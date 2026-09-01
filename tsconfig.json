@@ -3,18 +3,19 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@/assets/*": [
-        "./assets/*"
-      ]
+      "@/*": ["./src/*"],
+      "@/assets/*": ["./assets/*"]
     }
   },
-  "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "drizzle",
+    // Los scripts corren en Node, no en Hermes. Tienen su propio tsconfig para
+    // que los globales de Node (`__dirname`, `Buffer`, los timers) no se
+    // filtren al código de la app.
+    "scripts",
+    "drizzle.config.*.ts"
   ]
 }
