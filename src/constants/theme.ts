@@ -63,3 +63,83 @@ export const Spacing = {
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
+
+/* -------------------------------------------------------------------------
+ * Sistema de diseño de campo
+ *
+ * El operador usa la app con guantes, bajo sol directo y a veces con una sola
+ * mano. Todo lo de abajo está calibrado para eso, no para verse bien en el
+ * simulador. Los valores de `Estado` y `Marca.primarioTexto` tienen un
+ * contraste verificado de al menos 7:1 sobre blanco (WCAG AAA).
+ * ---------------------------------------------------------------------- */
+
+/** Colores semánticos. El color nunca es la única señal: siempre va con ícono. */
+export const Estado = {
+  /** Conforme ✓ */
+  conforme: '#166534',
+  conformeFondo: '#DCFCE7',
+  /** No conforme ✕ */
+  noConforme: '#991B1B',
+  noConformeFondo: '#FEE2E2',
+  /** No aplica – */
+  na: '#4B5563',
+  naFondo: '#F1F5F9',
+  /** Advertencia: documento por vencer, mantenimiento próximo */
+  atencion: '#92400E',
+  atencionFondo: '#FEF3C7',
+  /** Informativo */
+  info: '#1E40AF',
+  infoFondo: '#DBEAFE',
+} as const;
+
+export type EstadoColor = keyof typeof Estado;
+
+export const Marca = {
+  /** Fondo de acciones primarias. Ya es el color del splash. */
+  primario: '#208AEF',
+  /** Variante para texto sobre blanco (el primario no alcanza 7:1). */
+  primarioTexto: '#0A4E92',
+  primarioPresionado: '#0B5FB0',
+  /** Reservado para lo que inmoviliza el vehículo. Si todo alerta, nada alerta. */
+  critico: '#991B1B',
+} as const;
+
+/**
+ * Áreas táctiles en dp. Un guante de carnaza deja un área de contacto de
+ * 15–20 mm, muy por encima de los 48 dp que recomienda Material.
+ */
+export const Toque = {
+  /** Mínimo absoluto para cualquier elemento interactivo. */
+  minimo: 56,
+  /** Acción primaria y opciones del selector de conformidad. */
+  primario: 72,
+  /** Botón de ícono aislado. */
+  icono: 48,
+  /** Tecla del teclado numérico de medidores. */
+  tecla: 72,
+  /** Obturador de la cámara. */
+  obturador: 88,
+} as const;
+
+/**
+ * Escala tipográfica en sp. Nunca bajar de `pie`: a pleno sol y con el
+ * teléfono a un brazo de distancia, por debajo de 15 sp no se lee.
+ */
+export const Texto = {
+  pie: 15,
+  base: 18,
+  etiqueta: 20,
+  titulo: 24,
+  /** Lecturas de horómetro y odómetro: son el dato que más se equivoca. */
+  medidor: 32,
+} as const;
+
+export const Radio = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  pastilla: 999,
+} as const;
+
+/** Separación mínima entre dos objetivos táctiles adyacentes. */
+export const SeparacionTactil = 12;

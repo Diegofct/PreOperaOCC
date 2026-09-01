@@ -1,0 +1,1 @@
+ALTER TABLE `asignaciones` ADD `origen` text DEFAULT 'supervisor' NOT NULL;

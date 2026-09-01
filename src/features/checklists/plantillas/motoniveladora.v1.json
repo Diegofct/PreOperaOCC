@@ -1,0 +1,586 @@
+{
+  "tipoVehiculo": "motoniveladora",
+  "nombre": "Preoperacional Motoniveladora",
+  "tituloFormato": "INSPECCION PREOPERACIONAL DIARIA DE MOTONIVELADORA",
+  "version": 1,
+  "medidores": {
+    "horometro": "requerido",
+    "odometro": "oculto"
+  },
+  "exigeFirmaOperador": true,
+  "exigeFirmaJefe": true,
+  "periodicidades": [
+    "diaria"
+  ],
+  "secciones": [
+    {
+      "key": "tablero_de_control",
+      "titulo": "TABLERO DE CONTROL",
+      "items": [
+        {
+          "key": "tablero_de_control__horometro",
+          "label": "Horómetro",
+          "sistema": "ELECTRICO",
+          "tipo": "numero",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "nunca",
+          "ayuda": "Escriba el horometro diario del equipo/maquina.",
+          "unidad": "h",
+          "decimales": 1
+        },
+        {
+          "key": "tablero_de_control__switches_y_pulsadores_de_encendido",
+          "label": "Switches y pulsadores de encendido",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar el buen estado y funcionamiento de los switches de encendido de la máquina."
+        },
+        {
+          "key": "tablero_de_control__testigos_e_indicadores_del_tablero",
+          "label": "Testigos e indicadores del tablero",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar que los indicadores del tablero no muestren alarmas al momento de abrir el switch y su buen funcionamiento."
+        }
+      ]
+    },
+    {
+      "key": "cabina",
+      "titulo": "CABINA",
+      "items": [
+        {
+          "key": "cabina__espejos_retrovisores",
+          "label": "Espejos retrovisores",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "verificar que los vidrios estén completos y en buen estado, los brazos estén ajustados y la estructura sin golpes ni dobleces."
+        },
+        {
+          "key": "cabina__cinturon_de_seguridad",
+          "label": "Cinturon de seguridad",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que las correas esten en buen estado y funciona el retractil."
+        },
+        {
+          "key": "cabina__puertas",
+          "label": "Puertas",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar que los seguros funcionan y sus cerraduras, empaques en buen estado."
+        },
+        {
+          "key": "cabina__limpiabrisa_s",
+          "label": "Limpiabrisa(s)",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Plumilla(s) en buen estado, recorrido adecuado y las velocidades de limpieza funcionen correctamente."
+        },
+        {
+          "key": "cabina__asiento_s",
+          "label": "Asiento(s)",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Inspeccionar el asiento y su amortiguación para detectar desgaste o daños. Verifica que la bombona neumática sin fuga, mangueras buen estado, estructura firme, espuma óptima, tapiceria en buen estado."
+        },
+        {
+          "key": "cabina__vidrios_y_panoramico",
+          "label": "Vidrios y panoramico",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Vidrios completos, sin fisuras y buena visibilidad."
+        },
+        {
+          "key": "cabina__espejo_retrovisor_central",
+          "label": "Espejo retrovisor central",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "No tiene fisuras y tiene buena visualización."
+        },
+        {
+          "key": "cabina__alarma_de_retroceso_y_bocina_pito",
+          "label": "Alarma de retroceso y bocina (pito)",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que funcionen correctamente, estén en buen estado y emitan sonidos claros y audibles."
+        },
+        {
+          "key": "cabina__palancas_de_mando_timon_y_pedales",
+          "label": "Palancas de mando, timon y pedales",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que estén en buen estado, funcionen correctamente y estén en su posición correcta."
+        },
+        {
+          "key": "cabina__estructura_cabina",
+          "label": "Estructura cabina",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que la cabina no tiene golpes, no tiene rayas, buen estado de pintura."
+        },
+        {
+          "key": "cabina__aire_acondicionado",
+          "label": "Aire Acondicionado",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que esté en buenas condiciones, funcione sin ruidos, olores extraños y que mantenga una temperatura óptima."
+        },
+        {
+          "key": "cabina__parada_de_emergencia",
+          "label": "Parada de emergencia",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que el pulsador de parada de emergencia funcione correctamente."
+        },
+        {
+          "key": "cabina__freno_de_servicio",
+          "label": "Freno de servicio",
+          "sistema": "FRENOS",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revision de la capacidad de frenado, mueva lentamente el vehiculo y aplique los frenos"
+        },
+        {
+          "key": "cabina__freno_de_estacionamiento",
+          "label": "Freno de estacionamiento",
+          "sistema": "FRENOS",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revision de la capacidad de retencion, posicione el vehiculo en una pendiente y aplique los frenos de estacionamiento."
+        },
+        {
+          "key": "cabina__iluminacion_en_la_cabina",
+          "label": "Iluminación en la cabina",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar que la iluminación en la cabina enciende, sea buena y se encuentre en buen estado"
+        }
+      ]
+    },
+    {
+      "key": "luces_y_senales",
+      "titulo": "LUCES Y SEÑALES",
+      "items": [
+        {
+          "key": "luces_y_senales__farolas_delanteras",
+          "label": "Farolas delanteras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Todos los bombillos encienden. Las pastas de las farolas y el cableado están en buen estado."
+        },
+        {
+          "key": "luces_y_senales__luz_de_reversa",
+          "label": "Luz de reversa",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "luces_y_senales__direccionales_delanteras",
+          "label": "Direccionales delanteras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "luces_y_senales__direccionales_traseras",
+          "label": "Direccionales traseras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "luces_y_senales__exploradoras",
+          "label": "Exploradoras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        }
+      ]
+    },
+    {
+      "key": "estructura_exterior",
+      "titulo": "ESTRUCTURA - EXTERIOR",
+      "items": [
+        {
+          "key": "estructura_exterior__tornillos_pasadores_y_pernos",
+          "label": "Tornillos, pasadores y pernos.",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisión general de la tornillería, pernos y pasadores buscando posibles tornillos sueltos por su previo uso y las altas vibraciones."
+        },
+        {
+          "key": "estructura_exterior__carroceria",
+          "label": "Carroceria",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar el buen estado, sin fisuras ni golpes."
+        },
+        {
+          "key": "estructura_exterior__escaleras_y_apoyos_de_acceso",
+          "label": "Escaleras y apoyos de acceso",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Asegurarse de que las escaleras y apoyos estén en buen estado y usarlos adecuadamente para subir y bajar de la máquina."
+        },
+        {
+          "key": "estructura_exterior__mangueras_tubos_y_acoples",
+          "label": "Mangueras, tubos y acoples",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Hacer una inspección visual de las conexiones, empalmes y juntas, comprobando que no exista fuga, corrosión, deformación o desgaste."
+        },
+        {
+          "key": "estructura_exterior__aceite_del_mando_del_circulo_o_tornamesa",
+          "label": "Aceite del mando del circulo o tornamesa",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel de aceite del mando del circulo o tornamesa."
+        },
+        {
+          "key": "estructura_exterior__aceite_de_la_transmicion",
+          "label": "Aceite de la transmición",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienda la maquina por 5 min, revise el indicador de nivel y este debe estar entre el minimo y la mitad."
+        },
+        {
+          "key": "estructura_exterior__dientes_escarificadores",
+          "label": "Dientes escarificadores",
+          "sistema": null,
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar el buen estado, sin fisuras ni golpes."
+        },
+        {
+          "key": "estructura_exterior__hoja_cuchilla_y_cantoneras",
+          "label": "Hoja (cuchilla y cantoneras)",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar el buen estado, sin fisuras ni golpes."
+        },
+        {
+          "key": "estructura_exterior__puntos_de_lubricacion",
+          "label": "Puntos de lubricación",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verficiar estado y buen funcionamiento."
+        },
+        {
+          "key": "estructura_exterior__puntos_de_remolque_e_izaje",
+          "label": "Puntos de remolque e izaje",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que los puntos de remolque e izaje estén en buen estado."
+        }
+      ]
+    },
+    {
+      "key": "capot_o_careta",
+      "titulo": "CAPOT O CARETA",
+      "items": [
+        {
+          "key": "capot_o_careta__aceite_de_motor",
+          "label": "Aceite de motor",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel, varilla medidora en buen estado y ausencia de fugas."
+        },
+        {
+          "key": "capot_o_careta__aceite_del_diferencial",
+          "label": "Aceite del diferencial",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel de aceite del diferencial, varilla medidora en buen estado y ausencia de fugas."
+        },
+        {
+          "key": "capot_o_careta__aceite_hidraulico",
+          "label": "Aceite hidraulico",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Baje todos los accesorios al suelo y aplique una ligera presion, centre la maquina y verifique el nivel de aceite hidraulico."
+        },
+        {
+          "key": "capot_o_careta__deposito_refrigerante",
+          "label": "Depósito refrigerante",
+          "sistema": "MOTOR",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Tapa con buen sellado, nivel entre máximo y mínimo y buen estado del tanque."
+        },
+        {
+          "key": "capot_o_careta__filtros",
+          "label": "Filtros",
+          "sistema": "MOTOR",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Inspeccionar los filtros de aceite, combustible y aire en busca de fugas y asegurarse de que estén en buen estado. Drenar si es necesario."
+        },
+        {
+          "key": "capot_o_careta__tanque_de_combustible",
+          "label": "Tanque de combustible",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Tapa con buen sellado, nivel para realizar al menos un turno de trabajo y buen estado del tanque."
+        },
+        {
+          "key": "capot_o_careta__bomba_de_inyeccion",
+          "label": "Bomba de inyección",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar fugas de combustible."
+        },
+        {
+          "key": "capot_o_careta__radiador_y_enfriador_de_aceite",
+          "label": "Radiador y enfriador de aceite",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado, fugas y con la tapa puesta."
+        },
+        {
+          "key": "capot_o_careta__ventilador_correas_de_distribucion_bomba_de_agua",
+          "label": "Ventilador, correas de distribución, bomba de agua y patin tensor.",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado del ventilador, ajuste de correas y patin tensor sin ruidos. Bomba de agua sin fugas."
+        },
+        {
+          "key": "capot_o_careta__bateria",
+          "label": "Bateria",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado. Bornes y postes que no esten sulfatados y se encuentren bien ajustados."
+        },
+        {
+          "key": "capot_o_careta__silenciador_de_escape_exhosto",
+          "label": "Silenciador de escape (exhosto)",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar visualmente el silenciador en búsqueda de posibles deformaciones, roturas y acumulaciones de suciedad. En caso de contar con válvula para evitar la entrada de agua, verificar que esta esté cerrada"
+        },
+        {
+          "key": "capot_o_careta__estructura_motor",
+          "label": "Estructura motor",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Soportes en buen estado, sin fugas y sin ruidos"
+        },
+        {
+          "key": "capot_o_careta__switch_master_de_la_bateria",
+          "label": "Switch Master de la bateria",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar el buen estado y funcionamiento del master de la bateria."
+        }
+      ]
+    },
+    {
+      "key": "ruedas",
+      "titulo": "RUEDAS",
+      "items": [
+        {
+          "key": "ruedas__llantas_eje_1",
+          "label": "Llantas eje 1",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar labrado mayor a 3 mm, abolladuras y presión"
+        },
+        {
+          "key": "ruedas__llantas_eje_2",
+          "label": "Llantas eje 2",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__llantas_eje_3",
+          "label": "Llantas eje 3",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__esparragos",
+          "label": "Esparragos",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado y que esten completos"
+        },
+        {
+          "key": "ruedas__pastillas_y_rotor_del_freno",
+          "label": "Pastillas y rotor del freno",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar que el rotor del freno tenga un grosor superior a 13 mm y las pastillas esten en buen estado"
+        },
+        {
+          "key": "ruedas__tapa_valvulas",
+          "label": "Tapa Valvulas",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar presencia de tapa válvulas"
+        }
+      ]
+    },
+    {
+      "key": "adicionales",
+      "titulo": "ADICIONALES",
+      "items": [
+        {
+          "key": "adicionales__kit_de_seguridad",
+          "label": "kit de seguridad",
+          "sistema": "LEGALES",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar el buen estado de las herramientas, extintor y botiquin."
+        }
+      ]
+    }
+  ],
+  "origen": "Preoperacionales Motoniveladora.xlsx"
+}

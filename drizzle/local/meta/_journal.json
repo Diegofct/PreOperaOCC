@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787670368840,
+      "tag": "0000_slimy_the_call",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788184678925,
+      "tag": "0001_numerous_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788200000888,
+      "tag": "0002_peaceful_reptil",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1788216119423,
+      "tag": "0003_amazing_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788216156125,
+      "tag": "0004_fuzzy_puppet_master",
+      "breakpoints": true
+    }
+  ]
+}

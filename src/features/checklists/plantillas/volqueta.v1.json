@@ -1,0 +1,947 @@
+{
+  "tipoVehiculo": "volqueta",
+  "nombre": "Preoperacional Volqueta",
+  "tituloFormato": "INSPECCION PREOPERACIONAL DIARIA DE VOLQUETAS",
+  "version": 1,
+  "medidores": {
+    "horometro": "requerido",
+    "odometro": "requerido"
+  },
+  "exigeFirmaOperador": true,
+  "exigeFirmaJefe": true,
+  "periodicidades": [
+    "diaria"
+  ],
+  "secciones": [
+    {
+      "key": "tablero_de_control",
+      "titulo": "TABLERO DE CONTROL",
+      "items": [
+        {
+          "key": "tablero_de_control__horometro",
+          "label": "Horómetro",
+          "sistema": "ELECTRICO",
+          "tipo": "numero",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "nunca",
+          "ayuda": "Escriba el horometro diario del equipo.",
+          "unidad": "h",
+          "decimales": 1
+        },
+        {
+          "key": "tablero_de_control__odometro",
+          "label": "Odómetro",
+          "sistema": "ELECTRICO",
+          "tipo": "numero",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "nunca",
+          "ayuda": "Escriba el kilometraje diaro del equipo.",
+          "unidad": "km",
+          "decimales": 0
+        },
+        {
+          "key": "tablero_de_control__indicador_de_temperatura",
+          "label": "Indicador de temperatura",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Funciona correctamente y estado en buenas condiciones."
+        },
+        {
+          "key": "tablero_de_control__indicador_de_bateria",
+          "label": "Indicador de bateria",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "tablero_de_control__indicador_de_aceite",
+          "label": "Indicador de aceite",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "tablero_de_control__indicador_de_combustible",
+          "label": "Indicador de combustible",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "tablero_de_control__indicador_de_velocidad_tacometro",
+          "label": "Indicador de velocidad/tacómetro",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "tablero_de_control__conexiones_electricas",
+          "label": "Conexiones eléctricas",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Sin sulfatar, cableado en buen estado."
+        },
+        {
+          "key": "tablero_de_control__torpedo",
+          "label": "Torpedo",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buenas condiciones"
+        }
+      ]
+    },
+    {
+      "key": "cabina",
+      "titulo": "CABINA",
+      "items": [
+        {
+          "key": "cabina__espejos_laterales",
+          "label": "Espejos laterales",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Estan los reglamentarios para la correcta operación y control de puntos ciegos"
+        },
+        {
+          "key": "cabina__cinturones_de_seguridad",
+          "label": "Cinturones de seguridad.",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que las correas esten en buen estado y el retractil funciona"
+        },
+        {
+          "key": "cabina__puertas",
+          "label": "Puertas",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Funcionan seguros y cerraduras, empaques en buen estado."
+        },
+        {
+          "key": "cabina__limpiabrisas",
+          "label": "Limpiabrisas",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Se activa normalmente, con todas su velocidades y plumilla en buen estado"
+        },
+        {
+          "key": "cabina__asientos",
+          "label": "Asientos",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ajustados, bombona neumática sin fuga, mangueras buen estado, estructura firme y tapiceria en buenas condiciones."
+        },
+        {
+          "key": "cabina__panoramico",
+          "label": "Panorámico",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "No tiene fisuras y tiene buena visualización"
+        },
+        {
+          "key": "cabina__vidrios_de_ventanas",
+          "label": "Vidrios de ventanas",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Revisar que los vidrios suban y bajen"
+        },
+        {
+          "key": "cabina__alarma_de_reversa",
+          "label": "Alarma de reversa",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Funciona y tiene buen sonido."
+        },
+        {
+          "key": "cabina__pedales_y_palancas",
+          "label": "Pedales y palancas",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado, sin fugas, buen ajuste, se accionan con facilidad"
+        },
+        {
+          "key": "cabina__pito",
+          "label": "Pito",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen funcionamiento"
+        },
+        {
+          "key": "cabina__aire_acondicionado",
+          "label": "Aire acondicionado",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Temperatura óptima, equipo sin ruidos, ni olores."
+        }
+      ]
+    },
+    {
+      "key": "luces_y_senales",
+      "titulo": "LUCES Y SEÑALES",
+      "items": [
+        {
+          "key": "luces_y_senales__farolas_delanteras",
+          "label": "Farolas delanteras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        },
+        {
+          "key": "luces_y_senales__luz_de_reversa",
+          "label": "Luz de Reversa",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        },
+        {
+          "key": "luces_y_senales__direccionales_delanteras",
+          "label": "Direccionales delanteras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        },
+        {
+          "key": "luces_y_senales__direccionales_traseras",
+          "label": "Direccionales traseras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        },
+        {
+          "key": "luces_y_senales__luces_estacionarias",
+          "label": "Luces estacionarias",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        },
+        {
+          "key": "luces_y_senales__exploradoras",
+          "label": "Exploradoras",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Encienden y estan en buenas condiciones. Control de activación en buen estado"
+        }
+      ]
+    },
+    {
+      "key": "motor",
+      "titulo": "MOTOR",
+      "items": [
+        {
+          "key": "motor__aceite_de_motor",
+          "label": "Aceite de motor",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel entre maximo y minimo, varilla medidora en buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__filtro_de_aceite",
+          "label": "Filtro de aceite",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__filtro_de_combustible",
+          "label": "Filtro de combustible",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__filtro_de_aire",
+          "label": "Filtro de aire",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado y estado de polución"
+        },
+        {
+          "key": "motor__aceite_hidraulico",
+          "label": "Aceite hidraulico",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel, depósito en buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__liquido_de_refrigerante",
+          "label": "liquido de refrigerante",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel entre maximo y minimo, buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__deposito_de_refrigerante",
+          "label": "Deposito de refrigerante",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar nivel, depósito en buen estado y ausencia de fugas"
+        },
+        {
+          "key": "motor__correas_patin_tensor_y_bomba_de_agua",
+          "label": "Correas, patin tensor y bomba de agua",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar buen estado de las correas, patin sin ruidos y bomba de agua sin fugas."
+        },
+        {
+          "key": "motor__radiador",
+          "label": "Radiador",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado y con la tapa puesta"
+        },
+        {
+          "key": "motor__ventilador_correas_y_bomba_de_agua",
+          "label": "Ventilador, correas y bomba de agua.",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado y buen ajuste. Correas en buen estado, bomba de agua sin fugas."
+        },
+        {
+          "key": "motor__tanque_combustible",
+          "label": "Tanque combustible",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Tapa con buen sellado, nivel para realizar al menos un viaje y buen estado del tanque."
+        },
+        {
+          "key": "motor__estructura_motor",
+          "label": "Estructura motor",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Soportes en buen estado, sin fugas y sin ruidos"
+        },
+        {
+          "key": "motor__bateria",
+          "label": "Bateria",
+          "sistema": "ELECTRICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado. Bornes y postes que no esten sulfatados y se encuentren bien ajustados."
+        },
+        {
+          "key": "motor__exhosto",
+          "label": "Exhosto",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Humo claro, olor de gases, ruido, buen estado."
+        }
+      ]
+    },
+    {
+      "key": "frenos",
+      "titulo": "FRENOS",
+      "items": [
+        {
+          "key": "frenos__valvulas_relay_y_mangueras",
+          "label": "Valvulas relay y mangueras",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas de aire y buen estado de mangueras y acoples."
+        },
+        {
+          "key": "frenos__camaras_de_seguridad",
+          "label": "Cámaras de seguridad",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas de aire y buen estado de cuerpo y abrazadera."
+        },
+        {
+          "key": "frenos__bandas_y_campanas",
+          "label": "Bandas y campanas",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Mínima tolerancia, espesor adecuado y buena graduación."
+        },
+        {
+          "key": "frenos__rachets",
+          "label": "Rachets",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Debe estar junto a la cámara de seguridad."
+        },
+        {
+          "key": "frenos__mangueras_tubos_conexiones_y_racores",
+          "label": "Mangueras, tubos, conexiones y racores",
+          "sistema": "MECANICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Acoples en buen estado, mangueras y tubos sin roce, sin fugas, buen estado."
+        }
+      ]
+    },
+    {
+      "key": "transmision_de_cambios",
+      "titulo": "TRANSMISIÓN DE CAMBIOS",
+      "items": [
+        {
+          "key": "transmision_de_cambios__liquido_del_embrague",
+          "label": "Líquido del embrague",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Nivel según señales de máximo y mínimo y ausencia de fugas"
+        },
+        {
+          "key": "transmision_de_cambios__estructura_transmision",
+          "label": "Estructura transmisión",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas, sin ruidos anormales, cambios ajustados y buen estado"
+        },
+        {
+          "key": "transmision_de_cambios__valvulina",
+          "label": "Valvulina",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Nivel entre máximo y mínimo y sin fugas"
+        },
+        {
+          "key": "transmision_de_cambios__embrague",
+          "label": "Embrague",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Graduación adecuada"
+        }
+      ]
+    },
+    {
+      "key": "diferenciales",
+      "titulo": "DIFERENCIALES",
+      "items": [
+        {
+          "key": "diferenciales__estructura_diferenciales",
+          "label": "Estructura diferenciales",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que se encuentren en buen estado."
+        },
+        {
+          "key": "diferenciales__valvulina",
+          "label": "Valvulina",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas, sin ruidos anormales y buen estado"
+        },
+        {
+          "key": "diferenciales__kit_central",
+          "label": "Kit central",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Nivel entre máximo y mínimo y sin fugas"
+        },
+        {
+          "key": "diferenciales__cardan_y_crucetas",
+          "label": "Cardan y crucetas",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen ajuste y engrase"
+        },
+        {
+          "key": "diferenciales__cadena_de_seguridad",
+          "label": "Cadena de seguridad",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen ajuste y engrase"
+        }
+      ]
+    },
+    {
+      "key": "suspencion",
+      "titulo": "SUSPENCIÓN",
+      "items": [
+        {
+          "key": "suspencion__muelles",
+          "label": "Muelles",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "En buen estado"
+        },
+        {
+          "key": "suspencion__vigas",
+          "label": "Vigas",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado estructural y de cauchos"
+        },
+        {
+          "key": "suspencion__corbatines",
+          "label": "Corbatines",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "suspencion__barras_estabilizadoras",
+          "label": "Barras estabilizadoras",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        }
+      ]
+    },
+    {
+      "key": "dirreccion",
+      "titulo": "DIRRECCIÓN",
+      "items": [
+        {
+          "key": "dirreccion__botella",
+          "label": "Botella",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas y buen estado"
+        },
+        {
+          "key": "dirreccion__bomba_hidraulica",
+          "label": "Bomba hidraúlica",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "dirreccion__aceite_hidraulico",
+          "label": "Aceite hidraúlico",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Nivel adecuado"
+        },
+        {
+          "key": "dirreccion__mangueras",
+          "label": "Mangueras",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas y buen estado"
+        },
+        {
+          "key": "dirreccion__biela",
+          "label": "Biela",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas y sin rayuras"
+        },
+        {
+          "key": "dirreccion__brazo_pitman",
+          "label": "Brazo pitman",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "dirreccion__barra_y_terminales",
+          "label": "Barra y terminales",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen ajuste, desplazamiento proporcionado, sin ruido"
+        },
+        {
+          "key": "dirreccion__crucetas",
+          "label": "Crucetas",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen ajuste y engrase"
+        }
+      ]
+    },
+    {
+      "key": "volteo",
+      "titulo": "VOLTEO",
+      "items": [
+        {
+          "key": "volteo__fugas_en_cilindro_hidraulico",
+          "label": "Fugas en cilindro hidraúlico",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que se encuentre sin rayones y no tenga fugas por empaquetadura"
+        },
+        {
+          "key": "volteo__estructura_volco_compuerta_pasadores",
+          "label": "Estructura volco, compuerta, pasadores",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Estructura en buen estado (lamina, puentes y pasadores)."
+        },
+        {
+          "key": "volteo__camara_apertura_compuerta",
+          "label": "Camara apertura compuerta",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen ajuste y presición en la apertura"
+        },
+        {
+          "key": "volteo__aceite_hidraulico",
+          "label": "Aceite hidraúlico",
+          "sistema": "LUBRICACIÓN",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Nivel adecuado"
+        },
+        {
+          "key": "volteo__bomba_hidraulica",
+          "label": "Bomba hidraúlica",
+          "sistema": "MECÁNICO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Ausencia de fugas y sin rayuras"
+        },
+        {
+          "key": "volteo__chasis",
+          "label": "Chasis",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Sin fisuras y buen estado"
+        },
+        {
+          "key": "volteo__carpado",
+          "label": "Carpado",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Buen estado de la lona, motor funcionando, varillaje en buen estado."
+        }
+      ]
+    },
+    {
+      "key": "ruedas",
+      "titulo": "RUEDAS",
+      "items": [
+        {
+          "key": "ruedas__pernos_ruedas",
+          "label": "Pernos ruedas.",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que se encuentren en la presion adecuada, valvulas sin fuga, pernos ajustados y llantas sin cortes, incluida llanta de repuesto."
+        },
+        {
+          "key": "ruedas__tapa_valvulas",
+          "label": "Tapa válvulas",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__presion_de_aire",
+          "label": "Presión de aire",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__llantas_eje_1_delanteras",
+          "label": "Llantas eje 1 (delanteras)",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__llantas_eje_2",
+          "label": "Llantas eje 2",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "ruedas__llantas_eje_3",
+          "label": "Llantas eje 3",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme"
+        }
+      ]
+    },
+    {
+      "key": "adicionales",
+      "titulo": "ADICIONALES",
+      "items": [
+        {
+          "key": "adicionales__soat_y_tcm",
+          "label": "SOAT y TCM",
+          "sistema": "DOCUMENTO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Documentos al día."
+        },
+        {
+          "key": "adicionales__licencia_de_propiedad",
+          "label": "Licencia de propiedad",
+          "sistema": "DOCUMENTO",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "adicionales__conos_y_tacos",
+          "label": "Conos y tacos",
+          "sistema": "EQUIPO CARRETERA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que se encuentre los elementos necesarios y al día."
+        },
+        {
+          "key": "adicionales__herramienta",
+          "label": "Herramienta",
+          "sistema": "EQUIPO CARRETERA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "adicionales__gato_y_llave_tacones",
+          "label": "Gato y llave tacones",
+          "sistema": "EQUIPO CARRETERA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "adicionales__extintor",
+          "label": "Extintor",
+          "sistema": "EQUIPO CARRETERA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme"
+        },
+        {
+          "key": "adicionales__graseras",
+          "label": "Graseras",
+          "sistema": "ESTRUCTURA",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": false,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Todas las graseras en buen estado"
+        },
+        {
+          "key": "adicionales__llanta_de_repuesto",
+          "label": "Llanta de repuesto",
+          "sistema": "RODAJE",
+          "tipo": "conformidad",
+          "periodicidad": "diaria",
+          "inmoviliza": true,
+          "exigirFoto": "no_conforme",
+          "ayuda": "Verificar que se encuentren en la presion adecuada, valvulas sin fuga y llantas sin cortes."
+        }
+      ]
+    }
+  ],
+  "origen": "Preoperacionales Volquetas.xlsx"
+}
