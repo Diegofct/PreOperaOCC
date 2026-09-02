@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": {
     "@expo/ui": "~57.0.14",
+    "@neondatabase/serverless": "^1.1.0",
     "@noble/hashes": "^2.3.0",
     "@shopify/flash-list": "2.0.2",
     "drizzle-orm": "^0.45.2",
@@ -65,6 +66,10 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "formatos": "tsx scripts/import-formatos.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.local.ts",
+    "db:generate:servidor": "drizzle-kit generate --config drizzle.config.servidor.ts",
+    "db:migrar:servidor": "tsx --env-file=.env scripts/migrar-servidor.ts",
+    "db:sembrar:servidor": "tsx --env-file=.env scripts/sembrar-servidor.ts",
+    "crear-admin": "tsx --env-file=.env scripts/crear-admin.ts",
     "verificar": "tsx scripts/verificar-reglas.ts"
   },
   "private": true

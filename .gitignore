@@ -42,5 +42,16 @@ example
 /ios
 /android
 
-# Variables de entorno (credenciales del VPS, secretos de firma)
+# Variables de entorno (cadena de conexión de la base, secretos de firma).
+#
+# Se ignora cualquier variante, no solo `.env`: Neon y otros paneles ofrecen
+# descargar las credenciales como `env.txt` o `.env.txt`, y esos nombres no los
+# cubria ningun patron. Un archivo asi arrastrado a la carpeta del proyecto se
+# habria subido al repositorio sin que nada avisara.
 .env
+.env.*
+env.txt
+*.env
+
+# La plantilla si se versiona: no lleva valores reales.
+!.env.ejemplo

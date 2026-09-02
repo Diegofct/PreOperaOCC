@@ -13,11 +13,17 @@
 import { sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
+import type { ActividadBitacora } from '../../features/bitacoras/tipos';
 import type {
   PlantillaChecklist,
   RespuestaItem,
   ResultadoPreoperacional,
 } from '../../features/checklists/types';
+
+// Se reexporta para que quien ya lo importaba desde aquí siga funcionando: el
+// tipo se mudó a la capa de dominio porque el esquema del servidor también lo
+// usa y ese no puede tocar `src/db/local/*`.
+export type { ActividadBitacora };
 
 /** Estado de un registro capturado frente al servidor. */
 export type EstadoSync = 'borrador' | 'pendiente' | 'sincronizado' | 'rechazado';
@@ -228,21 +234,6 @@ export const bitacoras = sqliteTable(
   },
   (t) => [uniqueIndex('ux_bitacora_vehiculo_fecha').on(t.vehiculoId, t.fecha)],
 );
-
-/**
- * Una actividad del día. Una actividad = una fila del formato en papel.
- *
- * Igual que las respuestas del preoperacional, se auto-describe: guarda el
- * nombre además de la clave, para que un registro de 2026 se siga leyendo
- * aunque el catálogo de actividades cambie.
- */
-export interface ActividadBitacora {
-  id: string;
-  clave: string;
-  nombre: string;
-  descripcion: string;
-  observaciones: string;
-}
 
 export const media = sqliteTable(
   'media',
