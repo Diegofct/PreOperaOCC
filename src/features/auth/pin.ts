@@ -12,6 +12,8 @@ import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import * as Crypto from 'expo-crypto';
 
+import { igualEnTiempoConstante } from '@/shared/cripto/comparar';
+
 export const LONGITUD_PIN = 6;
 
 /**
@@ -52,19 +54,6 @@ export async function derivarVerificador(pin: string, saltHex: string): Promise<
     asyncTick: CEDER_CADA_MS,
   });
   return aHex(bytes);
-}
-
-/**
- * Comparación en tiempo constante.
- *
- * Un `===` sobre cadenas corta en el primer carácter distinto, y esa
- * diferencia de tiempo es medible. Aquí siempre se recorren los 64 caracteres.
- */
-function igualEnTiempoConstante(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diferencia = 0;
-  for (let i = 0; i < a.length; i++) diferencia |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diferencia === 0;
 }
 
 export async function verificarPin(

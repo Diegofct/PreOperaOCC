@@ -10,6 +10,13 @@
 import assert from 'node:assert/strict';
 
 import {
+  generarClaveTemporal,
+  hashDeClave,
+  medirCostoDeClave,
+  verificarClave,
+} from '../src/features/auth/servidor/cripto';
+
+import {
   debeOlvidarEquipo,
   esperaPorFallos,
   intentosRestantes,
@@ -45,6 +52,13 @@ let pruebas = 0;
 
 function prueba(nombre: string, fn: () => void) {
   fn();
+  pruebas++;
+  console.log(`  ✓ ${nombre}`);
+}
+
+/** Igual, para lo que hay que esperar: derivar una contraseña tarda ~300 ms. */
+async function pruebaAsync(nombre: string, fn: () => Promise<void>) {
+  await fn();
   pruebas++;
   console.log(`  ✓ ${nombre}`);
 }
@@ -300,4 +314,74 @@ prueba('el jefe ve exactamente las máquinas que le faltan', () => {
 });
 
 
-console.log(`\n${pruebas} verificaciones correctas.\n`);
+/* ------------------------------------------------------------------------ */
+/* Criptografía de las contraseñas web                                       */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Corre aquí, en Node, y no en un entorno de pruebas aparte, porque
+ * `crypto.subtle` es exactamente la misma API que usará Cloudflare Workers: lo
+ * que se comprueba aquí es lo que va a correr en producción.
+ */
+async function verificarCripto() {
+  await pruebaAsync('una contraseña verifica contra su hash y no contra otro', async () => {
+    const hash = await hashDeClave('caterpillar-120k');
+    assert.equal(await verificarClave('caterpillar-120k', hash), true);
+    assert.equal(await verificarClave('caterpillar-120K', hash), false);
+    assert.equal(await verificarClave('', hash), false);
+  });
+
+  await pruebaAsync('dos hashes de la misma contraseña son distintos', async () => {
+    // Si el salt no fuera por fila, dos personas con la misma contraseña
+    // tendrían el mismo hash y quedarían delatadas la una por la otra.
+    const [a, b] = await Promise.all([hashDeClave('la-misma'), hashDeClave('la-misma')]);
+    assert.notEqual(a, b);
+    assert.equal(await verificarClave('la-misma', a), true);
+    assert.equal(await verificarClave('la-misma', b), true);
+  });
+
+  await pruebaAsync('el hash lleva sus propios parámetros dentro', async () => {
+    // Es lo que permitirá subir el coste sin migrar ni una fila: las
+    // credenciales viejas se siguen verificando con el suyo.
+    const [algoritmo, digest, iteraciones, salt, dk] = (await hashDeClave('x')).split('$');
+    assert.equal(algoritmo, 'pbkdf2');
+    assert.equal(digest, 'sha256');
+    assert.ok(Number(iteraciones) >= 100_000);
+    assert.equal(salt.length, 32);
+    assert.equal(dk.length, 64);
+  });
+
+  await pruebaAsync('un hash con formato roto no autentica a nadie', async () => {
+    for (const roto of ['', 'x', 'pbkdf2$sha256$abc$00$00', 'bcrypt$sha256$1$00$00', '$$$$']) {
+      assert.equal(await verificarClave('lo-que-sea', roto), false);
+    }
+  });
+
+  await pruebaAsync('la contraseña temporal no trae caracteres que se confundan', async () => {
+    // Se dicta por teléfono: un cero confundido con una O es una llamada de
+    // vuelta. La `L` sí vale — la que se parece a un uno es la minúscula, y
+    // aquí todo va en mayúscula. Y dos claves iguales delatarían un generador
+    // roto, que es el peor fallo posible de esta función.
+    const generadas = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const clave = generarClaveTemporal();
+      assert.match(clave, /^[A-Z2-9]{4}(-[A-Z2-9]{4})+$/);
+      assert.ok(!/[O0I1]/.test(clave), `caracter ambiguo en ${clave}`);
+      generadas.add(clave);
+    }
+    assert.equal(generadas.size, 50);
+  });
+
+  const costo = await medirCostoDeClave();
+  console.log(`\n  · derivar una contraseña cuesta ${costo} ms en este equipo`);
+  if (costo > 1000) {
+    console.log('    (por encima de 1 s: convendría bajar ITERACIONES_CLAVE)');
+  }
+}
+
+verificarCripto()
+  .then(() => console.log(`\n${pruebas} verificaciones correctas.\n`))
+  .catch((error) => {
+    console.error('\nFalló una verificación:', error);
+    process.exit(1);
+  });

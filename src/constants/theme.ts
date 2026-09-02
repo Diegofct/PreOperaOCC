@@ -65,6 +65,28 @@ export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;
 
 /* -------------------------------------------------------------------------
+ * Superficie de escritorio: el panel de administración
+ *
+ * El panel no está sujeto a las restricciones de campo —nadie lo usa con
+ * guantes ni bajo sol— pero sí a los mismos colores, para que un vehículo NO
+ * APTO se vea igual de rojo en el computador del residente que en el celular
+ * del operador. Lo único que necesita aparte son bordes: una tabla sin líneas
+ * es ilegible, y el móvil no tiene tablas.
+ * ---------------------------------------------------------------------- */
+
+/** Ancho útil de una tabla del panel. Más que `MaxContentWidth`, que es de lectura. */
+export const MaxContentWidthPanel = 1180;
+
+export const Panel = {
+  /** Línea que separa filas y delimita campos. */
+  borde: '#D5D8DE',
+  /** Separación interna, más tenue: entre filas de una misma tabla. */
+  bordeSuave: '#E9EBEF',
+  /** Fondo de la fila de encabezados. */
+  fondoCabecera: '#F5F6F8',
+} as const;
+
+/* -------------------------------------------------------------------------
  * Sistema de diseño de campo
  *
  * El operador usa la app con guantes, bajo sol directo y a veces con una sola

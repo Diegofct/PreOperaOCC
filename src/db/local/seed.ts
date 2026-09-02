@@ -20,6 +20,8 @@ import { count, eq } from 'drizzle-orm';
 
 import { PLANTILLAS } from '@/features/checklists/plantillas';
 import type { PlantillaChecklist } from '@/features/checklists/types';
+import { cadenaCanonicaDePlantilla, idDePlantilla } from '@/shared/catalogos/plantillas';
+import { TIPOS_VEHICULO } from '@/shared/catalogos/tipos-vehiculo';
 
 import { db } from './client';
 import { asignaciones, obras, plantillas, tiposVehiculo, usuarios, vehiculos } from './schema';
@@ -28,20 +30,12 @@ import { asignaciones, obras, plantillas, tiposVehiculo, usuarios, vehiculos } f
 export async function hashDePlantilla(plantilla: PlantillaChecklist): Promise<string> {
   return Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    JSON.stringify(plantilla.secciones),
+    cadenaCanonicaDePlantilla(plantilla),
   );
 }
 
-const TIPOS: { id: string; nombre: string; claseMedidor: 'odometro' | 'horometro' | 'ambos' }[] = [
-  { id: 'camioneta', nombre: 'Camioneta', claseMedidor: 'ambos' },
-  { id: 'volqueta', nombre: 'Volqueta', claseMedidor: 'ambos' },
-  { id: 'retroexcavadora', nombre: 'Retroexcavadora', claseMedidor: 'horometro' },
-  { id: 'retrocargador', nombre: 'Retrocargador', claseMedidor: 'horometro' },
-  { id: 'motoniveladora', nombre: 'Motoniveladora', claseMedidor: 'horometro' },
-];
-
 async function sembrarTipos() {
-  for (const tipo of TIPOS) {
+  for (const tipo of TIPOS_VEHICULO) {
     await db.insert(tiposVehiculo).values(tipo).onConflictDoNothing();
   }
 }
@@ -49,7 +43,7 @@ async function sembrarTipos() {
 async function sembrarPlantillas() {
   for (const plantilla of PLANTILLAS) {
     const hash = await hashDePlantilla(plantilla);
-    const id = `${plantilla.tipoVehiculo}-v${plantilla.version}`;
+    const id = idDePlantilla(plantilla);
     await db
       .insert(plantillas)
       .values({
