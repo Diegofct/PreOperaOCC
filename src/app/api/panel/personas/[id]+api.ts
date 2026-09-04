@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { usuarios } from '@/db/servidor/esquema';
+import { dispositivos, usuarios } from '@/db/servidor/esquema';
 import { personaEditada } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
@@ -93,6 +93,29 @@ export async function DELETE(peticion: Request, { id }: { id: string }) {
     // resulta ser el único administrador. Se corta aquí, que es barato.
     if (id === sesion.id) {
       return errorDePeticion('No puede darse de baja a usted mismo.', 400);
+    }
+
+    /**
+     * Un operador con equipo activo **no se borra**: se desactiva.
+     *
+     * La lápida libera su nombre de usuario, y el celular resuelve el desbloqueo
+     * contra su propia réplica. Si el nombre se reasignara a otra persona, ese
+     * teléfono quedaría con una identidad que ya no le corresponde. Desactivarlo
+     * corta el acceso igual —la guardia del móvil lo rechaza en la siguiente
+     * petición— sin dejar esa puerta abierta.
+     */
+    const [equipo] = await baseServidor()
+      .select({ id: dispositivos.id })
+      .from(dispositivos)
+      .where(and(eq(dispositivos.usuarioId, id), isNull(dispositivos.revocadoEn)))
+      .limit(1);
+
+    if (equipo) {
+      return errorDePeticion(
+        'Esa persona tiene un celular activado. Desactívela en vez de darla de baja, o revoque ' +
+          'primero su equipo.',
+        409,
+      );
     }
 
     const [fila] = await baseServidor()

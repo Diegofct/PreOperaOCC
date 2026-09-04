@@ -42,14 +42,10 @@ export function aInstanteObligatorio(ms: number): Date {
 }
 
 /**
- * `YYYY-MM-DD` en hora de Colombia (UTC-5, sin horario de verano).
+ * El día de trabajo en obra.
  *
- * Lo usa el panel para poner la fecha de hoy por defecto. Se calcula desplazando
- * el instante y leyendo la parte UTC, en vez de confiar en la zona horaria del
- * computador: el residente puede estar mirando el panel desde cualquier parte, y
- * la jornada que documenta siempre es la de la obra.
+ * Se reexporta desde las reglas de jornada en vez de calcularlo aquí: es una
+ * regla del negocio —qué cuenta como "hoy" para una obra en Colombia— y ya vivía
+ * allí, donde la prueban las verificaciones.
  */
-export function fechaDeJornada(instante: Date = new Date()): string {
-  const DESFASE_COLOMBIA_MS = 5 * 60 * 60 * 1000;
-  return new Date(instante.getTime() - DESFASE_COLOMBIA_MS).toISOString().slice(0, 10);
-}
+export { fechaDeJornada } from '@/shared/rules/jornada';

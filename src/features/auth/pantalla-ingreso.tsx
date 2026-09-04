@@ -1,18 +1,23 @@
 /**
  * Ingreso del operador.
  *
- * No es una ruta: el layout raíz la monta en lugar del `Stack` cuando no hay
- * sesión abierta. Así no existe ningún instante en que una pantalla de trabajo
- * alcance a renderizarse sin operador, ni un enlace por el que colarse.
+ * No es una ruta: el layout la monta en lugar del `Stack` cuando no hay sesión
+ * abierta. Así no existe ningún instante en que una pantalla de trabajo alcance
+ * a renderizarse sin operador, ni un enlace por el que colarse.
  *
- * Una sola pantalla con dos modos:
- *   · Activación — usuario + PIN. Ocurre una vez por equipo. Cuando exista el
- *     servidor será el único momento en que la app pide señal.
- *   · Desbloqueo — solo PIN, validado contra este mismo celular. Funciona en
- *     modo avión, que es como se usa casi siempre.
+ * Una sola pantalla con cuatro modos, y **solo el primero necesita señal**:
+ *
+ *   · Activar        — usuario + código de la administración. Una vez por equipo.
+ *   · Definir PIN    — seis dígitos, dos veces. El PIN no sale del teléfono.
+ *   · Desbloquear    — solo PIN, contra este mismo celular. En modo avión.
+ *   · Recuperar      — código de respaldo cuando olvidó el PIN. **También sin señal.**
+ *
+ * Todo se teclea con el mismo teclado grande: el operador lleva guantes, y en el
+ * único sitio donde hace falta escribir letras —el usuario y el código— el campo
+ * es de altura `Toque.primario`.
  */
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,69 +31,143 @@ import {
 
 import { TecladoNumerico } from '@/components/ui/teclado-numerico';
 import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
+
 import { LONGITUD_PIN } from './pin';
 import { useSesion } from './sesion';
 
+/**
+ * Reinicia lo tecleado al cambiar de modo, sin un efecto que llame a `setState`.
+ *
+ * La `key` es el modo, así que React desmonta y vuelve a montar el formulario
+ * cuando se pasa de activar a definir el PIN, o de desbloquear a recuperar. El
+ * estado nace limpio por construcción: arrastrar tres dígitos de la pantalla
+ * anterior confunde y no sirve para nada.
+ */
 export function PantallaIngreso() {
-  const { estado, usuarioEnrolado, esperaMs, ocupado, enrolar, desbloquear, desenrolar } =
-    useSesion();
-  const activando = estado === 'sin_enrolar';
+  const { estado } = useSesion();
+
+  if (estado === 'cargando') {
+    return (
+      <View style={estilos.centro}>
+        <ActivityIndicator size="large" color={Marca.primario} />
+      </View>
+    );
+  }
+
+  return <FormularioDeIngreso key={estado} />;
+}
+
+function FormularioDeIngreso() {
+  const {
+    estado,
+    usuarioEnrolado,
+    esperaMs,
+    ocupado,
+    hayRespaldo,
+    activar,
+    definirPin,
+    desbloquear,
+    iniciarRecuperacion,
+    cancelarRecuperacion,
+    comprobarRespaldo,
+    desenrolar,
+  } = useSesion();
 
   const [usuario, setUsuario] = useState('');
+  const [codigo, setCodigo] = useState('');
   const [pin, setPin] = useState('');
+  /** El primer PIN, mientras se pide la repetición. Nunca sale de aquí. */
+  const [pinPrimero, setPinPrimero] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const enviando = useRef(false);
 
   const bloqueado = esperaMs > 0;
 
-  const enviar = useCallback(
+  const enviarPin = useCallback(
     async (pinCompleto: string) => {
       if (enviando.current) return;
       enviando.current = true;
       setError(null);
+
       try {
-        if (activando && usuario.trim().length === 0) {
-          setPin('');
-          setError('Escriba su usuario.');
+        if (estado === 'definiendo_pin') {
+          if (pinPrimero === null) {
+            setPinPrimero(pinCompleto);
+            setPin('');
+            return;
+          }
+          if (pinPrimero !== pinCompleto) {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setPinPrimero(null);
+            setPin('');
+            setError('Los dos PIN no coinciden. Empiece de nuevo.');
+            return;
+          }
+          const definido = await definirPin(pinCompleto);
+          if (!definido.ok) {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            setPinPrimero(null);
+            setPin('');
+            setError(definido.mensaje ?? null);
+          }
           return;
         }
-        const respuesta = activando
-          ? await enrolar(usuario, pinCompleto)
-          : await desbloquear(pinCompleto);
-        if (!respuesta.ok) {
-          setPin('');
-          setError(respuesta.mensaje ?? 'No se pudo ingresar.');
+
+        const resultado = await desbloquear(pinCompleto);
+        if (!resultado.ok) {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          setPin('');
+          setError(resultado.mensaje ?? null);
         }
       } finally {
         enviando.current = false;
       }
     },
-    [activando, usuario, enrolar, desbloquear],
+    [estado, pinPrimero, definirPin, desbloquear],
   );
-
-  // El PIN se envía solo al sexto dígito: en desbloqueo no hay ninguna razón
-  // para pedir un toque más, y es el gesto que el operador repite a diario.
-  useEffect(() => {
-    if (pin.length !== LONGITUD_PIN) return;
-    void enviar(pin);
-  }, [pin, enviar]);
 
   function agregarDigito(digito: string) {
     if (bloqueado || ocupado) return;
     setError(null);
-    setPin((previo) => (previo.length >= LONGITUD_PIN ? previo : previo + digito));
+    setPin((previo) => {
+      if (previo.length >= LONGITUD_PIN) return previo;
+      const siguiente = previo + digito;
+      if (siguiente.length === LONGITUD_PIN) void enviarPin(siguiente);
+      return siguiente;
+    });
   }
 
   function borrar() {
-    if (bloqueado || ocupado) return;
+    setError(null);
     setPin((previo) => previo.slice(0, -1));
+  }
+
+  async function enviarActivacion() {
+    if (ocupado || !usuario.trim() || !codigo.trim()) return;
+    setError(null);
+    const resultado = await activar(usuario, codigo);
+    if (!resultado.ok) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(resultado.mensaje ?? null);
+    }
+  }
+
+  async function enviarRespaldo() {
+    if (ocupado || !codigo.trim()) return;
+    setError(null);
+    const resultado = await comprobarRespaldo(codigo);
+    if (!resultado.ok) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setError(resultado.mensaje ?? null);
+    } else {
+      setCodigo('');
+    }
   }
 
   function confirmarDesenrolar() {
     Alert.alert(
       'Activar con otro usuario',
-      'Se borrará el acceso de este equipo y habrá que activarlo de nuevo con usuario y PIN. Los preoperacionales guardados no se pierden.',
+      'Se borrará el acceso de este equipo y habrá que activarlo de nuevo con un código. Los preoperacionales guardados no se pierden.',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -104,13 +183,96 @@ export function PantallaIngreso() {
     );
   }
 
-  if (estado === 'cargando') {
+  /* --------------------------------------------------------------------- */
+  /* Activar y recuperar: los dos modos que se resuelven con un código      */
+  /* --------------------------------------------------------------------- */
+
+  if (estado === 'sin_enrolar' || estado === 'recuperando') {
+    const activando = estado === 'sin_enrolar';
+
     return (
-      <View style={estilos.centro}>
-        <ActivityIndicator size="large" color={Marca.primario} />
-      </View>
+      <ScrollView
+        style={estilos.pantalla}
+        contentContainerStyle={estilos.contenido}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={estilos.cabecera}>
+          <Text style={estilos.titulo}>
+            {activando ? 'Active este equipo' : 'Recupere su acceso'}
+          </Text>
+          <Text style={estilos.ayuda}>
+            {activando
+              ? 'Escriba su usuario y el código que le dio la administración. Es lo único que necesita señal, y solo hay que hacerlo una vez.'
+              : `Equipo de ${usuarioEnrolado}. Pídale a su residente el código de respaldo de la carpeta de la obra. No necesita señal.`}
+          </Text>
+        </View>
+
+        {activando ? (
+          <TextInput
+            value={usuario}
+            onChangeText={setUsuario}
+            placeholder="Usuario"
+            placeholderTextColor={Colors.light.textSecondary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={estilos.campoUsuario}
+          />
+        ) : null}
+
+        <TextInput
+          value={codigo}
+          onChangeText={setCodigo}
+          placeholder={activando ? 'Código de activación' : 'Código de respaldo'}
+          placeholderTextColor={Colors.light.textSecondary}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          onSubmitEditing={activando ? enviarActivacion : enviarRespaldo}
+          style={estilos.campoUsuario}
+        />
+
+        {ocupado ? (
+          <View style={estilos.estadoLinea}>
+            <ActivityIndicator color={Marca.primario} />
+            <Text style={estilos.estadoTexto}>Comprobando…</Text>
+          </View>
+        ) : error ? (
+          <Text style={estilos.error}>{error}</Text>
+        ) : (
+          <View style={estilos.estadoLinea} />
+        )}
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={activando ? enviarActivacion : enviarRespaldo}
+          disabled={ocupado}
+          style={({ pressed }) => [
+            estilos.principal,
+            pressed && estilos.presionado,
+            ocupado && estilos.inactivo,
+          ]}
+        >
+          <Text style={estilos.principalTexto}>{activando ? 'Activar' : 'Continuar'}</Text>
+        </Pressable>
+
+        {!activando ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={cancelarRecuperacion}
+            style={({ pressed }) => [estilos.secundario, pressed && estilos.presionado]}
+          >
+            <Text style={estilos.secundarioTexto}>Volver</Text>
+          </Pressable>
+        ) : null}
+      </ScrollView>
     );
   }
+
+  /* --------------------------------------------------------------------- */
+  /* Definir PIN y desbloquear: los dos modos del teclado numérico          */
+  /* --------------------------------------------------------------------- */
+
+  const definiendo = estado === 'definiendo_pin';
+  const repitiendo = definiendo && pinPrimero !== null;
 
   return (
     <ScrollView
@@ -119,25 +281,17 @@ export function PantallaIngreso() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={estilos.cabecera}>
-        <Text style={estilos.titulo}>{activando ? 'Active este equipo' : 'Ingrese su PIN'}</Text>
+        <Text style={estilos.titulo}>
+          {definiendo ? (repitiendo ? 'Repita su PIN' : 'Defina su PIN') : 'Ingrese su PIN'}
+        </Text>
         <Text style={estilos.ayuda}>
-          {activando
-            ? 'Escriba el usuario y el PIN de 6 dígitos que le entregó su supervisor. Solo hay que hacerlo una vez.'
+          {definiendo
+            ? repitiendo
+              ? 'Escríbalo otra vez para confirmarlo.'
+              : 'Seis dígitos que solo usted sabrá. No lo conoce nadie más, ni la oficina: si lo olvida, se recupera con el código de respaldo de la obra.'
             : `Equipo de ${usuarioEnrolado}. No necesita señal.`}
         </Text>
       </View>
-
-      {activando ? (
-        <TextInput
-          value={usuario}
-          onChangeText={setUsuario}
-          placeholder="Usuario"
-          placeholderTextColor={Colors.light.textSecondary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={estilos.campoUsuario}
-        />
-      ) : null}
 
       <PuntosPin longitud={pin.length} hayError={error !== null} />
 
@@ -158,14 +312,25 @@ export function PantallaIngreso() {
         deshabilitado={bloqueado || ocupado}
       />
 
-      {!activando ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={confirmarDesenrolar}
-          style={({ pressed }) => [estilos.secundario, pressed && estilos.presionado]}
-        >
-          <Text style={estilos.secundarioTexto}>Activar con otro usuario</Text>
-        </Pressable>
+      {estado === 'bloqueada' ? (
+        <>
+          {hayRespaldo ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={iniciarRecuperacion}
+              style={({ pressed }) => [estilos.secundario, pressed && estilos.presionado]}
+            >
+              <Text style={estilos.secundarioTexto}>Olvidé mi PIN</Text>
+            </Pressable>
+          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            onPress={confirmarDesenrolar}
+            style={({ pressed }) => [estilos.secundario, pressed && estilos.presionado]}
+          >
+            <Text style={estilos.secundarioTexto}>Activar con otro usuario</Text>
+          </Pressable>
+        </>
       ) : null}
     </ScrollView>
   );
@@ -245,6 +410,19 @@ const estilos = StyleSheet.create({
     color: Estado.noConforme,
     textAlign: 'center',
   },
+  principal: {
+    minHeight: Toque.primario,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radio.md,
+    backgroundColor: Marca.primario,
+  },
+  principalTexto: {
+    fontSize: Texto.etiqueta,
+    fontWeight: '800',
+    color: Colors.light.background,
+  },
+  inactivo: { opacity: 0.5 },
   secundario: {
     minHeight: Toque.minimo,
     alignItems: 'center',

@@ -13,6 +13,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import * as Crypto from 'expo-crypto';
 
 import { igualEnTiempoConstante } from '@/shared/cripto/comparar';
+import { aHex, deHex, leerPbkdf2 } from '@/shared/cripto/formato-pbkdf2';
 
 export const LONGITUD_PIN = 6;
 
@@ -29,18 +30,6 @@ const LONGITUD_SALT = 32;
 
 /** Cede el hilo cada 4 ms para que la animación del teclado no se congele. */
 const CEDER_CADA_MS = 4;
-
-function aHex(bytes: Uint8Array): string {
-  let salida = '';
-  for (const byte of bytes) salida += byte.toString(16).padStart(2, '0');
-  return salida;
-}
-
-function deHex(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
 
 /** Salt nuevo para este dispositivo. Se genera una sola vez, al enrolar. */
 export function generarSalt(): string {
@@ -75,4 +64,36 @@ export async function medirCostoDelPin(): Promise<number> {
   const inicio = Date.now();
   await derivarVerificador('000000', salt);
   return Date.now() - inicio;
+}
+
+/**
+ * Comprueba un código contra un hash que escribió el servidor. **Sin red.**
+ *
+ * Es lo que hace posible la recuperación del PIN en un frente sin señal: al
+ * activarse, el equipo se guardó el hash del código de respaldo, y el día que el
+ * operador lo olvida, el residente le dicta el código de la carpeta de la obra y
+ * esto lo verifica aquí mismo.
+ *
+ * Deriva con `@noble/hashes` porque Hermes no trae `crypto.subtle` completo, y
+ * lee las iteraciones del propio hash en vez de suponerlas — el servidor usa un
+ * coste distinto para los códigos que para las contraseñas, precisamente para
+ * que esta comprobación no tarde varios segundos en un Android de gama baja.
+ */
+export async function verificarContraHashDelServidor(
+  codigo: string,
+  almacenado: string,
+): Promise<boolean> {
+  const partes = leerPbkdf2(almacenado);
+  if (!partes) return false;
+
+  // La misma forma canónica que usó el servidor al hashearlo: sin guiones, en
+  // mayúscula. Los guiones son solo para que el código se pueda dictar.
+  const canonico = codigo.trim().toUpperCase().replace(/[\s-]/g, '');
+
+  const bytes = await pbkdf2Async(sha256, canonico, deHex(partes.saltHex), {
+    c: partes.iteraciones,
+    dkLen: partes.claveHex.length / 2,
+    asyncTick: CEDER_CADA_MS,
+  });
+  return igualEnTiempoConstante(aHex(bytes), partes.claveHex);
 }

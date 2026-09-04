@@ -13,6 +13,7 @@ import {
   prepararCanal,
   programarRecordatorioDiario,
 } from '@/features/bitacoras/avisos';
+import { useSincronizacion } from '@/features/sync/usar-sincronizacion';
 
 /**
  * La superficie del operador.
@@ -74,6 +75,17 @@ function Puerta() {
     return escucharToquesDeAviso(() => router.push('/'));
   }, [estado, router]);
 
+  /**
+   * La bajada de datos corre aquí y no en `ProveedorBaseLocal`.
+   *
+   * Ese provider es "lo único que puede mostrar un spinner en el arranque", y la
+   * sincronización no puede añadir un segundo: el operador tiene que poder
+   * trabajar en el instante en que desbloquea, con lo que ya tenga bajado. Si
+   * hay señal, los datos se refrescan por detrás mientras él arranca la máquina;
+   * si no la hay, no pasa nada en absoluto.
+   */
+  useSincronizacion(estado === 'abierta');
+
   if (estado === 'cargando') {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.light.background }}>
@@ -88,7 +100,7 @@ function Puerta() {
     <Stack
       screenOptions={{
         headerStyle: { backgroundColor: Marca.primario },
-        headerTintColor: '#FFFFFF',
+        headerTintColor: Marca.sobreColor,
         headerTitleStyle: { fontSize: Texto.etiqueta, fontWeight: '700' },
         contentStyle: { backgroundColor: Colors.light.background },
       }}

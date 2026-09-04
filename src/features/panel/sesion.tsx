@@ -27,6 +27,16 @@ export type EstadoSesionPanel = 'comprobando' | 'fuera' | 'debe_cambiar' | 'dent
 interface ValorSesionPanel {
   estado: EstadoSesionPanel;
   persona: PersonaEnSesionFila | null;
+  /**
+   * Si alguien pidió cambiar su contraseña por su cuenta.
+   *
+   * Vive aquí y no en la barra de navegación porque quien la pinta es
+   * `MarcoSesion`, que está por encima de todo. Cuando el estado estaba dentro
+   * de la barra, la tarjeta sustituía **solo a la barra** y el panel seguía
+   * asomando debajo, como si la página se hubiera partido en dos.
+   */
+  cambiandoClave: boolean;
+  pedirCambioDeClave: (quiere: boolean) => void;
   ingresar: (datos: CredencialesIngreso) => Promise<string | null>;
   cambiarClave: (datos: ClaveNueva) => Promise<string | null>;
   salir: () => Promise<void>;
@@ -55,6 +65,7 @@ function estadoDe(persona: PersonaEnSesionFila | null): EstadoSesionPanel {
 export function ProveedorSesionPanel({ children }: { children: ReactNode }) {
   const [persona, setPersona] = useState<PersonaEnSesionFila | null>(null);
   const [comprobando, setComprobando] = useState(true);
+  const [cambiandoClave, setCambiandoClave] = useState(false);
 
   useEffect(() => {
     let vigente = true;
@@ -88,6 +99,7 @@ export function ProveedorSesionPanel({ children }: { children: ReactNode }) {
       // sobre el estado de la cuenta es el servidor, y darlo por hecho aquí es
       // como se acaba con un panel que cree que todo está bien cuando no.
       setPersona(await api.sesion.quienSoy());
+      setCambiandoClave(false);
       return null;
     } catch (fallo) {
       return mensajeDe(fallo);
@@ -108,6 +120,8 @@ export function ProveedorSesionPanel({ children }: { children: ReactNode }) {
   const valor: ValorSesionPanel = {
     estado: comprobando ? 'comprobando' : estadoDe(persona),
     persona,
+    cambiandoClave,
+    pedirCambioDeClave: setCambiandoClave,
     ingresar,
     cambiarClave,
     salir,

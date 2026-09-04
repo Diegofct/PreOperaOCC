@@ -23,7 +23,7 @@ import PantallaIngreso from './pantalla-ingreso';
 import { useSesionPanel } from './sesion';
 
 export function MarcoSesion({ children }: { children: ReactNode }) {
-  const { estado } = useSesionPanel();
+  const { estado, cambiandoClave, pedirCambioDeClave } = useSesionPanel();
 
   if (estado === 'comprobando') {
     return (
@@ -34,7 +34,10 @@ export function MarcoSesion({ children }: { children: ReactNode }) {
   }
 
   if (estado === 'fuera') return <PantallaIngreso />;
+  // Obligatorio o voluntario, el cambio de contraseña se pinta igual y desde
+  // aquí: es la única capa que está por encima del `Stack`.
   if (estado === 'debe_cambiar') return <PantallaCambiarClave />;
+  if (cambiandoClave) return <PantallaCambiarClave onCancelar={() => pedirCambioDeClave(false)} />;
 
   return <>{children}</>;
 }

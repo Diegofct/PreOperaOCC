@@ -19,7 +19,7 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { captureRef } from 'react-native-view-shot';
 
-import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
+import { Captura, Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -112,7 +112,7 @@ export function PadFirma({
               <Path
                 key={indice}
                 d={trazo}
-                stroke="#0F172A"
+                stroke={Captura.tinta}
                 strokeWidth={3}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -122,7 +122,7 @@ export function PadFirma({
             {trazoActual ? (
               <Path
                 d={trazoActual}
-                stroke="#0F172A"
+                stroke={Captura.tinta}
                 strokeWidth={3}
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -191,7 +191,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
     borderWidth: 2,
     borderColor: Colors.light.backgroundSelected,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Captura.papel,
     overflow: 'hidden',
   },
   marcaDeAgua: {
@@ -216,7 +216,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
   },
   botonPrimario: { backgroundColor: Marca.primario },
-  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   botonSecundario: { backgroundColor: Colors.light.backgroundElement },
   botonSecundarioTexto: { fontSize: Texto.etiqueta, fontWeight: '700', color: Estado.na },
   cancelar: { minHeight: Toque.minimo, alignItems: 'center', justifyContent: 'center' },

@@ -10,7 +10,7 @@ import { useRef, useState } from 'react';
 import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
+import { Captura, Colors, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -55,7 +55,7 @@ export function CapturarFoto({ visible, titulo, ayuda, onCancelar, onCapturar }:
       <View style={estilos.pantalla}>
         {!permiso ? (
           <View style={estilos.centro}>
-            <ActivityIndicator color="#FFFFFF" size="large" />
+            <ActivityIndicator color={Marca.sobreColor} size="large" />
           </View>
         ) : !permiso.granted ? (
           <View style={[estilos.centro, estilos.permiso]}>
@@ -133,7 +133,7 @@ export function CapturarFoto({ visible, titulo, ayuda, onCancelar, onCapturar }:
 }
 
 const estilos = StyleSheet.create({
-  pantalla: { flex: 1, backgroundColor: '#000000' },
+  pantalla: { flex: 1, backgroundColor: Captura.visor },
   centro: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   permiso: { padding: Spacing.four, gap: Spacing.three, backgroundColor: Colors.light.background },
   permisoTitulo: {
@@ -159,7 +159,7 @@ const estilos = StyleSheet.create({
     gap: Spacing.half,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
-  titulo: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  titulo: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   ayuda: { fontSize: Texto.pie, color: 'rgba(255,255,255,0.85)' },
   barraCaptura: {
     position: 'absolute',
@@ -178,7 +178,7 @@ const estilos = StyleSheet.create({
     height: Toque.obturador,
     borderRadius: Toque.obturador / 2,
     borderWidth: 5,
-    borderColor: '#FFFFFF',
+    borderColor: Marca.sobreColor,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -187,18 +187,18 @@ const estilos = StyleSheet.create({
     width: Toque.obturador - 22,
     height: Toque.obturador - 22,
     borderRadius: (Toque.obturador - 22) / 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Captura.papel,
   },
   cancelarLateral: { width: 92, minHeight: Toque.minimo, justifyContent: 'center' },
   cancelar: { minHeight: Toque.minimo, alignItems: 'center', justifyContent: 'center' },
-  cancelarTexto: { fontSize: Texto.base, fontWeight: '600', color: '#FFFFFF' },
+  cancelarTexto: { fontSize: Texto.base, fontWeight: '600', color: Marca.sobreColor },
   previa: { flex: 1 },
   acciones: {
     flexDirection: 'row',
     gap: Spacing.three,
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,
-    backgroundColor: '#000000',
+    backgroundColor: Captura.visor,
   },
   boton: {
     minHeight: Toque.primario,
@@ -207,7 +207,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
   },
   botonSecundario: { flex: 1, backgroundColor: 'rgba(255,255,255,0.16)' },
-  botonSecundarioTexto: { fontSize: Texto.etiqueta, fontWeight: '700', color: '#FFFFFF' },
+  botonSecundarioTexto: { fontSize: Texto.etiqueta, fontWeight: '700', color: Marca.sobreColor },
   botonPrimarioAncho: { flex: 2, backgroundColor: Marca.primario },
   botonPrimario: {
     minHeight: Toque.primario,
@@ -217,6 +217,6 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
     backgroundColor: Marca.primario,
   },
-  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   presionado: { opacity: 0.7 },
 });

@@ -333,8 +333,8 @@ const estilos = StyleSheet.create({
     backgroundColor: Colors.light.background,
   },
   contenido: { padding: Spacing.three, gap: Spacing.three, paddingBottom: Spacing.six },
-  cabecera: { gap: 2 },
-  vehiculo: { fontSize: 34, fontWeight: '800', color: Colors.light.text },
+  cabecera: { gap: Spacing.half },
+  vehiculo: { fontSize: Texto.titular, fontWeight: '800', color: Colors.light.text },
   detalle: { fontSize: Texto.base, color: Colors.light.textSecondary },
   avisoCerrada: {
     padding: Spacing.three,
@@ -346,7 +346,7 @@ const estilos = StyleSheet.create({
   medidor: {
     flex: 1,
     minHeight: Toque.primario,
-    gap: 2,
+    gap: Spacing.half,
     padding: Spacing.three,
     borderRadius: Radio.md,
     borderWidth: 2,
@@ -382,7 +382,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
     backgroundColor: Marca.primario,
   },
-  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   superpuesto: {
     position: 'absolute',
     top: 0,

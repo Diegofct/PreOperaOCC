@@ -15,12 +15,11 @@
  * de obra son `supervisor`, gerencia es `admin`.
  */
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
-
-import { Spacing } from '@/constants/theme';
 
 import { api } from './cliente-api';
 import {
+  Acciones,
+  AccionesFormulario,
   Aviso,
   Boton,
   Campo,
@@ -36,6 +35,7 @@ import {
   ETIQUETA_ROL,
   ROLES,
   type ClaveTemporalFila,
+  type CodigosFila,
   type ObraFila,
   type PersonaFila,
   type Rol,
@@ -57,12 +57,27 @@ export default function PantallaPersonas() {
    */
   const [temporal, setTemporal] = useState<ClaveTemporalFila | null>(null);
 
+  /** Los dos códigos de un operador. Igual que la contraseña: solo esta vez. */
+  const [codigos, setCodigos] = useState<CodigosFila | null>(null);
+
   async function generarClave(id: string) {
     try {
+      setCodigos(null);
       setTemporal(await api.personas.generarClave(id));
       personas.setError(null);
     } catch (fallo) {
       setTemporal(null);
+      personas.setError(mensajeDe(fallo));
+    }
+  }
+
+  async function generarCodigos(id: string) {
+    try {
+      setTemporal(null);
+      setCodigos(await api.personas.generarCodigos(id));
+      personas.setError(null);
+    } catch (fallo) {
+      setCodigos(null);
       personas.setError(mensajeDe(fallo));
     }
   }
@@ -86,23 +101,23 @@ export default function PantallaPersonas() {
   }
 
   const columnas: Columna<PersonaFila>[] = [
-    { clave: 'usuario', titulo: 'Usuario', ancho: 160, pintar: (p) => <Celda>{p.usuario}</Celda> },
+    { clave: 'usuario', titulo: 'Usuario', ancho: 140, pintar: (p) => <Celda>{p.usuario}</Celda> },
     {
       clave: 'nombre',
       titulo: 'Nombre completo',
-      ancho: 260,
+      ancho: 240,
       pintar: (p) => <Celda>{p.nombreCompleto}</Celda>,
     },
     {
       clave: 'documento',
       titulo: 'Documento',
-      ancho: 140,
+      ancho: 120,
       pintar: (p) => <Celda>{p.documento ?? '—'}</Celda>,
     },
     {
       clave: 'rol',
       titulo: 'Cargo',
-      ancho: 200,
+      ancho: 130,
       pintar: (p) => (
         <Etiqueta tono={p.rol === 'operador' ? 'neutro' : 'bueno'}>{ETIQUETA_ROL[p.rol]}</Etiqueta>
       ),
@@ -110,26 +125,30 @@ export default function PantallaPersonas() {
     {
       clave: 'obra',
       titulo: 'Obra',
-      ancho: 220,
+      ancho: 210,
       pintar: (p) => <Celda>{p.obraNombre ?? '—'}</Celda>,
     },
     {
       clave: 'acciones',
       titulo: '',
-      ancho: 260,
+      ancho: 240,
       pintar: (p) => (
-        <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+        <Acciones>
           {/* Repartir accesos al panel es de gerencia, y un operador no entra a
               la web: su acceso es el celular con su PIN. */}
           {esGerencia && p.rol !== 'operador' ? (
             <Boton titulo="Dar acceso" tono="secundario" onPress={() => generarClave(p.id)} />
+          ) : null}
+          {/* El operador no entra al panel: lo suyo es activar su celular. */}
+          {p.rol === 'operador' ? (
+            <Boton titulo="Códigos" tono="secundario" onPress={() => generarCodigos(p.id)} />
           ) : null}
           <Boton
             titulo="Dar de baja"
             tono="peligro"
             onPress={() => personas.ejecutar(() => api.personas.darDeBaja(p.id))}
           />
-        </View>
+        </Acciones>
       ),
     },
   ];
@@ -141,6 +160,15 @@ export default function PantallaPersonas() {
       error={personas.error ?? obras.error}
       cargando={personas.cargando || obras.cargando}
     >
+      {codigos ? (
+        <Aviso tono="exito">
+          {`Códigos de ${codigos.nombreCompleto} (usuario "${codigos.usuario}"). `}
+          {`ACTIVACIÓN: ${codigos.codigoActivacion} — dícteselo por teléfono; vence en ${codigos.horasDeVigencia} horas y sirve una sola vez. `}
+          {`RESPALDO: ${codigos.codigoRespaldo} — imprímalo y guárdelo en la carpeta de la obra: es la única forma de que recupere su PIN si lo olvida donde no hay señal. `}
+          {'Ninguno de los dos se vuelve a mostrar.'}
+        </Aviso>
+      ) : null}
+
       {temporal ? (
         <Aviso tono="exito">
           {`Contraseña temporal de ${temporal.nombreCompleto} (usuario "${temporal.usuario}"): `}
@@ -182,13 +210,13 @@ export default function PantallaPersonas() {
             vacio="Sin obra (gerencia)"
             ancho={240}
           />
-          <View style={{ paddingTop: Spacing.four }}>
+          <AccionesFormulario>
             <Boton
               titulo="Registrar persona"
               onPress={crear}
               deshabilitado={!usuario || !nombreCompleto}
             />
-          </View>
+          </AccionesFormulario>
         </Formulario>
       </Seccion>
 

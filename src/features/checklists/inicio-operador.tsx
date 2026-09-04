@@ -200,7 +200,7 @@ const estilos = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  codigo: { fontSize: 34, fontWeight: '800', color: Colors.light.text },
+  codigo: { fontSize: Texto.titular, fontWeight: '800', color: Colors.light.text },
   detalleVehiculo: { fontSize: Texto.base, color: Colors.light.textSecondary },
   autoasignado: {
     marginTop: Spacing.two,
@@ -223,7 +223,7 @@ const estilos = StyleSheet.create({
     backgroundColor: Marca.primario,
   },
   botonPresionado: { backgroundColor: Marca.primarioPresionado },
-  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  botonPrimarioTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   botonSecundario: {
     minHeight: Toque.minimo,
     alignItems: 'center',
@@ -249,10 +249,10 @@ const estilos = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.light.backgroundSelected,
   },
-  filaHistorialTexto: { gap: 2 },
+  filaHistorialTexto: { gap: Spacing.half },
   historialCodigo: { fontSize: Texto.base, fontWeight: '700', color: Colors.light.text },
   historialFecha: { fontSize: Texto.pie, color: Colors.light.textSecondary },
-  insignia: { paddingHorizontal: Spacing.two, paddingVertical: 4, borderRadius: Radio.pastilla },
-  insigniaTexto: { fontSize: 12, fontWeight: '800' },
+  insignia: { paddingHorizontal: Spacing.two, paddingVertical: Spacing.one, borderRadius: Radio.pastilla },
+  insigniaTexto: { fontSize: Texto.pie, fontWeight: '800' },
   presionado: { opacity: 0.7 },
 });

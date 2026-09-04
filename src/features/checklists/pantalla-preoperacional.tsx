@@ -601,7 +601,7 @@ const estilos = StyleSheet.create({
   pantalla: { flex: 1, backgroundColor: Colors.light.background },
   centro: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   encabezado: { padding: Spacing.three, gap: Spacing.three },
-  vehiculo: { fontSize: 30, fontWeight: '800', color: Colors.light.text },
+  vehiculo: { fontSize: Texto.titular, fontWeight: '800', color: Colors.light.text },
   formato: { fontSize: Texto.pie, color: Colors.light.textSecondary },
   avisoExtra: {
     padding: Spacing.three,
@@ -618,7 +618,7 @@ const estilos = StyleSheet.create({
     backgroundColor: Colors.light.backgroundElement,
   },
   medidorPresionado: { backgroundColor: Colors.light.backgroundSelected },
-  medidorTextos: { flex: 1, gap: 2 },
+  medidorTextos: { flex: 1, gap: Spacing.half },
   medidorAnterior: { fontSize: Texto.pie, color: Colors.light.textSecondary },
   medidorValor: {
     minWidth: 140,
@@ -708,7 +708,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
     backgroundColor: Marca.primario,
   },
-  botonEnviarTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: '#FFFFFF' },
+  botonEnviarTexto: { fontSize: Texto.etiqueta, fontWeight: '800', color: Marca.sobreColor },
   presionado: { opacity: 0.7 },
   deshabilitado: { opacity: 0.5 },
 });

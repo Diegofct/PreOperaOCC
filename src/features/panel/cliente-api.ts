@@ -15,12 +15,18 @@
 import type {
   AsignacionFila,
   AsignacionNueva,
+  BitacoraEditada,
+  BitacoraNueva,
   ClaveNueva,
   ClaveTemporalFila,
+  CodigosFila,
   CredencialesIngreso,
+  JornadaDePreoperacionales,
+  JornadaFila,
   ObraFila,
   ObraNueva,
   PersonaEnSesionFila,
+  PreoperacionalDetalle,
   PersonaFila,
   PersonaNueva,
   TipoVehiculoFila,
@@ -114,6 +120,9 @@ export const api = {
     /** Devuelve una contraseña temporal que **solo se puede leer esta vez**. */
     generarClave: (id: string) =>
       panelEnviar<ClaveTemporalFila>(`/personas/${id}/clave`, 'POST'),
+    /** Los dos códigos de un operador. También se leen una sola vez. */
+    generarCodigos: (id: string) =>
+      panelEnviar<CodigosFila>(`/personas/${id}/activacion`, 'POST'),
   },
 
   vehiculos: {
@@ -124,6 +133,40 @@ export const api = {
 
   tiposVehiculo: {
     listar: () => panel<TipoVehiculoFila[]>('/tipos-vehiculo'),
+  },
+
+  /**
+   * La bitácora diaria.
+   *
+   * Se guarda parcial y muchas veces: el residente abre las del día por la
+   * mañana y las va completando. Cerrar es lo que la convierte en documento, y
+   * desde entonces solo se puede anular.
+   */
+  bitacoras: {
+    delDia: (fecha: string) => panel<JornadaFila>(`/bitacoras?fecha=${encodeURIComponent(fecha)}`),
+    abrir: (datos: BitacoraNueva) => panelEnviar<{ id: string }>('/bitacoras', 'POST', datos),
+    guardar: (id: string, cambios: BitacoraEditada) =>
+      panelEnviar<{ id: string }>(`/bitacoras/${id}`, 'PATCH', cambios),
+    cerrar: (id: string) => panelEnviar<{ id: string }>(`/bitacoras/${id}/cerrar`, 'POST'),
+    anular: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/bitacoras/${id}/anular`, 'POST', { motivo }),
+  },
+
+  /**
+   * Los preoperacionales firmados que subieron del celular.
+   *
+   * Solo lectura, con una excepción: anular. Un preoperacional firmado es
+   * evidencia y no se edita — se anula con motivo y se levanta otro.
+   */
+  preoperacionales: {
+    delDia: (fecha: string, vehiculoId?: string | null) =>
+      panel<JornadaDePreoperacionales>(
+        `/preoperacionales?fecha=${encodeURIComponent(fecha)}` +
+          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : ''),
+      ),
+    detalle: (id: string) => panel<PreoperacionalDetalle>(`/preoperacionales/${id}`),
+    anular: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/preoperacionales/${id}/anular`, 'POST', { motivo }),
   },
 
   asignaciones: {

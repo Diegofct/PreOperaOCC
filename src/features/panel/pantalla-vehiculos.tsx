@@ -12,12 +12,10 @@
  * después.
  */
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
-
-import { Spacing } from '@/constants/theme';
 
 import { api } from './cliente-api';
 import {
+  AccionesFormulario,
   Boton,
   Campo,
   Celda,
@@ -93,22 +91,22 @@ export default function PantallaVehiculos() {
     {
       clave: 'codigo',
       titulo: 'Código',
-      ancho: 120,
+      ancho: 105,
       pintar: (v) => <Celda>{v.codigoInterno}</Celda>,
     },
-    { clave: 'tipo', titulo: 'Tipo', ancho: 160, pintar: (v) => <Celda>{v.tipoNombre}</Celda> },
-    { clave: 'placa', titulo: 'Placa', ancho: 110, pintar: (v) => <Celda>{v.placa ?? '—'}</Celda> },
+    { clave: 'tipo', titulo: 'Tipo', ancho: 145, pintar: (v) => <Celda>{v.tipoNombre}</Celda> },
+    { clave: 'placa', titulo: 'Placa', ancho: 95, pintar: (v) => <Celda>{v.placa ?? '—'}</Celda> },
     {
       clave: 'maquina',
       titulo: 'Marca y modelo',
-      ancho: 200,
+      ancho: 160,
       pintar: (v) => <Celda>{[v.marca, v.modelo].filter(Boolean).join(' ') || '—'}</Celda>,
     },
-    { clave: 'obra', titulo: 'Obra', ancho: 200, pintar: (v) => <Celda>{v.obraNombre ?? '—'}</Celda> },
+    { clave: 'obra', titulo: 'Obra', ancho: 160, pintar: (v) => <Celda>{v.obraNombre ?? '—'}</Celda> },
     {
       clave: 'medidores',
       titulo: 'Odóm. / Horóm.',
-      ancho: 160,
+      ancho: 145,
       pintar: (v) => (
         <Celda>
           {v.odometroKm !== null ? `${v.odometroKm} km` : '—'} ·{' '}
@@ -119,7 +117,7 @@ export default function PantallaVehiculos() {
     {
       clave: 'estado',
       titulo: 'Estado',
-      ancho: 150,
+      ancho: 140,
       pintar: (v) => (
         <Etiqueta
           tono={v.estado === 'operativo' ? 'bueno' : v.estado === 'no_apto' ? 'malo' : 'atencion'}
@@ -131,7 +129,7 @@ export default function PantallaVehiculos() {
     {
       clave: 'acciones',
       titulo: '',
-      ancho: 120,
+      ancho: 130,
       pintar: (v) => (
         <Boton
           titulo="Dar de baja"
@@ -197,13 +195,13 @@ export default function PantallaVehiculos() {
               ancho={160}
             />
           ) : null}
-          <View style={{ paddingTop: Spacing.four }}>
+          <AccionesFormulario>
             <Boton
               titulo="Registrar vehículo"
               onPress={crear}
               deshabilitado={!codigoInterno || !tipoVehiculoId}
             />
-          </View>
+          </AccionesFormulario>
         </Formulario>
       </Seccion>
 

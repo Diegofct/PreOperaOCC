@@ -15,6 +15,20 @@
       "when": 1788371695490,
       "tag": "0001_equal_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788383985226,
+      "tag": "0002_gigantic_magma",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788385959435,
+      "tag": "0003_lying_agent_brand",
+      "breakpoints": true
     }
   ]
 }

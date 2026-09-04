@@ -34,3 +34,13 @@ sqlite.execSync('PRAGMA foreign_keys = ON;');
 export const db = drizzle(sqlite, { schema: esquema });
 
 export type BaseLocal = typeof db;
+
+/**
+ * La base **dentro** de una transacción.
+ *
+ * No es el mismo tipo que `BaseLocal`: le falta `$client`, y por eso una función
+ * que reciba `BaseLocal` no acepta una transacción. Se exporta con nombre propio
+ * para que quien tenga que correr dentro de una lo diga en su firma — que es la
+ * forma de que el compilador impida ejecutarla por fuera.
+ */
+export type TransaccionLocal = Parameters<Parameters<typeof db.transaction>[0]>[0];

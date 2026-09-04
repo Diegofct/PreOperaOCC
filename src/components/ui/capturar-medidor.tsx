@@ -151,7 +151,7 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.lg,
     backgroundColor: Colors.light.backgroundElement,
   },
-  cifra: { fontSize: 44, fontWeight: '800', color: Colors.light.text },
+  cifra: { fontSize: Texto.cifra, fontWeight: '800', color: Colors.light.text },
   cifraMal: { color: Estado.noConforme },
   unidad: {
     fontSize: Texto.etiqueta,
@@ -159,7 +159,10 @@ const estilos = StyleSheet.create({
     color: Colors.light.textSecondary,
   },
   aviso: {
-    minHeight: 44,
+    // Dos renglones reservados aunque no haya aviso. No es un área táctil: es
+    // para que la aparición del mensaje no empuje los botones hacia abajo justo
+    // cuando el operador va a pulsarlos.
+    minHeight: 2 * 21,
     fontSize: Texto.pie,
     fontWeight: '600',
     lineHeight: 21,
@@ -182,7 +185,7 @@ const estilos = StyleSheet.create({
   botonPrimarioTexto: {
     fontSize: Texto.etiqueta,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: Marca.sobreColor,
   },
   botonSecundario: { backgroundColor: Colors.light.backgroundElement },
   botonSecundarioTexto: {

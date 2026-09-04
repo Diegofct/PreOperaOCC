@@ -12,7 +12,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Marca, MaxContentWidthPanel, Spacing, Texto } from '@/constants/theme';
+import {
+  Colors,
+  Marca,
+  MaxContentWidthPanel,
+  Panel,
+  Spacing,
+  TextoPanel,
+} from '@/constants/theme';
 
 import { Aviso, Titulo } from './componentes';
 
@@ -137,10 +144,22 @@ export function MarcoPantalla({
 }
 
 const estilos = StyleSheet.create({
-  pantalla: { flex: 1, backgroundColor: Colors.light.background },
-  contenedor: { alignItems: 'center', padding: Spacing.four },
+  // El lienzo es gris, no blanco: es lo que hace que las tarjetas y las tablas
+  // se lean como objetos apoyados encima en vez de como bloques flotando en un
+  // vacío del mismo color que ellos.
+  pantalla: { flex: 1, backgroundColor: Panel.fondo },
+  contenedor: { alignItems: 'center', padding: Spacing.four, paddingBottom: Spacing.six },
   columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.four },
-  encabezado: { gap: Spacing.one },
-  descripcion: { fontSize: Texto.pie, lineHeight: 22, color: Colors.light.textSecondary },
-  cargando: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  encabezado: { gap: Spacing.one, maxWidth: 720 },
+  descripcion: {
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 21,
+    color: Colors.light.textSecondary,
+  },
+  cargando: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingVertical: Spacing.five,
+  },
 });

@@ -43,7 +43,9 @@ export const obras = sqliteTable('obras', {
   eliminadoEn: integer('eliminado_en'),
 });
 
-export const usuarios = sqliteTable('usuarios', {
+export const usuarios = sqliteTable(
+  'usuarios',
+  {
   id: text('id').primaryKey(),
   usuario: text('usuario').notNull(),
   nombreCompleto: text('nombre_completo').notNull(),
@@ -58,7 +60,16 @@ export const usuarios = sqliteTable('usuarios', {
    */
   obraId: text('obra_id'),
   activo: integer('activo', { mode: 'boolean' }).notNull().default(true),
-});
+},
+  (t) => [
+    // El índice que `src/features/auth/servicio.ts` daba por hecho desde la
+    // Fase 1 y que no existía. Sin él, dos personas pueden acabar compartiendo
+    // nombre de usuario y el desbloqueo se vuelve ambiguo — y con el pull ya no
+    // es hipotético: el servidor manda usuarios reales a un equipo que puede
+    // traer todavía los de demostración.
+    uniqueIndex('ux_usuarios_usuario').on(t.usuario),
+  ],
+);
 
 export const tiposVehiculo = sqliteTable('tipos_vehiculo', {
   /** Slug: 'camioneta', 'volqueta', 'retroexcavadora'… */

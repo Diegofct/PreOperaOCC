@@ -23,6 +23,24 @@ export function fechaLocalISO(ms: number): string {
 }
 
 /**
+ * El día de trabajo en obra, `YYYY-MM-DD`, en hora de Colombia.
+ *
+ * Distinto de `fechaLocalISO`, y la diferencia importa: aquel usa la hora del
+ * equipo, que en el celular del residente **es** la de la obra. Esta se usa
+ * donde el reloj de quien mira no sirve —el navegador de alguien que puede estar
+ * en otra ciudad, o un servidor que corre en UTC—, y siempre responde con el día
+ * que se está trabajando en obra.
+ *
+ * Colombia no tiene horario de verano, así que el desfase es fijo. Si algún día
+ * lo tuviera, este es el único sitio que habría que cambiar.
+ */
+export const DESFASE_COLOMBIA_MS = 5 * 60 * 60 * 1000;
+
+export function fechaDeJornada(ahora: number = Date.now()): string {
+  return new Date(ahora - DESFASE_COLOMBIA_MS).toISOString().slice(0, 10);
+}
+
+/**
  * Horas que trabajó la máquina, según el horómetro y no según el reloj.
  *
  * Es la cifra que alimenta el mantenimiento preventivo. `null` mientras falte
