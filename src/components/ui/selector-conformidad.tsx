@@ -133,6 +133,8 @@ const estilos = StyleSheet.create({
     opacity: 0.4,
   },
   simbolo: {
+    // Óptico: el glifo ✓ / ✕ / – tiene que llenar el botón, y su altura
+    // visual no coincide con la de una letra del mismo tamaño.
     fontSize: 26,
     lineHeight: 30,
     fontWeight: '700',

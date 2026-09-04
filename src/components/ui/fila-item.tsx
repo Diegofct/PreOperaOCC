@@ -117,15 +117,15 @@ const estilos = StyleSheet.create({
   },
   insignia: {
     paddingHorizontal: Spacing.two,
-    paddingVertical: 3,
+    paddingVertical: Spacing.one,
     borderRadius: Radio.pastilla,
     backgroundColor: Marca.critico,
   },
   insigniaTexto: {
-    fontSize: 11,
+    fontSize: Texto.pie,
     fontWeight: '800',
     letterSpacing: 0.5,
-    color: '#FFFFFF',
+    color: Marca.sobreColor,
   },
   ayuda: {
     fontSize: Texto.pie,

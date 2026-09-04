@@ -44,7 +44,7 @@ export default function PantallaResultado() {
   }, [noApto]);
 
   const paleta = noApto
-    ? { fondo: Estado.noConforme, texto: '#FFFFFF', suave: 'rgba(255,255,255,0.16)' }
+    ? { fondo: Estado.noConforme, texto: Marca.sobreColor, suave: 'rgba(255,255,255,0.16)' }
     : conObservaciones
       ? { fondo: Estado.atencionFondo, texto: Estado.atencion, suave: 'rgba(0,0,0,0.06)' }
       : { fondo: Estado.conformeFondo, texto: Estado.conforme, suave: 'rgba(0,0,0,0.06)' };
@@ -109,11 +109,11 @@ export default function PantallaResultado() {
           onPress={() => router.replace('/')}
           style={({ pressed }) => [
             estilos.boton,
-            { backgroundColor: noApto ? '#FFFFFF' : Marca.primario },
+            { backgroundColor: noApto ? Marca.sobreColor : Marca.primario },
             pressed && estilos.presionado,
           ]}
         >
-          <Text style={[estilos.botonTexto, { color: noApto ? Estado.noConforme : '#FFFFFF' }]}>
+          <Text style={[estilos.botonTexto, { color: noApto ? Estado.noConforme : Marca.sobreColor }]}>
             Entendido
           </Text>
         </Pressable>
@@ -130,6 +130,13 @@ const estilos = StyleSheet.create({
     padding: Spacing.four,
     gap: Spacing.three,
   },
+  /*
+   * Estas dos medidas no salen de la escala y es deliberado: son una pareja de
+   * despliegue para la única pantalla de la app que dice una sola cosa. El
+   * operador tiene que leer APTO o NO APTO desde la cabina, a un brazo y con el
+   * sol de frente, y para eso hacen falta un símbolo grande y un titular debajo
+   * proporcionado a él. Meterlas en `Texto` invitaría a usarlas en otra parte.
+   */
   simbolo: { fontSize: 72, fontWeight: '800', textAlign: 'center', lineHeight: 80 },
   titulo: { fontSize: 30, fontWeight: '800', textAlign: 'center', lineHeight: 36 },
   vehiculo: { fontSize: Texto.etiqueta, fontWeight: '700', textAlign: 'center', opacity: 0.9 },

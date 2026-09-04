@@ -1,16 +1,35 @@
 /**
  * Estado de sesión del operador.
  *
- * Cuatro estados y nada más:
- *   · cargando     — leyendo el almacén seguro al arrancar
- *   · sin_enrolar  — este equipo todavía no tiene dueño: usuario + PIN
- *   · bloqueada    — hay dueño; solo falta el PIN. Funciona sin red.
- *   · abierta      — se puede trabajar
+ * Seis estados, y el orden en que se recorren es el recorrido real de un equipo:
+ *
+ *   · cargando       — leyendo el almacén seguro al arrancar
+ *   · sin_enrolar    — este equipo no tiene dueño: usuario + código de activación
+ *   · recuperando    — olvidó el PIN: código de respaldo. **Funciona sin red**
+ *   · definiendo_pin — activado (o recuperado): ahora elige su PIN
+ *   · bloqueada      — hay dueño; solo falta el PIN. Sin red
+ *   · abierta        — se puede trabajar
+ *
+ * De todos ellos, **solo `sin_enrolar` necesita señal**. Todo lo demás se
+ * resuelve contra este mismo teléfono, que es lo que permite trabajar en un
+ * frente sin cobertura — incluida la recuperación del PIN olvidado.
+ *
+ * El PIN se deriva aquí y no sale nunca: el servidor no tiene dónde guardarlo ni
+ * forma de consultarlo, y esa es exactamente la propiedad que hace que la firma
+ * de un preoperacional signifique algo.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { guardarEnrolamiento, guardarTokens, leerEnrolamiento, olvidarEquipo } from './almacen';
+import {
+  guardarEnrolamiento,
+  guardarHashRespaldo,
+  guardarTokens,
+  leerEnrolamiento,
+  leerHashRespaldo,
+  olvidarEquipo,
+  olvidarHashRespaldo,
+} from './almacen';
 import {
   esperaRestante,
   intentosRestantes,
@@ -20,10 +39,23 @@ import {
   registrarFallo,
   type EstadoIntentos,
 } from './intentos';
-import { derivarVerificador, esPinValido, generarSalt, verificarPin } from './pin';
-import { autenticar, MENSAJES_AUTH, usuarioPorId, type UsuarioAutenticado } from './servicio';
+import {
+  derivarVerificador,
+  esPinValido,
+  generarSalt,
+  verificarContraHashDelServidor,
+  verificarPin,
+} from './pin';
+import { canjearActivacion, MENSAJES_AUTH, type UsuarioAutenticado } from './servicio';
+import { usuarioPorId } from './usuario-local';
 
-export type EstadoSesion = 'cargando' | 'sin_enrolar' | 'bloqueada' | 'abierta';
+export type EstadoSesion =
+  | 'cargando'
+  | 'sin_enrolar'
+  | 'recuperando'
+  | 'definiendo_pin'
+  | 'bloqueada'
+  | 'abierta';
 
 export interface Respuesta {
   ok: boolean;
@@ -38,8 +70,14 @@ interface ValorSesion {
   esperaMs: number;
   intentosQueQuedan: number;
   ocupado: boolean;
-  enrolar: (usuario: string, pin: string) => Promise<Respuesta>;
+  /** Este equipo puede recuperar el PIN sin señal. */
+  hayRespaldo: boolean;
+  activar: (usuario: string, codigo: string) => Promise<Respuesta>;
+  definirPin: (pin: string) => Promise<Respuesta>;
   desbloquear: (pin: string) => Promise<Respuesta>;
+  iniciarRecuperacion: () => void;
+  cancelarRecuperacion: () => void;
+  comprobarRespaldo: (codigo: string) => Promise<Respuesta>;
   bloquear: () => void;
   desenrolar: () => Promise<void>;
 }
@@ -68,6 +106,15 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
   const [intentos, setIntentos] = useState<EstadoIntentos>(SIN_INTENTOS);
   const [ahora, setAhora] = useState(() => Date.now());
   const [ocupado, setOcupado] = useState(false);
+  const [hayRespaldo, setHayRespaldo] = useState(false);
+  /**
+   * Quién quedó a medio enrolar entre activar (o recuperar) y definir el PIN.
+   *
+   * Vive en memoria y no en el almacén seguro a propósito: si la app se cierra
+   * en ese punto, el equipo vuelve a pedir el código. Guardar a medias dejaría
+   * un teléfono con dueño y sin llave.
+   */
+  const aMedias = useRef<{ usuarioId: string; usuario: string } | null>(null);
   const montado = useRef(true);
 
   useEffect(() => {
@@ -79,10 +126,15 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      const [enrolamiento, guardados] = await Promise.all([leerEnrolamiento(), leerIntentos()]);
+      const [enrolamiento, guardados, respaldo] = await Promise.all([
+        leerEnrolamiento(),
+        leerIntentos(),
+        leerHashRespaldo(),
+      ]);
       if (!montado.current) return;
       setIntentos(guardados);
       setUsuarioEnrolado(enrolamiento?.usuario ?? null);
+      setHayRespaldo(respaldo !== null);
       setEstado(enrolamiento ? 'bloqueada' : 'sin_enrolar');
     })();
   }, []);
@@ -97,31 +149,154 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
     return () => clearInterval(id);
   }, [esperaMs]);
 
-  const enrolar = useCallback(async (nombreUsuario: string, pin: string): Promise<Respuesta> => {
+  /**
+   * Canjea el código de activación. **Lo único que necesita señal.**
+   *
+   * No abre la sesión: deja el equipo en `definiendo_pin`, porque el PIN todavía
+   * no existe. Los tokens y el hash del respaldo sí se guardan ya — si la app
+   * muere entre un paso y otro, lo que se pierde es un código de activación, no
+   * el acceso.
+   */
+  const activar = useCallback(
+    async (nombreUsuario: string, codigo: string): Promise<Respuesta> => {
+      setOcupado(true);
+      try {
+        const resultado = await canjearActivacion(nombreUsuario, codigo);
+        if (!resultado.ok) {
+          return { ok: false, mensaje: resultado.mensaje ?? MENSAJES_AUTH[resultado.error] };
+        }
+
+        await guardarTokens(resultado.accessToken, resultado.refreshToken);
+        if (resultado.hashRespaldo) await guardarHashRespaldo(resultado.hashRespaldo);
+        await limpiarIntentos();
+
+        aMedias.current = {
+          usuarioId: resultado.usuario.id,
+          usuario: resultado.usuario.usuario,
+        };
+
+        if (!montado.current) return { ok: true };
+        setIntentos(SIN_INTENTOS);
+        setHayRespaldo(resultado.hashRespaldo !== null);
+        setEstado('definiendo_pin');
+        return { ok: true };
+      } finally {
+        if (montado.current) setOcupado(false);
+      }
+    },
+    [],
+  );
+
+  /**
+   * El operador elige su PIN. Aquí se deriva el verificador y **aquí se queda**.
+   *
+   * Sirve para los dos caminos que llevan a este punto: acabar de activar el
+   * equipo, y recuperarlo tras olvidar el PIN. En los dos casos la sal es nueva,
+   * así que el verificador viejo deja de servir aunque alguien lo hubiera leído.
+   */
+  const definirPin = useCallback(async (pin: string): Promise<Respuesta> => {
     if (!esPinValido(pin)) return { ok: false, mensaje: 'El PIN son 6 dígitos.' };
+
+    const pendiente = aMedias.current;
+    if (!pendiente) {
+      if (montado.current) setEstado('sin_enrolar');
+      return { ok: false, mensaje: 'Vuelva a activar el equipo.' };
+    }
+
     setOcupado(true);
     try {
-      const resultado = await autenticar(nombreUsuario, pin);
-      if (!resultado.ok) return { ok: false, mensaje: MENSAJES_AUTH[resultado.error] };
-
       const salt = generarSalt();
       const verificador = await derivarVerificador(pin, salt);
       await guardarEnrolamiento({
-        usuarioId: resultado.usuario.id,
-        usuario: resultado.usuario.usuario,
+        usuarioId: pendiente.usuarioId,
+        usuario: pendiente.usuario,
         salt,
         verificador,
       });
-      if (resultado.accessToken && resultado.refreshToken) {
-        await guardarTokens(resultado.accessToken, resultado.refreshToken);
-      }
       await limpiarIntentos();
+
+      const encontrado = await usuarioPorId(pendiente.usuarioId);
+      aMedias.current = null;
 
       if (!montado.current) return { ok: true };
       setIntentos(SIN_INTENTOS);
-      setUsuarioEnrolado(resultado.usuario.usuario);
-      setUsuario(resultado.usuario);
+      setUsuarioEnrolado(pendiente.usuario);
+      // `encontrado` puede ser null la primera vez: la réplica local todavía no
+      // tiene a esta persona porque el pull no ha corrido. La sesión se abre
+      // igual con lo que sabemos, y el pull la completa enseguida.
+      setUsuario(
+        encontrado ?? {
+          id: pendiente.usuarioId,
+          usuario: pendiente.usuario,
+          nombreCompleto: pendiente.usuario,
+          rol: 'operador',
+        },
+      );
       setEstado('abierta');
+      return { ok: true };
+    } finally {
+      if (montado.current) setOcupado(false);
+    }
+  }, []);
+
+  const iniciarRecuperacion = useCallback(() => setEstado('recuperando'), []);
+  const cancelarRecuperacion = useCallback(() => setEstado('bloqueada'), []);
+
+  /**
+   * Comprueba el código de respaldo **sin red**.
+   *
+   * El residente lo dicta de la carpeta de la obra y esto lo verifica contra el
+   * hash que el equipo se guardó al activarse. Al acertar, el respaldo se quema:
+   * ese papel deja de abrir el teléfono, y el equipo recogerá uno nuevo en la
+   * siguiente sincronización.
+   *
+   * Los fallos cuentan en la misma escalera que el PIN. Si no contaran, el
+   * código de respaldo sería una puerta sin cerrojo al lado de una con cerrojo.
+   */
+  const comprobarRespaldo = useCallback(async (codigo: string): Promise<Respuesta> => {
+    const guardados = await leerIntentos();
+    const restante = esperaRestante(guardados);
+    if (restante > 0) {
+      if (montado.current) {
+        setIntentos(guardados);
+        setAhora(Date.now());
+      }
+      return { ok: false, mensaje: mensajeDeEspera(restante) };
+    }
+
+    const enrolamiento = await leerEnrolamiento();
+    const hash = await leerHashRespaldo();
+    if (!enrolamiento || !hash) {
+      return {
+        ok: false,
+        mensaje:
+          'Este equipo no tiene código de respaldo. Pida uno de activación a la administración.',
+      };
+    }
+
+    setOcupado(true);
+    try {
+      if (!(await verificarContraHashDelServidor(codigo, hash))) {
+        const fallo = await registrarFallo();
+        if (montado.current) {
+          setIntentos(fallo);
+          setAhora(Date.now());
+        }
+        const espera = esperaRestante(fallo);
+        return {
+          ok: false,
+          mensaje: espera > 0 ? mensajeDeEspera(espera) : 'Ese código no es correcto.',
+        };
+      }
+
+      await olvidarHashRespaldo();
+      await limpiarIntentos();
+      aMedias.current = { usuarioId: enrolamiento.usuarioId, usuario: enrolamiento.usuario };
+
+      if (!montado.current) return { ok: true };
+      setIntentos(SIN_INTENTOS);
+      setHayRespaldo(false);
+      setEstado('definiendo_pin');
       return { ok: true };
     } finally {
       if (montado.current) setOcupado(false);
@@ -202,9 +377,13 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
   }, []);
 
   const desenrolar = useCallback(async () => {
+    // `olvidarEquipo` borra todas las claves del almacén, respaldo incluido: el
+    // equipo vuelve a no tener dueño, y el respaldo era del dueño anterior.
     await olvidarEquipo();
     await limpiarIntentos();
+    aMedias.current = null;
     if (!montado.current) return;
+    setHayRespaldo(false);
     setUsuario(null);
     setUsuarioEnrolado(null);
     setIntentos(SIN_INTENTOS);
@@ -219,8 +398,13 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
       esperaMs,
       intentosQueQuedan: intentosRestantes(intentos.fallidos),
       ocupado,
-      enrolar,
+      hayRespaldo,
+      activar,
+      definirPin,
       desbloquear,
+      iniciarRecuperacion,
+      cancelarRecuperacion,
+      comprobarRespaldo,
       bloquear,
       desenrolar,
     }),
@@ -231,8 +415,13 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
       esperaMs,
       intentos.fallidos,
       ocupado,
-      enrolar,
+      hayRespaldo,
+      activar,
+      definirPin,
       desbloquear,
+      iniciarRecuperacion,
+      cancelarRecuperacion,
+      comprobarRespaldo,
       bloquear,
       desenrolar,
     ],

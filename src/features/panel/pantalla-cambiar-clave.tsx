@@ -19,7 +19,7 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Marca, Radio, Spacing, Texto } from '@/constants/theme';
+import { Colors, Panel, Radio, Sombra, Spacing, TextoPanel } from '@/constants/theme';
 
 import { Aviso, Boton, Campo } from './componentes';
 import { LONGITUD_MINIMA_CLAVE } from './contratos';
@@ -69,14 +69,12 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
           valor={actual}
           onChange={setActual}
           oculto
-          ancho={undefined}
         />
         <Campo
           etiqueta="Contraseña nueva"
           valor={nueva}
           onChange={setNueva}
           oculto
-          ancho={undefined}
           error={cortaDeMas ? `Al menos ${LONGITUD_MINIMA_CLAVE} caracteres.` : undefined}
           ayuda={`Mínimo ${LONGITUD_MINIMA_CLAVE} caracteres. Larga y fácil de recordar es mejor que corta y llena de símbolos.`}
         />
@@ -86,7 +84,6 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
           onChange={setRepetida}
           oculto
           onEnviar={enviar}
-          ancho={undefined}
           error={noCoinciden ? 'No coincide con la anterior.' : undefined}
         />
 
@@ -114,17 +111,23 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.four,
-    backgroundColor: Colors.light.backgroundElement,
+    backgroundColor: Panel.fondo,
   },
   tarjeta: {
     width: '100%',
     maxWidth: 420,
     gap: Spacing.three,
-    padding: Spacing.four,
+    padding: Spacing.five,
     borderRadius: Radio.lg,
+    borderCurve: 'continuous',
     backgroundColor: Colors.light.background,
+    boxShadow: Sombra.flotante,
   },
   encabezado: { gap: Spacing.one },
-  titulo: { fontSize: Texto.titulo, fontWeight: '800', color: Marca.primarioTexto },
-  subtitulo: { fontSize: Texto.pie, lineHeight: 22, color: Colors.light.textSecondary },
+  titulo: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
+  subtitulo: {
+    fontSize: TextoPanel.apoyo,
+    lineHeight: 19,
+    color: Colors.light.textSecondary,
+  },
 });

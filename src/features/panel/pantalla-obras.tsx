@@ -8,12 +8,19 @@
  * nada.
  */
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
-
-import { Spacing } from '@/constants/theme';
 
 import { api } from './cliente-api';
-import { Boton, Campo, Celda, Etiqueta, Formulario, Seccion, Tabla, type Columna } from './componentes';
+import {
+  AccionesFormulario,
+  Boton,
+  Campo,
+  Celda,
+  Etiqueta,
+  Formulario,
+  Seccion,
+  Tabla,
+  type Columna,
+} from './componentes';
 import { MarcoPantalla, useListado } from './marco';
 import type { ObraFila } from './contratos';
 
@@ -78,9 +85,9 @@ export default function PantallaObras() {
           <Campo etiqueta="Código" valor={codigo} onChange={setCodigo} ayuda="Ej. OBR-001" ancho={160} />
           <Campo etiqueta="Nombre" valor={nombre} onChange={setNombre} ancho={320} />
           <Campo etiqueta="Municipio" valor={municipio} onChange={setMunicipio} ancho={220} />
-          <View style={{ paddingTop: Spacing.four }}>
+          <AccionesFormulario>
             <Boton titulo="Registrar obra" onPress={crear} deshabilitado={!codigo || !nombre} />
-          </View>
+          </AccionesFormulario>
         </Formulario>
       </Seccion>
 

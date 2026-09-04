@@ -84,6 +84,17 @@ export const propositoMedia = pgEnum('proposito_media', [
 ]);
 export const operacionSync = pgEnum('operacion_sync', ['upsert', 'delete']);
 
+/**
+ * Los dos códigos que se le entregan a un operador, emitidos juntos.
+ *
+ *  · `activacion` — un solo uso, caduca. Enrola el equipo, y es el único momento
+ *    en que la app necesita señal.
+ *  · `respaldo` — la salida cuando el operador olvida su PIN **sin señal**. Se
+ *    imprime y se guarda en la carpeta de la obra; el teléfono guarda su
+ *    verificador al activarse, y por eso se puede comprobar en modo avión.
+ */
+export const tipoCodigo = pgEnum('tipo_codigo', ['activacion', 'respaldo']);
+
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
   timestamp('actualizado_en', { withTimezone: true, mode: 'date' })
@@ -367,8 +378,20 @@ export const bitacoras = pgTable(
     actualizadoEn: actualizadoEn(),
   },
   (t) => [
-    // La idempotencia natural de la entidad: una bitácora por máquina y día.
-    uniqueIndex('ux_bitacora_vehiculo_fecha').on(t.vehiculoId, t.fecha),
+    /**
+     * Una bitácora **viva** por máquina y día.
+     *
+     * Parcial, igual que los demás índices únicos de este esquema. Sin el
+     * `where`, anular una bitácora dejaría ese día bloqueado para siempre: la
+     * fila anulada seguiría ocupando el par (máquina, día) y no habría forma de
+     * volver a levantarla bien — que es justamente para lo que se anula.
+     *
+     * Sigue siendo la idempotencia natural de la entidad: un envío repetido
+     * desde el celular encuentra la que ya existe en vez de duplicarla.
+     */
+    uniqueIndex('ux_bitacora_vehiculo_fecha')
+      .on(t.vehiculoId, t.fecha)
+      .where(sql`anulado_en is null`),
     index('ix_bitacora_obra_fecha').on(t.obraId, t.fecha),
   ],
 );
@@ -456,14 +479,20 @@ export const codigosActivacion = pgTable(
     usuarioId: text('usuario_id')
       .notNull()
       .references(() => usuarios.id),
+    tipo: tipoCodigo('tipo').notNull().default('activacion'),
     /** El código no se guarda en claro: si se filtra la tabla, no sirve de nada. */
     hash: text('hash').notNull(),
+    /**
+     * El de respaldo no caduca —tiene que servir el día que haga falta— así que
+     * lleva una fecha muy lejana en vez de un nulo: una sola forma de comprobar
+     * la vigencia, sin ramas.
+     */
     expiraEn: timestamp('expira_en', { withTimezone: true, mode: 'date' }).notNull(),
     usadoEn: timestamp('usado_en', { withTimezone: true, mode: 'date' }),
     intentos: integer('intentos').notNull().default(0),
     creadoEn: creadoEn(),
   },
-  (t) => [index('ix_codigos_usuario').on(t.usuarioId, t.usadoEn)],
+  (t) => [index('ix_codigos_usuario').on(t.usuarioId, t.tipo, t.usadoEn)],
 );
 
 export const dispositivos = pgTable(
@@ -476,6 +505,14 @@ export const dispositivos = pgTable(
     /** El identificador del equipo que ya calcula `idDelDispositivo()` en el móvil. */
     identificadorEquipo: text('identificador_equipo').notNull(),
     etiqueta: text('etiqueta'),
+    /**
+     * SHA-256 del refresh token. El original solo existe en el teléfono.
+     *
+     * El access token es un JWT corto que no toca la base; este es el que
+     * permite renovarlo, vive meses, y por eso se guarda hasheado igual que la
+     * cookie del panel.
+     */
+    hashRefresh: text('hash_refresh'),
     altaEn: creadoEn(),
     ultimaVistaEn: timestamp('ultima_vista_en', { withTimezone: true, mode: 'date' }),
     revocadoEn: timestamp('revocado_en', { withTimezone: true, mode: 'date' }),

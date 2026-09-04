@@ -36,6 +36,11 @@ export default function LayoutPanel() {
           <Stack.Screen name="personas" options={{ title: 'Personas · PreOpera OCC' }} />
           <Stack.Screen name="vehiculos" options={{ title: 'Vehículos · PreOpera OCC' }} />
           <Stack.Screen name="asignaciones" options={{ title: 'Asignaciones · PreOpera OCC' }} />
+          <Stack.Screen name="bitacoras" options={{ title: 'Bitácoras · PreOpera OCC' }} />
+          <Stack.Screen
+            name="preoperacionales"
+            options={{ title: 'Preoperacionales · PreOpera OCC' }}
+          />
         </Stack>
       </MarcoSesion>
     </ProveedorSesionPanel>

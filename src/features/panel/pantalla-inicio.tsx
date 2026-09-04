@@ -2,30 +2,65 @@
  * La portada del panel.
  *
  * Su trabajo es responder de un vistazo "¿está esto listo para trabajar?". El
- * orden de las cuatro tarjetas es el de las dependencias reales —sin obra no se
- * puede colocar un vehículo, sin vehículo y sin operador no hay asignación— y
- * por eso la que está incompleta se señala: es el siguiente paso, no un adorno.
+ * orden de las tarjetas es el de las dependencias reales —sin obra no se puede
+ * colocar un vehículo, sin vehículo y sin operador no hay asignación, y la
+ * bitácora necesita las tres— y por eso la que está incompleta se señala: es el
+ * siguiente paso, no un adorno.
  */
 import { Link } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Marca, Panel, Radio, Spacing, Texto } from '@/constants/theme';
+import {
+  Colors,
+  Movimiento,
+  Panel,
+  Radio,
+  Sombra,
+  Spacing,
+  TextoPanel,
+} from '@/constants/theme';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 
 import { api } from './cliente-api';
 import { Aviso, Seccion } from './componentes';
-import type { AsignacionFila, ObraFila, PersonaFila, VehiculoFila } from './contratos';
+import type {
+  AsignacionFila,
+  JornadaDePreoperacionales,
+  JornadaFila,
+  ObraFila,
+  PersonaFila,
+  VehiculoFila,
+} from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+
+/** «1 operador», no «1 operadores»: la portada se lee todos los días. */
+function plural(cantidad: number, singular: string, plural: string): string {
+  return `${cantidad} ${cantidad === 1 ? singular : plural}`;
+}
 
 export default function PantallaInicioPanel() {
   const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
   const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
   const asignaciones = useListado<AsignacionFila>(useCallback(() => api.asignaciones.listar(), []));
+  const jornada = useListado<JornadaFila>(
+    useCallback(async () => [await api.bitacoras.delDia(fechaDeJornada())], []),
+  );
+  const inspecciones = useListado<JornadaDePreoperacionales>(
+    useCallback(async () => [await api.preoperacionales.delDia(fechaDeJornada())], []),
+  );
 
   const sinConfirmar = asignaciones.datos.filter(
     (a) => a.origen === 'autoasignada' && a.hasta === null,
   ).length;
+
+  const sinBitacora = jornada.datos[0]?.pendientes.length ?? 0;
+
+  const delDia = inspecciones.datos[0];
+  const noAptos =
+    delDia?.preoperacionales.filter((p) => p.resultado === 'no_apto' && !p.anuladoEn).length ?? 0;
+  const sinInspeccionar = delDia?.pendientes.length ?? 0;
 
   const tarjetas = [
     {
@@ -38,7 +73,7 @@ export default function PantallaInicioPanel() {
       ruta: '/panel/personas' as const,
       titulo: 'Personas',
       total: personas.datos.length,
-      pie: `${personas.datos.filter((p) => p.rol === 'operador').length} operadores`,
+      pie: plural(personas.datos.filter((p) => p.rol === 'operador').length, 'operador', 'operadores'),
     },
     {
       ruta: '/panel/vehiculos' as const,
@@ -51,6 +86,21 @@ export default function PantallaInicioPanel() {
       titulo: 'Asignaciones',
       total: asignaciones.datos.filter((a) => a.hasta === null).length,
       pie: 'Vigentes',
+    },
+    {
+      ruta: '/panel/bitacoras' as const,
+      titulo: 'Bitácoras de hoy',
+      total: jornada.datos[0]?.bitacoras.length ?? 0,
+      pie:
+        sinBitacora === 0
+          ? 'Ninguna máquina pendiente'
+          : `${plural(sinBitacora, 'máquina', 'máquinas')} sin abrir`,
+    },
+    {
+      ruta: '/panel/preoperacionales' as const,
+      titulo: 'Preoperacionales de hoy',
+      total: delDia?.preoperacionales.length ?? 0,
+      pie: noAptos === 0 ? 'Ninguno NO APTO' : `${noAptos} NO APTO`,
     },
   ];
 
@@ -69,10 +119,40 @@ export default function PantallaInicioPanel() {
     <MarcoPantalla
       titulo="Administración"
       descripcion="Desde aquí se registran las obras, las personas, la maquinaria y sus asignaciones. Lo que se registre acá es lo que verá el operador en su celular."
-      error={obras.error ?? personas.error ?? vehiculos.error ?? asignaciones.error}
-      cargando={obras.cargando || personas.cargando || vehiculos.cargando || asignaciones.cargando}
+      error={
+        obras.error ??
+        personas.error ??
+        vehiculos.error ??
+        asignaciones.error ??
+        jornada.error ??
+        inspecciones.error
+      }
+      cargando={
+        obras.cargando ||
+        personas.cargando ||
+        vehiculos.cargando ||
+        asignaciones.cargando ||
+        jornada.cargando ||
+        inspecciones.cargando
+      }
     >
       {siguientePaso ? <Aviso tono="info">{siguientePaso}</Aviso> : null}
+
+      {sinInspeccionar > 0 ? (
+        <Aviso tono="error">
+          {sinInspeccionar === 1
+            ? 'Hoy hay 1 máquina sin preoperacional. Si está trabajando, se está usando sin inspeccionar.'
+            : `Hoy hay ${sinInspeccionar} máquinas sin preoperacional. Si están trabajando, se están usando sin inspeccionar.`}
+        </Aviso>
+      ) : null}
+
+      {sinBitacora > 0 ? (
+        <Aviso tono="error">
+          {sinBitacora === 1
+            ? 'Hoy queda 1 máquina sin bitácora. Ábrala antes de que termine la jornada: reconstruirla después es adivinar.'
+            : `Hoy quedan ${sinBitacora} máquinas sin bitácora. Ábralas antes de que termine la jornada: reconstruirlas después es adivinar.`}
+        </Aviso>
+      ) : null}
 
       {sinConfirmar > 0 ? (
         <Aviso tono="error">
@@ -90,10 +170,12 @@ export default function PantallaInicioPanel() {
             // una sola línea. Con `asChild` el enlace cede el render al
             // `Pressable`, que sí apila.
             <Link key={tarjeta.ruta} href={tarjeta.ruta} asChild>
-              <Pressable style={estilos.tarjeta}>
-                <Text style={estilos.tarjetaTitulo}>{tarjeta.titulo}</Text>
-                <Text style={estilos.tarjetaTotal}>{tarjeta.total}</Text>
-                <Text style={estilos.tarjetaPie}>{tarjeta.pie}</Text>
+              <Pressable style={estilos.enlaceTarjeta}>
+                <TarjetaResumen>
+                  <Text style={estilos.tarjetaTitulo}>{tarjeta.titulo}</Text>
+                  <Text style={estilos.tarjetaTotal}>{tarjeta.total}</Text>
+                  <Text style={estilos.tarjetaPie}>{tarjeta.pie}</Text>
+                </TarjetaResumen>
               </Pressable>
             </Link>
           ))}
@@ -102,29 +184,71 @@ export default function PantallaInicioPanel() {
 
       <Seccion titulo="Lo que todavía no hace este panel">
         <Text style={estilos.nota}>
-          Lo que se registra aquí todavía no le llega al celular del operador: los equipos siguen
-          trabajando con los datos de prueba que traen dentro. Y los preoperacionales que firman
-          siguen guardados en sus teléfonos, así que aún no hay nada que ver de ellos por acá. Esas
-          dos son las dos mitades de la sincronización, y son el trabajo siguiente.
+          Las firmas y las fotos de los hallazgos siguen guardadas en los celulares: suben en el
+          trabajo siguiente, cuando exista el almacén de archivos. Todo lo demás del preoperacional
+          ya llega aquí solo, en cuanto el equipo agarra señal.
         </Text>
       </Seccion>
     </MarcoPantalla>
   );
 }
 
+/**
+ * La caja blanca de una tarjeta, con su elevación bajo el cursor.
+ *
+ * Va en un `View` interno y no en el `Pressable`: `Link` con `asChild` le impone
+ * su propio `style` al hijo, y un estilo-función ahí se pierde — la tarjeta se
+ * queda sin fondo ni relleno, que fue exactamente lo que pasó.
+ */
+function TarjetaResumen({ children }: { children: ReactNode }) {
+  const [encima, setEncima] = useState(false);
+
+  return (
+    <View
+      onPointerEnter={() => setEncima(true)}
+      onPointerLeave={() => setEncima(false)}
+      style={[estilos.tarjeta, encima && estilos.tarjetaHover]}
+    >
+      {children}
+    </View>
+  );
+}
+
 const estilos = StyleSheet.create({
+  // El enlace solo aporta el reparto del espacio; el aspecto lo pone la tarjeta.
+  enlaceTarjeta: { flexGrow: 1, flexBasis: 190, minWidth: 190 },
   tarjetas: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
   tarjeta: {
-    minWidth: 200,
-    flexGrow: 1,
+    flex: 1,
+    gap: Spacing.half,
     padding: Spacing.three,
-    borderWidth: 1,
-    borderColor: Panel.borde,
     borderRadius: Radio.md,
-    backgroundColor: Panel.fondoCabecera,
+    borderCurve: 'continuous',
+    backgroundColor: Colors.light.background,
+    boxShadow: Sombra.tarjeta,
+    transitionDuration: `${Movimiento.rapido}ms`,
   },
-  tarjetaTitulo: { fontSize: Texto.pie, fontWeight: '700', color: Marca.primarioTexto },
-  tarjetaTotal: { fontSize: Texto.medidor, fontWeight: '800', color: Colors.light.text },
-  tarjetaPie: { fontSize: Texto.pie, color: Colors.light.textSecondary },
-  nota: { fontSize: Texto.pie, lineHeight: 24, color: Colors.light.textSecondary },
+  // La tarjeta se levanta bajo el cursor: es lo que dice que se puede pulsar,
+  // sin necesidad de dibujarle un botón dentro.
+  tarjetaHover: { boxShadow: Sombra.elevada, backgroundColor: Panel.fondoHover },
+  tarjetaTitulo: {
+    // Dos renglones fijos: «Preoperacionales de hoy» ocupa dos y los demás uno,
+    // y sin esta altura su cifra quedaba un renglón más abajo que las otras
+    // cinco. Seis números que no comparten línea no se comparan de un vistazo.
+    minHeight: 30,
+    lineHeight: 15,
+    fontSize: TextoPanel.micro,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: Colors.light.textSecondary,
+  },
+  tarjetaTotal: {
+    fontSize: TextoPanel.cifra,
+    fontWeight: '800',
+    lineHeight: 34,
+    color: Colors.light.text,
+  },
+  tarjetaPie: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  nota: { fontSize: TextoPanel.cuerpo, lineHeight: 21, color: Colors.light.textSecondary },
 });

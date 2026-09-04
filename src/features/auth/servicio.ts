@@ -1,79 +1,97 @@
 /**
- * El único punto por donde la app pregunta "¿este usuario y este PIN son
- * válidos?".
+ * El único punto por donde la app pide activar un equipo.
  *
- * Hoy responde la implementación local, contra los usuarios sembrados. En la
- * Fase 2 responderá el servidor (`POST /api/auth/login`) y devolverá tokens de
- * verdad. Cambia `IMPLEMENTACION` y nada más: ninguna pantalla conoce el
- * origen de la respuesta.
+ * Ocurre **una vez por teléfono**, y es el único momento en toda la vida de la
+ * aplicación en que hace falta señal. El desbloqueo diario no pasa por aquí: se
+ * resuelve contra el verificador guardado en el propio celular, sin red, que es
+ * lo que permite trabajar en un frente sin cobertura.
  *
- * Esto solo ocurre en el **enrolamiento**, una vez por equipo. El desbloqueo
- * diario no pasa por aquí: se resuelve contra el verificador guardado en el
- * propio celular, sin red.
+ * Antes esto validaba usuario + PIN contra los datos de demostración sembrados
+ * en el bundle. Esos datos ya no existen: ahora el servidor entrega un código de
+ * un solo uso, y el PIN lo elige el operador después, en su equipo. **El PIN no
+ * viaja nunca** — ni al activar, ni al desbloquear, ni al sincronizar.
  */
-import { eq } from 'drizzle-orm';
+import { ErrorDelServidor, pedirSinToken, SinConexion } from '@/features/sync/cliente-http';
 
-import { db } from '@/db/local/client';
-import { usuarios } from '@/db/local/schema';
-import { pinDemostracionDe } from '@/db/local/seed';
+import { idDelDispositivo } from './almacen';
 
-export type ErrorAuth = 'usuario_desconocido' | 'pin_incorrecto' | 'inactivo' | 'sin_conexion';
+export type ErrorAuth =
+  | 'usuario_desconocido'
+  | 'codigo_incorrecto'
+  | 'inactivo'
+  | 'sin_conexion'
+  | 'servidor';
 
 export interface UsuarioAutenticado {
   id: string;
   usuario: string;
   nombreCompleto: string;
   rol: 'admin' | 'supervisor' | 'operador';
+  obraId?: string | null;
 }
 
-export type ResultadoAuth =
-  | { ok: true; usuario: UsuarioAutenticado; accessToken: string | null; refreshToken: string | null }
-  | { ok: false; error: ErrorAuth };
+export interface ActivacionExitosa {
+  ok: true;
+  usuario: UsuarioAutenticado;
+  accessToken: string;
+  refreshToken: string;
+  /** Hash del código de respaldo. `null` si este equipo no tendrá recuperación offline. */
+  hashRespaldo: string | null;
+}
+
+export type ResultadoAuth = ActivacionExitosa | { ok: false; error: ErrorAuth; mensaje?: string };
 
 export const MENSAJES_AUTH: Record<ErrorAuth, string> = {
   usuario_desconocido: 'Ese usuario no existe. Verifíquelo con su supervisor.',
-  pin_incorrecto: 'PIN incorrecto.',
+  codigo_incorrecto: 'El usuario o el código no son correctos.',
   inactivo: 'Su cuenta está inactiva. Comuníquese con su supervisor.',
-  sin_conexion: 'La primera vez necesita señal para activar el equipo.',
+  sin_conexion:
+    'La activación es lo único que necesita señal. Acérquese a donde haya cobertura e intente de nuevo.',
+  servidor: 'No se pudo activar el equipo. Intente de nuevo en un momento.',
 };
 
-type Implementacion = 'local' | 'remota';
-
-/** Cámbielo a 'remota' cuando `/api/auth/login` esté en pie (Fase 2). */
-const IMPLEMENTACION: Implementacion = 'local';
-
-async function autenticarLocal(usuario: string, pin: string): Promise<ResultadoAuth> {
-  const [fila] = await db
-    .select()
-    .from(usuarios)
-    .where(eq(usuarios.usuario, usuario.trim().toLowerCase()))
-    .limit(1);
-
-  if (!fila) return { ok: false, error: 'usuario_desconocido' };
-  if (!fila.activo) return { ok: false, error: 'inactivo' };
-  if (pinDemostracionDe(fila.usuario) !== pin) return { ok: false, error: 'pin_incorrecto' };
-
-  return {
-    ok: true,
-    usuario: {
-      id: fila.id,
-      usuario: fila.usuario,
-      nombreCompleto: fila.nombreCompleto,
-      rol: fila.rol,
-    },
-    accessToken: null,
-    refreshToken: null,
-  };
+interface RespuestaActivacion {
+  usuario: UsuarioAutenticado;
+  accessToken: string;
+  refreshToken: string;
+  hashRespaldo: string | null;
 }
 
-export async function autenticar(usuario: string, pin: string): Promise<ResultadoAuth> {
-  if (IMPLEMENTACION === 'local') return autenticarLocal(usuario, pin);
-  throw new Error('La autenticación remota llega en la Fase 2.');
-}
+/**
+ * Canjea el código de activación que le dio la administración.
+ *
+ * El error no distingue entre usuario inexistente y código malo: es lo mismo
+ * que hace el servidor, y por la misma razón — la diferencia delataría qué
+ * nombres de usuario existen.
+ */
+export async function canjearActivacion(usuario: string, codigo: string): Promise<ResultadoAuth> {
+  try {
+    const respuesta = await pedirSinToken<RespuestaActivacion>('/api/movil/activar', {
+      usuario: usuario.trim().toLowerCase(),
+      codigo: codigo.trim(),
+      equipo: idDelDispositivo(),
+    });
 
-/** El usuario ya enrolado, leído de la base local. */
-export async function usuarioPorId(id: string): Promise<UsuarioAutenticado | null> {
-  const [fila] = await db.select().from(usuarios).where(eq(usuarios.id, id)).limit(1);
-  if (!fila) return null;
-  return { id: fila.id, usuario: fila.usuario, nombreCompleto: fila.nombreCompleto, rol: fila.rol };
+    return {
+      ok: true,
+      usuario: respuesta.usuario,
+      accessToken: respuesta.accessToken,
+      refreshToken: respuesta.refreshToken,
+      hashRespaldo: respuesta.hashRespaldo,
+    };
+  } catch (fallo) {
+    if (fallo instanceof SinConexion) return { ok: false, error: 'sin_conexion' };
+
+    if (fallo instanceof ErrorDelServidor) {
+      if (fallo.estado === 403) return { ok: false, error: 'inactivo', mensaje: fallo.message };
+      if (fallo.estado === 401 || fallo.estado === 429) {
+        // El servidor ya redactó el mensaje pensando en el operador: si el
+        // código caducó o se bloqueó, decírselo tal cual le ahorra una llamada.
+        return { ok: false, error: 'codigo_incorrecto', mensaje: fallo.message };
+      }
+      return { ok: false, error: 'servidor', mensaje: fallo.message };
+    }
+
+    return { ok: false, error: 'servidor' };
+  }
 }

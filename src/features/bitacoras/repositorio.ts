@@ -26,7 +26,6 @@ import {
 import { encolar } from '@/features/sync/outbox';
 import { esBitacoraCompleta, fechaLocalISO } from '@/shared/rules/jornada';
 
-import { nombreDeActividad } from './actividades';
 
 /** Una máquina de la obra tal como la ve el jefe de operadores. */
 export interface MaquinaDelDia {
@@ -209,25 +208,9 @@ export async function bitacoraPorId(id: string): Promise<Bitacora | null> {
   return filas[0] ?? null;
 }
 
-export interface ActividadNueva {
-  clave: string;
-  /** Solo cuando la clave es 'otra'. */
-  texto?: string;
-  descripcion: string;
-  observaciones: string;
-}
-
-export function construirActividad(nueva: ActividadNueva): ActividadBitacora {
-  return {
-    id: uuidv7(),
-    clave: nueva.clave,
-    // Se guarda el nombre además de la clave: el registro se sigue leyendo
-    // aunque el catálogo de actividades cambie más adelante.
-    nombre: nueva.texto?.trim() || nombreDeActividad(nueva.clave),
-    descripcion: nueva.descripcion.trim(),
-    observaciones: nueva.observaciones.trim(),
-  };
-}
+// Se mudaron a `./tipos` cuando el panel web tuvo que construir las mismas
+// actividades: este archivo habla con SQLite y no puede entrar al bundle web.
+export { construirActividad, type ActividadNueva } from './tipos';
 
 /**
  * Guarda el estado del formulario. Se llama en cada cambio: escribir en SQLite

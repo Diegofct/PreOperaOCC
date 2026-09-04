@@ -16,6 +16,14 @@ const CLAVES = {
   verificador: 'auth.verificadorPin',
   accessToken: 'auth.accessToken',
   refreshToken: 'auth.refreshToken',
+  /**
+   * Hash del código de respaldo, tal como lo escribió el servidor.
+   *
+   * Es lo que permite recuperar el PIN **sin señal**: el residente dicta el
+   * código de la carpeta de la obra y el equipo lo comprueba contra esto, aquí
+   * mismo. El código en claro nunca se guarda; de él solo existe el papel.
+   */
+  hashRespaldo: 'auth.hashRespaldo',
 } as const;
 
 export interface Enrolamiento {
@@ -50,6 +58,27 @@ export async function guardarTokens(accessToken: string, refreshToken: string): 
     SecureStore.setItemAsync(CLAVES.accessToken, accessToken),
     SecureStore.setItemAsync(CLAVES.refreshToken, refreshToken),
   ]);
+}
+
+/** El hash del respaldo, o `null` si este equipo no tiene recuperación offline. */
+export async function leerHashRespaldo(): Promise<string | null> {
+  return SecureStore.getItemAsync(CLAVES.hashRespaldo);
+}
+
+export async function guardarHashRespaldo(hash: string): Promise<void> {
+  await SecureStore.setItemAsync(CLAVES.hashRespaldo, hash);
+}
+
+/**
+ * Quema el respaldo. Se llama justo después de usarlo.
+ *
+ * De un solo uso a propósito: el papel de la carpeta deja de abrir el equipo en
+ * cuanto se usa una vez, y el teléfono recoge uno nuevo en la siguiente
+ * sincronización. Hasta entonces, la recuperación sin señal no está disponible
+ * — y la pantalla lo dice, en vez de fingir que sí.
+ */
+export async function olvidarHashRespaldo(): Promise<void> {
+  await SecureStore.deleteItemAsync(CLAVES.hashRespaldo);
 }
 
 export async function leerAccessToken(): Promise<string | null> {

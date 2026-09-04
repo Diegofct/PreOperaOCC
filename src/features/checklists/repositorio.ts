@@ -17,6 +17,7 @@ import {
   type EstadoSync,
 } from '@/db/local/schema';
 import { encolar } from '@/features/sync/outbox';
+import { desfaseDeReloj } from '@/features/sync/reloj';
 import { periodicidadesAplicables } from '@/shared/rules/inspeccion';
 
 import type {
@@ -81,7 +82,16 @@ export async function asignacionesVigentesDe(usuarioId: string): Promise<Vehicul
     .innerJoin(vehiculos, eq(asignaciones.vehiculoId, vehiculos.id))
     .innerJoin(tiposVehiculo, eq(vehiculos.tipoVehiculoId, tiposVehiculo.id))
     .leftJoin(obras, eq(vehiculos.obraId, obras.id))
-    .where(and(eq(asignaciones.usuarioId, usuarioId), isNull(asignaciones.hasta)))
+    .where(
+      and(
+        eq(asignaciones.usuarioId, usuarioId),
+        isNull(asignaciones.hasta),
+        // Un vehículo dado de baja no le aparece al operador aunque la
+        // asignación siga abierta. Sin este filtro, una máquina que la
+        // administración retiró seguiría ofreciéndose para inspeccionar.
+        isNull(vehiculos.eliminadoEn),
+      ),
+    )
     .orderBy(desc(asignaciones.desde));
 }
 
@@ -158,8 +168,10 @@ export async function autoasignar(usuarioId: string, vehiculoId: string): Promis
     .where(eq(vehiculos.id, vehiculoId))
     .limit(1);
 
+  const id = uuidv7();
+
   await db.insert(asignaciones).values({
-    id: uuidv7(),
+    id,
     vehiculoId,
     usuarioId,
     obraId: vehiculo?.obraId ?? null,
@@ -167,6 +179,12 @@ export async function autoasignar(usuarioId: string, vehiculoId: string): Promis
     hasta: null,
     origen: 'autoasignada',
   });
+
+  // A la cola en la misma operación en que se crea. Es lo único que el operador
+  // decide y la administración necesita saber: la máquina se está usando sin que
+  // nadie la hubiera asignado, y el panel la muestra en amarillo hasta que
+  // alguien lo confirme.
+  await encolar('asignacion', id, { id, vehiculoId, desde: ahora });
 }
 
 export async function plantillaDeTipo(
@@ -325,10 +343,14 @@ export async function cerrarPreoperacional(
   },
 ) {
   const enviadoEn = Date.now();
+  // Se anota cuánto va corrido el reloj de este equipo respecto al servidor. No
+  // se corrige la hora: la que queda guardada tiene que ser la misma que el
+  // operador vio en su pantalla al firmar. Ver `@/features/sync/reloj`.
+  const desfaseRelojMs = await desfaseDeReloj();
 
   await db
     .update(preoperacionales)
-    .set({ ...datos, enviadoEn, estadoSync: 'pendiente', actualizadoEn: enviadoEn })
+    .set({ ...datos, enviadoEn, desfaseRelojMs, estadoSync: 'pendiente', actualizadoEn: enviadoEn })
     .where(eq(preoperacionales.id, id));
 
   const [preop] = await db

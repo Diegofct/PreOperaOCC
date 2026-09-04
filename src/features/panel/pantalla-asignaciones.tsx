@@ -11,12 +11,11 @@
  * de que una máquina se está operando sin que nadie lo hubiera previsto.
  */
 import { useCallback, useState } from 'react';
-import { View } from 'react-native';
-
-import { Spacing } from '@/constants/theme';
 
 import { api } from './cliente-api';
 import {
+  Acciones,
+  AccionesFormulario,
   Aviso,
   Boton,
   Celda,
@@ -30,14 +29,21 @@ import {
 import type { AsignacionFila, PersonaFila, VehiculoFila } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
 
-/** Fecha corta para una tabla; la hora no aporta nada aquí. */
+/**
+ * Fecha corta para una tabla; la hora no aporta nada aquí.
+ *
+ * Se arma a mano en vez de con `toLocaleDateString` porque el español de
+ * Colombia intercala dos «de» —«03 de sept de 2026»— y esa cadena no cabe
+ * dentro de una etiqueta de la columna Estado: se partía en dos renglones y se
+ * salía de su celda.
+ */
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
 function fechaCorta(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  const fecha = new Date(iso);
+  const dia = String(fecha.getDate()).padStart(2, '0');
+  return `${dia} ${MESES[fecha.getMonth()]} ${fecha.getFullYear()}`;
 }
 
 export default function PantallaAsignaciones() {
@@ -98,7 +104,7 @@ export default function PantallaAsignaciones() {
       ancho: 210,
       pintar: (a) =>
         a.hasta !== null ? null : (
-          <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+          <Acciones>
             {a.origen === 'autoasignada' ? (
               <Boton
                 titulo="Confirmar"
@@ -110,7 +116,7 @@ export default function PantallaAsignaciones() {
               tono="secundario"
               onPress={() => asignaciones.ejecutar(() => api.asignaciones.cerrar(a.id))}
             />
-          </View>
+          </Acciones>
         ),
     },
   ];
@@ -156,9 +162,9 @@ export default function PantallaAsignaciones() {
             vacio="Elige un operador"
             ancho={280}
           />
-          <View style={{ paddingTop: Spacing.four }}>
+          <AccionesFormulario>
             <Boton titulo="Asignar" onPress={crear} deshabilitado={!vehiculoId || !usuarioId} />
-          </View>
+          </AccionesFormulario>
         </Formulario>
       </Seccion>
 

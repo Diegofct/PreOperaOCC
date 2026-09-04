@@ -42,6 +42,27 @@ const idOpcional = z
   .nullish()
   .transform((v) => (v && v.length > 0 ? v : null));
 
+/*
+ * Campos de una edición parcial.
+ *
+ * Se distinguen de los de arriba en una cosa que parece un detalle y no lo es:
+ * **ausente y vacío significan cosas distintas.** Un `PATCH` que solo manda el
+ * horómetro final no está pidiendo borrar el inicial, y con los ayudantes de
+ * arriba —que convierten lo ausente en `null`— eso es exactamente lo que
+ * pasaba: guardar un campo vaciaba los demás.
+ *
+ * Aquí, ausente es `undefined` y el endpoint no toca la columna; `null`
+ * explícito sí la vacía.
+ */
+const medidorParcial = z
+  .number()
+  .int('El medidor va en números enteros.')
+  .min(0, 'El medidor no puede ser negativo.')
+  .nullable()
+  .optional();
+
+const idParcial = z.string().trim().min(1).nullable().optional();
+
 /* ------------------------------------------------------------------------ */
 /* Obras                                                                     */
 /* ------------------------------------------------------------------------ */
@@ -251,4 +272,188 @@ export interface ClaveTemporalFila {
   usuario: string;
   nombreCompleto: string;
   claveTemporal: string;
+}
+
+/**
+ * Los dos códigos de un operador, devueltos **una sola vez**.
+ *
+ * El de activación se dicta por teléfono y enrola el equipo. El de respaldo se
+ * imprime y se guarda en la carpeta de la obra: es la salida el día que el
+ * operador olvide su PIN en un frente sin señal.
+ */
+export interface CodigosFila {
+  usuario: string;
+  nombreCompleto: string;
+  codigoActivacion: string;
+  codigoRespaldo: string;
+  horasDeVigencia: number;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Bitácoras                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * El día de trabajo, `YYYY-MM-DD`.
+ *
+ * Texto y no fecha, de punta a punta. La jornada del 3 de marzo es el 3 de marzo
+ * en obra: convertirla a un instante la correría de día en la frontera de la
+ * medianoche, y quien mira el panel puede estar en otra parte.
+ */
+export const fechaDeJornadaZod = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha va en formato AAAA-MM-DD.');
+
+export const bitacoraNueva = z.object({
+  vehiculoId: textoObligatorio(64, 'el vehículo'),
+  fecha: fechaDeJornadaZod,
+});
+
+export type BitacoraNueva = z.input<typeof bitacoraNueva>;
+
+export const actividadNuevaZod = z.object({
+  clave: textoObligatorio(40, 'la actividad'),
+  /** Solo cuando la clave es 'otra': el nombre que escribió quien la registró. */
+  texto: z.string().trim().max(120).optional(),
+  descripcion: z.string().trim().max(500).default(''),
+  observaciones: z.string().trim().max(500).default(''),
+});
+
+/**
+ * Lo editable mientras la bitácora sigue abierta.
+ *
+ * Las actividades llegan enteras y sustituyen a las que hubiera, en vez de ir
+ * una por una. Es lo que hace que dos pestañas abiertas sobre la misma bitácora
+ * no acaben produciendo una lista con actividades repetidas o perdidas: gana la
+ * última que guarda, que es lo que quien la está llenando espera.
+ */
+export const bitacoraEditada = z.object({
+  operadorId: idParcial,
+  horometroInicial: medidorParcial,
+  horometroFinal: medidorParcial,
+  actividades: z.array(actividadNuevaZod).max(20).optional(),
+});
+
+export type BitacoraEditada = z.input<typeof bitacoraEditada>;
+
+export const anulacion = z.object({
+  motivo: textoObligatorio(300, 'el motivo de la anulación'),
+});
+
+export interface ActividadFila {
+  id: string;
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  observaciones: string;
+}
+
+export interface BitacoraFila {
+  id: string;
+  vehiculoId: string;
+  vehiculoCodigo: string;
+  tipoNombre: string;
+  /** El slug estable, que es la llave del catálogo de actividades. */
+  tipoVehiculoId: string;
+  obraId: string | null;
+  obraNombre: string | null;
+  fecha: string;
+  operadorId: string | null;
+  operadorNombre: string | null;
+  horometroInicial: number | null;
+  horometroFinal: number | null;
+  actividades: ActividadFila[];
+  cerradaEn: string | null;
+  anuladoEn: string | null;
+  motivoAnulacion: string | null;
+  /** Quién la está llevando. Puede ser distinto del operador. */
+  usuarioNombre: string | null;
+}
+
+/** Una máquina de la obra que ese día todavía no tiene bitácora. */
+export interface MaquinaPendienteFila {
+  vehiculoId: string;
+  codigoInterno: string;
+  tipoNombre: string;
+  tipoVehiculoId: string;
+  obraNombre: string | null;
+  horometroH: number | null;
+}
+
+export interface JornadaFila {
+  fecha: string;
+  bitacoras: BitacoraFila[];
+  pendientes: MaquinaPendienteFila[];
+}
+
+/* ------------------------------------------------------------------------ */
+/* Preoperacionales                                                          */
+/* ------------------------------------------------------------------------ */
+
+export const RESULTADOS = ['apto', 'apto_con_observaciones', 'no_apto'] as const;
+export type Resultado = (typeof RESULTADOS)[number];
+
+export const ETIQUETA_RESULTADO: Record<Resultado, string> = {
+  apto: 'APTO',
+  apto_con_observaciones: 'APTO con observaciones',
+  no_apto: 'NO APTO',
+};
+
+export interface PreoperacionalFila {
+  id: string;
+  vehiculoId: string;
+  vehiculoCodigo: string;
+  tipoNombre: string;
+  obraNombre: string | null;
+  operadorNombre: string;
+  iniciadoEn: string;
+  enviadoEn: string | null;
+  odometroKm: number | null;
+  horometroH: number | null;
+  resultado: Resultado | null;
+  cantidadInmovilizantes: number;
+  anuladoEn: string | null;
+}
+
+/** Una máquina que hoy todavía no tiene preoperacional. */
+export interface MaquinaSinFormatoFila {
+  vehiculoId: string;
+  codigoInterno: string;
+  tipoNombre: string;
+}
+
+export interface JornadaDePreoperacionales {
+  fecha: string;
+  preoperacionales: PreoperacionalFila[];
+  pendientes: MaquinaSinFormatoFila[];
+}
+
+/** Una respuesta tal como se guardó: se auto-describe, con su etiqueta dentro. */
+export interface RespuestaFila {
+  itemKey: string;
+  seccionKey: string;
+  label: string;
+  sistema?: string | null;
+  tipo: string;
+  inmoviliza: boolean;
+  valor: string;
+  observacion?: string | null;
+  respondidoEn?: number | null;
+}
+
+export interface PreoperacionalDetalle extends PreoperacionalFila {
+  placa: string | null;
+  operadorUsuario: string;
+  plantillaTipoVehiculo: string;
+  plantillaVersion: number;
+  periodicidades: string[];
+  recibidoEn: string;
+  respuestas: RespuestaFila[];
+  observaciones: string | null;
+  /** Cuánto iba corrido el reloj del equipo al firmar, en milisegundos. */
+  desfaseRelojMs: number;
+  motivoAnulacion: string | null;
+  anuladoPorNombre: string | null;
+  /** La plantilla con la que se firmó, para poder leerlo como se vio ese día. */
+  plantilla: { secciones: { key: string; titulo: string }[] } | null;
 }

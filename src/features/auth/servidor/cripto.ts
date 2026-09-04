@@ -15,6 +15,12 @@
  * en `@/shared/cripto/comparar` precisamente para no estar escrito dos veces.
  */
 import { igualEnTiempoConstante } from '@/shared/cripto/comparar';
+import {
+  aHex,
+  deHex,
+  formatearPbkdf2,
+  leerPbkdf2,
+} from '@/shared/cripto/formato-pbkdf2';
 
 /**
  * Coste de derivación de una contraseña web.
@@ -31,23 +37,26 @@ import { igualEnTiempoConstante } from '@/shared/cripto/comparar';
  */
 export const ITERACIONES_CLAVE = 600_000;
 
+/**
+ * Coste de los códigos de activación y respaldo.
+ *
+ * Mucho menor que el de una contraseña, y a propósito: un código de 8
+ * caracteres del alfabeto legible trae ~40 bits de aleatoriedad, mientras que
+ * una contraseña humana trae bastante menos. El KDF lento existe para compensar
+ * esa debilidad, y aquí no hay nada que compensar.
+ *
+ * Además, **el del respaldo lo verifica el teléfono** —con `@noble/hashes`, en
+ * JavaScript puro— el día que no hay señal. Las 600.000 vueltas del panel serían
+ * varios segundos de espera en un Android de gama baja. Este número es el mismo
+ * que `pin.ts` tiene calibrado contra el equipo real del cliente.
+ */
+export const ITERACIONES_CODIGO = 120_000;
+
 const LONGITUD_SALT = 16;
 const LONGITUD_CLAVE = 32;
 
 /** Mínimo de una contraseña web. Corta de más es peor que corta de menos. */
 export const LONGITUD_MINIMA_CLAVE = 10;
-
-function aHex(bytes: Uint8Array): string {
-  let salida = '';
-  for (const byte of bytes) salida += byte.toString(16).padStart(2, '0');
-  return salida;
-}
-
-function deHex(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
-}
 
 function bytesAleatorios(cuantos: number): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(cuantos));
@@ -77,25 +86,49 @@ async function derivar(clave: string, salt: Uint8Array, iteraciones: number): Pr
  * ni una fila. Las credenciales viejas se siguen verificando con su coste
  * original, y se rehashean solas cuando su dueño entra.
  */
-export async function hashDeClave(clave: string): Promise<string> {
+export async function hashDeClave(
+  clave: string,
+  iteraciones: number = ITERACIONES_CLAVE,
+): Promise<string> {
   const salt = bytesAleatorios(LONGITUD_SALT);
-  const dk = await derivar(clave, salt, ITERACIONES_CLAVE);
-  return `pbkdf2$sha256$${ITERACIONES_CLAVE}$${aHex(salt)}$${dk}`;
+  const claveHex = await derivar(clave, salt, iteraciones);
+  return formatearPbkdf2({ iteraciones, saltHex: aHex(salt), claveHex });
+}
+
+/**
+ * La forma canónica de un código, y **la única que se hashea o se compara**.
+ *
+ * Los códigos se muestran agrupados —`ELTB-PXS2`— porque así se dictan y se
+ * teclean con muchos menos errores, pero esos guiones son presentación. Quien
+ * los escribe puede ponerlos o no, en mayúscula o minúscula, con un espacio en
+ * medio.
+ *
+ * Existe porque no tenerlo costó un fallo real: el panel hasheaba el código con
+ * sus guiones y el móvil lo comparaba sin ellos, así que **ningún código
+ * funcionaba nunca**. Normalizar en los dos extremos por separado es cómo se
+ * vuelve a caer en lo mismo; normalizar aquí, una vez, no.
+ */
+export function normalizarCodigo(codigo: string): string {
+  return codigo.trim().toUpperCase().replace(/[\s-]/g, '');
+}
+
+/** Hash de un código de activación o de respaldo. Ver `ITERACIONES_CODIGO`. */
+export function hashDeCodigo(codigo: string): Promise<string> {
+  return hashDeClave(normalizarCodigo(codigo), ITERACIONES_CODIGO);
+}
+
+/** Comprueba un código contra su hash, normalizando primero. */
+export function verificarCodigo(codigo: string, almacenado: string): Promise<boolean> {
+  return verificarClave(normalizarCodigo(codigo), almacenado);
 }
 
 /** Verifica sin confiar en las constantes de hoy: lee los parámetros del hash. */
 export async function verificarClave(clave: string, almacenado: string): Promise<boolean> {
-  const partes = almacenado.split('$');
-  if (partes.length !== 5) return false;
+  const partes = leerPbkdf2(almacenado);
+  if (!partes) return false;
 
-  const [algoritmo, digest, iteracionesTexto, saltHex, dkEsperada] = partes;
-  if (algoritmo !== 'pbkdf2' || digest !== 'sha256') return false;
-
-  const iteraciones = Number(iteracionesTexto);
-  if (!Number.isInteger(iteraciones) || iteraciones <= 0) return false;
-
-  const calculada = await derivar(clave, deHex(saltHex), iteraciones);
-  return igualEnTiempoConstante(calculada, dkEsperada);
+  const calculada = await derivar(clave, deHex(partes.saltHex), partes.iteraciones);
+  return igualEnTiempoConstante(calculada, partes.claveHex);
 }
 
 /**

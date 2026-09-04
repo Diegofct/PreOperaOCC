@@ -30,8 +30,17 @@ import {
   periodicidadesAplicables,
   validarMedidor,
 } from '../src/shared/rules/inspeccion';
+import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/shared/rules/fusion';
+import {
+  debeRendirse,
+  esperaDeReintento,
+  ESPERA_MAXIMA_MS,
+  INTENTOS_MAXIMOS,
+  siguienteIntento,
+} from '../src/shared/rules/reintentos';
 import {
   esBitacoraCompleta,
+  fechaDeJornada,
   fechaLocalISO,
   horaLocal,
   horasDeMaquina,
@@ -303,6 +312,18 @@ prueba('una bitácora sin operador o sin actividad no está completa', () => {
   assert.equal(esBitacoraCompleta({ ...buena, horometroFinal: 9835 }), false);
 });
 
+prueba('la jornada en obra no cambia de día por la zona del navegador', () => {
+  // El residente puede mirar el panel desde cualquier parte; el día de trabajo
+  // siempre es el de la obra. A las 02:00 UTC del 4 de marzo, en Colombia
+  // todavía son las 21:00 del 3: la jornada es la del 3.
+  assert.equal(fechaDeJornada(Date.parse('2026-03-04T02:00:00Z')), '2026-03-03');
+  // Y a las 06:00 UTC ya son las 01:00 del 4 en obra.
+  assert.equal(fechaDeJornada(Date.parse('2026-03-04T06:00:00Z')), '2026-03-04');
+  // La frontera exacta: 05:00 UTC es medianoche en Colombia.
+  assert.equal(fechaDeJornada(Date.parse('2026-03-04T05:00:00Z')), '2026-03-04');
+  assert.equal(fechaDeJornada(Date.parse('2026-03-04T04:59:59Z')), '2026-03-03');
+});
+
 prueba('el jefe ve exactamente las máquinas que le faltan', () => {
   const flota = ['vol-01', 'vol-02', 'ret-01'];
   const completas = new Map([
@@ -311,6 +332,144 @@ prueba('el jefe ve exactamente las máquinas que le faltan', () => {
   ]);
   assert.deepEqual(maquinasSinBitacora(flota, completas), ['vol-02', 'ret-01']);
   assert.deepEqual(maquinasSinBitacora(flota, new Map()), flota);
+});
+
+
+/* ------------------------------------------------------------------------ */
+/* Fusión del pull con lo que ya hay en el teléfono                          */
+/* ------------------------------------------------------------------------ */
+
+const BASE: VehiculoLocal = {
+  codigoInterno: 'RET-01',
+  placa: null,
+  tipoVehiculoId: 'retroexcavadora',
+  marca: 'Case',
+  modelo: 'CX210',
+  obraId: 'obra-1',
+  odometroKm: null,
+  horometroH: 6430,
+  medidorActualizadoEn: 1_000,
+  estado: 'operativo',
+  eliminadoEn: null,
+};
+
+console.log('\nFusión del pull\n');
+
+prueba('el catálogo siempre lo manda el servidor', () => {
+  const local: VehiculoLocal = { ...BASE, placa: 'VIEJA', marca: 'Mal escrito', obraId: 'obra-0' };
+  const servidor: VehiculoLocal = { ...BASE, placa: 'ABC123', marca: 'Case', obraId: 'obra-2' };
+  const fusionado = fusionarVehiculo(servidor, local);
+  assert.equal(fusionado.placa, 'ABC123');
+  assert.equal(fusionado.marca, 'Case');
+  assert.equal(fusionado.obraId, 'obra-2');
+});
+
+prueba('el medidor se queda con el mayor valor, venga de donde venga', () => {
+  // El caso normal: el teléfono va por delante porque acaba de capturar una
+  // lectura que todavía no ha subido.
+  const local: VehiculoLocal = { ...BASE, horometroH: 6439, medidorActualizadoEn: 9_000 };
+  const servidor: VehiculoLocal = { ...BASE, horometroH: 6430, medidorActualizadoEn: 5_000 };
+  const fusionado = fusionarVehiculo(servidor, local);
+  assert.equal(fusionado.horometroH, 6439);
+  assert.equal(fusionado.medidorActualizadoEn, 9_000);
+
+  // Y al revés: si el servidor sabe más, gana el servidor.
+  const alReves = fusionarVehiculo({ ...BASE, horometroH: 6500, medidorActualizadoEn: 9_000 }, BASE);
+  assert.equal(alReves.horometroH, 6500);
+
+  assert.equal(mayorMedidor(null, 10), 10);
+  assert.equal(mayorMedidor(10, null), 10);
+  assert.equal(mayorMedidor(null, null), null);
+});
+
+prueba('un NO APTO local sobrevive mientras quede una captura sin subir', () => {
+  // El peor error posible del sistema sería poner en verde una máquina que el
+  // operador inmovilizó. El servidor todavía no sabe por qué está roja.
+  const local: VehiculoLocal = { ...BASE, estado: 'no_apto' };
+  const servidor: VehiculoLocal = { ...BASE, estado: 'operativo' };
+  const fusionado = fusionarVehiculo(servidor, local, { hayCapturaSinSubir: true });
+  assert.equal(fusionado.estado, 'no_apto');
+});
+
+prueba('y deja de sobrevivir cuando ya no queda ninguna', () => {
+  // Sin esto, una máquina reparada se quedaría roja para siempre: el servidor
+  // no tendría forma de volver a ponerla operativa.
+  const local: VehiculoLocal = { ...BASE, estado: 'no_apto' };
+  const servidor: VehiculoLocal = { ...BASE, estado: 'operativo' };
+  const fusionado = fusionarVehiculo(servidor, local, { hayCapturaSinSubir: false });
+  assert.equal(fusionado.estado, 'operativo');
+});
+
+prueba('la baja del servidor se aplica aunque queden capturas pendientes', () => {
+  // La fila se conserva —los preoperacionales guardados la referencian— pero
+  // queda apagada.
+  const fusionado = fusionarVehiculo(
+    { ...BASE, eliminadoEn: 7_000 },
+    { ...BASE, estado: 'no_apto' },
+    { hayCapturaSinSubir: true },
+  );
+  assert.equal(fusionado.eliminadoEn, 7_000);
+  assert.equal(fusionado.estado, 'no_apto');
+});
+
+prueba('un vehículo que este equipo no conocía entra tal cual', () => {
+  const fusionado = fusionarVehiculo({ ...BASE, horometroH: 99 }, null);
+  assert.equal(fusionado.horometroH, 99);
+  assert.equal(fusionado.estado, 'operativo');
+});
+
+
+/* ------------------------------------------------------------------------ */
+/* Reintentos de la cola de salida                                           */
+/* ------------------------------------------------------------------------ */
+
+console.log('\nReintentos de la subida\n');
+
+prueba('la espera crece con cada fallo y no pasa del tope', () => {
+  // En obra la señal va y viene: reintentar cada segundo no adelanta el envío y
+  // sí vacía la batería de un equipo que tiene que aguantar la jornada.
+  const esperas = [1, 2, 3, 4].map(esperaDeReintento);
+  assert.deepEqual(esperas, [5_000, 10_000, 20_000, 40_000]);
+
+  for (let intentos = 1; intentos < 40; intentos++) {
+    assert.ok(esperaDeReintento(intentos) <= ESPERA_MAXIMA_MS);
+  }
+  assert.equal(esperaDeReintento(30), ESPERA_MAXIMA_MS);
+
+  // Sin fallos no hay espera: el primer envío sale de inmediato.
+  assert.equal(esperaDeReintento(0), 0);
+});
+
+prueba('los reintentos se acaban y la fila deja de volver sola a la cola', () => {
+  const ahora = 1_000_000;
+
+  const primero = siguienteIntento(0, ahora);
+  assert.equal(primero.estado, 'pendiente');
+  assert.equal(primero.intentos, 1);
+  assert.equal(primero.proximoIntentoEn, ahora + 5_000);
+
+  // Justo antes del tope todavía se reintenta.
+  const penultimo = siguienteIntento(INTENTOS_MAXIMOS - 2, ahora);
+  assert.equal(penultimo.estado, 'pendiente');
+  assert.ok(penultimo.proximoIntentoEn > ahora);
+
+  // Y al llegar, se rinde. `proximoIntentoEn` queda en 0: una fecha futura
+  // sugeriría que va a volver sola, y no va.
+  const ultimo = siguienteIntento(INTENTOS_MAXIMOS - 1, ahora);
+  assert.equal(ultimo.estado, 'fallida');
+  assert.equal(ultimo.intentos, INTENTOS_MAXIMOS);
+  assert.equal(ultimo.proximoIntentoEn, 0);
+
+  assert.equal(debeRendirse(INTENTOS_MAXIMOS - 1), false);
+  assert.equal(debeRendirse(INTENTOS_MAXIMOS), true);
+});
+
+prueba('un error que reintentar no arregla se rinde de una vez', () => {
+  // El vehículo ya no existe en el servidor, o el envío no valida. Gastar ocho
+  // reintentos en eso solo retrasa que el operador se entere.
+  const resultado = siguienteIntento(0, 1_000_000, { definitivo: true });
+  assert.equal(resultado.estado, 'fallida');
+  assert.equal(resultado.intentos, INTENTOS_MAXIMOS);
 });
 
 
