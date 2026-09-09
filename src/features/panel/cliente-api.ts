@@ -23,6 +23,8 @@ import type {
   CredencialesIngreso,
   JornadaDePreoperacionales,
   JornadaFila,
+  LlantaFila,
+  LlantaNueva,
   ObraFila,
   ObraNueva,
   PersonaEnSesionFila,
@@ -135,6 +137,17 @@ export const api = {
     listar: () => panel<TipoVehiculoFila[]>('/tipos-vehiculo'),
   },
 
+  /** Las llantas de un equipo. Retirar no borra: deja el histórico. */
+  llantas: {
+    deVehiculo: (vehiculoId: string) => panel<LlantaFila[]>(`/vehiculos/${vehiculoId}/llantas`),
+    montar: (vehiculoId: string, datos: LlantaNueva) =>
+      panelEnviar<LlantaFila>(`/vehiculos/${vehiculoId}/llantas`, 'POST', datos),
+    actualizar: (id: string, datos: Partial<LlantaNueva>) =>
+      panelEnviar<LlantaFila>(`/llantas/${id}`, 'PATCH', datos),
+    retirar: (id: string, motivo: string) =>
+      panelEnviar<LlantaFila>(`/llantas/${id}`, 'DELETE', { motivo }),
+  },
+
   /**
    * La bitácora diaria.
    *
@@ -165,6 +178,14 @@ export const api = {
           (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : ''),
       ),
     detalle: (id: string) => panel<PreoperacionalDetalle>(`/preoperacionales/${id}`),
+    /**
+     * La dirección de una imagen, para dársela a un `<Image>`.
+     *
+     * Es una ruta del propio servidor y no del bucket: R2 es privado y sus
+     * archivos solo salen por `/api/panel/media/:id`, detrás de la sesión. El
+     * navegador adjunta la cookie solo, igual que en el resto del panel.
+     */
+    urlDeImagen: (mediaId: string) => `/api/panel/media/${mediaId}`,
     anular: (id: string, motivo: string) =>
       panelEnviar<{ id: string }>(`/preoperacionales/${id}/anular`, 'POST', { motivo }),
   },

@@ -22,14 +22,17 @@
  *     por un problema de red sería el peor fallo posible de este sistema, y esa
  *     regla ya está escrita en `intentos.ts` para el PIN.
  *
- * Las **imágenes todavía no suben**: necesitan un almacén de archivos y van en su
- * propio entregable. Sus filas se quedan en la cola, esperando, sin estorbar a
- * las demás.
+ * Las **imágenes son la única entidad que se puede saltar**. Las fotos de
+ * hallazgo esperan a una WiFi para no gastar el plan de datos del operador
+ * (`@/features/media/subir`), y saltarlas no rompe el orden estricto de `seq`
+ * porque son lo único de lo que **nada depende**: ningún registro posterior
+ * necesita que una foto haya llegado. Saltar un preoperacional sí lo rompería.
  */
 import { eq, inArray } from 'drizzle-orm';
 
 import { db } from '@/db/local/client';
-import { bitacoras, preoperacionales, type EstadoSync } from '@/db/local/schema';
+import { bitacoras, media, preoperacionales, type EstadoSync } from '@/db/local/schema';
+import { subirImagen } from '@/features/media/subir';
 
 import { ErrorDelServidor, pedirConToken, SinConexion } from './cliente-http';
 import { marcarEnviada, marcarFallida, proximoLote } from './outbox';
@@ -51,12 +54,16 @@ function esDefinitivo(estado: number): boolean {
   return estado === 400 || estado === 422;
 }
 
-/** Dónde va cada entidad de la cola. `media` todavía no tiene destino. */
-const RUTAS: Record<string, string | null> = {
+/**
+ * Dónde va cada entidad que viaja como JSON.
+ *
+ * `media` no está aquí: su ruta lleva el id dentro (`/api/movil/media/:id`) y su
+ * cuerpo son bytes, no texto. La arma `@/features/media/subir`.
+ */
+const RUTAS: Record<string, string | undefined> = {
   preoperacional: '/api/movil/preoperacionales',
   bitacora: '/api/movil/bitacoras',
   asignacion: '/api/movil/asignaciones',
-  media: null,
 };
 
 export async function subirPendientes(limite = 50): Promise<ResultadoPush> {
@@ -67,20 +74,39 @@ export async function subirPendientes(limite = 50): Promise<ResultadoPush> {
   let fallidas = 0;
 
   for (const fila of lote) {
+    const esImagen = fila.entidad === 'media';
     const ruta = RUTAS[fila.entidad];
 
-    // Las imágenes esperan al entregable que las suba. Se saltan sin tocarlas:
-    // marcarlas de cualquier forma perdería su sitio en la fila.
-    if (!ruta) continue;
+    // Una entidad que no sabemos mandar se salta sin tocarla: marcarla de
+    // cualquier forma le haría perder su sitio en la fila.
+    if (!esImagen && !ruta) continue;
 
     try {
-      await pedirConToken(ruta, {
-        method: 'POST',
-        body: JSON.stringify({
-          claveIdempotencia: fila.claveIdempotencia,
-          ...(fila.payload as Record<string, unknown>),
-        }),
-      });
+      if (esImagen) {
+        const resultado = await subirImagen(fila.entidadId, fila.claveIdempotencia);
+
+        // Todavía no toca: no hay WiFi y esta imagen no es urgente. Se queda
+        // pendiente, con su `seq` intacto, y lo de atrás sigue subiendo.
+        if (resultado === 'espera_wifi') continue;
+
+        if (resultado === 'sin_archivo') {
+          // El archivo ya no está en el teléfono. Reintentar no lo va a traer
+          // de vuelta, y dejarlo en la cola la congelaría para siempre.
+          await marcarFallida(fila.seq, 'El archivo ya no está en el teléfono.', {
+            definitivo: true,
+          });
+          fallidas += 1;
+          continue;
+        }
+      } else if (ruta) {
+        await pedirConToken(ruta, {
+          method: 'POST',
+          body: JSON.stringify({
+            claveIdempotencia: fila.claveIdempotencia,
+            ...(fila.payload as Record<string, unknown>),
+          }),
+        });
+      }
 
       await marcarEnviada(fila.seq);
       await marcarCapturaSincronizada(fila.entidad, fila.entidadId);
@@ -132,6 +158,12 @@ async function marcarCapturaSincronizada(entidad: string, id: string): Promise<v
       .update(preoperacionales)
       .set({ estadoSync: estado, ultimoError: null, actualizadoEn: Date.now() })
       .where(eq(preoperacionales.id, id));
+  } else if (entidad === 'media') {
+    // **El archivo local no se borra.** Ya está a salvo arriba, pero el teléfono
+    // sigue siendo la copia de respaldo: purgarlo es una decisión de política de
+    // almacenamiento, no del motor de subida. Por eso `purgarDespuesDe` sigue
+    // sin usarse, y está bien que así sea.
+    await db.update(media).set({ estadoSubida: 'subida' }).where(eq(media.id, id));
   } else if (entidad === 'bitacora') {
     await db
       .update(bitacoras)
@@ -151,6 +183,8 @@ async function marcarCapturaRechazada(
 
   if (entidad === 'preoperacional') {
     await db.update(preoperacionales).set(cambios).where(eq(preoperacionales.id, id));
+  } else if (entidad === 'media') {
+    await db.update(media).set({ estadoSubida: 'fallida' }).where(eq(media.id, id));
   } else if (entidad === 'bitacora') {
     await db.update(bitacoras).set(cambios).where(eq(bitacoras.id, id));
   }

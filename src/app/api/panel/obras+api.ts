@@ -5,7 +5,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { obras } from '@/db/servidor/esquema';
 import { obraNueva } from '@/features/panel/contratos';
 import { filtroDeObra } from '@/features/servidor/alcance';
-import { requerirAdmin, requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -19,7 +19,7 @@ import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'obras', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const filas = await baseServidor()
@@ -49,7 +49,7 @@ export async function GET(peticion: Request) {
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirAdmin(peticion);
+    const sesion = await requerirPermiso(peticion, 'obras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const datos = await cuerpoJson(peticion, obraNueva);

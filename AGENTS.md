@@ -13,7 +13,7 @@ La bitácora tiene las dos vías a propósito y **las dos están construidas**: 
 
 **Arquitectura: local-first.** SQLite dentro del teléfono es la única fuente que lee la interfaz móvil; la red nunca está en el camino de una pantalla. **El único momento en toda la vida de la app en que hace falta señal es activar el equipo**, una vez. Dos familias de tablas: *réplicas* (el servidor manda, un pull las sobrescribe) y *capturas* (nacen en el dispositivo con su UUID definitivo y suben una sola vez vía `outbox`, con clave de idempotencia). Cuando el celular recupera señal o entra a una wifi, el motor de sincronización drena la cola por detrás; el operador nunca espera por eso.
 
-> **Estado:** el ciclo está cerrado. El dashboard registra obras, personas, vehículos, asignaciones y bitácoras; el celular se activa con un código, el operador define su PIN, baja sus datos reales y **sube lo que firma**. Los preoperacionales aparecen completos en el panel. Falta **una sola cosa de la sincronización: las imágenes** —firma y fotos de hallazgos—, que necesitan un almacén de archivos (R2 o equivalente) y van en su propio entregable. Sin desplegar: todo corre en `localhost`.
+> **Estado:** el ciclo está cerrado y la sincronización está completa. El dashboard registra obras, personas, vehículos, asignaciones y bitácoras; el celular se activa con un código, el operador define su PIN, baja sus datos reales y **sube lo que firma, imágenes incluidas**. Los preoperacionales aparecen completos en el panel, con su firma y sus fotos. Lo que queda es el **despliegue**: todo corre en `localhost`. El servidor irá a un VPS de Hostinger —Node, con `expo-server/adapter/http`—, y el almacén de imágenes es **Cloudflare R2**, contratado aparte y sin relación con dónde viva el servidor.
 
 **Tecnologías:** Expo SDK 57 (`expo-router`, typed routes, React Compiler) · React Native 0.86 · React 19 · TypeScript 6 strict · Drizzle ORM sobre `expo-sqlite` (móvil) y sobre `@neondatabase/serverless` (servidor) · `@expo/ui` · Reanimated 4 · Zod 4.
 
@@ -66,13 +66,44 @@ El enum de `usuarios.rol` es `admin | supervisor | operador` y **no se amplía**
 - Catálogo del servidor: `npm run db:sembrar:servidor` (tipos de equipo y plantillas; **nunca** obras, personas ni vehículos — eso lo registra la administración).
 - Cuenta de gerencia: `npm run crear-admin`. Crea o repone la contraseña de un administrador desde la terminal. Es la única forma de entrar al panel la primera vez, y la salida si gerencia se queda fuera.
 
-> **Variables de entorno** (`.env`, ver `.env.ejemplo`): `DATABASE_URL` para Postgres y `SECRETO_TOKENS` para firmar los tokens de los celulares. `EXPO_PUBLIC_API_URL` es opcional: en desarrollo el teléfono deduce la dirección del propio servidor de Metro.
+> **Variables de entorno** (`.env`, ver `.env.ejemplo`): `DATABASE_URL` para Postgres, `SECRETO_TOKENS` para firmar los tokens de los celulares, y `R2_CUENTA_ID` · `R2_BUCKET` · `R2_LLAVE_ID` · `R2_LLAVE_SECRETA` para el almacén de imágenes. `EXPO_PUBLIC_API_URL` es opcional: en desarrollo el teléfono deduce la dirección del propio servidor de Metro.
 - Reimportar formatos: `npm run formatos` (lee `docs/*.xlsx`; la salida es **para revisión humana**).
 
 > **Dos trampas del CLI de Expo, comprobadas en este proyecto:**
 >
 > 1. El servidor de desarrollo **no recompila las rutas `+api.ts` en caliente**. Tras tocar una hay que reiniciar `npm run web`, o se sigue sirviendo la versión anterior — se pierde mucho rato buscando un error que ya estaba arreglado.
 > 2. **Expo imprime en la consola el valor completo de cada variable del `.env`**, contraseña de la base incluida, en cada comando que lo carga (`expo start`, `expo lint`, `expo export`). No se puede silenciar sin desactivar la carga de `.env` entera. Consecuencia práctica: **nunca compartas una captura ni una grabación de esa terminal**, y si la cadena de conexión se expuso, rótala desde el panel de Neon.
+
+## Cómo se trabaja: SDD
+
+Los cambios de comportamiento de este proyecto se desarrollan con **Spec Driven
+Development**: se parte de una especificación acordada, no de prompts improvisados. La
+guía completa está en `docs/flujo-sdd.md` y los principios innegociables en
+`docs/constitucion.md` — esa constitución es la ley contra la que se revisa toda spec, y
+este documento sigue siendo el manual de cómo se hace cada cosa.
+
+**La regla que lo resume: un cambio de comportamiento empieza por la spec, nunca por el código.**
+
+Ocho fases, cada una con su comando y su artefacto:
+
+| Fase | Comando | Artefacto |
+| --- | --- | --- |
+| Constitución | `/sdd:constitucion` | `docs/constitucion.md` |
+| Spec | `/sdd:spec` | `specs/NNN-nombre/spec.md` (RF en EARS) |
+| Clarificación | `/sdd:clarificar` | informe de huecos, sin resolverlos |
+| Plan | `/sdd:plan` | `specs/NNN-nombre/plan.md` |
+| Tareas | `/sdd:tareas` | `specs/NNN-nombre/tareas.md` |
+| Implementación | `/sdd:implementar Tn` | una sola tarea, y se para |
+| Validación | `/sdd:validar` | recorrido RF por RF con veredicto |
+| Cambio | `/sdd:cambio` | spec actualizada, con diff |
+
+Las plantillas viven en `specs/_plantillas/` y la entrevista de requisitos la conduce la
+skill `generador-de-specs`. La frontera importa: **`spec.md` es el QUÉ y el POR QUÉ**
+(se entiende sin saber que existe Drizzle) y **`plan.md` es el CÓMO**. Si en una spec
+aparece un nombre de tabla o de librería, está en el archivo equivocado.
+
+La puerta de calidad de cada tarea es la de siempre —`verificar`, `typecheck`, `lint` en
+verde—, detallada en «Al terminar cualquier tarea».
 
 ## Estilo y convenciones
 
@@ -106,6 +137,10 @@ El enum de `usuarios.rol` es `admin | supervisor | operador` y **no se amplía**
 - **El servidor reevalúa cada preoperacional al recibirlo**, con las mismas funciones puras de `src/shared/rules/inspeccion.ts` y contra la plantilla de la versión con que se firmó. Si su veredicto difiere del que mandó el teléfono, **gana el servidor** y la discrepancia queda escrita en las observaciones. No es desconfianza del operador: es que un formato republicado o un envío manipulado se tienen que notar.
 - **La subida va en orden estricto de `seq` y se corta al primer fallo transitorio.** Ese orden es el de dependencia. Lo único que no corta la tanda es un fallo definitivo (400/422), que marca esa fila como `fallida` y sigue — sin esa salida, un registro imposible congelaría la cola para siempre.
 - **Lo que sube no se borra del teléfono**: se marca `sincronizado`. El equipo es la copia de respaldo, y esa decisión no la toma el motor de subida.
+- **El bucket de imágenes es privado y no se expone jamás.** Ni URL pública, ni dominio, ni enlace firmado hacia el navegador: las firmas y las fotos salen únicamente por `/api/panel/media/[id]`, detrás de la sesión y del filtro por obra. Son actas con la firma de una persona; con un bucket público, adivinar un id bastaría para leer la evidencia de cualquier obra.
+- **Solo `src/features/media/servidor/almacen.ts` sabe que detrás hay R2.** Todo lo demás pide `guardar` y `leer`. Es lo que permite cambiar de almacén reescribiendo un archivo en vez de buscar llamadas por media docena de rutas, y la razón por la que la decisión R2-contra-disco-del-VPS se pudo tomar sin rehacer nada.
+- **La firma SigV4 se verifica contra los vectores oficiales de AWS**, en `scripts/verificar-reglas.ts`. Una firma mal calculada no se degrada: responde 403 sin decir qué parte del cálculo falló. Si tocas `firma-s3.ts`, esas pruebas son lo único que te dirá que sigue bien. Ojo con la clave de ejemplo: los vectores de S3 usan `…MDENG/bPxRfiCY…` con barra, y el juego genérico de AWS lleva un `+` en esa posición.
+- **Las imágenes son lo único que la cola de subida puede saltarse.** Las fotos de hallazgo esperan a una WiFi para no gastar el plan de datos del operador; **la firma sube siempre**, porque es lo que hace válida el acta y pesa 30 KB. Saltarlas no rompe el orden estricto de `seq` porque son lo único de lo que nada depende — saltar un preoperacional sí lo rompería.
 - **Los secretos solo se leen desde `+api.ts`.** Nunca `process.env.DATABASE_URL` —ni ninguna credencial— en un módulo que pueda alcanzar el bundle del cliente. Que Expo lo elimine no es una excusa para no comprobarlo: es el peor fallo posible de este proyecto y se verifica con un `grep` sobre `dist/client`.
 - **Las bajas son lógicas, nunca `DELETE`.** Un vehículo, una obra o una persona pueden tener preoperacionales firmados apuntándoles, y eso es evidencia. Se escribe `eliminado_en` (o `activo = false`, o `hasta = ahora`). Además es lo único que le permite al celular enterarse de la baja: una fila que deja de venir en el snapshot es indistinguible de una que nunca le tocó.
 - **Los tipos de equipo se cambian en `src/shared/catalogos/tipos-vehiculo.ts`**, nunca en una de las dos bases por separado. Los slugs son la llave que une un vehículo con su formato; si divergen, el móvil y el servidor hablan de filas distintas sin que nada falle a la vista.

@@ -7,6 +7,7 @@ import m0002 from './0002_peaceful_reptil.sql';
 import m0003 from './0003_amazing_killmonger.sql';
 import m0004 from './0004_fuzzy_puppet_master.sql';
 import m0005 from './0005_concerned_mikhail_rasputin.sql';
+import m0006 from './0006_fluffy_lilandra.sql';
 
   export default {
     journal,
@@ -16,7 +17,8 @@ m0001,
 m0002,
 m0003,
 m0004,
-m0005
+m0005,
+m0006
     }
   }
   

@@ -63,6 +63,42 @@ export function Aviso({ tono, children }: { tono: 'error' | 'exito' | 'info'; ch
   );
 }
 
+/**
+ * El paso intermedio antes de una acción que se lleva por delante algo vivo.
+ *
+ * No es un `Aviso` con botones dentro: `Aviso` mete su contenido en un `<Text>`,
+ * y un botón dentro de un texto no es válido. Tampoco es el `confirm()` del
+ * navegador, que no deja redactar nada y no existe fuera de la web.
+ *
+ * Lo que sí hace, y es la razón de existir: **decir qué se rompe, no preguntar
+ * si está seguro.** Un "¿confirma?" pelado no informa de nada y se contesta que
+ * sí por reflejo; "la contraseña actual de Fulano deja de servir" se lee.
+ */
+export function Confirmacion({
+  aviso,
+  confirmar,
+  onConfirmar,
+  onCancelar,
+}: {
+  aviso: string;
+  confirmar: string;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}) {
+  return (
+    <View style={estilos.confirmacion}>
+      <Text style={estilos.confirmacionSimbolo}>!</Text>
+      <View style={estilos.confirmacionCuerpo}>
+        <Text style={estilos.confirmacionTexto}>{aviso}</Text>
+        <View style={estilos.grupoAcciones}>
+          <Boton titulo={confirmar} tono="peligro" onPress={onConfirmar} />
+          <Boton titulo="Cancelar" tono="secundario" onPress={onCancelar} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 /** Marca de estado dentro de una tabla: texto y color, nunca solo color. */
 export function Etiqueta({
   tono,
@@ -470,6 +506,30 @@ const estilos = StyleSheet.create({
   },
   avisoSimbolo: { fontSize: TextoPanel.cuerpo, fontWeight: '800', lineHeight: 21 },
   avisoTexto: { flex: 1, fontSize: TextoPanel.cuerpo, lineHeight: 21, fontWeight: '600' },
+
+  confirmacion: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radio.md,
+    borderLeftWidth: 3,
+    backgroundColor: Estado.atencionFondo,
+    borderLeftColor: Estado.atencion,
+  },
+  confirmacionSimbolo: {
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '800',
+    lineHeight: 21,
+    color: Estado.atencion,
+  },
+  confirmacionCuerpo: { flex: 1, gap: Spacing.three },
+  confirmacionTexto: {
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 21,
+    fontWeight: '600',
+    color: Estado.atencion,
+  },
 
   etiqueta: {
     alignSelf: 'flex-start',

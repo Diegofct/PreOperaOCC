@@ -1,11 +1,12 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, gte, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { obras, tiposVehiculo, vehiculos } from '@/db/servidor/esquema';
+import { llantas, obras, tiposVehiculo, vehiculos } from '@/db/servidor/esquema';
 import { vehiculoNuevo } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { DESGASTE_PARA_CAMBIO } from '@/shared/catalogos/llantas';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -19,7 +20,7 @@ import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'vehiculos', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const filas = await baseServidor()
@@ -43,13 +44,30 @@ export async function GET(peticion: Request) {
       .where(and(isNull(vehiculos.eliminadoEn), filtroDeObra(sesion, vehiculos.obraId)))
       .orderBy(asc(vehiculos.codigoInterno));
 
-    return ok(filas);
+    // Cuántas llantas puestas le quedan al 30% de vida o menos. Va en una
+    // consulta aparte y no en un join con la de arriba: un join contra una tabla
+    // hija multiplica las filas del padre, y arreglarlo con `group by` obligaría
+    // a agrupar por las once columnas del vehículo. Son dos consultas cortas.
+    const gastadas = await baseServidor()
+      .select({ vehiculoId: llantas.vehiculoId, cuantas: count() })
+      .from(llantas)
+      .where(
+        and(
+          isNull(llantas.retiradaEn),
+          gte(llantas.porcentajeDesgaste, DESGASTE_PARA_CAMBIO),
+        ),
+      )
+      .groupBy(llantas.vehiculoId);
+
+    const porVehiculo = new Map(gastadas.map((f) => [f.vehiculoId, Number(f.cuantas)]));
+
+    return ok(filas.map((f) => ({ ...f, llantasPorCambiar: porVehiculo.get(f.id) ?? 0 })));
   });
 }
 
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'vehiculos', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const datos = await cuerpoJson(peticion, vehiculoNuevo);

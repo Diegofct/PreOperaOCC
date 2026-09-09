@@ -14,6 +14,7 @@ import { sql } from 'drizzle-orm';
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 import type { ActividadBitacora } from '../../features/bitacoras/tipos';
+import type { Cargo } from '../../shared/catalogos/cargos';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -53,6 +54,12 @@ export const usuarios = sqliteTable(
   rol: text('rol', { enum: ['admin', 'supervisor', 'operador'] })
     .notNull()
     .default('operador'),
+  /**
+   * El oficio en la obra, réplica del servidor. Ver el comentario en el esquema
+   * del servidor: el cargo no es el acceso. Hoy el celular solo lo guarda; lo
+   * va a necesitar la bitácora para mostrar quién es quién al elegir personal.
+   */
+  cargo: text('cargo').$type<Cargo>(),
   /**
    * La obra a la que pertenece. Solo importa para quien lleva las bitácoras:
    * un jefe de operadores no tiene vehículo asignado, así que sin esto no hay

@@ -32,6 +32,7 @@ import { guardarFirma, guardarFoto, mediaDe } from '@/features/media/repositorio
 import {
   evaluarPreoperacional,
   itemsMarcablesEnBloque,
+  respuestasDeMedidores,
   validarMedidor,
 } from '@/shared/rules/inspeccion';
 
@@ -62,6 +63,14 @@ export default function PantallaPreoperacional() {
   const [odometro, setOdometro] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [cargando, setCargando] = useState(true);
+  /**
+   * El tipo de equipo todavía no tiene formato de preoperacional. Pasa con los
+   * tipos que se registran antes de que OCC entregue su hoja: la vibro
+   * compactadora y la recicladora entraron así en la spec 003. Sin este estado
+   * la pantalla se quedaba girando para siempre, que es la peor forma de decir
+   * que algo falta.
+   */
+  const [sinFormato, setSinFormato] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
   /** ids de `media` por ítem del checklist. */
@@ -82,7 +91,12 @@ export default function PantallaPreoperacional() {
       const vehiculo = await vehiculoPorId(vehiculoId);
       if (!vehiculo) return;
       const abierto = await abrirBorrador(usuario.id, vehiculo);
-      if (cancelado || !abierto) return;
+      if (cancelado) return;
+      if (!abierto) {
+        setSinFormato(true);
+        setCargando(false);
+        return;
+      }
 
       setBorrador(abierto);
       setRespuestas(
@@ -118,7 +132,13 @@ export default function PantallaPreoperacional() {
     };
   }, [usuario.id, vehiculoId]);
 
-  /** Los ítems que toca revisar hoy, agrupados como los trae el formato. */
+  /**
+   * Los ítems que toca revisar hoy, agrupados como los trae el formato.
+   *
+   * Solo los de conformidad: los de tipo `numero` —horómetro, odómetro— viven
+   * arriba, en el teclado grande. Salen de la lista, **no de las respuestas**;
+   * `respuestasDeMedidores` los devuelve al armarlas.
+   */
   const secciones = useMemo(() => {
     if (!borrador) return [];
     const activas = new Set(borrador.periodicidades);
@@ -138,11 +158,14 @@ export default function PantallaPreoperacional() {
 
   /** Convierte el estado de pantalla a las respuestas auto-descritas que se guardan. */
   const construirRespuestas = useCallback((): RespuestaItem[] => {
+    if (!borrador) return [];
+
     const porSeccion = new Map<string, string>();
     for (const seccion of secciones) {
       for (const item of seccion.data) porSeccion.set(item.key, seccion.key);
     }
-    return todosLosItems
+
+    const deLaLista = todosLosItems
       .filter((item) => respuestas[item.key]?.valor)
       .map((item) => {
         const estado = respuestas[item.key];
@@ -160,7 +183,20 @@ export default function PantallaPreoperacional() {
           respondidoEn: Date.now(),
         } satisfies RespuestaItem;
       });
-  }, [fotosPorItem, respuestas, secciones, todosLosItems]);
+
+    // Las lecturas de los medidores son ítems del formato como cualquier otro,
+    // solo que se capturan con otro teclado. Sin esta línea quedan como ítems
+    // sin responder y no se puede firmar.
+    return [
+      ...deLaLista,
+      ...respuestasDeMedidores(
+        borrador.plantilla,
+        borrador.periodicidades,
+        { horometro: horometro ? Number(horometro) : null, odometro: odometro ? Number(odometro) : null },
+        Date.now(),
+      ),
+    ];
+  }, [borrador, fotosPorItem, horometro, odometro, respuestas, secciones, todosLosItems]);
 
   /** Autoguardado: nunca se pierde trabajo, aunque Android mate la app. */
   const programarGuardado = useCallback(() => {
@@ -387,6 +423,19 @@ export default function PantallaPreoperacional() {
     }
   }
 
+  if (sinFormato) {
+    return (
+      <View style={estilos.centro}>
+        <Text style={estilos.sinFormatoTitulo}>Este equipo aún no tiene formato</Text>
+        <Text style={estilos.sinFormatoTexto}>
+          El preoperacional de este tipo de máquina todavía no está cargado en la aplicación.
+          Avísele a la administración: hasta que lo carguen, este equipo no se puede inspeccionar
+          desde aquí.
+        </Text>
+      </View>
+    );
+  }
+
   if (cargando || !borrador) {
     return (
       <View style={estilos.centro}>
@@ -599,7 +648,24 @@ function CampoMedidor({
 
 const estilos = StyleSheet.create({
   pantalla: { flex: 1, backgroundColor: Colors.light.background },
-  centro: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centro: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  sinFormatoTitulo: {
+    fontSize: Texto.titulo,
+    fontWeight: '800',
+    color: Colors.light.text,
+    textAlign: 'center',
+  },
+  sinFormatoTexto: {
+    fontSize: Texto.base,
+    color: Colors.light.textSecondary,
+    textAlign: 'center',
+  },
   encabezado: { padding: Spacing.three, gap: Spacing.three },
   vehiculo: { fontSize: Texto.titular, fontWeight: '800', color: Colors.light.text },
   formato: { fontSize: Texto.pie, color: Colors.light.textSecondary },

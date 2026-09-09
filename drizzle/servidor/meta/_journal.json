@@ -29,6 +29,27 @@
       "when": 1788385959435,
       "tag": "0003_lying_agent_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788985799015,
+      "tag": "0004_nosy_blue_shield",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788986412299,
+      "tag": "0005_asignar_cargo_operadores",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788989181692,
+      "tag": "0006_slippery_husk",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@
  * Regla de uso: **ninguna consulta del panel arma su propia condición de obra.**
  * Si una necesita algo que estas funciones no dan, se amplían aquí.
  */
-import { eq, isNull, or, type SQL } from 'drizzle-orm';
+import { eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 
 import type { PersonaEnSesion } from './guardia';
@@ -34,10 +34,16 @@ export function veTodasLasObras(persona: PersonaEnSesion): boolean {
  * persona de gerencia no está adscrita a ninguna, y un vehículo recién dado de
  * alta puede estar todavía sin asignar. Ocultárselas al residente haría que la
  * máquina que acaba de registrar desapareciera de su pantalla.
+ *
+ * Un supervisor **sin obra asignada** no alcanza nada, y esto cambió con la
+ * spec 001. Antes devolvía «sin filtro», que es lo mismo que decir «que lo vea
+ * todo»: una cuenta a medio configurar tenía más alcance que una bien puesta, y
+ * el fallo no se notaba porque todo funcionaba. Ahora el filtro no deja pasar
+ * ninguna fila, que es lo que hay que ver cuando falta un dato.
  */
 export function filtroDeObra(persona: PersonaEnSesion, columna: PgColumn): SQL | undefined {
   if (veTodasLasObras(persona)) return undefined;
-  if (!persona.obraId) return undefined;
+  if (!persona.obraId) return sql`false`;
   return or(eq(columna, persona.obraId), isNull(columna));
 }
 
@@ -49,6 +55,6 @@ export function filtroDeObra(persona: PersonaEnSesion, columna: PgColumn): SQL |
  */
 export function alcanzaLaObra(persona: PersonaEnSesion, obraId: string | null): boolean {
   if (veTodasLasObras(persona)) return true;
-  if (!persona.obraId) return true;
+  if (!persona.obraId) return false;
   return obraId === null || obraId === persona.obraId;
 }

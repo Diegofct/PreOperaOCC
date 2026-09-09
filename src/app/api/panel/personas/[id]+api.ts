@@ -5,7 +5,7 @@ import { dispositivos, usuarios } from '@/db/servidor/esquema';
 import { personaEditada } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import {
   cuerpoJson,
   errorDePeticion,
@@ -13,6 +13,7 @@ import {
   ok,
   responder,
 } from '@/features/servidor/respuestas';
+import { puedeCambiarRol } from '@/shared/rules/permisos';
 
 /** Editar y dar de baja una persona. `PATCH` y `DELETE /api/panel/personas/:id`. */
 
@@ -22,6 +23,7 @@ const COLUMNAS = {
   nombreCompleto: usuarios.nombreCompleto,
   documento: usuarios.documento,
   rol: usuarios.rol,
+  cargo: usuarios.cargo,
   obraId: usuarios.obraId,
   activo: usuarios.activo,
 };
@@ -52,13 +54,22 @@ async function personaAlcanzable(
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'personas', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const fueraDeAlcance = await personaAlcanzable(sesion, id);
     if (fueraDeAlcance) return fueraDeAlcance;
 
     const cambios = await cuerpoJson(peticion, personaEditada);
+
+    // La segunda cerradura de la misma puerta: nadie asciende a nadie por
+    // encima de sí mismo. Con la tabla de permisos actual solo la gerencia
+    // llega hasta aquí, así que hoy no rechaza a nadie — y precisamente por eso
+    // se escribe, para que siga en pie el día que el permiso de escritura se
+    // relaje. Antes esta ruta aceptaba el rol del cuerpo sin mirarlo.
+    if (cambios.rol && !puedeCambiarRol(sesion.rol, cambios.rol)) {
+      return errorDePeticion('No puede dar más permisos de los que usted tiene.', 403);
+    }
 
     const [fila] = await baseServidor()
       .update(usuarios)
@@ -83,7 +94,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
  */
 export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'personas', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const fueraDeAlcance = await personaAlcanzable(sesion, id);

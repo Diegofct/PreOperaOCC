@@ -13,9 +13,12 @@
  */
 import { useCallback, useState } from 'react';
 
+import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
+
 import { api } from './cliente-api';
 import {
   AccionesFormulario,
+  Aviso,
   Boton,
   Campo,
   Celda,
@@ -33,6 +36,7 @@ import {
   type VehiculoFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { SeccionLlantas } from './seccion-llantas';
 
 /** Cadena de formulario → número, con lo vacío como ausencia y no como cero. */
 function aNumero(texto: string): number | null {
@@ -57,6 +61,10 @@ export default function PantallaVehiculos() {
   const [horometro, setHorometro] = useState('');
 
   const tipoElegido = tipos.datos.find((t) => t.id === tipoVehiculoId);
+  // El tipo existe en el catálogo pero OCC aún no entregó su formato. Se puede
+  // registrar el equipo —hace falta para asignarlo y para la bitácora—, pero no
+  // se le podrá levantar un preoperacional hasta que llegue la hoja.
+  const sinFormato = formatoPendiente(tipoVehiculoId);
   const pideOdometro = tipoElegido?.claseMedidor !== 'horometro';
   const pideHorometro = tipoElegido?.claseMedidor !== 'odometro';
 
@@ -119,11 +127,23 @@ export default function PantallaVehiculos() {
       titulo: 'Estado',
       ancho: 140,
       pintar: (v) => (
-        <Etiqueta
-          tono={v.estado === 'operativo' ? 'bueno' : v.estado === 'no_apto' ? 'malo' : 'atencion'}
-        >
-          {ETIQUETA_ESTADO_VEHICULO[v.estado]}
-        </Etiqueta>
+        <>
+          <Etiqueta
+            tono={v.estado === 'operativo' ? 'bueno' : v.estado === 'no_apto' ? 'malo' : 'atencion'}
+          >
+            {ETIQUETA_ESTADO_VEHICULO[v.estado]}
+          </Etiqueta>
+          {formatoPendiente(v.tipoVehiculoId) ? (
+            <Etiqueta tono="atencion">Sin formato</Etiqueta>
+          ) : null}
+          {v.llantasPorCambiar > 0 ? (
+            <Etiqueta tono="malo">
+              {v.llantasPorCambiar === 1
+                ? '1 llanta por cambiar'
+                : `${v.llantasPorCambiar} llantas por cambiar`}
+            </Etiqueta>
+          ) : null}
+        </>
       ),
     },
     {
@@ -142,6 +162,7 @@ export default function PantallaVehiculos() {
 
   return (
     <MarcoPantalla
+      modulo="vehiculos"
       titulo="Vehículos"
       descripcion="La maquinaria de OCC. El tipo de equipo decide qué formato de preoperacional se le presenta al operador."
       error={vehiculos.error ?? tipos.error ?? obras.error}
@@ -195,6 +216,12 @@ export default function PantallaVehiculos() {
               ancho={160}
             />
           ) : null}
+          {sinFormato ? (
+            <Aviso tono="info">
+              Este tipo de equipo todavía no tiene formato de preoperacional. Puede registrarlo y
+              asignarlo, pero el operador no podrá inspeccionarlo hasta que OCC entregue la hoja.
+            </Aviso>
+          ) : null}
           <AccionesFormulario>
             <Boton
               titulo="Registrar vehículo"
@@ -212,6 +239,8 @@ export default function PantallaVehiculos() {
           vacio="Todavía no hay ningún vehículo. Registra el primero arriba."
         />
       </Seccion>
+
+      <SeccionLlantas vehiculos={vehiculos.datos} />
     </MarcoPantalla>
   );
 }

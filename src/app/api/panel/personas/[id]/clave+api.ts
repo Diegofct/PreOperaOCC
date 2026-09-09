@@ -20,6 +20,13 @@ import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servido
  *
  * **Solo `admin`.** Repartir accesos es de gerencia; un residente que pudiera
  * hacerlo podría darse a sí mismo una vía a otra obra.
+ *
+ * **Y sobre uno mismo, no.** Esto no es "ver mi acceso": borra la contraseña
+ * anterior y cierra las sesiones de esa persona. Pedirlo para uno mismo es
+ * cerrarse la puerta con la clave nueva escrita en una pantalla que se pierde al
+ * cambiar de módulo — ya pasó una vez, y hubo que reponerla con
+ * `scripts/crear-admin.ts`. Quien quiera cambiar la suya tiene la pantalla de
+ * cambio, que pide la actual y no deja a nadie fuera.
  */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
@@ -41,6 +48,16 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .limit(1);
 
     if (!persona) return noEncontrado('esa persona');
+
+    // La misma regla que la interfaz, aquí porque aquí es donde vale: un botón
+    // escondido se salta con una petición a mano.
+    if (persona.id === sesion.id) {
+      return errorDePeticion(
+        'Esta acción reparte accesos a otras personas y cerraría su propia sesión. ' +
+          'Para cambiar la suya, use "Cambiar mi contraseña".',
+        400,
+      );
+    }
 
     if (persona.rol === 'operador') {
       return errorDePeticion(

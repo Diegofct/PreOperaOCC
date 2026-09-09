@@ -9,9 +9,11 @@
  * máquinas que hoy no tienen formato salen arriba del todo en ámbar. Un listado
  * ordenado por hora entierra justo el registro que obliga a alguien a hacer algo.
  *
- * Las imágenes —la firma dibujada, las fotos de hallazgos— todavía no suben: se
- * quedan en el teléfono hasta el entregable que las traiga. La pantalla lo dice
- * en vez de disimularlo.
+ * Las imágenes ya suben. La firma viaja con el resto del formato en cuanto hay
+ * señal, porque es lo que hace válida el acta; las fotos de hallazgos esperan a
+ * una WiFi para no gastarle el plan de datos al operador, así que pueden llegar
+ * más tarde. La pantalla lo dice en vez de disimularlo, que es lo mismo que
+ * hacía antes por el motivo contrario.
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -133,6 +135,7 @@ export default function PantallaPreoperacionales() {
 
   return (
     <MarcoPantalla
+      modulo="preoperacionales"
       titulo="Preoperacionales"
       descripcion="Lo que los operadores inspeccionaron y firmaron en obra. Suben solos del celular en cuanto el equipo agarra señal."
       error={jornada.error ?? vehiculos.error}
@@ -190,8 +193,9 @@ export default function PantallaPreoperacionales() {
 
       <View style={estilos.nota}>
         <Text style={estilos.notaTexto}>
-          Las firmas y las fotos de hallazgos todavía se quedan en el teléfono: suben en el trabajo
-          siguiente, cuando exista el almacén de archivos. Todo lo demás del formato ya está aquí.
+          El formato llega completo, con su firma, en cuanto el celular agarra señal. Las fotos de
+          los hallazgos se suman al entrar a una WiFi, para no gastarle el plan de datos al
+          operador; el detalle de cada acta marca las que vienen en camino.
         </Text>
       </View>
     </MarcoPantalla>

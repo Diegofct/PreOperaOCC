@@ -13,14 +13,21 @@
  * justo cuando tiene prisa.
  */
 import { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Estado, Marca, MaxContentWidthPanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { alcanza } from '@/shared/rules/permisos';
 
 import { api } from './cliente-api';
 import { Acciones, Aviso, Boton, Campo, Etiqueta, Seccion, Titulo } from './componentes';
-import { ETIQUETA_RESULTADO, type PreoperacionalDetalle, type RespuestaFila } from './contratos';
+import {
+  ETIQUETA_RESULTADO,
+  type ImagenDelRegistro,
+  type PreoperacionalDetalle,
+  type RespuestaFila,
+} from './contratos';
 import { mensajeDe, useListado } from './marco';
+import { usePersona } from './sesion';
 
 const MINUTO_MS = 60_000;
 
@@ -40,6 +47,9 @@ export function DetallePreoperacional({
   const [motivo, setMotivo] = useState('');
   const [anulando, setAnulando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+
+  const persona = usePersona();
+  const puedeAnular = alcanza(persona?.rol ?? 'operador', 'preoperacionales', 'anular');
 
   const p = detalle.datos[0];
 
@@ -79,6 +89,10 @@ export function DetallePreoperacional({
     lista.push(respuesta);
     porSeccion.set(respuesta.seccionKey, lista);
   }
+
+  // Una foto de hallazgo se identifica por la `key` de su ítem, que no le dice
+  // nada a nadie. La etiqueta sale de la propia respuesta, que se auto-describe.
+  const etiquetasPorItem = new Map(p.respuestas.map((r) => [r.itemKey, r.label] as const));
 
   return (
     <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.contenedor}>
@@ -175,13 +189,51 @@ export function DetallePreoperacional({
         </Seccion>
 
         <Seccion titulo="Firma y fotos">
-          <Text style={estilos.observaciones}>
-            Se quedaron en el celular del operador. Suben en el trabajo siguiente, cuando exista el
-            almacén de archivos.
-          </Text>
+          {p.imagenes.length === 0 ? (
+            <Text style={estilos.observaciones}>
+              Este registro no trae firma ni fotos de evidencia.
+            </Text>
+          ) : (
+            <View style={estilos.imagenes}>
+              {[...p.imagenes].sort(porOrdenDeLectura).map((imagen) => (
+                <View
+                  key={imagen.id}
+                  style={[
+                    estilos.imagen,
+                    imagen.proposito === 'firma_operador' && estilos.imagenFirma,
+                  ]}
+                >
+                  <Text style={estilos.imagenTitulo}>
+                    {tituloDeImagen(imagen, etiquetasPorItem)}
+                  </Text>
+
+                  {imagen.disponible ? (
+                    <Image
+                      source={{ uri: api.preoperacionales.urlDeImagen(imagen.id) }}
+                      style={estilos.miniatura}
+                      resizeMode="contain"
+                      accessibilityLabel={tituloDeImagen(imagen, etiquetasPorItem)}
+                    />
+                  ) : (
+                    // Nunca un hueco roto: que falte el archivo es información,
+                    // y esconderlo haría parecer que el acta se firmó sin firma.
+                    <View style={estilos.miniaturaPendiente}>
+                      <Text style={estilos.pendienteTexto}>
+                        En camino. Se suma en cuanto el equipo entre a una WiFi.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
         </Seccion>
 
-        {!p.anuladoEn ? (
+        {/* Corregir evidencia firmada por un operador es de la gerencia. El
+            residente ve el acta entera —firma y fotos incluidas—, pero no la
+            toca. La cerradura está en la ruta; esto solo evita ofrecer un botón
+            que iba a responder que no. */}
+        {!p.anuladoEn && puedeAnular ? (
           anulando ? (
             <Seccion titulo="Anular este preoperacional">
               <Campo
@@ -242,6 +294,37 @@ function fechaHora(iso: string): string {
   });
 }
 
+/**
+ * Cómo se llama cada imagen en pantalla.
+ *
+ * La de un hallazgo se nombra con la etiqueta de su ítem: quien revisa esto
+ * quiere saber de qué es la foto, y `frenos_servicio` no se lo dice.
+ */
+function tituloDeImagen(imagen: ImagenDelRegistro, etiquetas: Map<string, string>): string {
+  switch (imagen.proposito) {
+    case 'firma_operador':
+      return 'Firma del operador';
+    case 'foto_horometro':
+      return 'Foto del medidor';
+    case 'hallazgo':
+      return imagen.itemKey ? (etiquetas.get(imagen.itemKey) ?? 'Hallazgo') : 'Hallazgo';
+    default:
+      return 'Evidencia';
+  }
+}
+
+const ORDEN_PROPOSITO: Record<string, number> = {
+  firma_operador: 0,
+  foto_horometro: 1,
+  hallazgo: 2,
+  evidencia: 3,
+};
+
+/** La firma primero: es lo que se busca al abrir un acta, no una foto de un tornillo. */
+function porOrdenDeLectura(a: ImagenDelRegistro, b: ImagenDelRegistro): number {
+  return (ORDEN_PROPOSITO[a.proposito] ?? 9) - (ORDEN_PROPOSITO[b.proposito] ?? 9);
+}
+
 const estilos = StyleSheet.create({
   pantalla: { flex: 1, backgroundColor: Colors.light.background },
   contenedor: { alignItems: 'center', padding: Spacing.four },
@@ -296,4 +379,34 @@ const estilos = StyleSheet.create({
   itemLabel: { flex: 1, fontSize: TextoPanel.cuerpo, color: Colors.light.text },
   itemValor: { fontSize: TextoPanel.cuerpo, fontWeight: '700' },
 
+  imagenes: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
+  imagen: { width: 240, gap: Spacing.one },
+  /** La firma es un trazo ancho y bajo: en una tarjeta estrecha no se lee. */
+  imagenFirma: { width: '100%' },
+  imagenTitulo: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },
+  miniatura: {
+    width: '100%',
+    height: 180,
+    borderRadius: Radio.sm,
+    borderWidth: 1,
+    borderColor: Panel.borde,
+    backgroundColor: Panel.fondoCabecera,
+  },
+  miniaturaPendiente: {
+    width: '100%',
+    height: 180,
+    padding: Spacing.three,
+    justifyContent: 'center',
+    borderRadius: Radio.sm,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Panel.borde,
+    backgroundColor: Panel.fondo,
+  },
+  pendienteTexto: {
+    fontSize: TextoPanel.apoyo,
+    lineHeight: 20,
+    textAlign: 'center',
+    color: Colors.light.textSecondary,
+  },
 });

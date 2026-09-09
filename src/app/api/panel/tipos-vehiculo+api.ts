@@ -16,6 +16,8 @@ import { ok, responder } from '@/features/servidor/respuestas';
  */
 export async function GET(peticion: Request) {
   return responder(async () => {
+    // Guardia genérica a propósito: el catálogo de tipos de equipo es global
+    // y lo necesitan hasta las pantallas que no tocan vehículos.
     const sesion = await requerirSesion(peticion);
     if (sesion instanceof Response) return sesion;
 

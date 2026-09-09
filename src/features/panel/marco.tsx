@@ -21,7 +21,10 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
+import { alcanza, type Modulo } from '@/shared/rules/permisos';
+
 import { Aviso, Titulo } from './componentes';
+import { usePersona } from './sesion';
 
 export interface Listado<T> {
   datos: T[];
@@ -107,19 +110,35 @@ export function mensajeDe(fallo: unknown): string {
   return 'Algo falló. Vuelve a intentarlo.';
 }
 
+/**
+ * El marco de toda pantalla del panel, y de paso su portero.
+ *
+ * `modulo` es opcional a propósito: una pantalla que se olvide de declararlo se
+ * comporta como antes, y el dato sigue protegido por la ruta del servidor, que
+ * es la cerradura de verdad. Esto de aquí es para que el residente vea una
+ * explicación en vez de una tabla vacía y un error.
+ *
+ * El corte va antes de pintar nada, así que la pantalla ni siquiera llega a
+ * pedir los datos que no le tocan.
+ */
 export function MarcoPantalla({
   titulo,
   descripcion,
   error,
   cargando,
+  modulo,
   children,
 }: {
   titulo: string;
   descripcion: string;
   error?: string | null;
   cargando?: boolean;
+  modulo?: Modulo;
   children: ReactNode;
 }) {
+  const persona = usePersona();
+  const fueraDeAlcance = modulo && persona && !alcanza(persona.rol, modulo, 'ver');
+
   return (
     <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.contenedor}>
       <View style={estilos.columna}>
@@ -128,15 +147,24 @@ export function MarcoPantalla({
           <Text style={estilos.descripcion}>{descripcion}</Text>
         </View>
 
-        {error ? <Aviso tono="error">{error}</Aviso> : null}
-
-        {cargando ? (
-          <View style={estilos.cargando}>
-            <ActivityIndicator color={Marca.primario} />
-            <Text style={estilos.descripcion}>Cargando…</Text>
-          </View>
+        {fueraDeAlcance ? (
+          <Aviso tono="info">
+            Este módulo es de la gerencia. Si necesita registrar o corregir algo aquí,
+            pídaselo a quien lleve la administración.
+          </Aviso>
         ) : (
-          children
+          <>
+            {error ? <Aviso tono="error">{error}</Aviso> : null}
+
+            {cargando ? (
+              <View style={estilos.cargando}>
+                <ActivityIndicator color={Marca.primario} />
+                <Text style={estilos.descripcion}>Cargando…</Text>
+              </View>
+            ) : (
+              children
+            )}
+          </>
         )}
       </View>
     </ScrollView>

@@ -14,6 +14,8 @@
  *     es lo normal, no un caso de error; si el refresco también falla, entonces
  *     sí hay que volver a activar el equipo y eso lo decide quien llamó.
  */
+import { fetch as fetchBinario } from 'expo/fetch';
+
 import {
   guardarTokens,
   leerAccessToken,
@@ -77,7 +79,20 @@ async function llamar(ruta: string, opciones: RequestInit, token: string | null)
   }
 }
 
-async function leerCuerpo<T>(respuesta: Response): Promise<T> {
+/**
+ * Lo mínimo que este archivo necesita de una respuesta.
+ *
+ * No es `Response` a secas porque las imágenes viajan por `expo/fetch`, que
+ * devuelve su propio tipo. Las dos saben responder lo mismo, y describirlo así
+ * evita duplicar la lectura del cuerpo solo por un desajuste de tipos.
+ */
+interface RespuestaLeible {
+  ok: boolean;
+  status: number;
+  json(): Promise<unknown>;
+}
+
+async function leerCuerpo<T>(respuesta: RespuestaLeible): Promise<T> {
   const cuerpo: unknown = await respuesta.json().catch(() => null);
 
   if (!respuesta.ok) {
@@ -110,6 +125,58 @@ export async function pedirConToken<T>(ruta: string, opciones: RequestInit = {})
 
   const nuevo = await refrescar();
   return leerCuerpo<T>(await llamar(ruta, opciones, nuevo));
+}
+
+/**
+ * Sube bytes crudos. Es el camino de las imágenes, y el único que no manda JSON.
+ *
+ * Va por `expo/fetch` y no por el `fetch` global a propósito: es el que Expo
+ * documenta para subir archivos, y el que maneja un cuerpo binario sin pasarlo
+ * por base64 —que en una foto de 250 KB serían 80 KB de más por cada intento,
+ * sobre la peor red del proyecto—.
+ *
+ * El token se resuelve igual que en `pedirConToken`, reusando el mismo refresco:
+ * dos caminos de autenticación distintos acabarían divergiendo.
+ */
+export async function pedirBinarioConToken<T>(
+  ruta: string,
+  cuerpo: Uint8Array<ArrayBuffer>,
+  cabeceras: Record<string, string>,
+): Promise<T> {
+  const token = await leerAccessToken();
+  if (!token) throw new ErrorDelServidor('Este equipo no está activado.', 401, true);
+
+  const primera = await llamarBinario(ruta, cuerpo, cabeceras, token);
+  if (primera.status !== 401) return leerCuerpo<T>(primera);
+
+  const nuevo = await refrescar();
+  return leerCuerpo<T>(await llamarBinario(ruta, cuerpo, cabeceras, nuevo));
+}
+
+/** Más holgado que el de texto: una foto por 2G no cabe en veinte segundos. */
+const TIEMPO_LIMITE_BINARIO_MS = 60_000;
+
+async function llamarBinario(
+  ruta: string,
+  cuerpo: Uint8Array<ArrayBuffer>,
+  cabeceras: Record<string, string>,
+  token: string,
+): Promise<RespuestaLeible> {
+  const control = new AbortController();
+  const corte = setTimeout(() => control.abort(), TIEMPO_LIMITE_BINARIO_MS);
+
+  try {
+    return await fetchBinario(`${urlDelServidor()}${ruta}`, {
+      method: 'POST',
+      signal: control.signal,
+      headers: { ...cabeceras, Authorization: `Bearer ${token}` },
+      body: cuerpo,
+    });
+  } catch {
+    throw new SinConexion();
+  } finally {
+    clearTimeout(corte);
+  }
 }
 
 async function refrescar(): Promise<string> {

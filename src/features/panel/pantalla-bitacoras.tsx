@@ -10,6 +10,16 @@
  * ya se abrieron. Ese orden no es estético: lo que se pierde en obra no son las
  * bitácoras mal llenadas, son las que nadie abrió, y una pantalla que solo
  * muestre lo hecho no las hace visibles jamás.
+ *
+ * ── Por qué las tarjetas llevan un `zIndex` calculado ──
+ *
+ * Las bitácoras del día son tarjetas apiladas, y dentro de cada una hay
+ * desplegables cuya lista flota. React Native Web le pone `z-index: 0` a toda
+ * vista, así que cada tarjeta es su propio contexto de apilamiento y todas
+ * empatan a cero; con el empate manda el orden de pintado, y la lista abierta
+ * en una tarjeta se metía por debajo de la siguiente. Se apilan al revés
+ * —`total - índice`, la primera arriba— porque la lista siempre cae hacia
+ * abajo: lo que tiene que taparse es lo que viene después.
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -22,6 +32,8 @@ import {
   mensajeDeHorometros,
   validarHorometros,
 } from '@/shared/rules/jornada';
+
+import { nombreDeCargo } from '@/shared/catalogos/cargos';
 
 import { api } from './cliente-api';
 import { Acciones, Aviso, Boton, Campo, Etiqueta, Seccion, Selector } from './componentes';
@@ -54,6 +66,7 @@ export default function PantallaBitacoras() {
 
   return (
     <MarcoPantalla
+      modulo="bitacoras"
       titulo="Bitácoras"
       descripcion="El trabajo de cada máquina, día a día: quién la operó, cuántas horas y en qué. Es lo que alimenta el mantenimiento preventivo y el rendimiento de la obra."
       error={jornada.error ?? personas.error}
@@ -92,11 +105,12 @@ export default function PantallaBitacoras() {
                 Todavía no se abrió ninguna bitácora este día.
               </Text>
             ) : (
-              dia.bitacoras.map((bitacora) => (
+              dia.bitacoras.map((bitacora, indice) => (
                 <TarjetaBitacora
                   key={bitacora.id}
                   bitacora={bitacora}
                   operadores={operadores}
+                  nivel={dia.bitacoras.length - indice}
                   onCambio={() => jornada.recargar()}
                   onError={(mensaje) => jornada.setError(mensaje)}
                 />
@@ -140,11 +154,14 @@ function Pendientes({
 function TarjetaBitacora({
   bitacora,
   operadores,
+  nivel,
   onCambio,
   onError,
 }: {
   bitacora: BitacoraFila;
   operadores: PersonaFila[];
+  /** Orden de apilado: mayor pinta encima. Ver la cabecera del archivo. */
+  nivel: number;
   onCambio: () => void;
   onError: (mensaje: string | null) => void;
 }) {
@@ -199,7 +216,7 @@ function TarjetaBitacora({
     );
 
   return (
-    <View style={[estilos.tarjeta, anulada && estilos.tarjetaAnulada]}>
+    <View style={[estilos.tarjeta, { zIndex: nivel }, anulada && estilos.tarjetaAnulada]}>
       <View style={estilos.cabecera}>
         <Text style={estilos.codigo}>{bitacora.vehiculoCodigo}</Text>
         <Text style={estilos.tipo}>{bitacora.tipoNombre}</Text>
@@ -242,7 +259,11 @@ function TarjetaBitacora({
             <Selector
               etiqueta="Quién la operó"
               valor={operadorId}
-              opciones={operadores.map((p) => ({ valor: p.id, etiqueta: p.nombreCompleto }))}
+              opciones={operadores.map((p) => ({
+                valor: p.id,
+                etiqueta: p.nombreCompleto,
+                detalle: nombreDeCargo(p.cargo),
+              }))}
               onChange={setOperadorId}
               vacio="Elija el operador"
               ancho={240}
@@ -400,7 +421,18 @@ const estilos = StyleSheet.create({
   espaciador: { flex: 1 },
   nota: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
 
-  campos: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: Spacing.three },
+  campos: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: Spacing.three,
+    // React Native Web le pone `z-index: 0` a toda vista, así que cada una es un
+    // contexto de apilamiento propio y el `zIndex` que el selector se sube a sí
+    // mismo al abrirse no sale de aquí. Sin esta línea, la fila de campos y la de
+    // acciones empatan a cero, gana la última que se pinta —las acciones— y la
+    // lista de "Quién la operó" aparece por debajo de Guardar y Cerrar jornada.
+    zIndex: 1,
+  },
 
   resumen: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.four },
   dato: { gap: Spacing.half },

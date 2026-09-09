@@ -16,6 +16,9 @@
  */
 import { z } from 'zod';
 
+import { IDS_CARGO, type Cargo } from '@/shared/catalogos/cargos';
+import { ROLES, type Rol } from '@/shared/rules/permisos';
+
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
   z
@@ -93,9 +96,11 @@ export interface ObraFila {
 /**
  * El rol no se amplía: los cargos reales de OCC se mapean sobre estos tres.
  * Residente y director de obra son `supervisor`; gerencia es `admin`.
+ *
+ * La lista vive con la tabla de permisos, no aquí: quien decide qué puede hacer
+ * cada rol es quien debe decir cuáles hay.
  */
-export const ROLES = ['admin', 'supervisor', 'operador'] as const;
-export type Rol = (typeof ROLES)[number];
+export { ROLES, type Rol };
 
 export const ETIQUETA_ROL: Record<Rol, string> = {
   admin: 'Gerencia',
@@ -115,7 +120,16 @@ export const personaNueva = z.object({
     .regex(/^[a-z0-9._-]+$/, 'El usuario solo admite letras, números, punto, guion y guion bajo.'),
   nombreCompleto: textoObligatorio(160, 'el nombre completo'),
   documento: textoOpcional(32),
-  rol: z.enum(ROLES, { error: 'Ese cargo no existe.' }).default('operador'),
+  /** El acceso al sistema. El oficio va en `cargo`, que es otra cosa. */
+  rol: z.enum(ROLES, { error: 'Ese nivel de acceso no existe.' }).default('operador'),
+  /**
+   * El oficio en la obra. Opcional porque las personas registradas antes de la
+   * spec 002 no lo tienen, y quedarse sin cargo es un estado real.
+   */
+  cargo: z
+    .enum(IDS_CARGO as [Cargo, ...Cargo[]], { error: 'Ese cargo no existe.' })
+    .nullish()
+    .transform((v) => v ?? null),
   obraId: idOpcional,
   activo: z.boolean().default(true),
 });
@@ -130,6 +144,7 @@ export interface PersonaFila {
   nombreCompleto: string;
   documento: string | null;
   rol: Rol;
+  cargo: Cargo | null;
   obraId: string | null;
   obraNombre: string | null;
   activo: boolean;
@@ -184,6 +199,8 @@ export interface VehiculoFila {
   odometroKm: number | null;
   horometroH: number | null;
   estado: EstadoVehiculo;
+  /** Llantas puestas a las que les queda 30% de vida o menos. Ver spec 003. */
+  llantasPorCambiar: number;
 }
 
 export interface TipoVehiculoFila {
@@ -456,4 +473,76 @@ export interface PreoperacionalDetalle extends PreoperacionalFila {
   anuladoPorNombre: string | null;
   /** La plantilla con la que se firmó, para poder leerlo como se vio ese día. */
   plantilla: { secciones: { key: string; titulo: string }[] } | null;
+  imagenes: ImagenDelRegistro[];
+}
+
+/**
+ * Una firma o una foto de evidencia.
+ *
+ * Se listan también las que **todavía no han subido**. La fila existe desde que
+ * el operador la capturó, aunque el archivo siga en su teléfono esperando una
+ * WiFi; decirlo es más honesto que mostrar un acta que parece no tener firma.
+ */
+export interface ImagenDelRegistro {
+  id: string;
+  proposito: 'hallazgo' | 'firma_operador' | 'foto_horometro' | 'evidencia';
+  /** El ítem del checklist al que pertenece la foto, si es de un hallazgo. */
+  itemKey: string | null;
+  mime: string;
+  bytes: number | null;
+  subidoEn: string | null;
+  /** `false` mientras el archivo siga en el celular. */
+  disponible: boolean;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Llantas                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * El porcentaje de desgaste. De 0 a 100 y entero: medir décimas de desgaste con
+ * la vista, que es como se hace en obra, es precisión inventada.
+ */
+const desgaste = z
+  .number()
+  .int('El desgaste va en números enteros.')
+  .min(0, 'El desgaste no puede ser negativo.')
+  .max(100, 'El desgaste no pasa de 100.')
+  .nullish()
+  .transform((v) => v ?? null);
+
+/** Medida en milímetros o pulgadas, siempre entera y positiva. */
+const medida = (campo: string) =>
+  z
+    .number()
+    .int(`${campo} va en números enteros.`)
+    .positive(`${campo} tiene que ser mayor que cero.`)
+    .nullish()
+    .transform((v) => v ?? null);
+
+export const llantaNueva = z.object({
+  /** Slug del catálogo; se valida contra el tipo del vehículo en el servidor. */
+  posicion: textoObligatorio(40, 'la posición'),
+  marca: textoOpcional(60),
+  rin: medida('El rin'),
+  ancho: medida('El ancho'),
+  alto: medida('El alto'),
+  porcentajeDesgaste: desgaste,
+});
+
+export const llantaEditada = llantaNueva.partial();
+
+export type LlantaNueva = z.input<typeof llantaNueva>;
+
+export interface LlantaFila {
+  id: string;
+  vehiculoId: string;
+  posicion: string;
+  marca: string | null;
+  rin: number | null;
+  ancho: number | null;
+  alto: number | null;
+  porcentajeDesgaste: number | null;
+  retiradaEn: string | null;
+  motivoRetiro: string | null;
 }

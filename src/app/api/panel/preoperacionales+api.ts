@@ -4,7 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { obras, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
 
@@ -27,7 +27,7 @@ const operador = aliasedTable(usuarios, 'operador');
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'preoperacionales', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const parametros = new URL(peticion.url).searchParams;

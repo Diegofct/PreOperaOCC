@@ -4,7 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { asignaciones } from '@/db/servidor/esquema';
 import { asignacionEditada } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -30,7 +30,7 @@ const COLUMNAS = {
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'asignaciones', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const [existente] = await baseServidor()

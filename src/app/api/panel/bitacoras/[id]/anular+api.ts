@@ -4,7 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { bitacoras } from '@/db/servidor/esquema';
 import { anulacion } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import {
   cuerpoJson,
   errorDePeticion,
@@ -29,7 +29,7 @@ import {
  */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'bitacoras', 'anular');
     if (sesion instanceof Response) return sesion;
 
     const { motivo } = await cuerpoJson(peticion, anulacion);

@@ -5,7 +5,7 @@ import { bitacoras, usuarios } from '@/db/servidor/esquema';
 import { rechazoSiNoEsEditable } from '@/features/bitacoras/servidor/acceso';
 import { construirActividad } from '@/features/bitacoras/tipos';
 import { bitacoraEditada } from '@/features/panel/contratos';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import {
   cuerpoJson,
   errorDePeticion,
@@ -25,7 +25,7 @@ import {
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'bitacoras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const rechazo = await rechazoSiNoEsEditable(sesion, id);
