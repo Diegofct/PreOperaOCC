@@ -116,6 +116,10 @@ export async function GET(peticion: Request) {
             nombreCompleto: usuarios.nombreCompleto,
             documento: usuarios.documento,
             rol: usuarios.rol,
+            // Hoy el celular solo lo guarda. Viaja desde ya porque la bitácora
+            // lo va a necesitar para mostrar quién es quién al elegir personal,
+            // y añadirlo después obliga a otra migración del teléfono.
+            cargo: usuarios.cargo,
             obraId: usuarios.obraId,
             activo: usuarios.activo,
             eliminadoEn: usuarios.eliminadoEn,

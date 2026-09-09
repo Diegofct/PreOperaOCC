@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras } from '@/db/servidor/esquema';
 import { obraEditada } from '@/features/panel/contratos';
-import { requerirAdmin } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /** Editar y dar de baja una obra. `PATCH` y `DELETE /api/panel/obras/:id`. */
@@ -19,7 +19,7 @@ const COLUMNAS = {
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
     // Editar y dar de baja obras es de gerencia, igual que crearlas.
-    const sesion = await requerirAdmin(peticion);
+    const sesion = await requerirPermiso(peticion, 'obras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const cambios = await cuerpoJson(peticion, obraEditada);
@@ -47,7 +47,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
 export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
     // Editar y dar de baja obras es de gerencia, igual que crearlas.
-    const sesion = await requerirAdmin(peticion);
+    const sesion = await requerirPermiso(peticion, 'obras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const [fila] = await baseServidor()

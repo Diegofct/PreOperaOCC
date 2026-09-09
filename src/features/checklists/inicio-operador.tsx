@@ -11,7 +11,8 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { FilaUsuario, PildoraSincronizacion } from '@/components/ui/cabecera-inicio';
 import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
 import { useSesion } from '@/features/auth/sesion';
-import { contarPendientes } from '@/features/sync/outbox';
+import { drenarEnSegundoPlano } from '@/features/sync/motor';
+import { contarPendientes, reencolarFallidas } from '@/features/sync/outbox';
 
 import { asignacionesVigentesDe, historialDe, type VehiculoDelOperador } from './repositorio';
 
@@ -54,6 +55,20 @@ export function InicioOperador() {
     }, [cargar]),
   );
 
+  /**
+   * Deslizar para refrescar es el único reintento que pide una persona.
+   *
+   * Además de releer la pantalla, devuelve a la cola lo que un fallo definitivo
+   * dio por perdido y vuelve a intentar la subida. Es la salida para el registro
+   * que el servidor rechazó por un fallo que ya se corrigió: sin esto, un acta
+   * firmada se queda varada en el teléfono sin manera de sacarla.
+   */
+  const refrescar = useCallback(async () => {
+    await reencolarFallidas();
+    drenarEnSegundoPlano();
+    await cargar();
+  }, [cargar]);
+
   const principal = asignados[0] ?? null;
   const hayVarios = asignados.length > 1;
 
@@ -69,7 +84,7 @@ export function InicioOperador() {
     <ScrollView
       style={estilos.pantalla}
       contentContainerStyle={estilos.contenido}
-      refreshControl={<RefreshControl refreshing={cargando} onRefresh={cargar} />}
+      refreshControl={<RefreshControl refreshing={cargando} onRefresh={refrescar} />}
     >
       <PildoraSincronizacion pendientes={pendientes} />
       <FilaUsuario nombre={usuario?.nombreCompleto ?? ''} onSalir={bloquear} />

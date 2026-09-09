@@ -11,10 +11,40 @@
  *    cambian al entrar. Así nadie acaba conociendo la contraseña definitiva de
  *    otro.
  *
- * El cargo real se mapea sobre tres roles y no se amplía: residente y director
- * de obra son `supervisor`, gerencia es `admin`.
+ * **Cargo y acceso son dos campos distintos**, y antes eran uno solo. El cargo es
+ * el oficio en la obra —topógrafo, cadenero, maestro—; el acceso es lo que puede
+ * hacer en el sistema, y sigue siendo tres valores que no se amplían. Mezclarlos
+ * dejaba fuera a media obra: un cadenero no es «operador» en ningún sentido útil,
+ * pero era la única casilla donde cabía. Elegir el cargo **propone** el acceso; se
+ * puede corregir a mano.
+ *
+ * ── Sobre la propia fila no hay botones que se lleven a nadie por delante ──
+ *
+ * "Dar acceso" **repone** la contraseña: borra la anterior y cierra las sesiones
+ * abiertas de esa persona. Sobre uno mismo eso es cerrarse la puerta, y ya pasó:
+ * un administrador lo pulsó sobre su propia fila creyendo que le mostraría su
+ * acceso, se quedó fuera y hubo que reponerle la clave desde la terminal. Por
+ * eso ahora, en la fila de quien está mirando, ese botón se cambia por el de
+ * cambiar la propia contraseña — que es lo que uno espera al pulsarlo sobre sí
+ * mismo— y "Dar de baja" no aparece.
+ *
+ * "Dar de baja" sobre uno mismo el servidor ya lo rechazaba, así que el botón
+ * solo servía para ofrecer algo que no podía pasar; se quita de esa fila y el
+ * rechazo del servidor se queda donde está, que es donde manda.
+ *
+ * Para el resto de las filas, reponer una contraseña pide confirmación antes: el
+ * aviso dice **qué se rompe**, porque un "¿está seguro?" pelado se contesta que
+ * sí por reflejo.
  */
 import { useCallback, useState } from 'react';
+
+import {
+  CARGOS,
+  nombreDeCargo,
+  operaVehiculos,
+  rolSugerido,
+  type Cargo,
+} from '@/shared/catalogos/cargos';
 
 import { api } from './cliente-api';
 import {
@@ -24,6 +54,7 @@ import {
   Boton,
   Campo,
   Celda,
+  Confirmacion,
   Etiqueta,
   Formulario,
   Seccion,
@@ -44,7 +75,7 @@ import { MarcoPantalla, mensajeDe, useListado } from './marco';
 import { useSesionPanel } from './sesion';
 
 export default function PantallaPersonas() {
-  const { persona: yo } = useSesionPanel();
+  const { persona: yo, pedirCambioDeClave } = useSesionPanel();
   const esGerencia = yo?.rol === 'admin';
 
   const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
@@ -60,8 +91,23 @@ export default function PantallaPersonas() {
   /** Los dos códigos de un operador. Igual que la contraseña: solo esta vez. */
   const [codigos, setCodigos] = useState<CodigosFila | null>(null);
 
+  /**
+   * A quién se le va a reponer la contraseña, mientras no lo confirmen.
+   *
+   * Se guarda la fila entera y no el id porque el aviso nombra a la persona: un
+   * "¿confirma?" que no dice a quién afecta no es una confirmación.
+   */
+  const [porConfirmar, setPorConfirmar] = useState<PersonaFila | null>(null);
+
+  function pedirConfirmacion(persona: PersonaFila) {
+    setTemporal(null);
+    setCodigos(null);
+    setPorConfirmar(persona);
+  }
+
   async function generarClave(id: string) {
     try {
+      setPorConfirmar(null);
       setCodigos(null);
       setTemporal(await api.personas.generarClave(id));
       personas.setError(null);
@@ -73,6 +119,7 @@ export default function PantallaPersonas() {
 
   async function generarCodigos(id: string) {
     try {
+      setPorConfirmar(null);
       setTemporal(null);
       setCodigos(await api.personas.generarCodigos(id));
       personas.setError(null);
@@ -86,80 +133,143 @@ export default function PantallaPersonas() {
   const [nombreCompleto, setNombreCompleto] = useState('');
   const [documento, setDocumento] = useState('');
   const [rol, setRol] = useState<Rol>('operador');
+  const [cargo, setCargo] = useState<Cargo | null>(null);
   const [obraId, setObraId] = useState<string | null>(null);
+
+  /**
+   * Elegir el cargo propone el acceso que le corresponde, y ahí se acaba la
+   * automatía: gerencia puede corregirlo a mano después y no se le vuelve a
+   * pisar. Deducirlo sin poder cambiarlo dejaría sin salida el caso raro —un
+   * auxiliar que sí debe entrar al panel— y obligaría a inventarle un cargo
+   * falso para resolverlo.
+   */
+  function elegirCargo(valor: string | null) {
+    const nuevo = (valor as Cargo) ?? null;
+    setCargo(nuevo);
+    if (nuevo) setRol(rolSugerido(nuevo));
+  }
 
   async function crear() {
     const creada = await personas.ejecutar(() =>
-      api.personas.crear({ usuario, nombreCompleto, documento, rol, obraId, activo: true }),
+      api.personas.crear({ usuario, nombreCompleto, documento, rol, cargo, obraId, activo: true }),
     );
     if (creada) {
       setUsuario('');
       setNombreCompleto('');
       setDocumento('');
+      setCargo(null);
       setObraId(null);
     }
   }
 
   const columnas: Columna<PersonaFila>[] = [
-    { clave: 'usuario', titulo: 'Usuario', ancho: 140, pintar: (p) => <Celda>{p.usuario}</Celda> },
+    { clave: 'usuario', titulo: 'Usuario', ancho: 130, pintar: (p) => <Celda>{p.usuario}</Celda> },
     {
       clave: 'nombre',
       titulo: 'Nombre completo',
-      ancho: 240,
+      ancho: 210,
       pintar: (p) => <Celda>{p.nombreCompleto}</Celda>,
     },
     {
       clave: 'documento',
       titulo: 'Documento',
-      ancho: 120,
+      ancho: 110,
       pintar: (p) => <Celda>{p.documento ?? '—'}</Celda>,
     },
     {
-      clave: 'rol',
+      clave: 'cargo',
       titulo: 'Cargo',
-      ancho: 130,
-      pintar: (p) => (
-        <Etiqueta tono={p.rol === 'operador' ? 'neutro' : 'bueno'}>{ETIQUETA_ROL[p.rol]}</Etiqueta>
-      ),
+      ancho: 160,
+      pintar: (p) => <Celda>{nombreDeCargo(p.cargo)}</Celda>,
+    },
+    {
+      // Qué acceso tiene de verdad, no el nombre interno del rol: a un
+      // topógrafo el sistema le dice «operador» por dentro, pero no entra a
+      // ninguna parte, y verlo escrito evita repartir códigos por error.
+      clave: 'acceso',
+      titulo: 'Acceso',
+      ancho: 110,
+      pintar: (p) => {
+        if (p.rol === 'admin') return <Etiqueta tono="bueno">Gerencia</Etiqueta>;
+        if (p.rol === 'supervisor') return <Etiqueta tono="bueno">Panel</Etiqueta>;
+        return operaVehiculos(p.cargo) ? (
+          <Etiqueta tono="neutro">Celular</Etiqueta>
+        ) : (
+          <Etiqueta tono="neutro">Sin acceso</Etiqueta>
+        );
+      },
     },
     {
       clave: 'obra',
       titulo: 'Obra',
-      ancho: 210,
+      ancho: 180,
       pintar: (p) => <Celda>{p.obraNombre ?? '—'}</Celda>,
     },
     {
       clave: 'acciones',
       titulo: '',
-      ancho: 240,
-      pintar: (p) => (
-        <Acciones>
-          {/* Repartir accesos al panel es de gerencia, y un operador no entra a
-              la web: su acceso es el celular con su PIN. */}
-          {esGerencia && p.rol !== 'operador' ? (
-            <Boton titulo="Dar acceso" tono="secundario" onPress={() => generarClave(p.id)} />
-          ) : null}
-          {/* El operador no entra al panel: lo suyo es activar su celular. */}
-          {p.rol === 'operador' ? (
-            <Boton titulo="Códigos" tono="secundario" onPress={() => generarCodigos(p.id)} />
-          ) : null}
-          <Boton
-            titulo="Dar de baja"
-            tono="peligro"
-            onPress={() => personas.ejecutar(() => api.personas.darDeBaja(p.id))}
-          />
-        </Acciones>
-      ),
+      ancho: 230,
+      pintar: (p) => {
+        // La fila de quien está mirando. Ver la cabecera del archivo: aquí no va
+        // ninguna acción que pueda dejarle fuera de su propio panel.
+        const soyYo = p.id === yo?.id;
+
+        if (soyYo) {
+          return (
+            <Acciones>
+              <Boton
+                titulo="Cambiar mi contraseña"
+                tono="secundario"
+                onPress={() => pedirCambioDeClave(true)}
+              />
+            </Acciones>
+          );
+        }
+
+        return (
+          <Acciones>
+            {/* Repartir accesos al panel es de gerencia, y un operador no entra a
+                la web: su acceso es el celular con su PIN. */}
+            {esGerencia && p.rol !== 'operador' ? (
+              <Boton titulo="Dar acceso" tono="secundario" onPress={() => pedirConfirmacion(p)} />
+            ) : null}
+            {/* El operador no entra al panel: lo suyo es activar su celular. */}
+            {operaVehiculos(p.cargo) ? (
+              <Boton titulo="Códigos" tono="secundario" onPress={() => generarCodigos(p.id)} />
+            ) : null}
+            <Boton
+              titulo="Dar de baja"
+              tono="peligro"
+              onPress={() => personas.ejecutar(() => api.personas.darDeBaja(p.id))}
+            />
+          </Acciones>
+        );
+      },
     },
   ];
 
   return (
     <MarcoPantalla
+      modulo="personas"
       titulo="Personas"
       descripcion="Quién trabaja en OCC y con qué cargo. Al personal administrativo se le da acceso al panel desde aquí; el operador elige su PIN en el celular."
       error={personas.error ?? obras.error}
       cargando={personas.cargando || obras.cargando}
     >
+      {porConfirmar ? (
+        <Confirmacion
+          aviso={
+            `Se le va a generar una contraseña nueva a ${porConfirmar.nombreCompleto} ` +
+            `(usuario "${porConfirmar.usuario}"). La que tenga ahora deja de servir en ese ` +
+            'momento y se le cerrará la sesión si estaba dentro. La nueva se muestra una sola ' +
+            'vez: téngala a mano para dictársela.'
+          }
+          confirmar="Generar contraseña nueva"
+          onConfirmar={() => generarClave(porConfirmar.id)}
+          onCancelar={() => setPorConfirmar(null)}
+        />
+      ) : null}
+
       {codigos ? (
         <Aviso tono="exito">
           {`Códigos de ${codigos.nombreCompleto} (usuario "${codigos.usuario}"). `}
@@ -196,6 +306,15 @@ export default function PantallaPersonas() {
           <Campo etiqueta="Documento" valor={documento} onChange={setDocumento} ancho={160} />
           <Selector
             etiqueta="Cargo"
+            valor={cargo}
+            opciones={CARGOS.map((c) => ({ valor: c.id, etiqueta: c.nombre }))}
+            onChange={elegirCargo}
+            permiteVacio
+            vacio="Sin definir"
+            ancho={220}
+          />
+          <Selector
+            etiqueta="Acceso"
             valor={rol}
             opciones={ROLES.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
             onChange={(v) => setRol((v as Rol) ?? 'operador')}

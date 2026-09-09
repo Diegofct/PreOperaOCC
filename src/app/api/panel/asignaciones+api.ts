@@ -5,7 +5,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { asignaciones, obras, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { asignacionNueva } from '@/features/panel/contratos';
 import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -24,7 +24,7 @@ const persona = aliasedTable(usuarios, 'persona');
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'asignaciones', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const filas = await baseServidor()
@@ -58,7 +58,7 @@ export async function GET(peticion: Request) {
 
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'asignaciones', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const { vehiculoId, usuarioId } = await cuerpoJson(peticion, asignacionNueva);

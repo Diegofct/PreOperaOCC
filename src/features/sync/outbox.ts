@@ -12,7 +12,7 @@
  * la cierran. Quien decide **cuándo** reintentar es `@/shared/rules/reintentos`,
  * que vive aparte para poder probarse sin una base.
  */
-import { and, count, eq, lte } from 'drizzle-orm';
+import { and, count, eq, inArray, lte } from 'drizzle-orm';
 
 import { db } from '@/db/local/client';
 import { outbox } from '@/db/local/schema';
@@ -90,13 +90,46 @@ export async function encolar(
     });
 }
 
-/** Lo que el operador ve en la píldora del inicio. */
+/**
+ * Lo que el operador ve en la píldora del inicio.
+ *
+ * Cuenta las fallidas además de las pendientes, **a propósito**. Una fila
+ * fallida ya no se reintenta sola, así que si no se contara aquí la píldora
+ * diría "todo guardado" con un acta firmada atascada dentro del teléfono. Es
+ * justo el caso en que el operador tiene que enterarse.
+ */
 export async function contarPendientes(): Promise<number> {
   const [fila] = await db
     .select({ total: count() })
     .from(outbox)
-    .where(eq(outbox.estado, 'pendiente'));
+    .where(inArray(outbox.estado, ['pendiente', 'fallida']));
   return fila?.total ?? 0;
+}
+
+/**
+ * Devuelve a la cola lo que se dio por perdido. Solo a petición de una persona.
+ *
+ * Un fallo definitivo (400/422) para la fila de golpe, y con razón: sin esa
+ * salida un registro imposible congelaría la cola para siempre. Pero
+ * "definitivo" lo decide el servidor **de hoy**, y un servidor con un fallo
+ * corregido mañana acepta lo que hoy rechaza — ya pasó: un esquema de ingesta
+ * que no aceptaba la lectura del horómetro dejó un preoperacional firmado
+ * varado sin manera de recuperarlo.
+ *
+ * No se llama sola desde el motor, que volvería a ser el bucle de reintentos que
+ * este proyecto no quiere. La dispara el operador al deslizar para refrescar,
+ * que es un gesto explícito y gratuito cuando no hay nada que reencolar.
+ */
+export async function reencolarFallidas(ahora = Date.now()): Promise<number> {
+  const filas = await db.select({ seq: outbox.seq }).from(outbox).where(eq(outbox.estado, 'fallida'));
+  if (filas.length === 0) return 0;
+
+  await db
+    .update(outbox)
+    .set({ estado: 'pendiente', intentos: 0, proximoIntentoEn: ahora })
+    .where(eq(outbox.estado, 'fallida'));
+
+  return filas.length;
 }
 
 export async function contarFallidas(): Promise<number> {

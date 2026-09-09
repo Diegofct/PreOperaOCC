@@ -4,8 +4,15 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { vehiculos } from '@/db/servidor/esquema';
 import { vehiculoEditado } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
-import { cuerpoJson, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { requerirPermiso, type PersonaEnSesion } from '@/features/servidor/guardia';
+import {
+  cuerpoJson,
+  errorDePeticion,
+  noEncontrado,
+  ok,
+  responder,
+} from '@/features/servidor/respuestas';
+import { validarMedidor } from '@/shared/rules/inspeccion';
 
 /** Editar y dar de baja un vehículo. `PATCH` y `DELETE /api/panel/vehiculos/:id`. */
 
@@ -44,7 +51,7 @@ async function fueraDeAlcance(sesion: PersonaEnSesion, id: string): Promise<Resp
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'vehiculos', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const rechazo = await fueraDeAlcance(sesion, id);
@@ -53,6 +60,31 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const cambios = await cuerpoJson(peticion, vehiculoEditado);
 
     const tocaMedidor = cambios.odometroKm !== undefined || cambios.horometroH !== undefined;
+
+    // Spec 003 / RF-7. El celular ya rechazaba una lectura que retrocede; esta
+    // ruta no, y era la puerta de atrás: corregir un medidor desde el panel
+    // podía dejarlo por debajo de lo que el operador ya había reportado, y a
+    // partir de ahí ninguna lectura del día cuadraba.
+    if (tocaMedidor) {
+      const [actual] = await baseServidor()
+        .select({ odometroKm: vehiculos.odometroKm, horometroH: vehiculos.horometroH })
+        .from(vehiculos)
+        .where(and(eq(vehiculos.id, id), isNull(vehiculos.eliminadoEn)))
+        .limit(1);
+
+      const lecturas = [
+        { clase: 'odometro' as const, valor: cambios.odometroKm, anterior: actual?.odometroKm },
+        { clase: 'horometro' as const, valor: cambios.horometroH, anterior: actual?.horometroH },
+      ];
+
+      for (const { clase, valor, anterior } of lecturas) {
+        if (typeof valor !== 'number') continue;
+        const veredicto = validarMedidor(clase, valor, anterior ?? null);
+        if (veredicto.estado === 'retrocede') {
+          return errorDePeticion(veredicto.mensaje, 400);
+        }
+      }
+    }
 
     const [fila] = await baseServidor()
       .update(vehiculos)
@@ -75,7 +107,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
  */
 export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'vehiculos', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const rechazo = await fueraDeAlcance(sesion, id);

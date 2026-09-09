@@ -1,9 +1,9 @@
-import { aliasedTable, eq } from 'drizzle-orm';
+import { aliasedTable, and, eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { obras, plantillas, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
+import { media, obras, plantillas, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -19,7 +19,7 @@ const operador = aliasedTable(usuarios, 'operador');
 
 export async function GET(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'preoperacionales', 'ver');
     if (sesion instanceof Response) return sesion;
 
     const db = baseServidor();
@@ -80,6 +80,27 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       .where(eq(plantillas.id, `${fila.plantillaTipoVehiculo}-v${fila.plantillaVersion}`))
       .limit(1);
 
-    return ok({ ...fila, anuladoPorNombre, plantilla: plantilla?.esquema ?? null });
+    // Las imágenes se listan aunque todavía no hayan subido: sin `claveR2` la
+    // fila existe porque el teléfono ya la registró, y el panel tiene que poder
+    // decir "hay una foto en camino" en vez de fingir que no la hay.
+    const filasMedia = await db
+      .select({
+        id: media.id,
+        proposito: media.proposito,
+        itemKey: media.itemKey,
+        mime: media.mime,
+        bytes: media.bytes,
+        subidoEn: media.subidoEn,
+        claveR2: media.claveR2,
+      })
+      .from(media)
+      .where(and(eq(media.duenoTipo, 'preoperacional'), eq(media.duenoId, id)));
+
+    const imagenes = filasMedia.map(({ claveR2, ...resto }) => ({
+      ...resto,
+      disponible: claveR2 !== null,
+    }));
+
+    return ok({ ...fila, anuladoPorNombre, plantilla: plantilla?.esquema ?? null, imagenes });
   });
 }

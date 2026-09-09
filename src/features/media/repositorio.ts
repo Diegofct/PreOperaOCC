@@ -8,7 +8,9 @@
  *
  * El archivo se guarda en el almacenamiento de la app y la fila queda con
  * `estadoSubida: 'pendiente'`. El binario y su metadato viajan por canales
- * distintos: el texto sube siempre, las fotos esperan a la WiFi.
+ * distintos: el texto sube siempre, las fotos esperan a la WiFi. Quien lo decide
+ * es `./subir.ts`, y ahí hay una excepción — **la firma sube con la red que
+ * haya**, porque es lo que hace válida el acta y pesa lo que un mensaje.
  */
 import { and, eq } from 'drizzle-orm';
 import { Directory, File, Paths } from 'expo-file-system';

@@ -5,7 +5,8 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { codigosActivacion, usuarios } from '@/db/servidor/esquema';
 import { generarClaveTemporal, hashDeCodigo } from '@/features/auth/servidor/cripto';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
+import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -37,7 +38,7 @@ const NUNCA = new Date('2999-12-31T00:00:00Z');
 
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'personas', 'activar');
     if (sesion instanceof Response) return sesion;
 
     const db = baseServidor();
@@ -48,6 +49,7 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         usuario: usuarios.usuario,
         nombreCompleto: usuarios.nombreCompleto,
         rol: usuarios.rol,
+        cargo: usuarios.cargo,
         obraId: usuarios.obraId,
         activo: usuarios.activo,
       })
@@ -64,6 +66,19 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         'Los códigos de activación son para operadores. Al personal administrativo se le da ' +
           'acceso al panel con contraseña.',
         400,
+      );
+    }
+
+    // En la obra hay mucha más gente que operadores: topógrafos, cadeneros,
+    // maestros, la profesional social. Todos existen en el sistema para que la
+    // bitácora registre su trabajo, y ninguno lleva máquina. El código de
+    // activación es la única puerta al celular, así que negarlo aquí es lo que
+    // impide que un cadenero acabe con un teléfono activado por un clic de más.
+    if (!operaVehiculos(persona.cargo)) {
+      return errorDePeticion(
+        `El cargo «${nombreDeCargo(persona.cargo)}» no lleva máquina, así que no necesita ` +
+          'celular. Los códigos son para conductores y operadores.',
+        409,
       );
     }
 

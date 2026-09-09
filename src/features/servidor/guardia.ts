@@ -20,6 +20,7 @@ import { eq } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { credencialesWeb } from '@/db/servidor/esquema';
 import { personaDeLaPeticion, type PersonaEnSesion } from '@/features/auth/servidor/sesion';
+import { alcanza, type Accion, type Modulo } from '@/shared/rules/permisos';
 
 import { errorDePeticion } from './respuestas';
 
@@ -68,6 +69,44 @@ export async function requerirAdmin(peticion: Request): Promise<PersonaEnSesion 
 
   if (sesion.rol !== 'admin') {
     return errorDePeticion('Esta acción es solo para la gerencia.', 403);
+  }
+  return sesion;
+}
+
+/** Lo que el rechazo tiene que decirle a quien se topa con él. */
+const QUE_SE_INTENTABA: Record<Accion, string> = {
+  ver: 'entrar a este módulo',
+  listar: 'consultar este listado',
+  escribir: 'crear o modificar este registro',
+  anular: 'anular este registro',
+  activar: 'emitir códigos de activación',
+};
+
+/**
+ * La puerta con nombre y apellido: además de sesión, exige el permiso concreto.
+ *
+ * Recibe módulo y acción, y le pregunta a la tabla de `shared/rules/permisos`,
+ * que es la misma que usa la barra de navegación para decidir qué enseña. Esa es
+ * toda la gracia: el menú y la cerradura no pueden desalinearse, porque leen la
+ * misma frase.
+ *
+ * Se prefiere esto a ir multiplicando `requerirAdmin` en variantes —
+ * `requerirGerenciaOResidente`, `requerirQuienPuedaAnular`— porque por ese camino
+ * se llega a catorce funciones parecidas y a olvidarse de una.
+ */
+export async function requerirPermiso(
+  peticion: Request,
+  modulo: Modulo,
+  accion: Accion,
+): Promise<PersonaEnSesion | Response> {
+  const sesion = await requerirSesion(peticion);
+  if (sesion instanceof Response) return sesion;
+
+  if (!alcanza(sesion.rol, modulo, accion)) {
+    return errorDePeticion(
+      `No puede ${QUE_SE_INTENTABA[accion]}: es una acción de la gerencia.`,
+      403,
+    );
   }
   return sesion;
 }

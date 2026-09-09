@@ -12,6 +12,8 @@
  */
 import { useCallback, useState } from 'react';
 
+import { nombreDeCargo } from '@/shared/catalogos/cargos';
+
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -123,6 +125,7 @@ export default function PantallaAsignaciones() {
 
   return (
     <MarcoPantalla
+      modulo="asignaciones"
       titulo="Asignaciones"
       descripcion="Qué máquina lleva cada operador. Es lo primero que consulta la app al abrirse en obra."
       error={asignaciones.error ?? vehiculos.error ?? personas.error}
@@ -156,7 +159,7 @@ export default function PantallaAsignaciones() {
             opciones={operadores.map((p) => ({
               valor: p.id,
               etiqueta: p.nombreCompleto,
-              detalle: p.obraNombre ?? undefined,
+              detalle: [nombreDeCargo(p.cargo), p.obraNombre].filter(Boolean).join(' · '),
             }))}
             onChange={setUsuarioId}
             vacio="Elige un operador"

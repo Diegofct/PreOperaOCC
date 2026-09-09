@@ -47,6 +47,7 @@ import {
 // esbuild por su cuenta y no lee los `paths` del tsconfig, igual que en
 // `src/db/local/schema.ts`.
 import type { ActividadBitacora } from '../../features/bitacoras/tipos';
+import type { Cargo } from '../../shared/catalogos/cargos';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -143,6 +144,18 @@ export const usuarios = pgTable(
     documento: text('documento'),
     rol: rolUsuario('rol').notNull().default('operador'),
     /**
+     * Qué hace en la obra: topógrafo, cadenero, maestro… El `rol` de arriba es
+     * el acceso al sistema y no se amplía; esto es el oficio, y son dos cosas
+     * distintas. Los valores viven en `shared/catalogos/cargos`, no en un enum
+     * de la base: son la llave que une a una persona con su cargo en las dos
+     * bases, y un enum aquí obligaría a una migración de tipo por cada cargo
+     * nuevo.
+     *
+     * Nullable porque las personas registradas antes de la spec 002 no tienen
+     * cargo, y eso es un estado real, no un dato que falte por descuido.
+     */
+    cargo: text('cargo').$type<Cargo>(),
+    /**
      * La obra a la que pertenece. Solo importa para quien lleva las bitácoras:
      * un jefe de operadores no tiene vehículo asignado, así que sin esto no hay
      * forma de saber qué máquinas le tocan.
@@ -207,6 +220,58 @@ export const vehiculos = pgTable(
     uniqueIndex('ux_vehiculos_codigo')
       .on(t.codigoInterno)
       .where(sql`eliminado_en is null`),
+  ],
+);
+
+/**
+ * Las llantas de cada equipo, una fila por rueda. Spec 003.
+ *
+ * Por llanta y no por vehículo porque el desgaste es de cada rueda: en una
+ * volqueta de diez, saber que «las llantas están al 40%» no dice cuál hay que
+ * cambiar, que es justo el dato por el que existe este registro.
+ *
+ * **Solo en el servidor.** El celular no las necesita: el operador no las
+ * registra ni las consulta, y replicar una tabla que nadie lee al teléfono es
+ * peso muerto en la bajada. El día que el preoperacional mida el desgaste, esto
+ * se replica.
+ *
+ * La posición sale de `shared/catalogos/llantas` y es una lista fija por tipo de
+ * equipo. Se guarda el slug, no el rótulo.
+ */
+export const llantas = pgTable(
+  'llantas',
+  {
+    id: text('id').primaryKey(),
+    vehiculoId: text('vehiculo_id')
+      .notNull()
+      .references(() => vehiculos.id),
+    /** Slug de `posicionesDe(tipoVehiculo)`: 'delantera_izquierda', 'eje2_derecha_externa'… */
+    posicion: text('posicion').notNull(),
+    marca: text('marca'),
+    /** Diámetro del rin en pulgadas. Entero: no existen rines de 17,5 y medio. */
+    rin: integer('rin'),
+    /** Medidas de la llanta en milímetros, como vienen en el flanco. */
+    ancho: integer('ancho'),
+    alto: integer('alto'),
+    /** De 0 a 100. Lo actualiza la gerencia en una revisión. */
+    porcentajeDesgaste: integer('porcentaje_desgaste'),
+    /**
+     * Cuándo se retiró. Una llanta retirada no se borra: es el histórico de lo
+     * que rodó en esa posición, y es lo que permite ver más adelante cada cuánto
+     * hay que cambiarla.
+     */
+    retiradaEn: timestamp('retirada_en', { withTimezone: true, mode: 'date' }),
+    motivoRetiro: text('motivo_retiro'),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    index('ix_llantas_vehiculo').on(t.vehiculoId),
+    // Parcial: una posición puede volver a ocuparse cuando se retira la llanta
+    // que estaba ahí, pero no puede haber dos puestas a la vez en el mismo sitio.
+    uniqueIndex('ux_llantas_posicion')
+      .on(t.vehiculoId, t.posicion)
+      .where(sql`retirada_en is null`),
   ],
 );
 

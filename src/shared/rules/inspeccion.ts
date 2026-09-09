@@ -122,6 +122,59 @@ export function evaluarPreoperacional(
 }
 
 /**
+ * Las lecturas de los medidores, convertidas en respuestas del formato.
+ *
+ * El horómetro y el odómetro son **ítems del formato** —están en el Excel, en su
+ * sección, con su `key`— pero no se responden en la lista: se capturan arriba,
+ * con el teclado grande, porque escribir un número con guantes en una fila de
+ * checklist no funciona. Esa separación de interfaz no puede convertirse en una
+ * separación de datos: si no vuelven aquí, `evaluarPreoperacional` los cuenta
+ * como sin responder y **el operador no puede firmar nunca** — que es
+ * exactamente lo que pasaba con la volqueta, 85 ítems llenos y dos fantasmas.
+ *
+ * El vínculo entre lectura e ítem es la **unidad**, no la `key`: es el mismo
+ * criterio con el que `scripts/import-formatos.ts` deduce el bloque `medidores`
+ * de la plantilla (`tiene('h')`, `tiene('km')`), así que los dos lados no pueden
+ * discrepar sin que el formato entero esté mal importado.
+ */
+export function respuestasDeMedidores(
+  plantilla: PlantillaChecklist,
+  periodicidades: Periodicidad[],
+  lecturas: { horometro?: number | null; odometro?: number | null },
+  respondidoEn: number,
+): RespuestaItem[] {
+  const activas = new Set(periodicidades);
+  const respuestas: RespuestaItem[] = [];
+
+  for (const seccion of plantilla.secciones) {
+    for (const item of seccion.items) {
+      if (item.tipo !== 'numero' || !activas.has(item.periodicidad)) continue;
+
+      const valor =
+        item.unidad === 'h'
+          ? lecturas.horometro
+          : item.unidad === 'km'
+            ? lecturas.odometro
+            : null;
+      if (valor == null) continue;
+
+      respuestas.push({
+        itemKey: item.key,
+        seccionKey: seccion.key,
+        label: item.label,
+        sistema: item.sistema,
+        tipo: item.tipo,
+        inmoviliza: item.inmoviliza,
+        valor,
+        respondidoEn,
+      });
+    }
+  }
+
+  return respuestas;
+}
+
+/**
  * Los ítems que inmovilizan quedan fuera de "marcar toda la sección como
  * conforme". El operador tiene que mirarlos uno por uno: son precisamente los
  * que no se pueden despachar en bloque.

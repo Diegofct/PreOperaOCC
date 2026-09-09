@@ -26,6 +26,7 @@ import type {
   SeccionChecklist,
   TipoItem,
 } from '../src/features/checklists/types';
+import { aplicarAjustes } from '../src/features/checklists/plantillas/ajustes';
 
 const RAIZ = path.join(__dirname, '..');
 const ORIGEN = path.join(RAIZ, 'docs');
@@ -279,7 +280,9 @@ async function main() {
   console.log('Importando formatos de OCC\n');
 
   for (const formato of FORMATOS) {
-    const plantilla = await importar(formato);
+    // Lo que el Excel no sabe decir se aplica aquí, no editando el JSON: el
+    // JSON se regenera y el ajuste se perdería. Ver `ajustes.ts`.
+    const plantilla = aplicarAjustes(await importar(formato));
     const destino = path.join(DESTINO, `${plantilla.tipoVehiculo}.v${plantilla.version}.json`);
     writeFileSync(destino, `${JSON.stringify(plantilla, null, 2)}\n`, 'utf8');
 

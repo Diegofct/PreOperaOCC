@@ -15,6 +15,8 @@ import {
   medirCostoDeClave,
   verificarClave,
 } from '../src/features/auth/servidor/cripto';
+import { firmarPeticion } from '../src/features/media/servidor/firma-s3';
+import { respuestaEnviada } from '../src/features/servidor/envios';
 
 import {
   debeOlvidarEquipo,
@@ -28,9 +30,36 @@ import {
   itemsAplicables,
   itemsMarcablesEnBloque,
   periodicidadesAplicables,
+  respuestasDeMedidores,
   validarMedidor,
 } from '../src/shared/rules/inspeccion';
 import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/shared/rules/fusion';
+import {
+  alcanza,
+  MODULOS,
+  modulosVisibles,
+  puedeCambiarRol,
+  type Rol,
+} from '../src/shared/rules/permisos';
+import {
+  CARGOS,
+  cargoPorId,
+  nombreDeCargo,
+  operaVehiculos,
+  rolSugerido,
+} from '../src/shared/catalogos/cargos';
+import { PLANTILLAS_POR_TIPO } from '../src/features/checklists/plantillas';
+import {
+  DESGASTE_PARA_CAMBIO,
+  hayQueCambiar,
+  nombreDePosicion,
+  posicionesDe,
+  vidaUtilRestante,
+} from '../src/shared/catalogos/llantas';
+import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
+import { vehiculos } from '../src/db/servidor/esquema';
+import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
+import type { PersonaEnSesion } from '../src/features/auth/servidor/sesion';
 import {
   debeRendirse,
   esperaDeReintento,
@@ -48,9 +77,9 @@ import {
   validarHorometros,
 } from '../src/shared/rules/jornada';
 
-import camioneta from '../src/features/checklists/plantillas/camioneta.v1.json';
+import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
 import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
-import volqueta from '../src/features/checklists/plantillas/volqueta.v1.json';
+import volqueta from '../src/features/checklists/plantillas/volqueta.v2.json';
 
 const VOLQUETA = volqueta as PlantillaChecklist;
 const CAMIONETA = camioneta as PlantillaChecklist;
@@ -98,9 +127,9 @@ function responderTodo(
 
 console.log('\nReglas del preoperacional\n');
 
-prueba('la volqueta importada tiene los 87 ítems del formato', () => {
+prueba('la volqueta importada tiene los 86 ítems del formato', () => {
   const items = VOLQUETA.secciones.flatMap((s) => s.items);
-  assert.equal(items.length, 87);
+  assert.equal(items.length, 86);
   assert.equal(items.filter((i) => i.inmoviliza).length, 16);
 });
 
@@ -155,6 +184,138 @@ prueba('un formato incompleto no se puede dar por terminado', () => {
   assert.equal(evaluacion.faltantes.length, 2);
 });
 
+/**
+ * Estas tres reproducen lo que arma la pantalla, no lo que arma `responderTodo`.
+ * La pantalla solo responde los ítems de conformidad —los medidores se capturan
+ * con otro teclado—, y por eso el fallo pasó desapercibido: el ayudante de
+ * pruebas respondía también los de tipo `numero`, que es justo lo que la app no
+ * hacía. Con la volqueta el operador llenaba sus 85 ítems y el formato seguía
+ * diciendo que le faltaban dos.
+ */
+function responderSoloLaLista(
+  plantilla: PlantillaChecklist,
+  periodicidades: ReturnType<typeof periodicidadesAplicables>,
+): RespuestaItem[] {
+  return responderTodo(plantilla, periodicidades).filter((r) => r.tipo === 'conformidad');
+}
+
+prueba('las lecturas de los medidores completan el formato', () => {
+  const p = periodicidadesAplicables(Date.now(), VOLQUETA);
+  const deLaLista = responderSoloLaLista(VOLQUETA, p);
+
+  const sinMedidores = evaluarPreoperacional(VOLQUETA, p, deLaLista);
+  assert.equal(sinMedidores.completo, false);
+  // Desde la spec 003 la volqueta solo lleva kilometraje: el horómetro salió de
+  // su formato porque no se controla por horas de motor.
+  assert.deepEqual(sinMedidores.faltantes.map((i) => i.label).sort(), ['Odómetro']);
+
+  const conMedidores = evaluarPreoperacional(VOLQUETA, p, [
+    ...deLaLista,
+    ...respuestasDeMedidores(VOLQUETA, p, { horometro: null, odometro: 88_310 }, Date.now()),
+  ]);
+  assert.equal(conMedidores.completo, true);
+  assert.equal(conMedidores.resultado, 'apto');
+});
+
+prueba('cada lectura va al ítem de su unidad', () => {
+  // El vínculo lectura-ítem es la unidad, no la clave. La volqueta solo tiene
+  // ítem en kilómetros, así que la lectura de horas sobrante se descarta en vez
+  // de colarse en el ítem equivocado.
+  const p = periodicidadesAplicables(Date.now(), VOLQUETA);
+  const medidores = respuestasDeMedidores(
+    VOLQUETA,
+    p,
+    { horometro: 1204.5, odometro: 88_310 },
+    Date.now(),
+  );
+
+  assert.equal(medidores.length, 1);
+  assert.equal(medidores[0].itemKey, 'tablero_de_control__odometro');
+  assert.equal(medidores[0].valor, 88_310);
+  // Se auto-describen igual que el resto: la sección tiene que venir de verdad.
+  assert.equal(medidores.every((r) => r.seccionKey !== ''), true);
+});
+
+prueba('camioneta y volqueta ya no piden horómetro', () => {
+  // Spec 003 / RF-4. Si alguien vuelve a importar los formatos sin aplicar los
+  // ajustes, esto es lo que lo va a decir.
+  for (const plantilla of [CAMIONETA, VOLQUETA]) {
+    assert.equal(plantilla.version, 2, plantilla.tipoVehiculo);
+    assert.equal(plantilla.medidores.horometro, 'oculto', plantilla.tipoVehiculo);
+    assert.equal(plantilla.medidores.odometro, 'requerido', plantilla.tipoVehiculo);
+    const enHoras = plantilla.secciones
+      .flatMap((s) => s.items)
+      .filter((i) => i.tipo === 'numero' && i.unidad === 'h');
+    assert.equal(enHoras.length, 0, plantilla.tipoVehiculo);
+  }
+});
+
+prueba('un formato sin odómetro no pide uno', () => {
+  const p = periodicidadesAplicables(Date.now(), RETROEXCAVADORA);
+  const medidores = respuestasDeMedidores(
+    RETROEXCAVADORA,
+    p,
+    { horometro: 3410, odometro: null },
+    Date.now(),
+  );
+
+  assert.equal(medidores.length, 1);
+  assert.equal(medidores[0].valor, 3410);
+
+  const evaluacion = evaluarPreoperacional(RETROEXCAVADORA, p, [
+    ...responderSoloLaLista(RETROEXCAVADORA, p),
+    ...medidores,
+  ]);
+  assert.equal(evaluacion.completo, true);
+});
+
+prueba('el servidor acepta tal cual lo que arma el móvil', () => {
+  const p = periodicidadesAplicables(Date.now(), VOLQUETA);
+  const items = VOLQUETA.secciones.flatMap((s) => s.items);
+
+  const envio = [
+    // Un hallazgo con su comentario y su foto: lo que más caro sale perder.
+    {
+      ...responderSoloLaLista(VOLQUETA, p)[0],
+      valor: 'no_conforme' as const,
+      comentario: 'Fuga por el retén del cilindro derecho.',
+      mediaIds: ['01a06446-7fc7-7c5e-9f4f-29f9c5fa0016'],
+      marcadoEnBloque: false,
+    },
+    ...responderSoloLaLista(VOLQUETA, p).slice(1),
+    ...respuestasDeMedidores(VOLQUETA, p, { horometro: 1204, odometro: 88_310 }, Date.now()),
+  ];
+
+  for (const respuesta of envio) {
+    // `parse` y no `safeParse`: si esto lanza, el móvil está mandando algo que
+    // el servidor contesta con un 400, y un 400 es definitivo — el
+    // preoperacional se marca rechazado y no vuelve a intentarse jamás.
+    respuestaEnviada.parse(JSON.parse(JSON.stringify(respuesta)));
+  }
+
+  assert.equal(envio.length, items.length);
+});
+
+prueba('la ingesta no se traga el comentario ni las fotos de un hallazgo', () => {
+  const validada = respuestaEnviada.parse({
+    itemKey: 'frenos__freno_de_servicio',
+    seccionKey: 'frenos',
+    label: 'Freno de servicio',
+    sistema: 'FRENOS - AI',
+    tipo: 'conformidad',
+    inmoviliza: true,
+    valor: 'no_conforme',
+    comentario: 'Pedal se va al fondo.',
+    mediaIds: ['una-foto'],
+    respondidoEn: Date.now(),
+  });
+
+  // Zod descarta callado lo que no declara: el día que el nombre de un campo se
+  // desalinee, esto falla aquí y no en la obra, seis meses después.
+  assert.equal(validada.comentario, 'Pedal se va al fondo.');
+  assert.deepEqual(validada.mediaIds, ['una-foto']);
+});
+
 prueba('"marcar todo bien" nunca alcanza a los ítems que inmovilizan', () => {
   for (const seccion of VOLQUETA.secciones) {
     const marcables = itemsMarcablesEnBloque(seccion.items);
@@ -174,19 +335,19 @@ prueba('la camioneta suma los ítems quincenales y mensuales cuando toca', () =>
     mensual: hoy - 2 * MS_DIA,
   });
   assert.deepEqual(soloDiaria, ['diaria']);
-  assert.equal(itemsAplicables(CAMIONETA, soloDiaria).length, 36);
+  assert.equal(itemsAplicables(CAMIONETA, soloDiaria).length, 35);
 
   const conQuincenal = periodicidadesAplicables(hoy, CAMIONETA, {
     quincenal: hoy - 16 * MS_DIA,
     mensual: hoy - 2 * MS_DIA,
   });
   assert.deepEqual(conQuincenal, ['diaria', 'quincenal']);
-  assert.equal(itemsAplicables(CAMIONETA, conQuincenal).length, 36 + 16);
+  assert.equal(itemsAplicables(CAMIONETA, conQuincenal).length, 35 + 16);
 
   // Un equipo que nunca ha tenido revisión periódica las debe todas.
   const primeraVez = periodicidadesAplicables(hoy, CAMIONETA);
   assert.deepEqual(primeraVez, ['diaria', 'quincenal', 'mensual']);
-  assert.equal(itemsAplicables(CAMIONETA, primeraVez).length, 59);
+  assert.equal(itemsAplicables(CAMIONETA, primeraVez).length, 58);
 });
 
 prueba('un formato sin revisión periódica no inventa una', () => {
@@ -473,6 +634,189 @@ prueba('un error que reintentar no arregla se rinde de una vez', () => {
 });
 
 
+console.log('\nPermisos del panel\n');
+
+prueba('la gerencia alcanza todos los módulos', () => {
+  for (const modulo of MODULOS) {
+    assert.ok(alcanza('admin', modulo, 'ver'), `gerencia debería entrar a ${modulo}`);
+  }
+  assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
+});
+
+prueba('el residente solo entra a inicio, asignaciones, bitácoras y preoperacionales', () => {
+  assert.deepEqual(modulosVisibles('supervisor'), [
+    'inicio',
+    'asignaciones',
+    'bitacoras',
+    'preoperacionales',
+  ]);
+});
+
+prueba('el residente no escribe en el maestro de la empresa', () => {
+  // Esto es lo que hoy sí puede hacer, y es el motivo de la spec 001.
+  for (const modulo of ['obras', 'personas', 'vehiculos'] as const) {
+    assert.equal(alcanza('supervisor', modulo, 'escribir'), false, modulo);
+    assert.equal(alcanza('supervisor', modulo, 'ver'), false, modulo);
+  }
+});
+
+prueba('pero sí puede listar personas y vehículos', () => {
+  // El caso que evita que alguien "arregle" el permiso de más y deje sin datos
+  // a los selectores de Asignaciones y Bitácoras.
+  assert.ok(alcanza('supervisor', 'personas', 'listar'));
+  assert.ok(alcanza('supervisor', 'vehiculos', 'listar'));
+});
+
+prueba('el residente trabaja en asignaciones y bitácoras, y anula bitácoras', () => {
+  assert.ok(alcanza('supervisor', 'asignaciones', 'escribir'));
+  assert.ok(alcanza('supervisor', 'bitacoras', 'escribir'));
+  assert.ok(alcanza('supervisor', 'bitacoras', 'anular'));
+});
+
+prueba('anular un preoperacional es solo de la gerencia', () => {
+  assert.ok(alcanza('supervisor', 'preoperacionales', 'ver'));
+  assert.equal(alcanza('supervisor', 'preoperacionales', 'anular'), false);
+  assert.ok(alcanza('admin', 'preoperacionales', 'anular'));
+});
+
+prueba('emitir códigos de activación es solo de la gerencia', () => {
+  assert.ok(alcanza('admin', 'personas', 'activar'));
+  assert.equal(alcanza('supervisor', 'personas', 'activar'), false);
+});
+
+prueba('el operador no alcanza nada del panel', () => {
+  assert.deepEqual(modulosVisibles('operador'), []);
+  for (const modulo of MODULOS) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar'] as const) {
+      assert.equal(alcanza('operador', modulo, accion), false, `${modulo}/${accion}`);
+    }
+  }
+});
+
+prueba('nadie reparte más permisos de los que tiene', () => {
+  assert.equal(puedeCambiarRol('supervisor', 'admin'), false);
+  assert.ok(puedeCambiarRol('supervisor', 'supervisor'));
+  assert.ok(puedeCambiarRol('supervisor', 'operador'));
+  assert.ok(puedeCambiarRol('admin', 'admin'));
+});
+
+/** Una sesión de mentira, con lo justo para preguntarle al alcance. */
+function sesionDe(rol: Rol, obraId: string | null): PersonaEnSesion {
+  return {
+    id: 'u1',
+    usuario: 'prueba',
+    nombreCompleto: 'Persona de prueba',
+    rol,
+    obraId,
+    debeCambiarClave: false,
+  };
+}
+
+prueba('la gerencia alcanza cualquier obra y no filtra por ninguna', () => {
+  const gerencia = sesionDe('admin', null);
+  assert.equal(filtroDeObra(gerencia, vehiculos.obraId), undefined);
+  assert.ok(alcanzaLaObra(gerencia, 'obra-a'));
+  assert.ok(alcanzaLaObra(gerencia, null));
+});
+
+prueba('el residente alcanza su obra y las filas sin obra', () => {
+  const residente = sesionDe('supervisor', 'obra-a');
+  assert.notEqual(filtroDeObra(residente, vehiculos.obraId), undefined);
+  assert.ok(alcanzaLaObra(residente, 'obra-a'));
+  assert.ok(alcanzaLaObra(residente, null));
+  assert.equal(alcanzaLaObra(residente, 'obra-b'), false);
+});
+
+prueba('un residente sin obra asignada no alcanza nada', () => {
+  // Antes de la spec 001 esto devolvía «sin filtro» y `true`: una cuenta a
+  // medio configurar veía más que una bien puesta. Si alguien vuelve a
+  // ponerlo así, esta comprobación es lo único que lo va a decir.
+  const suelto = sesionDe('supervisor', null);
+  assert.notEqual(filtroDeObra(suelto, vehiculos.obraId), undefined);
+  assert.equal(alcanzaLaObra(suelto, 'obra-a'), false);
+  assert.equal(alcanzaLaObra(suelto, null), false);
+});
+
+console.log('\nCargos de la obra\n');
+
+prueba('la marca de «sin formato» cuadra con las plantillas que existen', () => {
+  // Spec 003 / RF-3. Es la comprobación que impide que la marca y la realidad
+  // se separen: el día que llegue el Excel de la recicladora, quitar la marca
+  // sin añadir la plantilla —o al revés— falla aquí y no en obra.
+  for (const tipo of TIPOS_VEHICULO) {
+    const tiene = PLANTILLAS_POR_TIPO.has(tipo.id);
+    assert.equal(tiene, !tipo.sinFormato, `${tipo.id}: marca y plantilla no cuadran`);
+  }
+  assert.deepEqual(
+    TIPOS_VEHICULO.filter((x) => x.sinFormato).map((x) => x.id),
+    ['vibrocompactadora', 'recicladora'],
+  );
+});
+
+prueba('cada tipo de equipo con formato tiene posiciones de llanta', () => {
+  // Spec 003 / RF-9. La lista es fija a propósito: si la posición se escribiera
+  // a mano, la misma rueda acabaría registrada de tres maneras y no habría
+  // seguimiento posible.
+  for (const tipo of TIPOS_VEHICULO) {
+    const posiciones = posicionesDe(tipo.id);
+    const ids = posiciones.map((p) => p.id);
+    assert.equal(new Set(ids).size, ids.length, `${tipo.id}: posiciones repetidas`);
+  }
+  assert.equal(posicionesDe('camioneta').length, 5);
+  // Doble troque: dirección sencilla, dos ejes de rueda doble y el repuesto.
+  assert.equal(posicionesDe('volqueta').length, 11);
+  assert.equal(posicionesDe('motoniveladora').length, 6);
+});
+
+prueba('una posición inventada no pertenece a ningún equipo', () => {
+  assert.equal(posicionesDe('volqueta').some((p) => p.id === 'tandem_izquierda_trasera'), false);
+  assert.deepEqual(posicionesDe('inventado'), []);
+  assert.equal(nombreDePosicion('camioneta', 'delantera_izquierda'), 'Delantera izquierda');
+});
+
+prueba('se avisa cuando a la llanta le queda 30% de vida o menos', () => {
+  // Spec 003 / RF-14. El acuerdo fue «cuando llegue al 30%», que en obra
+  // significa 30% de vida restante: gastada al 70%. Leerlo al revés marcaría la
+  // flota entera, así que esta comprobación es la que fija el sentido.
+  assert.equal(hayQueCambiar(69), false);
+  assert.equal(hayQueCambiar(70), true);
+  assert.equal(hayQueCambiar(100), true);
+  assert.equal(vidaUtilRestante(DESGASTE_PARA_CAMBIO), 30);
+});
+
+prueba('una llanta sin medir no se marca como gastada', () => {
+  // Marcar en rojo lo que no se sabe hace que se deje de mirar el rojo.
+  assert.equal(hayQueCambiar(null), false);
+  assert.equal(hayQueCambiar(undefined), false);
+  assert.equal(hayQueCambiar(0), false);
+});
+
+prueba('están los quince cargos, con slug y rótulo únicos', () => {
+  assert.equal(CARGOS.length, 15);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 15);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 15);
+});
+
+prueba('solo la dirección y las residencias entran al panel', () => {
+  const alPanel = CARGOS.filter((c) => c.rolSugerido === 'supervisor').map((c) => c.id);
+  assert.deepEqual(alPanel, ['director', 'residente_1', 'residente_2']);
+});
+
+prueba('solo el conductor y el operador llevan máquina', () => {
+  const conMaquina = CARGOS.filter((c) => c.operaVehiculos).map((c) => c.id);
+  assert.deepEqual(conMaquina, ['conductor', 'operador']);
+  // El caso que da sentido a todo esto: un cadenero no recibe celular.
+  assert.equal(operaVehiculos('cadenero_1'), false);
+  assert.equal(operaVehiculos('topografo'), false);
+});
+
+prueba('un cargo que no existe no sugiere acceso ni máquina', () => {
+  assert.equal(cargoPorId('jefe_de_todo'), undefined);
+  assert.equal(rolSugerido('jefe_de_todo'), 'operador');
+  assert.equal(operaVehiculos('jefe_de_todo'), false);
+  assert.equal(nombreDeCargo(null), 'Sin definir');
+});
+
 /* ------------------------------------------------------------------------ */
 /* Criptografía de las contraseñas web                                       */
 /* ------------------------------------------------------------------------ */
@@ -538,7 +882,137 @@ async function verificarCripto() {
   }
 }
 
-verificarCripto()
+/* ------------------------------------------------------------------------ */
+
+/**
+ * La firma SigV4, contra los vectores publicados por AWS.
+ *
+ * Estos dos ejemplos salen de la documentación de Amazon —"Signature
+ * Calculations for the Authorization Header: Transferring Payload in a Single
+ * Chunk"— y son la única forma de saber que `firma-s3.ts` está bien **sin
+ * llamar a Cloudflare**. Importa mucho: una firma mal calculada no se degrada
+ * ni avisa, responde 403 sin decir qué parte del cálculo falló, y se puede ir
+ * un día entero buscándolo en el sitio equivocado.
+ *
+ * Los dos casos no son redundantes. El PUT cubre el cuerpo firmado por su
+ * hash, las cabeceras extra y una clave con carácter especial (`$`, que hay que
+ * codificar); el GET cubre el cuerpo vacío y una cabecera —`range`— que se
+ * ordena entre las demás.
+ */
+const CREDENCIALES_DE_EJEMPLO = {
+  llaveId: 'AKIAIOSFODNN7EXAMPLE',
+  // Ojo: los ejemplos de S3 usan la variante con barra (`…MDENG/bPxRfiCY…`).
+  // El otro juego de vectores de AWS, el genérico, lleva un `+` en esa
+  // posición, y confundirlos da una firma perfecta sobre una clave distinta:
+  // todo el cálculo cuadra y solo falla el último HMAC.
+  llaveSecreta: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  region: 'us-east-1',
+  servicio: 's3',
+};
+
+async function verificarFirmaS3() {
+  const instante = new Date('2013-05-24T00:00:00Z');
+
+  await pruebaAsync('el hash del cuerpo coincide con el vector de AWS', async () => {
+    const cabeceras = await firmarPeticion(
+      {
+        metodo: 'PUT',
+        url: 'https://examplebucket.s3.amazonaws.com/test%24file.text',
+        cuerpo: new TextEncoder().encode('Welcome to Amazon S3.'),
+        instante,
+      },
+      CREDENCIALES_DE_EJEMPLO,
+    );
+    assert.equal(
+      cabeceras['x-amz-content-sha256'],
+      '44ce7dd67c959e0d3524ffac1771dfbba87d2b6b4b4e99e42034a8b803f8b072',
+    );
+  });
+
+  await pruebaAsync('firma un PUT con cuerpo igual que el vector de AWS', async () => {
+    const cabeceras = await firmarPeticion(
+      {
+        metodo: 'PUT',
+        url: 'https://examplebucket.s3.amazonaws.com/test%24file.text',
+        cabeceras: {
+          date: 'Fri, 24 May 2013 00:00:00 GMT',
+          'x-amz-storage-class': 'REDUCED_REDUNDANCY',
+        },
+        cuerpo: new TextEncoder().encode('Welcome to Amazon S3.'),
+        instante,
+      },
+      CREDENCIALES_DE_EJEMPLO,
+    );
+
+    assert.equal(
+      cabeceras.Authorization,
+      'AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, ' +
+        'SignedHeaders=date;host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, ' +
+        'Signature=98ad721746da40c64f1a55b78f14c238d841ea1380cd77a1b5971af0ece108bd',
+    );
+  });
+
+  await pruebaAsync('firma un GET sin cuerpo igual que el vector de AWS', async () => {
+    const cabeceras = await firmarPeticion(
+      {
+        metodo: 'GET',
+        url: 'https://examplebucket.s3.amazonaws.com/test.txt',
+        cabeceras: { range: 'bytes=0-9' },
+        instante,
+      },
+      CREDENCIALES_DE_EJEMPLO,
+    );
+
+    assert.equal(
+      cabeceras.Authorization,
+      'AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, ' +
+        'SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, ' +
+        'Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41',
+    );
+  });
+
+  await pruebaAsync('la firma cambia con el día, la región y el servicio', async () => {
+    // El encadenamiento de HMAC existe justamente para esto: una firma
+    // interceptada no se puede reusar mañana ni contra otro servicio.
+    const base = {
+      metodo: 'GET',
+      url: 'https://examplebucket.s3.amazonaws.com/test.txt',
+      instante,
+    };
+    const hoy = await firmarPeticion(base, CREDENCIALES_DE_EJEMPLO);
+    const manana = await firmarPeticion(
+      { ...base, instante: new Date('2013-05-25T00:00:00Z') },
+      CREDENCIALES_DE_EJEMPLO,
+    );
+    const otraRegion = await firmarPeticion(base, {
+      ...CREDENCIALES_DE_EJEMPLO,
+      region: 'eu-west-1',
+    });
+
+    assert.notEqual(hoy.Authorization, manana.Authorization);
+    assert.notEqual(hoy.Authorization, otraRegion.Authorization);
+  });
+
+  await pruebaAsync('una clave con espacios y acentos se codifica sin romper la firma', async () => {
+    // No es teórico: el nombre del objeto lo arma el servidor a partir de ids,
+    // pero la ruta pasa por el mismo camino que cualquier otra. Si esto se
+    // codificara dos veces —el error clásico en S3— fallaría solo a veces.
+    const cabeceras = await firmarPeticion(
+      {
+        metodo: 'PUT',
+        url: 'https://examplebucket.s3.amazonaws.com/obra%20norte/motoniveladora%20a%C3%B1o.jpg',
+        cuerpo: new TextEncoder().encode('x'),
+        instante,
+      },
+      CREDENCIALES_DE_EJEMPLO,
+    );
+    assert.match(cabeceras.Authorization, /^AWS4-HMAC-SHA256 Credential=/);
+    assert.ok(cabeceras.Authorization.includes('SignedHeaders=host;x-amz-content-sha256;x-amz-date'));
+  });
+}
+
+verificarFirmaS3()
+  .then(verificarCripto)
   .then(() => console.log(`\n${pruebas} verificaciones correctas.\n`))
   .catch((error) => {
     console.error('\nFalló una verificación:', error);

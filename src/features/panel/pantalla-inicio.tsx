@@ -21,6 +21,7 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { alcanza } from '@/shared/rules/permisos';
 
 import { api } from './cliente-api';
 import { Aviso, Seccion } from './componentes';
@@ -33,6 +34,7 @@ import type {
   VehiculoFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { usePersona } from './sesion';
 
 /** «1 operador», no «1 operadores»: la portada se lee todos los días. */
 function plural(cantidad: number, singular: string, plural: string): string {
@@ -40,7 +42,17 @@ function plural(cantidad: number, singular: string, plural: string): string {
 }
 
 export default function PantallaInicioPanel() {
-  const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
+  const persona = usePersona();
+  const rol = persona?.rol ?? 'operador';
+
+  // El residente no alcanza el listado de obras, así que ni se pide: pedirlo
+  // devolvería un 403 y el inicio entero se pintaría con un error en rojo por
+  // un dato que además no le sirve. Personas y vehículos sí los alcanza —los
+  // necesitan Asignaciones y Bitácoras—, por eso esos dos sí se piden siempre.
+  const veObras = alcanza(rol, 'obras', 'listar');
+  const obras = useListado<ObraFila>(
+    useCallback(() => (veObras ? api.obras.listar() : Promise.resolve([])), [veObras]),
+  );
   const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
   const asignaciones = useListado<AsignacionFila>(useCallback(() => api.asignaciones.listar(), []));
@@ -62,32 +74,39 @@ export default function PantallaInicioPanel() {
     delDia?.preoperacionales.filter((p) => p.resultado === 'no_apto' && !p.anuladoEn).length ?? 0;
   const sinInspeccionar = delDia?.pendientes.length ?? 0;
 
+  // Ninguna cifra ni ningún atajo de un módulo al que este rol no entra: un
+  // enlace que lleva a un aviso de «esto no es suyo» es peor que no estar.
   const tarjetas = [
     {
+      modulo: 'obras' as const,
       ruta: '/panel/obras' as const,
       titulo: 'Obras',
       total: obras.datos.length,
       pie: 'Frentes de trabajo',
     },
     {
+      modulo: 'personas' as const,
       ruta: '/panel/personas' as const,
       titulo: 'Personas',
       total: personas.datos.length,
       pie: plural(personas.datos.filter((p) => p.rol === 'operador').length, 'operador', 'operadores'),
     },
     {
+      modulo: 'vehiculos' as const,
       ruta: '/panel/vehiculos' as const,
       titulo: 'Vehículos',
       total: vehiculos.datos.length,
       pie: 'Maquinaria registrada',
     },
     {
+      modulo: 'asignaciones' as const,
       ruta: '/panel/asignaciones' as const,
       titulo: 'Asignaciones',
       total: asignaciones.datos.filter((a) => a.hasta === null).length,
       pie: 'Vigentes',
     },
     {
+      modulo: 'bitacoras' as const,
       ruta: '/panel/bitacoras' as const,
       titulo: 'Bitácoras de hoy',
       total: jornada.datos[0]?.bitacoras.length ?? 0,
@@ -97,15 +116,19 @@ export default function PantallaInicioPanel() {
           : `${plural(sinBitacora, 'máquina', 'máquinas')} sin abrir`,
     },
     {
+      modulo: 'preoperacionales' as const,
       ruta: '/panel/preoperacionales' as const,
       titulo: 'Preoperacionales de hoy',
       total: delDia?.preoperacionales.length ?? 0,
       pie: noAptos === 0 ? 'Ninguno NO APTO' : `${noAptos} NO APTO`,
     },
-  ];
+  ].filter((tarjeta) => alcanza(rol, tarjeta.modulo, 'ver'));
 
-  const siguientePaso =
-    obras.datos.length === 0
+  // Habla de registrar obras, maquinaria y personas: es la lista de tareas de
+  // la gerencia, no la del residente.
+  const siguientePaso = !alcanza(rol, 'obras', 'escribir')
+    ? null
+    : obras.datos.length === 0
       ? 'Empieza registrando una obra: todo lo demás cuelga de ella.'
       : vehiculos.datos.length === 0
         ? 'Ya hay obra. El siguiente paso es registrar la maquinaria.'
@@ -118,7 +141,11 @@ export default function PantallaInicioPanel() {
   return (
     <MarcoPantalla
       titulo="Administración"
-      descripcion="Desde aquí se registran las obras, las personas, la maquinaria y sus asignaciones. Lo que se registre acá es lo que verá el operador en su celular."
+      descripcion={
+        alcanza(rol, 'obras', 'escribir')
+          ? 'Desde aquí se registran las obras, las personas, la maquinaria y sus asignaciones. Lo que se registre acá es lo que verá el operador en su celular.'
+          : 'Cómo va hoy su obra: qué máquinas están asignadas, qué bitácoras faltan por cerrar y qué preoperacionales llegaron del campo.'
+      }
       error={
         obras.error ??
         personas.error ??
@@ -182,11 +209,12 @@ export default function PantallaInicioPanel() {
         </View>
       </Seccion>
 
-      <Seccion titulo="Lo que todavía no hace este panel">
+      <Seccion titulo="Cómo llegan las firmas y las fotos">
         <Text style={estilos.nota}>
-          Las firmas y las fotos de los hallazgos siguen guardadas en los celulares: suben en el
-          trabajo siguiente, cuando exista el almacén de archivos. Todo lo demás del preoperacional
-          ya llega aquí solo, en cuanto el equipo agarra señal.
+          El preoperacional llega completo, con la firma del operador, en cuanto su celular agarra
+          señal. Las fotos de los hallazgos viajan aparte y se suman al entrar a una WiFi, para no
+          gastarle el plan de datos al operador. El acta ya es válida desde que llega, y el detalle
+          va marcando las fotos que vienen en camino.
         </Text>
       </Seccion>
     </MarcoPantalla>

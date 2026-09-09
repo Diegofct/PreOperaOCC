@@ -16,6 +16,7 @@ import {
   vehiculos,
   type EstadoSync,
 } from '@/db/local/schema';
+import { drenarEnSegundoPlano } from '@/features/sync/motor';
 import { encolar } from '@/features/sync/outbox';
 import { desfaseDeReloj } from '@/features/sync/reloj';
 import { periodicidadesAplicables } from '@/shared/rules/inspeccion';
@@ -373,6 +374,13 @@ export async function cerrarPreoperacional(
   for (const evidencia of evidencias) {
     await encolar('media', evidencia.id, { id: evidencia.id, duenoId: id });
   }
+
+  // Y se intenta subir ya, sin esperar. Firmar es el momento de la jornada con
+  // más probabilidad de señal —el operador acaba de terminar, mirando el
+  // teléfono— y hasta ahora era el único que no disparaba nada: el registro se
+  // quedaba en la cola hasta el siguiente arranque de sesión aunque hubiera
+  // WiFi delante. Si no hay red no pasa nada; la cola sigue intacta.
+  drenarEnSegundoPlano();
 
   // Los medidores del vehículo solo avanzan. Un valor menor ya se rechazó al
   // capturarlo; aquí se protege el caso de dos registros fuera de orden.

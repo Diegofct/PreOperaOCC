@@ -28,18 +28,30 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
+import { modulosVisibles, type Modulo } from '@/shared/rules/permisos';
+
 import { ETIQUETA_ROL } from './contratos';
 import { useSesionPanel } from './sesion';
 
-const ENLACES = [
-  { ruta: '/panel', titulo: 'Inicio' },
-  { ruta: '/panel/obras', titulo: 'Obras' },
-  { ruta: '/panel/personas', titulo: 'Personas' },
-  { ruta: '/panel/vehiculos', titulo: 'Vehículos' },
-  { ruta: '/panel/asignaciones', titulo: 'Asignaciones' },
-  { ruta: '/panel/bitacoras', titulo: 'Bitácoras' },
-  { ruta: '/panel/preoperacionales', titulo: 'Preoperacionales' },
-] as const;
+/**
+ * Un enlace por módulo. Qué módulos hay y en qué orden lo dice la tabla de
+ * permisos, no esta lista: aquí solo viven la ruta y el rótulo.
+ *
+ * Así el menú no puede desalinearse de la cerradura. Si algún día se añade un
+ * módulo a la tabla y se olvida aquí, TypeScript lo dice — el `Record` obliga a
+ * que estén los siete.
+ */
+const ENLACES = {
+  inicio: { ruta: '/panel', titulo: 'Inicio' },
+  obras: { ruta: '/panel/obras', titulo: 'Obras' },
+  personas: { ruta: '/panel/personas', titulo: 'Personas' },
+  vehiculos: { ruta: '/panel/vehiculos', titulo: 'Vehículos' },
+  asignaciones: { ruta: '/panel/asignaciones', titulo: 'Asignaciones' },
+  bitacoras: { ruta: '/panel/bitacoras', titulo: 'Bitácoras' },
+  preoperacionales: { ruta: '/panel/preoperacionales', titulo: 'Preoperacionales' },
+  // `as const` conserva las rutas como literales, que es lo que exigen las
+  // rutas tipadas de Expo Router; `satisfies` obliga a que estén los siete.
+} as const satisfies Record<Modulo, { ruta: string; titulo: string }>;
 
 export function BarraNavegacion() {
   const rutaActual = usePathname();
@@ -56,7 +68,8 @@ export function BarraNavegacion() {
         </View>
 
         <View style={estilos.enlaces}>
-          {ENLACES.map((enlace) => {
+          {modulosVisibles(persona?.rol ?? 'operador').map((modulo) => {
+            const enlace = ENLACES[modulo];
             const activo = rutaActual === enlace.ruta;
             return (
               <Link key={enlace.ruta} href={enlace.ruta} asChild>

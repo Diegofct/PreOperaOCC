@@ -11,6 +11,7 @@ import {
   vehiculoAlcanzable,
   yaProcesada,
 } from '@/features/servidor/ingesta';
+import { respuestaEnviada } from '@/features/servidor/envios';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { evaluarPreoperacional } from '@/shared/rules/inspeccion';
 import type {
@@ -42,18 +43,6 @@ import type {
  * se corrige anulándolo desde el panel y levantando otro.
  */
 
-const respuesta = z.object({
-  itemKey: z.string().min(1),
-  seccionKey: z.string().min(1),
-  label: z.string(),
-  sistema: z.string().nullish(),
-  tipo: z.string(),
-  inmoviliza: z.boolean(),
-  valor: z.string(),
-  observacion: z.string().nullish(),
-  respondidoEn: z.number().int().nonnegative().nullish(),
-});
-
 const envio = z.object({
   claveIdempotencia: z.string().trim().min(1).max(200),
   id: z.string().trim().min(1).max(64),
@@ -71,7 +60,7 @@ const envio = z.object({
   odometroKm: z.number().int().nonnegative().nullish(),
   horometroH: z.number().int().nonnegative().nullish(),
 
-  respuestas: z.array(respuesta),
+  respuestas: z.array(respuestaEnviada),
   // Conjunto cerrado: un resultado inventado no entra ni siquiera para
   // compararlo con el del servidor.
   resultado: z.enum(['apto', 'apto_con_observaciones', 'no_apto']).nullish(),

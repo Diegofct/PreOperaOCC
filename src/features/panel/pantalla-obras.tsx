@@ -75,6 +75,7 @@ export default function PantallaObras() {
 
   return (
     <MarcoPantalla
+      modulo="obras"
       titulo="Obras"
       descripcion="Los frentes de trabajo de OCC. Cada persona y cada máquina pertenece a uno."
       error={listado.error}

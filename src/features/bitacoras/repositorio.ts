@@ -23,6 +23,7 @@ import {
   type ActividadBitacora,
   type EstadoSync,
 } from '@/db/local/schema';
+import { drenarEnSegundoPlano } from '@/features/sync/motor';
 import { encolar } from '@/features/sync/outbox';
 import { esBitacoraCompleta, fechaLocalISO } from '@/shared/rules/jornada';
 
@@ -246,6 +247,9 @@ export async function cerrarBitacora(id: string, ahora = Date.now()): Promise<vo
   // A la cola con `refrescar`: la bitácora se edita durante el día, así que lo
   // que debe subir es la última versión — conservando su lugar en la fila.
   await encolar('bitacora', id, completa, { refrescar: true });
+
+  // Igual que al firmar un preoperacional: se intenta subir ya, sin esperar.
+  drenarEnSegundoPlano();
 
   if (completa.horometroFinal == null) return;
 

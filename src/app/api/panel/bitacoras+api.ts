@@ -6,7 +6,7 @@ import { fechaDeJornada } from '@/db/servidor/conversion';
 import { bitacoras, obras, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { bitacoraNueva, fechaDeJornadaZod } from '@/features/panel/contratos';
 import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -33,7 +33,7 @@ const llevaLaBitacora = aliasedTable(usuarios, 'lleva');
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'bitacoras', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const parametro = new URL(peticion.url).searchParams.get('fecha');
@@ -108,7 +108,7 @@ export async function GET(peticion: Request) {
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'bitacoras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const { vehiculoId, fecha } = await cuerpoJson(peticion, bitacoraNueva);

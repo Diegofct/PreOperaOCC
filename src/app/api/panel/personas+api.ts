@@ -5,7 +5,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { obras, usuarios } from '@/db/servidor/esquema';
 import { personaNueva } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -24,7 +24,7 @@ import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/
 
 export async function GET(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'personas', 'listar');
     if (sesion instanceof Response) return sesion;
 
     const filas = await baseServidor()
@@ -34,6 +34,7 @@ export async function GET(peticion: Request) {
         nombreCompleto: usuarios.nombreCompleto,
         documento: usuarios.documento,
         rol: usuarios.rol,
+        cargo: usuarios.cargo,
         obraId: usuarios.obraId,
         obraNombre: obras.nombre,
         activo: usuarios.activo,
@@ -51,7 +52,7 @@ export async function GET(peticion: Request) {
 
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const sesion = await requerirSesion(peticion);
+    const sesion = await requerirPermiso(peticion, 'personas', 'escribir');
     if (sesion instanceof Response) return sesion;
 
     const datos = await cuerpoJson(peticion, personaNueva);
