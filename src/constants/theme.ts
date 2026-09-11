@@ -7,24 +7,18 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
-} as const;
+// Los colores viven en un módulo sin React Native para poder comprobarlos
+// desde Node. Ver `paleta.ts`.
+export {
+  Captura,
+  Colors,
+  Estado,
+  Marca,
+  Panel,
+  type EstadoColor,
+  type ThemeColor,
+} from './paleta';
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({
   ios: {
@@ -60,7 +54,6 @@ export const Fonts = Platform.select({
  * la identidad de la app no debería mover el papel bajo una firma ya hecha. Pero
  * sí viven en un solo sitio, que es lo que faltaba.
  */
-export const Captura = { papel: '#FFFFFF', tinta: '#0F172A', visor: '#000000' } as const;
 
 export const Spacing = {
   half: 2,
@@ -94,22 +87,6 @@ export const MaxContentWidth = 800;
  */
 export const MaxContentWidthPanel = 1280;
 
-export const Panel = {
-  /** Línea que separa filas y delimita campos. */
-  borde: '#D5D8DE',
-  /** Separación interna, más tenue: entre filas de una misma tabla. */
-  bordeSuave: '#E9EBEF',
-  /** Fondo de la fila de encabezados y de los bloques de formulario. */
-  fondoCabecera: '#F5F6F8',
-  /** El lienzo detrás de las tarjetas. Da profundidad sin sombras pesadas. */
-  fondo: '#F7F8FA',
-  /** Fila alterna de una tabla larga: el ojo no se salta de renglón. */
-  fondoAlterno: '#FBFCFD',
-  /** Fila bajo el cursor. Solo existe en escritorio: en el móvil no hay puntero. */
-  fondoHover: '#EEF3FA',
-  /** Anillo de foco del teclado. Navegar sin ratón tiene que verse. */
-  foco: '#93C5FD',
-} as const;
 
 /**
  * Escala tipográfica del panel, **distinta a la de campo y a propósito**.
@@ -172,45 +149,7 @@ export const Movimiento = {
  * ---------------------------------------------------------------------- */
 
 /** Colores semánticos. El color nunca es la única señal: siempre va con ícono. */
-export const Estado = {
-  /** Conforme ✓ */
-  conforme: '#166534',
-  conformeFondo: '#DCFCE7',
-  /** No conforme ✕ */
-  noConforme: '#991B1B',
-  noConformeFondo: '#FEE2E2',
-  /** No aplica – */
-  na: '#4B5563',
-  naFondo: '#F1F5F9',
-  /** Advertencia: documento por vencer, mantenimiento próximo */
-  atencion: '#92400E',
-  atencionFondo: '#FEF3C7',
-  /** Informativo */
-  info: '#1E40AF',
-  infoFondo: '#DBEAFE',
-} as const;
 
-export type EstadoColor = keyof typeof Estado;
-
-export const Marca = {
-  /** Fondo de acciones primarias. Ya es el color del splash. */
-  primario: '#208AEF',
-  /** Variante para texto sobre blanco (el primario no alcanza 7:1). */
-  primarioTexto: '#0A4E92',
-  primarioPresionado: '#0B5FB0',
-  /** Fondo tenue del primario: pastillas, filas seleccionadas, avisos suaves. */
-  primarioSuave: '#E7F1FD',
-  /**
-   * Lo que va **encima** de una superficie de color: texto, íconos, indicadores.
-   *
-   * Estaba escrito como `'#FFFFFF'` en doce sitios distintos. No es "blanco": es
-   * "lo que contrasta con el primario o con el crítico", y el día que la marca
-   * cambie a un color claro esto tiene que cambiar con ella, en un solo sitio.
-   */
-  sobreColor: '#FFFFFF',
-  /** Reservado para lo que inmoviliza el vehículo. Si todo alerta, nada alerta. */
-  critico: '#991B1B',
-} as const;
 
 /**
  * Áreas táctiles en dp. Un guante de carnaza deja un área de contacto de

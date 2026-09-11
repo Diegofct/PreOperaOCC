@@ -1,6 +1,6 @@
 # Spec 001 — Permisos por rol en el panel
 
-> Estado: Aprobada · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09
 
 ## Contexto y objetivo
 

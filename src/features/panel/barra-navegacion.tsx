@@ -16,12 +16,12 @@
  */
 import { Link, usePathname } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   Colors,
-  Marca,
   MaxContentWidthPanel,
+  Panel,
   Movimiento,
   Radio,
   Spacing,
@@ -61,9 +61,13 @@ export function BarraNavegacion() {
     <View style={estilos.barra}>
       <View style={estilos.contenido}>
         <View style={estilos.marca}>
-          <View style={estilos.logotipo}>
-            <Text style={estilos.logotipoTexto}>OCC</Text>
-          </View>
+          <Image
+            source={require('@/../assets/obras_civiles_transparente.png')}
+            style={estilos.logotipo}
+            resizeMode="contain"
+            accessibilityLabel="Obras Civiles Colombianas"
+          />
+          <View style={estilos.separadorMarca} />
           <Text style={estilos.nombre}>PreOpera</Text>
         </View>
 
@@ -136,17 +140,26 @@ function Pastilla({ activa, children }: { activa: boolean; children: ReactNode }
   );
 }
 
-/**
- * Blanco translúcido sobre el azul de la barra.
- *
- * No sale de `Marca` a propósito: no es un color del sistema, es el mismo
- * `sobreColor` a media opacidad, y solo tiene sentido encima de esta barra.
- */
-const SOBRE_BARRA_TENUE = 'rgba(255, 255, 255, 0.16)';
-const SOBRE_BARRA_FUERTE = 'rgba(255, 255, 255, 0.24)';
-
 const estilos = StyleSheet.create({
-  barra: { backgroundColor: Marca.primario, paddingVertical: Spacing.two, alignItems: 'center' },
+  /**
+   * Barra blanca, y no de color.
+   *
+   * Dos razones, y la primera manda: el logotipo de OCC lleva «OBRAS» en negro y
+   * «CIVILES» en gris, y sobre un fondo oscuro la mitad del nombre desaparece.
+   * Está dibujado para vivir sobre claro.
+   *
+   * La segunda es la de siempre en esta aplicación: el rojo de la marca es el
+   * mismo con el que aquí se dice NO APTO. Una barra de color compitiendo con
+   * los estados le quita fuerza al único color que tiene que darla. El grafito
+   * queda para lo que se pulsa.
+   */
+  barra: {
+    backgroundColor: Colors.light.background,
+    paddingVertical: Spacing.two,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: Panel.borde,
+  },
   contenido: {
     width: '100%',
     maxWidth: MaxContentWidthPanel,
@@ -157,25 +170,12 @@ const estilos = StyleSheet.create({
     gap: Spacing.three,
   },
 
-  marca: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  // Un cuadro con las iniciales en vez de una imagen: no hay logotipo todavía, y
-  // el nombre solo, suelto en la barra, se lee como un texto más.
-  logotipo: {
-    width: 30,
-    height: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radio.sm,
-    borderCurve: 'continuous',
-    backgroundColor: SOBRE_BARRA_FUERTE,
-  },
-  logotipoTexto: {
-    fontSize: TextoPanel.micro,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    color: Marca.sobreColor,
-  },
-  nombre: { fontSize: TextoPanel.seccion, fontWeight: '800', color: Marca.sobreColor },
+  marca: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  /** El logotipo de OCC, con su propia transparencia. Se apoya en el blanco. */
+  logotipo: { width: 116, height: 36 },
+  /** Separa la marca de la empresa del nombre del sistema. No son lo mismo. */
+  separadorMarca: { width: 1, height: 24, backgroundColor: Panel.borde },
+  nombre: { fontSize: TextoPanel.seccion, fontWeight: '800', color: Colors.light.text },
 
   enlaces: {
     flex: 1,
@@ -191,19 +191,18 @@ const estilos = StyleSheet.create({
     borderCurve: 'continuous',
     transitionDuration: `${Movimiento.rapido}ms`,
   },
-  enlaceHover: { backgroundColor: SOBRE_BARRA_TENUE },
-  enlaceActivo: { backgroundColor: Colors.light.background },
+  enlaceHover: { backgroundColor: Panel.fondoCabecera },
+  enlaceActivo: { backgroundColor: Panel.accion },
   enlace: {
     fontSize: TextoPanel.cuerpo,
     fontWeight: '600',
-    color: Marca.sobreColor,
-    opacity: 0.9,
+    color: Colors.light.textSecondary,
   },
-  enlaceTextoActivo: { color: Marca.primarioTexto, opacity: 1, fontWeight: '700' },
+  enlaceTextoActivo: { color: Panel.sobreAccion, fontWeight: '700' },
 
   cuenta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  nombrePersona: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Marca.sobreColor },
-  cargo: { fontSize: TextoPanel.micro, color: Marca.sobreColor, opacity: 0.8 },
+  nombrePersona: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },
+  cargo: { fontSize: TextoPanel.micro, color: Colors.light.textSecondary },
 
   salir: {
     paddingHorizontal: Spacing.three,
@@ -211,8 +210,8 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.sm,
     borderCurve: 'continuous',
     borderWidth: 1,
-    borderColor: SOBRE_BARRA_FUERTE,
+    borderColor: Panel.borde,
     transitionDuration: `${Movimiento.rapido}ms`,
   },
-  salirTexto: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Marca.sobreColor },
+  salirTexto: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },
 });

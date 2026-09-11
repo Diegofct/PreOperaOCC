@@ -22,7 +22,18 @@ import { Colors, Estado, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
 import { api } from './cliente-api';
-import { Aviso, Boton, Celda, Etiqueta, Seccion, Selector, Tabla, type Columna } from './componentes';
+import {
+  Aviso,
+  BarraDeListado,
+  Boton,
+  Celda,
+  Etiqueta,
+  Paginacion,
+  Seccion,
+  Selector,
+  Tabla,
+  type Columna,
+} from './componentes';
 import {
   ETIQUETA_RESULTADO,
   type JornadaDePreoperacionales,
@@ -30,6 +41,7 @@ import {
   type VehiculoFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { DetallePreoperacional } from './detalle-preoperacional';
 
 function sumarDias(fecha: string, dias: number): string {
@@ -68,6 +80,22 @@ export default function PantallaPreoperacionales() {
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
 
   const dia = jornada.datos[0];
+
+  /**
+   * Buscar y filtrar lo firmado ese día.
+   *
+   * Con una obra y cinco máquinas sobra; con tres obras y cuarenta equipos, dar
+   * con el preoperacional de una volqueta concreta es leer la tabla entera.
+   */
+  const [resultadoFiltro, setResultadoFiltro] = useState<string | null>(null);
+  const filtrado = useListadoFiltrado(
+    dia?.preoperacionales ?? [],
+    (p) => [p.vehiculoCodigo, p.tipoNombre, p.operadorNombre, p.obraNombre],
+    useCallback(
+      (p: PreoperacionalFila) => resultadoFiltro === null || p.resultado === resultadoFiltro,
+      [resultadoFiltro],
+    ),
+  );
 
   if (abierto) {
     return (
@@ -182,11 +210,43 @@ export default function PantallaPreoperacionales() {
       ) : null}
 
       {dia ? (
-        <Seccion titulo={`Firmados este día (${dia.preoperacionales.length})`}>
+        <Seccion titulo="Firmados este día">
+          <BarraDeListado
+            busqueda={filtrado.busqueda}
+            onBuscar={filtrado.buscar}
+            total={filtrado.total}
+            mostradas={filtrado.coincidencias}
+          >
+            <Selector
+              etiqueta="Resultado"
+              valor={resultadoFiltro}
+              opciones={[
+                { valor: 'no_apto', etiqueta: 'NO APTO' },
+                { valor: 'apto_con_observaciones', etiqueta: 'Apto con observaciones' },
+                { valor: 'apto', etiqueta: 'Apto' },
+              ]}
+              onChange={setResultadoFiltro}
+              permiteVacio
+              vacio="Cualquier resultado"
+              ancho={230}
+            />
+          </BarraDeListado>
+
           <Tabla
             columnas={columnas}
-            filas={dia.preoperacionales}
-            vacio="Ningún preoperacional este día. Si el operador ya lo llenó, aparecerá en cuanto su celular agarre señal."
+            filas={filtrado.pagina}
+            vacio={
+              dia.preoperacionales.length === 0
+                ? 'Aquí aparecen los preoperacionales que firman los operadores en obra, con su firma y sus fotos. Ninguno este día: si el operador ya lo llenó, llegará en cuanto su celular agarre señal.'
+                : 'Ningún preoperacional coincide con lo que busca.'
+            }
+          />
+
+          <Paginacion
+            pagina={filtrado.paginaActual}
+            porPagina={POR_PAGINA}
+            total={filtrado.coincidencias}
+            onCambiar={filtrado.irAPagina}
           />
         </Seccion>
       ) : null}

@@ -11,10 +11,13 @@ import { useCallback, useState } from 'react';
 
 import { api } from './cliente-api';
 import {
+  Acciones,
   AccionesFormulario,
   Boton,
   Campo,
   Celda,
+  Confirmacion,
+  Confirmado,
   Etiqueta,
   Formulario,
   Seccion,
@@ -22,6 +25,7 @@ import {
   type Columna,
 } from './componentes';
 import { MarcoPantalla, useListado } from './marco';
+import { VentanaCorregirObra } from './ventana-obra';
 import type { ObraFila } from './contratos';
 
 export default function PantallaObras() {
@@ -31,11 +35,16 @@ export default function PantallaObras() {
   const [nombre, setNombre] = useState('');
   const [municipio, setMunicipio] = useState('');
 
+  const [editando, setEditando] = useState<ObraFila | null>(null);
+  const [porDarDeBaja, setPorDarDeBaja] = useState<ObraFila | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
   async function crear() {
     const creada = await listado.ejecutar(() =>
       api.obras.crear({ codigo, nombre, municipio, activa: true }),
     );
     if (creada) {
+      setHecho(nombre + ' quedó registrada.');
       setCodigo('');
       setNombre('');
       setMunicipio('');
@@ -62,13 +71,19 @@ export default function PantallaObras() {
     {
       clave: 'acciones',
       titulo: '',
-      ancho: 120,
+      ancho: 230,
       pintar: (o) => (
-        <Boton
-          titulo="Dar de baja"
-          tono="peligro"
-          onPress={() => listado.ejecutar(() => api.obras.darDeBaja(o.id))}
-        />
+        <Acciones>
+          <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(o)} />
+          <Boton
+            titulo="Dar de baja"
+            tono="peligro"
+            onPress={() => {
+              setHecho(null);
+              setPorDarDeBaja(o);
+            }}
+          />
+        </Acciones>
       ),
     },
   ];
@@ -92,11 +107,40 @@ export default function PantallaObras() {
         </Formulario>
       </Seccion>
 
+      <Confirmado mensaje={hecho} />
+
+      {porDarDeBaja ? (
+        <Confirmacion
+          aviso={porDarDeBaja.nombre + ' deja de aparecer y de poder recibir registros nuevos. No se borra: los preoperacionales, las bitácoras y los partes de esa obra siguen colgando de ella.'}
+          confirmar="Dar de baja"
+          onConfirmar={async () => {
+            const obra = porDarDeBaja;
+            setPorDarDeBaja(null);
+            const listo = await listado.ejecutar(() => api.obras.darDeBaja(obra.id));
+            if (listo) setHecho(obra.nombre + ' quedó dada de baja.');
+          }}
+          onCancelar={() => setPorDarDeBaja(null)}
+        />
+      ) : null}
+
+      {editando ? (
+        <VentanaCorregirObra
+          obra={editando}
+          onCerrar={() => setEditando(null)}
+          onGuardado={(nombreObra) => {
+            setEditando(null);
+            setHecho(nombreObra + ' quedó corregida.');
+            listado.recargar();
+          }}
+          onFallo={listado.setError}
+        />
+      ) : null}
+
       <Seccion titulo={`Obras registradas (${listado.datos.length})`}>
         <Tabla
           columnas={columnas}
           filas={listado.datos}
-          vacio="Todavía no hay ninguna obra. Registra la primera arriba."
+          vacio="Aquí van los frentes de trabajo de OCC. La obra es la raíz de todo lo demás: las personas pertenecen a una, los vehículos están en una, y sin al menos una registrada las otras pantallas no tienen dónde colgar nada. Registre la primera en el formulario de arriba."
         />
       </Seccion>
     </MarcoPantalla>

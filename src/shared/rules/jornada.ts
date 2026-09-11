@@ -118,3 +118,86 @@ export function maquinasSinBitacora(
 ): string[] {
   return vehiculoIds.filter((id) => completasPorVehiculo.get(id) !== true);
 }
+
+/* ------------------------------------------------------------------------ */
+/* El medidor de cada equipo (spec 004 / RF-10, RF-12, RF-43)                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * No toda máquina se mide en horas.
+ *
+ * Las funciones de arriba nacieron cuando la bitácora era de maquinaria amarilla
+ * y hablaban solo de horómetros. Desde la spec 003 la camioneta y la volqueta se
+ * controlan por kilómetros, y pedirles horas de motor era pedir un dato que su
+ * tablero no da: el residente acababa escribiendo cualquier cosa o dejándolo en
+ * blanco. Se conservan como están —las usa la bitácora vieja del celular— y lo
+ * genérico va aquí.
+ */
+export type ClaseDeMedidor = 'horometro' | 'odometro';
+
+/** Lo máximo que puede avanzar un medidor en un día. Por encima es un dedazo. */
+export const MAXIMO_AVANCE_POR_DIA: Record<ClaseDeMedidor, number> = {
+  horometro: MAXIMO_HORAS_POR_DIA,
+  // El mismo umbral que ya usa la validación del preoperacional para un salto
+  // sospechoso de odómetro.
+  odometro: 800,
+};
+
+export const UNIDAD_DE_MEDIDOR: Record<ClaseDeMedidor, string> = {
+  horometro: 'h',
+  odometro: 'km',
+};
+
+export const ETIQUETA_MEDIDOR: Record<ClaseDeMedidor, string> = {
+  horometro: 'Horómetro',
+  odometro: 'Odómetro',
+};
+
+/** Cuánto avanzó el medidor. `null` si falta una lectura o si retrocede. */
+export function avanceDeMedidor(inicial: number | null, final: number | null): number | null {
+  return horasDeMaquina(inicial, final);
+}
+
+/** Las mismas comprobaciones, con el tope que corresponde a la clase. */
+export function validarAvance(
+  clase: ClaseDeMedidor,
+  inicial: number | null,
+  final: number | null,
+): ErrorHorometros | null {
+  if (inicial === null) return 'falta_inicial';
+  if (final === null) return 'falta_final';
+  if (final < inicial) return 'final_menor';
+  if (final - inicial > MAXIMO_AVANCE_POR_DIA[clase]) return 'salto_enorme';
+  return null;
+}
+
+export function mensajeDeAvance(
+  clase: ClaseDeMedidor,
+  error: ErrorHorometros,
+  inicial: number | null,
+): string {
+  const unidad = UNIDAD_DE_MEDIDOR[clase];
+  switch (error) {
+    case 'falta_inicial':
+      return `Falta la lectura inicial (${unidad}).`;
+    case 'falta_final':
+      return `Falta la lectura final (${unidad}).`;
+    case 'final_menor':
+      return `La lectura final no puede ser menor que la inicial${
+        inicial === null ? '' : ` (${inicial} ${unidad})`
+      }.`;
+    case 'salto_enorme':
+      return `Son más de ${MAXIMO_AVANCE_POR_DIA[clase]} ${unidad} en un día. Revise las lecturas.`;
+  }
+}
+
+/**
+ * Qué medidor le corresponde a un tipo de equipo.
+ *
+ * `ambos` se resuelve como horómetro: hoy ningún tipo lo usa —la spec 003 pasó
+ * la camioneta y la volqueta a kilometraje—, pero el enum lo admite y hay que
+ * decidir algo antes que quedarse sin medidor.
+ */
+export function medidorDeClase(claseDelTipo: string | null | undefined): ClaseDeMedidor {
+  return claseDelTipo === 'odometro' ? 'odometro' : 'horometro';
+}

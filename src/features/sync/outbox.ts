@@ -24,6 +24,15 @@ import { siguienteIntento } from '@/shared/rules/reintentos';
  * escoge su máquina y eso tiene que llegar al panel para que alguien lo
  * confirme. Las demás entidades son capturas de trabajo.
  */
+/**
+ * Qué puede subir el celular.
+ *
+ * `bitacora` **ya no se encola**: la spec 004 retiró esa pantalla del teléfono y
+ * el parte diario se lleva en el panel. Se conserva el tipo, y con él su ruta de
+ * subida, por una razón concreta: un equipo que quedó con una bitácora cerrada y
+ * sin señal la tiene todavía en la cola, y quitar el tipo la dejaría varada para
+ * siempre. Cuando ese teléfono recupere red, la sube y la cola queda limpia.
+ */
 export type EntidadSincronizable = 'preoperacional' | 'bitacora' | 'media' | 'asignacion';
 
 /**

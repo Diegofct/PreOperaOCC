@@ -136,17 +136,25 @@ export function Boton({
   tono?: 'primario' | 'secundario' | 'peligro';
   deshabilitado?: boolean;
 }) {
+  /**
+   * El botón principal va en el grafito de OCC, no en su rojo.
+   *
+   * El rojo de la marca es el mismo con el que aquí se dice «peligro» y «NO
+   * APTO». Si el botón de guardar fuera rojo, el de dar de baja dejaría de
+   * distinguirse de él, y ese es un error que solo se descubre cuando alguien
+   * ya pulsó el que no era.
+   */
   const paleta = {
     primario: {
-      fondo: Marca.primario,
-      fondoActivo: Marca.primarioPresionado,
-      texto: Marca.sobreColor,
+      fondo: Panel.accion,
+      fondoActivo: Panel.accionPresionada,
+      texto: Panel.sobreAccion,
       borde: 'transparent',
     },
     secundario: {
       fondo: Colors.light.background,
       fondoActivo: Panel.fondoHover,
-      texto: Marca.primarioTexto,
+      texto: Panel.accion,
       borde: Panel.borde,
     },
     peligro: {
@@ -157,11 +165,15 @@ export function Boton({
     },
   }[tono];
 
+  const [enfocado, setEnfocado] = useState(false);
+
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
       disabled={deshabilitado}
+      onFocus={() => setEnfocado(true)}
+      onBlur={() => setEnfocado(false)}
       // `hovered` solo llega en web; en nativo es siempre falso y no estorba.
       style={({ pressed, hovered }) => [
         estilos.boton,
@@ -171,6 +183,9 @@ export function Boton({
           transitionDuration: `${Movimiento.rapido}ms`,
         },
         tono === 'primario' && !deshabilitado && { boxShadow: Sombra.tarjeta },
+        // Quien navega con el tabulador tiene que ver dónde está. Sin esto el
+        // panel se puede recorrer sin ratón, pero a ciegas.
+        enfocado && estilos.enfocado,
         deshabilitado && estilos.botonInactivo,
       ]}
     >
@@ -275,6 +290,9 @@ export function Selector({
   ancho?: number;
 }) {
   const [abierto, setAbierto] = useState(false);
+  // El foco se lleva aparte porque `focused` no está en los tipos de
+  // `Pressable`: solo existe en el React Native de la web.
+  const [enfocado, setEnfocado] = useState(false);
   const elegida = opciones.find((o) => o.valor === valor);
 
   return (
@@ -288,11 +306,15 @@ export function Selector({
       <Text style={estilos.campoEtiqueta}>{etiqueta}</Text>
       <Pressable
         onPress={() => setAbierto((a) => !a)}
+        onFocus={() => setEnfocado(true)}
+        onBlur={() => setEnfocado(false)}
         style={({ hovered }) => [
           estilos.campoEntrada,
           estilos.selectorBoton,
           hovered && estilos.campoHover,
-          abierto && estilos.campoEnfocado,
+          // Abierto o enfocado con el tabulador: en los dos casos hay que ver
+          // dónde está uno.
+          (abierto || enfocado) && estilos.campoEnfocado,
           error ? estilos.campoEntradaMal : null,
         ]}
       >
@@ -490,8 +512,377 @@ export function Tarjeta({ children }: { children: ReactNode }) {
   return <View style={estilos.tarjeta}>{children}</View>;
 }
 
+/**
+ * Una fila de un formulario largo, dentro de una sola tarjeta.
+ *
+ * El parte diario tiene siete secciones y cada una es una lista: máquinas,
+ * personas, actividades, tramos de clima, materiales. Con una tarjeta por fila
+ * —que es como estaba— la pantalla se convierte en una escalera de bloques
+ * blancos con sombra, y a la quinta ya no se distingue dónde acaba una máquina y
+ * empieza la siguiente.
+ *
+ * Aquí las filas viven dentro de la tarjeta de su sección, separadas por una
+ * línea fina. Es lo mismo que hace una tabla, con campos en vez de celdas.
+ */
+export function FilaDeFormulario({
+  children,
+  ultima = false,
+}: {
+  children: ReactNode;
+  /** La última no lleva línea abajo: si no, parece que falta algo debajo. */
+  ultima?: boolean;
+}) {
+  return <View style={[estilos.filaFormulario, !ultima && estilos.filaConLinea]}>{children}</View>;
+}
+
+/** La tarjeta que agrupa las filas de una sección y su pie de acciones. */
+export function Bloque({ children }: { children: ReactNode }) {
+  return <View style={estilos.bloque}>{children}</View>;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Cifras y medidores                                                        */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Una cifra grande con su rótulo y su pie.
+ *
+ * El pie no es decoración: una cifra sola no dice si está bien o mal. «14
+ * equipos» no significa nada; «14 equipos · 3 sin inspeccionar» sí.
+ */
+export function Cifra({
+  titulo,
+  valor,
+  pie,
+  tono = 'neutro',
+}: {
+  titulo: string;
+  valor: string;
+  pie?: string;
+  tono?: 'neutro' | 'bueno' | 'atencion' | 'malo';
+}) {
+  const color = {
+    neutro: Colors.light.text,
+    bueno: Estado.conforme,
+    atencion: Estado.atencion,
+    malo: Estado.noConforme,
+  }[tono];
+
+  return (
+    <View style={estilos.cifra}>
+      <Text style={estilos.cifraTitulo}>{titulo.toUpperCase()}</Text>
+      <Text style={[estilos.cifraValor, { color }]}>{valor}</Text>
+      {pie ? <Text style={estilos.cifraPie}>{pie}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * Una barra de porcentaje.
+ *
+ * Lleva **siempre el número escrito al lado**. El color solo acompaña: quien no
+ * distingue el verde del rojo tiene que poder leer lo mismo, y en una pantalla
+ * de obra con sol de frente el color es lo primero que se pierde.
+ */
+export function Medidor({
+  titulo,
+  porcentaje,
+  pie,
+}: {
+  titulo: string;
+  /** De 0 a 100, o `null` cuando la cifra no aplica. */
+  porcentaje: number | null;
+  pie?: string;
+}) {
+  const tono =
+    porcentaje === null
+      ? Panel.borde
+      : porcentaje >= 90
+        ? Estado.conforme
+        : porcentaje >= 60
+          ? Estado.atencion
+          : Estado.noConforme;
+
+  return (
+    <View style={estilos.medidor}>
+      <View style={estilos.medidorCabecera}>
+        <Text style={estilos.cifraTitulo}>{titulo.toUpperCase()}</Text>
+        <Text style={estilos.medidorValor}>
+          {porcentaje === null ? 'No aplica' : `${porcentaje}%`}
+        </Text>
+      </View>
+      <View style={estilos.medidorCarril}>
+        <View
+          style={[
+            estilos.medidorRelleno,
+            { width: `${porcentaje ?? 0}%`, backgroundColor: tono },
+          ]}
+        />
+      </View>
+      {pie ? <Text style={estilos.cifraPie}>{pie}</Text> : null}
+    </View>
+  );
+}
+
+/** Una fila de cifras que se reparte el ancho y baja de línea si no cabe. */
+export function Cifras({ children }: { children: ReactNode }) {
+  return <View style={estilos.cifras}>{children}</View>;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Ventana modal                                                             */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Una ventana sobre la pantalla, para editar sin perder de vista la lista.
+ *
+ * Se prefiere a llevar a otra pantalla porque editar es una corrección corta:
+ * ir y volver hace perder el sitio en una tabla de cincuenta filas, y quien
+ * corrige un dato normalmente va a corregir otro justo después.
+ *
+ * El telón cierra al pulsarlo, igual que el del `Selector`. Es lo que espera
+ * cualquiera y evita dejar a alguien atrapado si el botón de cerrar se pierde
+ * detrás de un formulario largo.
+ */
+export function Modal({
+  titulo,
+  children,
+  onCerrar,
+}: {
+  titulo: string;
+  children: ReactNode;
+  onCerrar: () => void;
+}) {
+  return (
+    <View style={estilos.telonModal}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onCerrar} />
+      <View style={estilos.ventana}>
+        <View style={estilos.ventanaCabecera}>
+          <Text style={estilos.ventanaTitulo}>{titulo}</Text>
+          <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
+        </View>
+        <View style={estilos.ventanaCuerpo}>{children}</View>
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Buscar y filtrar                                                          */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * La barra de encima de un listado: buscar, filtrar y saber cuántas filas hay.
+ *
+ * Va en una sola fila y encima de la tabla, no repartida: con los filtros
+ * dispersos nadie sabe cuáles están puestos, y una lista filtrada que parece
+ * completa es peor que una lista larga.
+ */
+export function BarraDeListado({
+  busqueda,
+  onBuscar,
+  total,
+  mostradas,
+  children,
+}: {
+  busqueda: string;
+  onBuscar: (texto: string) => void;
+  total: number;
+  mostradas: number;
+  /** Los selectores de filtro, si la pantalla tiene alguno. */
+  children?: ReactNode;
+}) {
+  return (
+    <View style={estilos.barra}>
+      <Campo etiqueta="Buscar" valor={busqueda} onChange={onBuscar} ancho={260} />
+      {children}
+      <View style={estilos.cuenta}>
+        <Text style={estilos.cuentaTexto}>
+          {mostradas === total
+            ? `${total} ${total === 1 ? 'registro' : 'registros'}`
+            : `${mostradas} de ${total}`}
+        </Text>
+        {busqueda.length > 0 || mostradas !== total ? (
+          <Boton titulo="Limpiar" tono="secundario" onPress={() => onBuscar('')} />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Recorrer una lista por partes.
+ *
+ * Aparece solo cuando hace falta: con dos páginas de nada, unos botones
+ * deshabilitados debajo de la tabla son ruido.
+ */
+export function Paginacion({
+  pagina,
+  porPagina,
+  total,
+  onCambiar,
+}: {
+  pagina: number;
+  porPagina: number;
+  total: number;
+  onCambiar: (pagina: number) => void;
+}) {
+  const paginas = Math.max(1, Math.ceil(total / porPagina));
+  if (paginas <= 1) return null;
+
+  return (
+    <View style={estilos.paginacion}>
+      <Boton
+        titulo="◀ Anterior"
+        tono="secundario"
+        onPress={() => onCambiar(pagina - 1)}
+        deshabilitado={pagina <= 1}
+      />
+      <Text style={estilos.cuentaTexto}>
+        Página {pagina} de {paginas}
+      </Text>
+      <Boton
+        titulo="Siguiente ▶"
+        tono="secundario"
+        onPress={() => onCambiar(pagina + 1)}
+        deshabilitado={pagina >= paginas}
+      />
+    </View>
+  );
+}
+
+/**
+ * Lo que se acaba de hacer, dicho sin interrumpir.
+ *
+ * No es un diálogo ni tapa nada: una confirmación que hay que cerrar convierte
+ * cada guardado en dos gestos, y a la tercera vez se pulsa sin leer.
+ */
+export function Confirmado({ mensaje }: { mensaje: string | null }) {
+  if (!mensaje) return null;
+  return <Aviso tono="exito">{mensaje}</Aviso>;
+}
+
 const estilos = StyleSheet.create({
   titulo: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
+
+  bloque: {
+    borderRadius: Radio.md,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: Panel.bordeSuave,
+    backgroundColor: Colors.light.background,
+    boxShadow: Sombra.tarjeta,
+    overflow: 'visible',
+  },
+  filaFormulario: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    gap: Spacing.three,
+    padding: Spacing.three,
+  },
+  filaConLinea: { borderBottomWidth: 1, borderBottomColor: Panel.bordeSuave },
+
+  cifras: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
+  cifra: {
+    flexGrow: 1,
+    flexBasis: 190,
+    minWidth: 190,
+    gap: Spacing.one,
+    padding: Spacing.three,
+    borderRadius: Radio.md,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: Panel.bordeSuave,
+    backgroundColor: Colors.light.background,
+    boxShadow: Sombra.tarjeta,
+  },
+  cifraTitulo: {
+    fontSize: TextoPanel.micro,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    color: Colors.light.textSecondary,
+    // Deja los números alineados aunque un rótulo ocupe dos renglones.
+    minHeight: 30,
+  },
+  cifraValor: { fontSize: TextoPanel.cifra, fontWeight: '800' },
+  cifraPie: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+
+  medidor: {
+    flexGrow: 1,
+    flexBasis: 280,
+    minWidth: 280,
+    gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radio.md,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: Panel.bordeSuave,
+    backgroundColor: Colors.light.background,
+    boxShadow: Sombra.tarjeta,
+  },
+  medidorCabecera: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
+  medidorValor: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
+  medidorCarril: {
+    height: 10,
+    borderRadius: Radio.pastilla,
+    backgroundColor: Panel.fondoCabecera,
+    overflow: 'hidden',
+  },
+  medidorRelleno: { height: '100%', borderRadius: Radio.pastilla },
+
+  telonModal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    // El telón oscurece lo de detrás sin ocultarlo: se sigue viendo de qué
+    // lista salió esta ventana.
+    backgroundColor: 'rgba(16, 24, 40, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.four,
+    zIndex: 100,
+  },
+  ventana: {
+    width: '100%',
+    maxWidth: 720,
+    maxHeight: '90%',
+    borderRadius: Radio.lg,
+    borderCurve: 'continuous',
+    backgroundColor: Colors.light.background,
+    boxShadow: Sombra.flotante,
+  },
+  ventanaCabecera: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+    padding: Spacing.four,
+    borderBottomWidth: 1,
+    borderBottomColor: Panel.bordeSuave,
+  },
+  ventanaTitulo: { fontSize: TextoPanel.seccion, fontWeight: '800', color: Colors.light.text },
+  ventanaCuerpo: { padding: Spacing.four, gap: Spacing.three },
+
+  barra: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: Spacing.three,
+    flexWrap: 'wrap',
+    zIndex: 2,
+  },
+  cuenta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.one },
+  cuentaTexto: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary, fontWeight: '600' },
+
+  paginacion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+    paddingTop: Spacing.two,
+  },
   ayuda: { fontSize: TextoPanel.apoyo, lineHeight: 20, color: Colors.light.textSecondary },
 
   aviso: {
@@ -577,7 +968,9 @@ const estilos = StyleSheet.create({
     outlineWidth: 0,
   },
   campoHover: { backgroundColor: Panel.fondoHover },
-  campoEnfocado: { borderColor: Marca.primario, boxShadow: `0 0 0 3px ${Panel.foco}` },
+  campoEnfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
+  /** El mismo anillo, para lo que se pulsa. */
+  enfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
   campoEntradaMal: { borderColor: Estado.noConforme },
   campoError: { fontSize: TextoPanel.apoyo, color: Estado.noConforme, fontWeight: '600' },
   campoAyuda: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
@@ -607,7 +1000,7 @@ const estilos = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Panel.bordeSuave,
   },
-  selectorOpcionElegida: { backgroundColor: Marca.primarioSuave },
+  selectorOpcionElegida: { backgroundColor: Panel.accionSuave },
 
   tablaMarco: {
     borderRadius: Radio.md,

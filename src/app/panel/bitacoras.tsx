@@ -1,1 +1,1 @@
-export { default } from '@/features/panel/pantalla-bitacoras';
+export { default } from '@/features/panel/pantalla-partes';

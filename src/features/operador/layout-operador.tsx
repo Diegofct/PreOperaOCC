@@ -1,18 +1,11 @@
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 
 import { Colors, Marca, Texto } from '@/constants/theme';
 import { ProveedorBaseLocal } from '@/db/local/provider';
 import { PantallaIngreso } from '@/features/auth/pantalla-ingreso';
 import { ProveedorSesion, useSesion } from '@/features/auth/sesion';
-import {
-  cancelarRecordatorio,
-  escucharToquesDeAviso,
-  prepararCanal,
-  programarRecordatorioDiario,
-} from '@/features/bitacoras/avisos';
 import { useSincronizacion } from '@/features/sync/usar-sincronizacion';
 
 /**
@@ -47,33 +40,9 @@ export default function LayoutOperador() {
  * Y nada de esto necesita red — el PIN se valida contra el propio equipo.
  */
 function Puerta() {
-  const { estado, usuario } = useSesion();
-  const router = useRouter();
-
-  useEffect(() => {
-    void prepararCanal();
-  }, []);
-
-  /**
-   * El recordatorio diario es solo para quien lleva las bitácoras. Se programa
-   * al abrir sesión y se apaga al cerrarla: un equipo que cambió de dueño no
-   * debe seguir avisándole al anterior.
-   */
-  const llevaBitacoras = usuario != null && usuario.rol !== 'operador';
-  useEffect(() => {
-    if (!llevaBitacoras) {
-      void cancelarRecordatorio();
-      return;
-    }
-    void programarRecordatorioDiario();
-  }, [llevaBitacoras]);
-
-  // Tocar el aviso lleva al inicio, que es donde está la lista de máquinas con
-  // lo que falta por registrar.
-  useEffect(() => {
-    if (estado !== 'abierta') return;
-    return escucharToquesDeAviso(() => router.push('/'));
-  }, [estado, router]);
+  // Los recordatorios diarios se fueron con la bitácora del celular (spec 004):
+  // avisaban a quien llevaba las bitácoras, y eso ahora se hace en el panel.
+  const { estado } = useSesion();
 
   /**
    * La bajada de datos corre aquí y no en `ProveedorBaseLocal`.
