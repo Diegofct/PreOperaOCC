@@ -1,6 +1,6 @@
 # Spec 003 — Vehículos: tipos, medidores y llantas
 
-> Estado: Borrador · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09
 
 ## Contexto y objetivo
 

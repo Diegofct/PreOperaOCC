@@ -192,6 +192,7 @@ export interface VehiculoFila {
   placa: string | null;
   tipoVehiculoId: string;
   tipoNombre: string;
+  claseMedidor: 'odometro' | 'horometro' | 'ambos';
   marca: string | null;
   modelo: string | null;
   obraId: string | null;
@@ -545,4 +546,193 @@ export interface LlantaFila {
   porcentajeDesgaste: number | null;
   retiradaEn: string | null;
   motivoRetiro: string | null;
+}
+
+/* ------------------------------------------------------------------------ */
+/* El parte diario de obra (spec 004)                                        */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Cada sección llega entera y se reemplaza entera.
+ *
+ * No se mandan altas y bajas por separado: el parte se edita como un formulario,
+ * no como una lista viva, y reemplazar la sección completa evita tener que
+ * resolver en el servidor qué fila se borró. El servidor **reconstruye** cada
+ * fila con el nombre del vehículo, de la persona y del material que tengan ese
+ * día, así que lo que mande el navegador en esos campos se ignora.
+ */
+const numeroOpcional = (campo: string) =>
+  z
+    .number()
+    .min(0, `${campo} no puede ser negativo.`)
+    .nullish()
+    .transform((v) => v ?? null);
+
+/** "HH:MM". Es lo que teclea quien llena el parte. */
+const horaDelDia = z
+  .string()
+  .trim()
+  .regex(/^\d{1,2}:\d{2}$/, 'La hora va como HH:MM.');
+
+export const maquinaDelParte = z.object({
+  vehiculoId: textoObligatorio(64, 'el equipo'),
+  /** Horas u odómetro según el equipo: lo decide el servidor por su tipo. */
+  medidorInicial: medidorParcial,
+  medidorFinal: medidorParcial,
+});
+
+export const personaDelParte = z.object({
+  usuarioId: textoObligatorio(64, 'la persona'),
+  entrada: horaDelDia,
+  salida: horaDelDia,
+});
+
+export const actividadDelParte = z.object({
+  /**
+   * El id de la fila, cuando ya existía.
+   *
+   * Es lo que permite colgarle una fotografía: sin esto el servidor generaba un
+   * id nuevo en cada guardado y la foto quedaba apuntando a una actividad que
+   * ya no existía. Las demás secciones no lo necesitan porque no llevan
+   * adjuntos.
+   */
+  id: idParcial,
+  clave: textoObligatorio(60, 'la actividad'),
+  /** Solo cuando la actividad es «otra»: qué fue. */
+  texto: textoOpcional(120),
+  descripcion: textoOpcional(400).transform((v) => v ?? ''),
+  observaciones: textoOpcional(400).transform((v) => v ?? ''),
+  longitud: numeroOpcional('La longitud'),
+  ancho: numeroOpcional('El ancho'),
+  alto: numeroOpcional('El alto'),
+  area: numeroOpcional('El área'),
+  volumen: numeroOpcional('El volumen'),
+});
+
+export const franjaDeClima = z.object({
+  condicion: textoObligatorio(40, 'la condición del clima'),
+  desde: horaDelDia,
+  hasta: horaDelDia,
+});
+
+export const materialDelParte = z.object({
+  material: textoObligatorio(60, 'el material'),
+  cantidad: z
+    .number()
+    .positive('La cantidad tiene que ser mayor que cero.')
+    .max(100_000, 'Esa cantidad no parece de una obra.'),
+});
+
+export const parteEditado = z.object({
+  maquinaria: z.array(maquinaDelParte).max(40).optional(),
+  personal: z.array(personaDelParte).max(80).optional(),
+  actividades: z.array(actividadDelParte).max(40).optional(),
+  clima: z.array(franjaDeClima).max(12).optional(),
+  laboratorio: z.array(materialDelParte).max(40).optional(),
+  notas: textoOpcional(4000),
+});
+
+export type ParteEditado = z.input<typeof parteEditado>;
+
+export interface MaquinaDelParteFila {
+  id: string;
+  vehiculoId: string;
+  codigo: string;
+  claseMedidor: 'horometro' | 'odometro';
+  medidorInicial: number | null;
+  medidorFinal: number | null;
+}
+
+export interface PersonaDelParteFila {
+  id: string;
+  usuarioId: string;
+  nombre: string;
+  cargo: string | null;
+  entrada: string | null;
+  salida: string | null;
+}
+
+export interface ActividadDelParteFila {
+  id: string;
+  clave: string;
+  nombre: string;
+  descripcion: string;
+  observaciones: string;
+  longitud: number | null;
+  ancho: number | null;
+  alto: number | null;
+  area: number | null;
+  volumen: number | null;
+}
+
+export interface FranjaDeClimaFila {
+  id: string;
+  condicion: string;
+  nombre: string;
+  desde: string;
+  hasta: string;
+}
+
+export interface MaterialDelParteFila {
+  id: string;
+  material: string;
+  nombre: string;
+  cantidad: number;
+  unidad: string;
+}
+
+export interface ParteFila {
+  id: string;
+  obraId: string;
+  obraNombre: string | null;
+  fecha: string;
+  usuarioNombre: string | null;
+  maquinaria: MaquinaDelParteFila[];
+  personal: PersonaDelParteFila[];
+  actividades: ActividadDelParteFila[];
+  clima: FranjaDeClimaFila[];
+  laboratorio: MaterialDelParteFila[];
+  notas: string | null;
+  cerradoEn: string | null;
+  anuladoEn: string | null;
+  motivoAnulacion: string | null;
+}
+
+/** Lo que devuelve la consulta de un día: el parte y con qué llenarlo. */
+export interface DiaDeObra {
+  fecha: string;
+  partes: ParteFila[];
+}
+
+/* ------------------------------------------------------------------------ */
+/* El resumen del inicio (spec 005)                                          */
+/* ------------------------------------------------------------------------ */
+
+export type PeriodoResumen = 'hoy' | 'semana' | 'mes';
+
+export const ETIQUETA_PERIODO: Record<PeriodoResumen, string> = {
+  hoy: 'Hoy',
+  semana: 'Última semana',
+  mes: 'Último mes',
+};
+
+export interface ResumenFila {
+  periodo: PeriodoResumen;
+  desde: string;
+  hasta: string;
+  obras: number;
+  equipos: number;
+  /** De 0 a 100, o `null` si no hay equipos: sin flota no se incumple nada. */
+  cumplimiento: number | null;
+  inspeccionadosHoy: number;
+  sinInspeccionar: number;
+  noAptos: number;
+  /** Horas de motor. **No se suman con los kilómetros**: son dos unidades. */
+  horasMaquina: number;
+  kilometros: number;
+  partes: number;
+  partesCerrados: number;
+  minutosPersonal: number;
+  minutosExtra: number;
+  personasContadas: number;
 }

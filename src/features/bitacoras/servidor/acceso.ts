@@ -10,7 +10,7 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { bitacoras } from '@/db/servidor/esquema';
+import { bitacoras, partesDeObra } from '@/db/servidor/esquema';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
@@ -50,4 +50,38 @@ export async function rechazoSiNoEsEditable(
     );
   }
   return null;
+}
+
+/**
+ * ¿Se puede escribir todavía en este parte de obra? (spec 004)
+ *
+ * Vive aquí y no dentro de la ruta porque lo comparten el guardado, el cierre y
+ * la anulación. Una ruta importando a otra ruta funciona, pero deja al
+ * enrutador evaluando un módulo de ruta por un ayudante, que es justo la clase
+ * de cadena de imports que este proyecto evita.
+ */
+export async function parteEditable(
+  sesion: PersonaEnSesion,
+  id: string,
+): Promise<Response | { obraId: string; fecha: string }> {
+  const [fila] = await baseServidor()
+    .select({
+      obraId: partesDeObra.obraId,
+      fecha: partesDeObra.fecha,
+      cerradoEn: partesDeObra.cerradoEn,
+      anuladoEn: partesDeObra.anuladoEn,
+    })
+    .from(partesDeObra)
+    .where(eq(partesDeObra.id, id))
+    .limit(1);
+
+  if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('ese parte');
+  if (fila.anuladoEn) return errorDePeticion('Ese parte está anulado.', 409);
+  if (fila.cerradoEn) {
+    return errorDePeticion(
+      'Ese parte ya está cerrado. Para corregirlo hay que anularlo y abrir otro.',
+      409,
+    );
+  }
+  return { obraId: fila.obraId, fecha: fila.fecha };
 }

@@ -1,282 +1,377 @@
 /**
  * La portada del panel.
  *
- * Su trabajo es responder de un vistazo "¿está esto listo para trabajar?". El
- * orden de las tarjetas es el de las dependencias reales —sin obra no se puede
- * colocar un vehículo, sin vehículo y sin operador no hay asignación, y la
- * bitácora necesita las tres— y por eso la que está incompleta se señala: es el
- * siguiente paso, no un adorno.
+ * Antes contaba filas: cuántas obras, cuántas personas, cuántos vehículos. La
+ * gerencia entraba a saber cómo iba la operación y salía sabiendo cuántas obras
+ * había registradas, que es un dato que ya sabía.
+ *
+ * ── Dos portadas, no una filtrada ──
+ *
+ * La gerencia entra a saber **cómo va la operación**; el residente, a saber
+ * **qué le falta por hacer hoy**. Son dos preguntas distintas y por eso son dos
+ * pantallas distintas: al residente, un tablero de rendimiento le esconde lo
+ * único que tiene que mirar antes de que se acabe la jornada.
+ *
+ * ── Lo que no se mezcla ──
+ *
+ * Las horas de motor y los kilómetros van separados. Desde la spec 003 la
+ * camioneta y la volqueta se miden en kilómetros y la maquinaria amarilla en
+ * horas de motor; sumarlos daría un número que no significa nada.
+ *
+ * ── Lo que no se mide, y por qué ──
+ *
+ * Las horas improductivas no están. Estaban previstas hasta que la spec 004
+ * cambió el modelo: en la bitácora por máquina las actividades colgaban de un
+ * equipo, y en el parte de obra la maquinaria y las actividades son secciones
+ * separadas. Sin un vínculo entre ellas, cualquier cifra de improductividad
+ * sería inventada.
  */
 import { Link } from 'expo-router';
-import { useCallback, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import {
-  Colors,
-  Movimiento,
-  Panel,
-  Radio,
-  Sombra,
-  Spacing,
-  TextoPanel,
-} from '@/constants/theme';
-import { fechaDeJornada } from '@/shared/rules/jornada';
+import { Spacing } from '@/constants/theme';
+import { horasLegibles } from '@/shared/rules/horas';
 import { alcanza } from '@/shared/rules/permisos';
 
 import { api } from './cliente-api';
-import { Aviso, Seccion } from './componentes';
-import type {
-  AsignacionFila,
-  JornadaDePreoperacionales,
-  JornadaFila,
-  ObraFila,
-  PersonaFila,
-  VehiculoFila,
+import {
+  Acciones,
+  Aviso,
+  Boton,
+  Celda,
+  Cifra,
+  Cifras,
+  Medidor,
+  Seccion,
+  Tabla,
+  type Columna,
+} from './componentes';
+import {
+  ETIQUETA_PERIODO,
+  type AsignacionFila,
+  type PeriodoResumen,
+  type ResumenFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
 import { usePersona } from './sesion';
 
-/** «1 operador», no «1 operadores»: la portada se lee todos los días. */
-function plural(cantidad: number, singular: string, plural: string): string {
-  return `${cantidad} ${cantidad === 1 ? singular : plural}`;
+/** Una cifra del resumen, tal como se lee en la tabla equivalente. */
+interface FilaResumen {
+  id: string;
+  concepto: string;
+  valor: string;
 }
 
 export default function PantallaInicioPanel() {
   const persona = usePersona();
   const rol = persona?.rol ?? 'operador';
+  const esGerencia = alcanza(rol, 'obras', 'escribir');
 
-  // El residente no alcanza el listado de obras, así que ni se pide: pedirlo
-  // devolvería un 403 y el inicio entero se pintaría con un error en rojo por
-  // un dato que además no le sirve. Personas y vehículos sí los alcanza —los
-  // necesitan Asignaciones y Bitácoras—, por eso esos dos sí se piden siempre.
-  const veObras = alcanza(rol, 'obras', 'listar');
-  const obras = useListado<ObraFila>(
-    useCallback(() => (veObras ? api.obras.listar() : Promise.resolve([])), [veObras]),
-  );
-  const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
-  const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
-  const asignaciones = useListado<AsignacionFila>(useCallback(() => api.asignaciones.listar(), []));
-  const jornada = useListado<JornadaFila>(
-    useCallback(async () => [await api.bitacoras.delDia(fechaDeJornada())], []),
-  );
-  const inspecciones = useListado<JornadaDePreoperacionales>(
-    useCallback(async () => [await api.preoperacionales.delDia(fechaDeJornada())], []),
+  const [periodo, setPeriodo] = useState<PeriodoResumen>('hoy');
+
+  const resumen = useListado<ResumenFila>(
+    useCallback(async () => [await api.resumen.de(periodo)], [periodo]),
   );
 
-  const sinConfirmar = asignaciones.datos.filter(
-    (a) => a.origen === 'autoasignada' && a.hasta === null,
-  ).length;
+  // El residente necesita saber si alguien tomó una máquina sin asignación; la
+  // gerencia lo ve en su módulo. Solo se pide donde se usa.
+  const asignaciones = useListado<AsignacionFila>(
+    useCallback(
+      () => (esGerencia ? Promise.resolve([]) : api.asignaciones.listar()),
+      [esGerencia],
+    ),
+  );
 
-  const sinBitacora = jornada.datos[0]?.pendientes.length ?? 0;
-
-  const delDia = inspecciones.datos[0];
-  const noAptos =
-    delDia?.preoperacionales.filter((p) => p.resultado === 'no_apto' && !p.anuladoEn).length ?? 0;
-  const sinInspeccionar = delDia?.pendientes.length ?? 0;
-
-  // Ninguna cifra ni ningún atajo de un módulo al que este rol no entra: un
-  // enlace que lleva a un aviso de «esto no es suyo» es peor que no estar.
-  const tarjetas = [
-    {
-      modulo: 'obras' as const,
-      ruta: '/panel/obras' as const,
-      titulo: 'Obras',
-      total: obras.datos.length,
-      pie: 'Frentes de trabajo',
-    },
-    {
-      modulo: 'personas' as const,
-      ruta: '/panel/personas' as const,
-      titulo: 'Personas',
-      total: personas.datos.length,
-      pie: plural(personas.datos.filter((p) => p.rol === 'operador').length, 'operador', 'operadores'),
-    },
-    {
-      modulo: 'vehiculos' as const,
-      ruta: '/panel/vehiculos' as const,
-      titulo: 'Vehículos',
-      total: vehiculos.datos.length,
-      pie: 'Maquinaria registrada',
-    },
-    {
-      modulo: 'asignaciones' as const,
-      ruta: '/panel/asignaciones' as const,
-      titulo: 'Asignaciones',
-      total: asignaciones.datos.filter((a) => a.hasta === null).length,
-      pie: 'Vigentes',
-    },
-    {
-      modulo: 'bitacoras' as const,
-      ruta: '/panel/bitacoras' as const,
-      titulo: 'Bitácoras de hoy',
-      total: jornada.datos[0]?.bitacoras.length ?? 0,
-      pie:
-        sinBitacora === 0
-          ? 'Ninguna máquina pendiente'
-          : `${plural(sinBitacora, 'máquina', 'máquinas')} sin abrir`,
-    },
-    {
-      modulo: 'preoperacionales' as const,
-      ruta: '/panel/preoperacionales' as const,
-      titulo: 'Preoperacionales de hoy',
-      total: delDia?.preoperacionales.length ?? 0,
-      pie: noAptos === 0 ? 'Ninguno NO APTO' : `${noAptos} NO APTO`,
-    },
-  ].filter((tarjeta) => alcanza(rol, tarjeta.modulo, 'ver'));
-
-  // Habla de registrar obras, maquinaria y personas: es la lista de tareas de
-  // la gerencia, no la del residente.
-  const siguientePaso = !alcanza(rol, 'obras', 'escribir')
-    ? null
-    : obras.datos.length === 0
-      ? 'Empieza registrando una obra: todo lo demás cuelga de ella.'
-      : vehiculos.datos.length === 0
-        ? 'Ya hay obra. El siguiente paso es registrar la maquinaria.'
-        : personas.datos.length === 0
-          ? 'Falta registrar a los operadores.'
-          : asignaciones.datos.filter((a) => a.hasta === null).length === 0
-            ? 'Solo falta asignarle una máquina a cada operador.'
-            : null;
+  const datos = resumen.datos[0];
 
   return (
     <MarcoPantalla
-      titulo="Administración"
+      modulo="inicio"
+      titulo={esGerencia ? 'Cómo va la operación' : 'Su obra hoy'}
       descripcion={
-        alcanza(rol, 'obras', 'escribir')
-          ? 'Desde aquí se registran las obras, las personas, la maquinaria y sus asignaciones. Lo que se registre acá es lo que verá el operador en su celular.'
-          : 'Cómo va hoy su obra: qué máquinas están asignadas, qué bitácoras faltan por cerrar y qué preoperacionales llegaron del campo.'
+        esGerencia
+          ? 'Lo que están haciendo las obras: qué se inspeccionó, cuánto trabajaron las máquinas y la gente, y qué quedó sin cerrar.'
+          : 'Lo que falta por hacer hoy en su obra. Lo de arriba es lo que no puede quedarse sin resolver antes de que termine la jornada.'
       }
-      error={
-        obras.error ??
-        personas.error ??
-        vehiculos.error ??
-        asignaciones.error ??
-        jornada.error ??
-        inspecciones.error
-      }
-      cargando={
-        obras.cargando ||
-        personas.cargando ||
-        vehiculos.cargando ||
-        asignaciones.cargando ||
-        jornada.cargando ||
-        inspecciones.cargando
-      }
+      error={resumen.error ?? asignaciones.error}
+      cargando={resumen.cargando}
     >
-      {siguientePaso ? <Aviso tono="info">{siguientePaso}</Aviso> : null}
+      {!datos ? null : esGerencia ? (
+        <VistaGerencia datos={datos} periodo={periodo} onPeriodo={setPeriodo} />
+      ) : (
+        <VistaResidente
+          datos={datos}
+          sinConfirmar={
+            asignaciones.datos.filter((a) => a.origen === 'autoasignada' && a.hasta === null)
+              .length
+          }
+        />
+      )}
+    </MarcoPantalla>
+  );
+}
 
-      {sinInspeccionar > 0 ? (
-        <Aviso tono="error">
-          {sinInspeccionar === 1
-            ? 'Hoy hay 1 máquina sin preoperacional. Si está trabajando, se está usando sin inspeccionar.'
-            : `Hoy hay ${sinInspeccionar} máquinas sin preoperacional. Si están trabajando, se están usando sin inspeccionar.`}
+/* ------------------------------------------------------------------------ */
+/* Gerencia                                                                  */
+/* ------------------------------------------------------------------------ */
+
+function VistaGerencia({
+  datos,
+  periodo,
+  onPeriodo,
+}: {
+  datos: ResumenFila;
+  periodo: PeriodoResumen;
+  onPeriodo: (periodo: PeriodoResumen) => void;
+}) {
+  const vacio =
+    datos.partes === 0 && datos.inspeccionadosHoy === 0 && datos.horasMaquina === 0;
+
+  return (
+    <>
+      <Seccion titulo="Periodo">
+        <Acciones>
+          {(['hoy', 'semana', 'mes'] as const).map((p) => (
+            <Boton
+              key={p}
+              titulo={ETIQUETA_PERIODO[p]}
+              tono={p === periodo ? 'primario' : 'secundario'}
+              onPress={() => onPeriodo(p)}
+            />
+          ))}
+        </Acciones>
+      </Seccion>
+
+      {vacio ? (
+        <Aviso tono="info">
+          No hay nada registrado en este periodo. Puede ser que todavía no se haya trabajado, o
+          que los partes y los preoperacionales del celular no hayan llegado: el teléfono sube
+          cuando encuentra señal.
         </Aviso>
       ) : null}
 
-      {sinBitacora > 0 ? (
+      {datos.noAptos > 0 ? (
         <Aviso tono="error">
-          {sinBitacora === 1
-            ? 'Hoy queda 1 máquina sin bitácora. Ábrala antes de que termine la jornada: reconstruirla después es adivinar.'
-            : `Hoy quedan ${sinBitacora} máquinas sin bitácora. Ábralas antes de que termine la jornada: reconstruirlas después es adivinar.`}
+          {datos.noAptos === 1
+            ? 'Hay 1 equipo que hoy quedó NO APTO. No debería estar trabajando.'
+            : `Hay ${datos.noAptos} equipos que hoy quedaron NO APTOS. No deberían estar trabajando.`}
+        </Aviso>
+      ) : null}
+
+      <Seccion titulo="Preoperacionales de hoy">
+        <Cifras>
+          <Medidor
+            titulo="Cumplimiento"
+            porcentaje={datos.cumplimiento}
+            pie={
+              datos.cumplimiento === null
+                ? 'Todavía no hay equipos registrados.'
+                : `${datos.inspeccionadosHoy} de ${datos.equipos} equipos inspeccionados`
+            }
+          />
+          <Cifra
+            titulo="Sin inspeccionar"
+            valor={String(datos.sinInspeccionar)}
+            pie={datos.sinInspeccionar === 0 ? 'Ninguno pendiente' : 'Si están trabajando, es sin revisar'}
+            tono={datos.sinInspeccionar === 0 ? 'bueno' : 'malo'}
+          />
+          <Cifra
+            titulo="Equipos NO APTOS"
+            valor={String(datos.noAptos)}
+            pie={datos.noAptos === 0 ? 'Ninguno' : 'Inmovilizados por el formato'}
+            tono={datos.noAptos === 0 ? 'bueno' : 'malo'}
+          />
+        </Cifras>
+      </Seccion>
+
+      <Seccion titulo={`Trabajo registrado · ${ETIQUETA_PERIODO[periodo].toLowerCase()}`}>
+        <Cifras>
+          <Cifra
+            titulo="Horas de máquina"
+            valor={`${datos.horasMaquina} h`}
+            pie="Maquinaria amarilla, por horómetro"
+          />
+          <Cifra
+            titulo="Kilómetros"
+            valor={`${datos.kilometros} km`}
+            pie="Camionetas y volquetas, por odómetro"
+          />
+          <Cifra
+            titulo="Horas de personal"
+            valor={horasLegibles(datos.minutosPersonal)}
+            pie={
+              datos.minutosExtra === 0
+                ? 'Sin horas extra'
+                : `${horasLegibles(datos.minutosExtra)} extra`
+            }
+            tono={datos.minutosExtra === 0 ? 'neutro' : 'atencion'}
+          />
+          <Cifra
+            titulo="Partes de obra"
+            valor={`${datos.partesCerrados} de ${datos.partes}`}
+            pie={
+              datos.partes === datos.partesCerrados
+                ? 'Todos cerrados'
+                : 'Sin cerrar: reconstruirlos después es adivinar'
+            }
+            tono={datos.partes === datos.partesCerrados ? 'bueno' : 'atencion'}
+          />
+        </Cifras>
+      </Seccion>
+
+      <TablaEquivalente datos={datos} />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Residente                                                                 */
+/* ------------------------------------------------------------------------ */
+
+function VistaResidente({ datos, sinConfirmar }: { datos: ResumenFila; sinConfirmar: number }) {
+  const todoEnOrden =
+    datos.sinInspeccionar === 0 &&
+    datos.noAptos === 0 &&
+    sinConfirmar === 0 &&
+    datos.partes === datos.partesCerrados;
+
+  return (
+    <>
+      {todoEnOrden ? (
+        <Aviso tono="exito">
+          Hoy no queda nada pendiente en su obra: todos los equipos tienen su preoperacional y el
+          parte del día está cerrado.
+        </Aviso>
+      ) : null}
+
+      {datos.noAptos > 0 ? (
+        <Aviso tono="error">
+          {datos.noAptos === 1
+            ? 'Un equipo quedó NO APTO hoy. No debe seguir trabajando hasta que se resuelva.'
+            : `${datos.noAptos} equipos quedaron NO APTOS hoy. No deben seguir trabajando.`}
+        </Aviso>
+      ) : null}
+
+      {datos.sinInspeccionar > 0 ? (
+        <Aviso tono="error">
+          {datos.sinInspeccionar === 1
+            ? 'Queda 1 máquina sin preoperacional. Si está trabajando, se está usando sin inspeccionar.'
+            : `Quedan ${datos.sinInspeccionar} máquinas sin preoperacional. Si están trabajando, se están usando sin inspeccionar.`}
         </Aviso>
       ) : null}
 
       {sinConfirmar > 0 ? (
         <Aviso tono="error">
           {sinConfirmar === 1
-            ? 'Un operador tomó una máquina en obra sin asignación previa. Revísala en Asignaciones.'
-            : `${sinConfirmar} operadores tomaron máquinas en obra sin asignación previa. Revísalas en Asignaciones.`}
+            ? 'Un operador tomó una máquina sin asignación previa. Confírmela en Asignaciones.'
+            : `${sinConfirmar} operadores tomaron máquinas sin asignación previa. Confírmelas en Asignaciones.`}
         </Aviso>
       ) : null}
 
-      <Seccion titulo="Resumen">
-        <View style={estilos.tarjetas}>
-          {tarjetas.map((tarjeta) => (
-            // `asChild` es obligatorio aquí: un `Link` sin él se comporta como
-            // un texto, y los tres renglones de la tarjeta saldrían pegados en
-            // una sola línea. Con `asChild` el enlace cede el render al
-            // `Pressable`, que sí apila.
-            <Link key={tarjeta.ruta} href={tarjeta.ruta} asChild>
-              <Pressable style={estilos.enlaceTarjeta}>
-                <TarjetaResumen>
-                  <Text style={estilos.tarjetaTitulo}>{tarjeta.titulo}</Text>
-                  <Text style={estilos.tarjetaTotal}>{tarjeta.total}</Text>
-                  <Text style={estilos.tarjetaPie}>{tarjeta.pie}</Text>
-                </TarjetaResumen>
-              </Pressable>
-            </Link>
-          ))}
-        </View>
+      <Seccion titulo="Lo de hoy">
+        <Cifras>
+          <Cifra
+            titulo="Sin preoperacional"
+            valor={String(datos.sinInspeccionar)}
+            pie={datos.sinInspeccionar === 0 ? 'Ninguna pendiente' : 'Levántelos antes de que arranquen'}
+            tono={datos.sinInspeccionar === 0 ? 'bueno' : 'malo'}
+          />
+          <Cifra
+            titulo="Parte del día"
+            valor={datos.partesCerrados > 0 ? 'Cerrado' : datos.partes > 0 ? 'Abierto' : 'Sin abrir'}
+            pie={
+              datos.partesCerrados > 0
+                ? 'Nada más que hacer'
+                : 'Ciérrelo antes de que termine la jornada'
+            }
+            tono={datos.partesCerrados > 0 ? 'bueno' : 'atencion'}
+          />
+          <Cifra
+            titulo="Equipos de su obra"
+            valor={String(datos.equipos)}
+            pie={`${datos.inspeccionadosHoy} inspeccionados hoy`}
+          />
+        </Cifras>
       </Seccion>
 
-      <Seccion titulo="Cómo llegan las firmas y las fotos">
-        <Text style={estilos.nota}>
-          El preoperacional llega completo, con la firma del operador, en cuanto su celular agarra
-          señal. Las fotos de los hallazgos viajan aparte y se suman al entrar a una WiFi, para no
-          gastarle el plan de datos al operador. El acta ya es válida desde que llega, y el detalle
-          va marcando las fotos que vienen en camino.
-        </Text>
+      <Seccion titulo="Atajos">
+        <Acciones>
+          <Enlace ruta="/panel/bitacoras" titulo="Llenar el parte de hoy" />
+          <Enlace ruta="/panel/preoperacionales" titulo="Ver los preoperacionales" />
+          <Enlace ruta="/panel/asignaciones" titulo="Revisar asignaciones" />
+        </Acciones>
       </Seccion>
-    </MarcoPantalla>
+    </>
   );
 }
 
+function Enlace({ ruta, titulo }: { ruta: '/panel/bitacoras' | '/panel/preoperacionales' | '/panel/asignaciones'; titulo: string }) {
+  return (
+    <Link href={ruta} asChild>
+      <Pressable>
+        <Boton titulo={titulo} tono="secundario" onPress={() => {}} />
+      </Pressable>
+    </Link>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* La misma información, en tabla                                            */
+/* ------------------------------------------------------------------------ */
+
 /**
- * La caja blanca de una tarjeta, con su elevación bajo el cursor.
+ * Las mismas cifras escritas, además de dibujadas.
  *
- * Va en un `View` interno y no en el `Pressable`: `Link` con `asChild` le impone
- * su propio `style` al hijo, y un estilo-función ahí se pierde — la tarjeta se
- * queda sin fondo ni relleno, que fue exactamente lo que pasó.
+ * No es redundancia: una barra se lee de un vistazo y una tabla se lee sin
+ * depender de la vista ni del color, se copia y se compara con la del mes
+ * pasado. Las dos formas del mismo dato tienen usos distintos.
  */
-function TarjetaResumen({ children }: { children: ReactNode }) {
-  const [encima, setEncima] = useState(false);
+function TablaEquivalente({ datos }: { datos: ResumenFila }) {
+  const filas: FilaResumen[] = [
+    { id: 'obras', concepto: 'Obras que cubre este resumen', valor: String(datos.obras) },
+    { id: 'equipos', concepto: 'Equipos activos', valor: String(datos.equipos) },
+    {
+      id: 'cumplimiento',
+      concepto: 'Cumplimiento del preoperacional de hoy',
+      valor: datos.cumplimiento === null ? 'No aplica' : `${datos.cumplimiento}%`,
+    },
+    { id: 'inspeccionados', concepto: 'Equipos inspeccionados hoy', valor: String(datos.inspeccionadosHoy) },
+    { id: 'sin', concepto: 'Equipos sin preoperacional hoy', valor: String(datos.sinInspeccionar) },
+    { id: 'noaptos', concepto: 'Equipos NO APTOS hoy', valor: String(datos.noAptos) },
+    { id: 'horas', concepto: 'Horas de máquina del periodo', valor: `${datos.horasMaquina} h` },
+    { id: 'km', concepto: 'Kilómetros del periodo', valor: `${datos.kilometros} km` },
+    {
+      id: 'personal',
+      concepto: 'Horas de personal del periodo',
+      valor: horasLegibles(datos.minutosPersonal),
+    },
+    {
+      id: 'extra',
+      concepto: 'De ellas, extra',
+      valor: horasLegibles(datos.minutosExtra),
+    },
+    {
+      id: 'partes',
+      concepto: 'Partes de obra cerrados',
+      valor: `${datos.partesCerrados} de ${datos.partes}`,
+    },
+  ];
+
+  const columnas: Columna<FilaResumen>[] = [
+    { clave: 'concepto', titulo: 'Concepto', ancho: 420, pintar: (f) => <Celda>{f.concepto}</Celda> },
+    { clave: 'valor', titulo: 'Valor', ancho: 180, pintar: (f) => <Celda>{f.valor}</Celda> },
+  ];
 
   return (
-    <View
-      onPointerEnter={() => setEncima(true)}
-      onPointerLeave={() => setEncima(false)}
-      style={[estilos.tarjeta, encima && estilos.tarjetaHover]}
-    >
-      {children}
-    </View>
+    <Seccion titulo="Las mismas cifras, en tabla">
+      <View style={estilos.tabla}>
+        <Tabla columnas={columnas} filas={filas} vacio="" />
+      </View>
+    </Seccion>
   );
 }
 
 const estilos = StyleSheet.create({
-  // El enlace solo aporta el reparto del espacio; el aspecto lo pone la tarjeta.
-  enlaceTarjeta: { flexGrow: 1, flexBasis: 190, minWidth: 190 },
-  tarjetas: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
-  tarjeta: {
-    flex: 1,
-    gap: Spacing.half,
-    padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
-    transitionDuration: `${Movimiento.rapido}ms`,
-  },
-  // La tarjeta se levanta bajo el cursor: es lo que dice que se puede pulsar,
-  // sin necesidad de dibujarle un botón dentro.
-  tarjetaHover: { boxShadow: Sombra.elevada, backgroundColor: Panel.fondoHover },
-  tarjetaTitulo: {
-    // Dos renglones fijos: «Preoperacionales de hoy» ocupa dos y los demás uno,
-    // y sin esta altura su cifra quedaba un renglón más abajo que las otras
-    // cinco. Seis números que no comparten línea no se comparan de un vistazo.
-    minHeight: 30,
-    lineHeight: 15,
-    fontSize: TextoPanel.micro,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    color: Colors.light.textSecondary,
-  },
-  tarjetaTotal: {
-    fontSize: TextoPanel.cifra,
-    fontWeight: '800',
-    lineHeight: 34,
-    color: Colors.light.text,
-  },
-  tarjetaPie: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
-  nota: { fontSize: TextoPanel.cuerpo, lineHeight: 21, color: Colors.light.textSecondary },
+  tabla: { maxWidth: 700, gap: Spacing.two },
 });

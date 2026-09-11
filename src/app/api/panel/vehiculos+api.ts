@@ -30,6 +30,8 @@ export async function GET(peticion: Request) {
         placa: vehiculos.placa,
         tipoVehiculoId: vehiculos.tipoVehiculoId,
         tipoNombre: tiposVehiculo.nombre,
+        // Lo necesita el parte diario para pedir el medidor que corresponde.
+        claseMedidor: tiposVehiculo.claseMedidor,
         marca: vehiculos.marca,
         modelo: vehiculos.modelo,
         obraId: vehiculos.obraId,

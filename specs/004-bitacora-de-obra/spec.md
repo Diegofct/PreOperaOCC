@@ -1,6 +1,6 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: Borrador · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09
 
 ## Contexto y objetivo
 
@@ -59,12 +59,15 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 - RF-9: EL SISTEMA permitirá registrar varias máquinas en la bitácora, cada una con su
   lectura de medidor al iniciar y al terminar la jornada.
-- RF-10: CUANDO se registren las dos lecturas de una máquina, EL SISTEMA calculará sus horas
-  de trabajo del día.
+- RF-10: CUANDO se registren las dos lecturas de una máquina, EL SISTEMA calculará su avance
+  del día en la unidad que corresponda a ese equipo: horas de motor en la maquinaria
+  amarilla, kilómetros recorridos en camionetas y volquetas.
 - RF-11: SI la lectura final es menor que la inicial, ENTONCES EL SISTEMA rechazará el
   registro de esa máquina.
-- RF-12: SI las horas resultantes de una máquina superan las 24 de un día, ENTONCES EL
-  SISTEMA rechazará el registro de esa máquina.
+- RF-12: SI el avance de una máquina supera lo posible en un día —24 horas de motor, u 800
+  kilómetros—, ENTONCES EL SISTEMA rechazará el registro de esa máquina.
+- RF-43: EL SISTEMA pedirá a cada máquina únicamente el medidor que le corresponde, y al
+  cerrar actualizará ese mismo medidor del equipo.
 - RF-13: CUANDO se cierre la bitácora, EL SISTEMA actualizará el medidor de cada máquina
   registrada, sin hacerlo retroceder nunca.
 - RF-14: EL SISTEMA ofrecerá para elegir únicamente las máquinas de la obra de esa bitácora.
@@ -76,20 +79,31 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-16: EL SISTEMA permitirá registrar varias personas en la bitácora, cada una con su hora
   de entrada y su hora de salida.
 - RF-17: CUANDO se registren las dos horas de una persona, EL SISTEMA calculará las horas
-  trabajadas y cuántas de ellas fueron extras.
-- RF-18: SI la hora de salida es anterior a la de entrada, ENTONCES EL SISTEMA rechazará el
-  registro de esa persona.
+  trabajadas, descontando el descanso de almuerzo.
+- RF-18: SI la hora de salida es igual a la de entrada, o la jornada resultante supera las
+  16 horas seguidas, ENTONCES EL SISTEMA rechazará el registro de esa persona.
+- RF-42: CUANDO la hora de salida sea anterior a la de entrada, EL SISTEMA entenderá que la
+  jornada cruzó la medianoche y la contará entera.
 - RF-19: SI se intenta registrar dos veces a la misma persona en la misma bitácora, ENTONCES
   EL SISTEMA lo rechazará.
 - RF-20: EL SISTEMA mostrará el cargo de cada persona al elegirla, para distinguir entre
   nombres parecidos.
+- RF-38: EL SISTEMA tomará como jornada ordinaria la de 7:30 a 12:00 y de 13:30 a 17:00, y
+  contará como extra lo que la pase.
+- RF-39: EL SISTEMA señalará cuántas de las horas trabajadas fueron nocturnas, entendiendo
+  por nocturnas las trabajadas entre las 7:00 p.m. y las 6:00 a.m.
+- RF-40: EL SISTEMA señalará si el día de la bitácora fue domingo o festivo, calculando los
+  festivos de Colombia sin depender de una lista escrita a mano.
+- RF-41: EL SISTEMA no convertirá esas horas a dinero.
+- RF-44: EL SISTEMA dejará en blanco las horas de entrada y salida del personal y las de los
+  tramos de clima, para que se escriban en vez de corregir un valor puesto de antemano.
 
 ### Actividades (H3)
 
 - RF-21: EL SISTEMA permitirá registrar varias actividades, cada una elegida de una lista, y
   añadir tantas como haga falta.
 - RF-22: CUANDO se elija una actividad, EL SISTEMA habilitará el registro de sus
-  dimensiones: longitud, ancho, alto, área y volumen.
+  dimensiones: longitud, ancho, alto, área y volumen, cada una escrita a mano.
 - RF-23: EL SISTEMA permitirá adjuntar una fotografía a cada actividad.
 - RF-24: SI la actividad elegida no está en la lista, ENTONCES EL SISTEMA exigirá que se
   escriba cuál fue.
@@ -99,7 +113,7 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 - RF-26: EL SISTEMA permitirá registrar varias franjas de clima en el mismo día, cada una
   con su condición (soleado, parcialmente nublado, nublado o lloviendo) y su hora de inicio
-  y de fin.
+  y de fin, de forma que entre todas puedan cubrir la jornada completa.
 - RF-27: SI la hora de fin de una franja es anterior a su hora de inicio, ENTONCES EL
   SISTEMA la rechazará.
 - RF-28: SI dos franjas del mismo día se solapan en el tiempo, ENTONCES EL SISTEMA lo
@@ -107,8 +121,8 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 ### Laboratorio, notas y fotografía (H3, H5)
 
-- RF-29: EL SISTEMA permitirá registrar varios elementos de laboratorio, cada uno elegido de
-  una lista y con la cantidad utilizada.
+- RF-29: EL SISTEMA permitirá registrar varios materiales consumidos del laboratorio, cada
+  uno elegido de una lista y con la cantidad utilizada y su unidad.
 - RF-30: SI se registra un elemento de laboratorio sin cantidad, ENTONCES EL SISTEMA lo
   rechazará.
 - RF-31: EL SISTEMA permitirá escribir notas u observaciones libres del día.
@@ -173,6 +187,10 @@ tanda: no añade campos, cambia de qué habla el documento.
 - Migrar las bitácoras por máquina ya registradas al formato nuevo: se conservan como
   histórico de solo lectura (RF-36).
 - Informes, exportación a hoja de cálculo o PDF, y firmas sobre la bitácora.
+- **Calcular solos el área y el volumen** a partir de longitud, ancho y alto. Se escriben a
+  mano en esta iteración: falta definir qué unidad usa cada actividad, y sin eso el cálculo
+  sería correcto unas veces y absurdo otras.
+- El tope de **42 horas semanales**: esta bitácora clasifica el día, no la semana.
 - Cálculo de nómina o de costos a partir de las horas del personal.
 - Comparar lo ejecutado contra lo programado, y cualquier medida de avance de obra.
 - Que las horas del personal alimenten otro módulo.
@@ -190,17 +208,23 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 ## Dudas abiertas
 
-- [NECESITA ACLARACIÓN: ¿a partir de cuántas horas diarias se cuentan como extras (RF-17)?
-  ¿Y se distinguen las diurnas de las nocturnas, o las de domingo y festivo?]
-- [NECESITA ACLARACIÓN: ¿qué es un "elemento de laboratorio" (RF-29): el material que se
-  consumió (cemento, base granular, asfalto) o el ensayo que se practicó (densidad de campo,
-  compresión de cilindros, granulometría)? Son dos listas distintas y la unidad de la
-  cantidad cambia con la respuesta.]
-- [NECESITA ACLARACIÓN: en las actividades, ¿el área y el volumen se calculan solos a partir
-  de longitud, ancho y alto, o se escriben aparte porque no siempre son un rectángulo?]
-- [NECESITA ACLARACIÓN: ¿las franjas de clima tienen que cubrir toda la jornada, o se
-  registran solo las que importan?]
-- [NECESITA ACLARACIÓN: un día sin trabajo, ¿cómo se cierra la bitácora? (ver casos límite)]
+Resueltas el 2026-09-09:
 
-Resuelta el 2026-09-09: **anular una bitácora cerrada es del residente** (RF-37). No sigue
-la regla del preoperacional porque la bitácora la llena él mismo cada día.
+- **Anular una bitácora cerrada** es del residente (RF-37). No sigue la regla del
+  preoperacional porque la bitácora la llena él mismo cada día.
+- **Jornada y extras**: la ordinaria es de 7:30 a 12:00 y de 13:30 a 17:00 —ocho horas—, y
+  lo que la pase es extra (RF-38). Se marcan además las nocturnas y los domingos y festivos
+  (RF-39, RF-40), pero no se convierte nada a dinero (RF-41): eso es una nómina.
+- **Laboratorio**: es el material consumido, no el ensayo practicado (RF-29). La lista de
+  materiales queda **pendiente de validación por OCC**, igual que la de actividades.
+- **Área y volumen**: se escriben a mano por ahora. Calcularlos exige saber qué unidad usa
+  cada actividad, y esa decisión está pendiente.
+- **Clima**: las franjas deben poder cubrir la jornada completa (RF-26), sin solaparse
+  (RF-28).
+- **Casos límite**: se implementan como están descritos arriba.
+
+Sigue abierta:
+
+- [NECESITA ACLARACIÓN: la unidad de medida de cada actividad (m, m², m³, km). Es lo que
+  falta para poder calcular solos el área y el volumen.]
+- [NECESITA ACLARACIÓN: un día sin trabajo, ¿cómo se cierra la bitácora? (ver casos límite)]

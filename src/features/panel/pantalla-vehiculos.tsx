@@ -17,19 +17,25 @@ import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
 
 import { api } from './cliente-api';
 import {
+  Acciones,
   AccionesFormulario,
   Aviso,
+  BarraDeListado,
   Boton,
   Campo,
   Celda,
+  Confirmacion,
+  Confirmado,
   Etiqueta,
   Formulario,
+  Paginacion,
   Seccion,
   Selector,
   Tabla,
   type Columna,
 } from './componentes';
 import {
+  ESTADOS_VEHICULO,
   ETIQUETA_ESTADO_VEHICULO,
   type ObraFila,
   type TipoVehiculoFila,
@@ -37,6 +43,8 @@ import {
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
 import { SeccionLlantas } from './seccion-llantas';
+import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { VentanaCorregirVehiculo } from './ventana-vehiculo';
 
 /** Cadena de formulario → número, con lo vacío como ausencia y no como cero. */
 function aNumero(texto: string): number | null {
@@ -68,6 +76,25 @@ export default function PantallaVehiculos() {
   const pideOdometro = tipoElegido?.claseMedidor !== 'horometro';
   const pideHorometro = tipoElegido?.claseMedidor !== 'odometro';
 
+  /** Filtros propios de esta pantalla, encima de la búsqueda por texto. */
+  const [obraFiltro, setObraFiltro] = useState<string | null>(null);
+  const [estadoFiltro, setEstadoFiltro] = useState<string | null>(null);
+
+  const filtrado = useListadoFiltrado(
+    vehiculos.datos,
+    (v) => [v.codigoInterno, v.placa, v.marca, v.modelo, v.tipoNombre, v.obraNombre],
+    useCallback(
+      (v: VehiculoFila) =>
+        (obraFiltro === null || v.obraId === obraFiltro) &&
+        (estadoFiltro === null || v.estado === estadoFiltro),
+      [obraFiltro, estadoFiltro],
+    ),
+  );
+
+  const [editando, setEditando] = useState<VehiculoFila | null>(null);
+  const [porDarDeBaja, setPorDarDeBaja] = useState<VehiculoFila | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
   async function crear() {
     if (!tipoVehiculoId) return;
 
@@ -86,6 +113,7 @@ export default function PantallaVehiculos() {
     );
 
     if (creado) {
+      setHecho(codigoInterno + ' quedó registrado.');
       setCodigoInterno('');
       setPlaca('');
       setMarca('');
@@ -151,11 +179,17 @@ export default function PantallaVehiculos() {
       titulo: '',
       ancho: 130,
       pintar: (v) => (
-        <Boton
-          titulo="Dar de baja"
-          tono="peligro"
-          onPress={() => vehiculos.ejecutar(() => api.vehiculos.darDeBaja(v.id))}
-        />
+        <Acciones>
+          <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(v)} />
+          <Boton
+            titulo="Dar de baja"
+            tono="peligro"
+            onPress={() => {
+              setHecho(null);
+              setPorDarDeBaja(v);
+            }}
+          />
+        </Acciones>
       ),
     },
   ];
@@ -232,11 +266,81 @@ export default function PantallaVehiculos() {
         </Formulario>
       </Seccion>
 
-      <Seccion titulo={`Flota registrada (${vehiculos.datos.length})`}>
+      <Confirmado mensaje={hecho} />
+
+      {porDarDeBaja ? (
+        <Confirmacion
+          aviso={porDarDeBaja.codigoInterno + ' deja de aparecer en la flota y de poder asignarse. No se borra: los preoperacionales firmados y las bitácoras cerradas de esa máquina siguen apuntándole.'}
+          confirmar="Dar de baja"
+          onConfirmar={async () => {
+            const equipo = porDarDeBaja;
+            setPorDarDeBaja(null);
+            const listo = await vehiculos.ejecutar(() => api.vehiculos.darDeBaja(equipo.id));
+            if (listo) setHecho(equipo.codigoInterno + ' quedó dado de baja.');
+          }}
+          onCancelar={() => setPorDarDeBaja(null)}
+        />
+      ) : null}
+
+      {editando ? (
+        <VentanaCorregirVehiculo
+          vehiculo={editando}
+          obras={obras.datos}
+          onCerrar={() => setEditando(null)}
+          onGuardado={(codigo) => {
+            setEditando(null);
+            setHecho(codigo + ' quedó corregido.');
+            vehiculos.recargar();
+          }}
+          onFallo={vehiculos.setError}
+        />
+      ) : null}
+
+      <Seccion titulo="Flota registrada">
+        <BarraDeListado
+          busqueda={filtrado.busqueda}
+          onBuscar={filtrado.buscar}
+          total={filtrado.total}
+          mostradas={filtrado.coincidencias}
+        >
+          <Selector
+            etiqueta="Obra"
+            valor={obraFiltro}
+            opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
+            onChange={setObraFiltro}
+            permiteVacio
+            vacio="Todas las obras"
+            ancho={200}
+          />
+          <Selector
+            etiqueta="Estado"
+            valor={estadoFiltro}
+            opciones={ESTADOS_VEHICULO.map((e) => ({
+              valor: e,
+              etiqueta: ETIQUETA_ESTADO_VEHICULO[e],
+            }))}
+            onChange={setEstadoFiltro}
+            permiteVacio
+            vacio="Todos los estados"
+            ancho={190}
+          />
+        </BarraDeListado>
+
         <Tabla
           columnas={columnas}
-          filas={vehiculos.datos}
-          vacio="Todavía no hay ningún vehículo. Registra el primero arriba."
+          filas={filtrado.pagina}
+          vacio={
+            vehiculos.datos.length === 0
+              ? 'Aquí va la maquinaria de OCC. El tipo de equipo decide qué formato de preoperacional le sale al operador y con qué medidor se controla, así que conviene registrarlo bien desde el principio. Registre el primero en el formulario de arriba.'
+              : 'Ningún equipo coincide con lo que busca.'
+          }
+        />
+
+        <Paginacion
+          pagina={filtrado.paginaActual}
+          porPagina={POR_PAGINA}
+          total={filtrado.coincidencias}
+          onCambiar={filtrado.irAPagina}
         />
       </Seccion>
 

@@ -1,6 +1,6 @@
 # Spec 005 — Un panel que se pueda usar y que diga algo
 
-> Estado: Borrador · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09
 
 ## Contexto y objetivo
 
@@ -55,8 +55,10 @@ dejan de servir.
 ### El inicio dice cómo va la operación (H2)
 
 - RF-5: EL SISTEMA mostrará en el inicio, para el periodo consultado: las horas de máquina
-  registradas, qué parte de ellas fue improductiva, y qué porcentaje de los equipos activos
-  tiene su preoperacional del día.
+  registradas, los kilómetros recorridos, las horas de personal con su parte de extras, y
+  qué porcentaje de los equipos activos tiene su preoperacional del día.
+- RF-25: EL SISTEMA no mezclará en una sola cifra las horas de motor con los kilómetros: son
+  dos unidades y sumarlas no significa nada.
 - RF-6: EL SISTEMA permitirá elegir el periodo del resumen entre hoy, la última semana y el
   último mes.
 - RF-7: EL SISTEMA mostrará los equipos que quedaron **no aptos** y los que no tienen
@@ -69,6 +71,9 @@ dejan de servir.
   estado: siempre irá acompañado de texto, ícono o etiqueta directa.
 - RF-11: EL SISTEMA respetará el alcance por obra en el resumen: el residente ve el de su
   obra y la gerencia el de todas.
+- RF-24: EL SISTEMA mostrará a la gerencia el estado de la operación completa, y al residente
+  lo que le toca hacer hoy en su obra. No son la misma pantalla con otros datos: son dos
+  preguntas distintas.
 
 ### Encontrar las cosas (H3)
 
@@ -139,6 +144,11 @@ dejan de servir.
 - Rehacer la navegación en algo distinto de la barra superior actual.
 - Personalización por usuario (columnas a gusto, tableros configurables).
 - Cualquier métrica que exija datos que hoy no se capturan.
+- **Las horas improductivas.** Estaban en RF-5 hasta que la spec 004 cambió el modelo: en la
+  bitácora por máquina las actividades colgaban de un equipo, y en el parte de obra la
+  maquinaria y las actividades son secciones separadas sin vínculo entre ellas. Medirlo
+  exige decidir si una actividad se ata a las máquinas que la ejecutaron, y esa es una
+  decisión de negocio que merece su propia spec.
 
 ## Criterios de finalización
 
@@ -153,10 +163,16 @@ dejan de servir.
 
 ## Dudas abiertas
 
-- [NECESITA ACLARACIÓN: "actividad improductiva" ya está marcado en la lista de actividades
-  de la bitácora, pero esa lista está pendiente de validación por OCC. ¿Sirve como está para
-  medir rendimiento, o hay que revisarla antes?]
-- [NECESITA ACLARACIÓN: ¿el resumen del inicio es el mismo para gerencia y para el
-  residente, o cada uno necesita ver cosas distintas?]
-- [NECESITA ACLARACIÓN: ¿hay una imagen de marca de OCC (logo, colores corporativos) que el
-  panel deba usar? Hoy usa un azul genérico y las letras "OCC" en un cuadro.]
+Resueltas el 2026-09-10:
+
+- **El resumen es distinto para cada uno** (RF-24). La gerencia entra a saber cómo va la
+  operación; el residente, a saber qué le falta por hacer hoy.
+- **La marca de OCC la va a entregar el cliente**: logo y colores corporativos. Mientras
+  llegan, el rediseño avanza con los tokens actuales — todo el color sale de
+  `constants/theme`, así que aplicarla después es tocar un archivo.
+
+Sigue abierta:
+
+- [NECESITA ACLARACIÓN: para poder medir horas improductivas hay que atar cada actividad a
+  las máquinas que la ejecutaron. ¿Tiene sentido pedirle eso al residente al llenar el parte,
+  o el rendimiento se mide de otra forma en obra?]

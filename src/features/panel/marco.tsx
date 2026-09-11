@@ -14,7 +14,6 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import {
   Colors,
-  Marca,
   MaxContentWidthPanel,
   Panel,
   Spacing,
@@ -158,7 +157,7 @@ export function MarcoPantalla({
 
             {cargando ? (
               <View style={estilos.cargando}>
-                <ActivityIndicator color={Marca.primario} />
+                <ActivityIndicator color={Panel.accion} />
                 <Text style={estilos.descripcion}>Cargando…</Text>
               </View>
             ) : (

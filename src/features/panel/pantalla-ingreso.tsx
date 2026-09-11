@@ -121,7 +121,7 @@ const estilos = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: Radio.md,
     borderCurve: 'continuous',
-    backgroundColor: Marca.primario,
+    backgroundColor: Panel.accion,
   },
   logotipoTexto: {
     fontSize: TextoPanel.apoyo,

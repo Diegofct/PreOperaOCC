@@ -50,7 +50,15 @@ export const CLAVE_OTRA = 'otra';
  * Se filtran por tipo de vehículo para que la lista quepa en una pantalla: no
  * tiene sentido ofrecerle "nivelación" al conductor de una camioneta.
  */
-export function actividadesDe(tipoVehiculo: string): Actividad[] {
+/**
+ * Las actividades que puede hacer ese tipo de máquina.
+ *
+ * Con `null` devuelve todas: el parte diario de obra no gira alrededor de una
+ * máquina —la maquinaria es una sección entre siete— y ahí no hay tipo por el
+ * que filtrar. La bitácora por máquina sí lo pasa.
+ */
+export function actividadesDe(tipoVehiculo: string | null): Actividad[] {
+  if (tipoVehiculo === null) return [...ACTIVIDADES];
   return ACTIVIDADES.filter((a) => !a.tipos || a.tipos.includes(tipoVehiculo));
 }
 

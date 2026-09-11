@@ -8,6 +8,8 @@
  * no se pueda enviar un formato incompleto, y que los medidores no retrocedan.
  */
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import {
   generarClaveTemporal,
@@ -56,6 +58,29 @@ import {
   posicionesDe,
   vidaUtilRestante,
 } from '../src/shared/catalogos/llantas';
+import {
+  diaDeLaSemana,
+  domingoDePascua,
+  esDominicalOFestivo,
+  esFestivo,
+  festivosDe,
+} from '../src/shared/rules/festivos';
+import {
+  cubrenLaJornada,
+  desglosarJornada,
+  minutosCubiertos,
+  minutosDeHora,
+  validarFranjas,
+  validarHorario,
+} from '../src/shared/rules/horas';
+import {
+  cantidadLegible,
+  MATERIALES_LABORATORIO,
+  nombreDeClima,
+  nombreDeMaterial,
+} from '../src/shared/catalogos/bitacora';
+import { Colors, Estado, Panel } from '../src/constants/paleta';
+import { normalizar } from '../src/shared/rules/texto';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
 import { vehiculos } from '../src/db/servidor/esquema';
 import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
@@ -69,6 +94,9 @@ import {
 } from '../src/shared/rules/reintentos';
 import {
   esBitacoraCompleta,
+  medidorDeClase,
+  mensajeDeAvance,
+  validarAvance,
   fechaDeJornada,
   fechaLocalISO,
   horaLocal,
@@ -789,6 +817,281 @@ prueba('una llanta sin medir no se marca como gastada', () => {
   assert.equal(hayQueCambiar(null), false);
   assert.equal(hayQueCambiar(undefined), false);
   assert.equal(hayQueCambiar(0), false);
+});
+
+console.log('\nFestivos y horas de la obra\n');
+
+prueba('los festivos de un año no se repiten', () => {
+  for (const anio of [2025, 2026, 2027]) {
+    const dias = festivosDe(anio);
+    assert.equal(new Set(dias).size, dias.length, `${anio}: hay festivos repetidos`);
+  }
+  // Normalmente son dieciocho, pero dos celebraciones pueden caer en el mismo
+  // lunes: en 2025 el Sagrado Corazón y San Pedro coincidieron el 30 de junio,
+  // y ese año tuvo diecisiete días festivos.
+  assert.equal(festivosDe(2026).length, 18);
+  assert.equal(festivosDe(2025).length, 17);
+  assert.ok(esFestivo('2025-06-30'));
+});
+
+prueba('los de la ley Emiliani caen siempre en lunes', () => {
+  // Reyes, San José, San Pedro, Asunción, Raza, Todos los Santos y Cartagena se
+  // corren al lunes siguiente; los de Semana Santa que se corren, también.
+  const anio = 2026;
+  const dias = festivosDe(anio);
+  const fijos = new Set([
+    `${anio}-01-01`,
+    `${anio}-05-01`,
+    `${anio}-07-20`,
+    `${anio}-08-07`,
+    `${anio}-12-08`,
+    `${anio}-12-25`,
+  ]);
+  const santos = new Set([`${anio}-04-02`, `${anio}-04-03`]);
+  for (const dia of dias) {
+    if (fijos.has(dia) || santos.has(dia)) continue;
+    assert.equal(diaDeLaSemana(dia), 1, `${dia} debería ser lunes`);
+  }
+});
+
+prueba('la Semana Santa de 2026 cae donde dice el calendario', () => {
+  // Anclado a una fecha comprobada: Domingo de Resurrección el 5 de abril de
+  // 2026, con Jueves y Viernes Santo el 2 y el 3. Si el cálculo de la Pascua se
+  // desviara una semana, todo lo demás seguiría cuadrando menos esto.
+  assert.equal(domingoDePascua(2026), '2026-04-05');
+  assert.ok(esFestivo('2026-04-02'));
+  assert.ok(esFestivo('2026-04-03'));
+  assert.equal(esFestivo('2026-04-05'), false, 'el domingo de Pascua no es festivo de ley');
+});
+
+prueba('domingos y festivos se tratan igual', () => {
+  assert.ok(esDominicalOFestivo('2026-04-05')); // domingo
+  assert.ok(esDominicalOFestivo('2026-01-01')); // festivo fijo
+  assert.equal(esDominicalOFestivo('2026-09-09'), false); // miércoles cualquiera
+});
+
+prueba('la jornada completa son ocho horas y ninguna extra', () => {
+  const d = desglosarJornada('2026-09-09', '07:30', '17:00');
+  assert.ok(d);
+  assert.equal(d.trabajados, 480);
+  assert.equal(d.ordinarios, 480);
+  assert.equal(d.extra, 0);
+  assert.equal(d.nocturnos, 0);
+  assert.equal(d.dominicalOFestivo, false);
+});
+
+prueba('el almuerzo no se cuenta como trabajado', () => {
+  // Quien entra a las 13:30 no almorzó dentro de su jornada: sus tres horas y
+  // media son tres horas y media, no cinco.
+  const d = desglosarJornada('2026-09-09', '13:30', '17:00');
+  assert.ok(d);
+  assert.equal(d.trabajados, 210);
+  assert.equal(d.extra, 0);
+});
+
+prueba('lo que pasa de la jornada es hora extra', () => {
+  const d = desglosarJornada('2026-09-09', '07:30', '19:00');
+  assert.ok(d);
+  assert.equal(d.trabajados, 600); // 11 h y media menos hora y media de almuerzo
+  assert.equal(d.ordinarios, 480);
+  assert.equal(d.extra, 120);
+  assert.equal(d.nocturnos, 0, 'a las 19:00 en punto todavía no hay recargo');
+});
+
+prueba('el recargo nocturno empieza a las siete de la noche', () => {
+  // Ley 2466 de 2025: antes empezaba a las nueve. Si alguien vuelve a poner las
+  // 21:00, esto es lo que lo va a decir.
+  const d = desglosarJornada('2026-09-09', '13:30', '21:00');
+  assert.ok(d);
+  assert.equal(d.nocturnos, 120);
+});
+
+prueba('una jornada que cruza la medianoche se cuenta entera', () => {
+  const d = desglosarJornada('2026-09-09', '20:00', '02:00');
+  assert.ok(d);
+  assert.equal(d.trabajados, 360);
+  assert.equal(d.nocturnos, 360, 'de 20:00 a 02:00 todo es nocturno');
+  assert.equal(d.extra, 0, 'seis horas seguidas no llegan a la jornada ordinaria');
+});
+
+prueba('trabajar en domingo queda marcado', () => {
+  const d = desglosarJornada('2026-04-05', '07:30', '17:00');
+  assert.ok(d);
+  assert.equal(d.dominicalOFestivo, true);
+});
+
+prueba('un horario imposible se rechaza y no se desglosa', () => {
+  assert.equal(validarHorario(null, '17:00'), 'falta_entrada');
+  assert.equal(validarHorario('07:30', null), 'falta_salida');
+  assert.equal(validarHorario('07:30', '07:30'), 'salida_antes');
+  assert.equal(validarHorario('07:30', '01:00'), 'jornada_imposible');
+  assert.equal(desglosarJornada('2026-09-09', '07:30', '07:30'), null);
+  assert.equal(minutosDeHora('25:00'), null);
+});
+
+prueba('los tramos de clima no pueden pisarse', () => {
+  const bien = [
+    { desde: '07:30', hasta: '10:00' },
+    { desde: '10:00', hasta: '15:00' },
+    { desde: '15:30', hasta: '17:30' },
+  ];
+  assert.equal(validarFranjas(bien), null, 'tocarse en el borde no es pisarse');
+
+  const pisados = [
+    { desde: '07:00', hasta: '11:00' },
+    { desde: '10:00', hasta: '12:00' },
+  ];
+  assert.deepEqual(validarFranjas(pisados), { tipo: 'solape', primera: 0, segunda: 1 });
+});
+
+prueba('un tramo de clima que termina antes de empezar se rechaza', () => {
+  // Al contrario que la jornada de una persona, aquí no hay medianoche que
+  // cruzar: el clima se registra dentro del día de la obra.
+  assert.deepEqual(validarFranjas([{ desde: '15:00', hasta: '09:00' }]), {
+    tipo: 'invertida',
+    indice: 0,
+  });
+});
+
+prueba('los tramos de clima pueden cubrir la jornada completa', () => {
+  // El ejemplo que se pidió: llovió de 7 a 10, salió el sol hasta las 3 y
+  // quedó nublado hasta las 5:30.
+  const dia = [
+    { desde: '07:00', hasta: '10:00' },
+    { desde: '10:00', hasta: '15:00' },
+    { desde: '15:00', hasta: '17:30' },
+  ];
+  assert.equal(validarFranjas(dia), null);
+  assert.equal(cubrenLaJornada(dia), true);
+  assert.equal(minutosCubiertos(dia), 630);
+
+  // Con un hueco entre las 12 y las 13:30 no se cubre.
+  assert.equal(
+    cubrenLaJornada([
+      { desde: '07:30', hasta: '12:00' },
+      { desde: '13:30', hasta: '17:00' },
+    ]),
+    false,
+  );
+});
+
+prueba('los materiales de laboratorio traen su unidad pegada', () => {
+  // Un «3» de cemento sin decir si son bultos o metros cúbicos es el dato que
+  // después nadie sabe interpretar.
+  assert.equal(new Set(MATERIALES_LABORATORIO.map((m) => m.id)).size, MATERIALES_LABORATORIO.length);
+  assert.equal(cantidadLegible('cemento', 4), '4 bultos');
+  assert.equal(cantidadLegible('base_granular', 12), '12 m³');
+  assert.equal(nombreDeMaterial('inventado'), 'inventado');
+  assert.equal(nombreDeClima('lloviendo'), 'Lloviendo');
+});
+
+prueba('cada equipo se mide con lo que le corresponde', () => {
+  // Spec 004 / RF-43. La camioneta y la volqueta van por kilómetros desde la
+  // spec 003; pedirles horas de motor es pedir un dato que su tablero no da.
+  assert.equal(medidorDeClase('odometro'), 'odometro');
+  assert.equal(medidorDeClase('horometro'), 'horometro');
+  // `ambos` ya no lo usa ningún tipo, pero el enum lo admite y hay que decidir.
+  assert.equal(medidorDeClase('ambos'), 'horometro');
+  assert.equal(medidorDeClase(null), 'horometro');
+});
+
+prueba('el tope del avance depende del medidor', () => {
+  // Spec 004 / RF-12. Veinte horas de motor son mucho pero posibles; veinte
+  // horas de más en un odómetro son veinte kilómetros, que no son nada.
+  assert.equal(validarAvance('horometro', 100, 120), null);
+  assert.equal(validarAvance('horometro', 100, 130), 'salto_enorme');
+  assert.equal(validarAvance('odometro', 1000, 1600), null);
+  assert.equal(validarAvance('odometro', 1000, 2000), 'salto_enorme');
+  assert.equal(validarAvance('odometro', 1000, 900), 'final_menor');
+  assert.equal(validarAvance('horometro', null, 120), 'falta_inicial');
+});
+
+prueba('el mensaje del avance habla en la unidad del equipo', () => {
+  assert.match(mensajeDeAvance('odometro', 'salto_enorme', 1000), /km/);
+  assert.match(mensajeDeAvance('horometro', 'salto_enorme', 100), / h/);
+  assert.match(mensajeDeAvance('odometro', 'final_menor', 1000), /1000 km/);
+});
+
+prueba('buscar encuentra aunque no se escriban las tildes', () => {
+  // Spec 005 / RF-12. En una obra nadie escribe con tildes en un buscador, y un
+  // buscador que las exige es un buscador que no se usa.
+  assert.equal(normalizar('Topógrafo'), 'topografo');
+  assert.equal(normalizar('  MOTONIVELADORA  '), 'motoniveladora');
+  assert.equal(normalizar('Bitácoras'), 'bitacoras');
+  assert.equal(normalizar('Peña'), 'pena', 'la eñe no es una ene con tilde, pero se busca igual');
+});
+
+prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
+  // Spec 005 / RF-20. Cuando una tabla se pasa, la columna que queda fuera de
+  // la vista es siempre la última —la de los botones—, que es justo la que hay
+  // que pulsar. Y no se nota en un monitor grande: se nota en el portátil de la
+  // obra. Por eso se cuenta aquí y no se mira a ojo.
+  const LIMITE = 1280; // MaxContentWidthPanel
+  const SEPARACION = 16; // Spacing.three
+  const MARGEN = 32; // Spacing.three a cada lado
+
+  const carpeta = path.join(__dirname, '..', 'src', 'features', 'panel');
+  const pantallas = readdirSync(carpeta).filter((f) => f.endsWith('.tsx'));
+
+  let tablas = 0;
+  for (const archivo of pantallas) {
+    const fuente = readFileSync(path.join(carpeta, archivo), 'utf8');
+    for (const bloque of fuente.matchAll(/const columnas[^=]*=\s*\[(.*?)\n {2}\];/gs)) {
+      const anchos = [...bloque[1].matchAll(/ancho:\s*(\d+)/g)].map((m) => Number(m[1]));
+      if (anchos.length === 0) continue;
+      tablas++;
+      const gasto =
+        anchos.reduce((suma, a) => suma + a, 0) + SEPARACION * (anchos.length - 1) + MARGEN;
+      assert.ok(gasto <= LIMITE, `${archivo}: la tabla gasta ${gasto} de ${LIMITE}`);
+    }
+  }
+
+  assert.ok(tablas >= 8, `se esperaban al menos 8 tablas y se encontraron ${tablas}`);
+});
+
+/**
+ * Relación de contraste de la WCAG entre dos colores.
+ *
+ * Se calcula y no se mira a ojo: el contraste es el ajuste que más fácil se
+ * rompe sin que nadie lo note —basta con aclarar un gris «para que se vea más
+ * suave»— y el que más caro sale en una pantalla de obra con sol de frente.
+ */
+function luminancia(hex: string): number {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const canales = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * canales[0] + 0.7152 * canales[1] + 0.0722 * canales[2];
+}
+
+function contraste(texto: string, fondo: string): number {
+  const a = luminancia(texto);
+  const b = luminancia(fondo);
+  const [claro, oscuro] = a > b ? [a, b] : [b, a];
+  return (claro + 0.05) / (oscuro + 0.05);
+}
+
+prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
+  // Spec 005 / RF-22: mínimo 4.5:1.
+  const pares: [string, string, string][] = [
+    ['texto principal sobre blanco', Colors.light.text, Colors.light.background],
+    ['texto secundario sobre blanco', Colors.light.textSecondary, Colors.light.background],
+    ['texto secundario sobre el lienzo', Colors.light.textSecondary, Panel.fondo],
+    ['texto secundario sobre cabecera', Colors.light.textSecondary, Panel.fondoCabecera],
+    ['texto secundario sobre fila alterna', Colors.light.textSecondary, Panel.fondoAlterno],
+    ['botón principal', Panel.sobreAccion, Panel.accion],
+    ['conforme', Estado.conforme, Estado.conformeFondo],
+    ['no conforme', Estado.noConforme, Estado.noConformeFondo],
+    ['atención', Estado.atencion, Estado.atencionFondo],
+    ['información', Estado.info, Estado.infoFondo],
+    ['no aplica', Estado.na, Estado.naFondo],
+  ];
+
+  for (const [que, texto, fondo] of pares) {
+    const razon = contraste(texto, fondo);
+    assert.ok(razon >= 4.5, `${que}: ${razon.toFixed(2)}:1, por debajo de 4.5:1`);
+  }
 });
 
 prueba('están los quince cargos, con slug y rótulo únicos', () => {

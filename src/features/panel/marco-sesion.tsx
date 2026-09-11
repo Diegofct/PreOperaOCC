@@ -16,7 +16,7 @@
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { Colors, Marca } from '@/constants/theme';
+import { Colors, Panel } from '@/constants/theme';
 
 import PantallaCambiarClave from './pantalla-cambiar-clave';
 import PantallaIngreso from './pantalla-ingreso';
@@ -28,7 +28,7 @@ export function MarcoSesion({ children }: { children: ReactNode }) {
   if (estado === 'comprobando') {
     return (
       <View style={estilos.centro}>
-        <ActivityIndicator color={Marca.primario} size="large" />
+        <ActivityIndicator color={Panel.accion} size="large" />
       </View>
     );
   }

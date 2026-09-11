@@ -22,11 +22,16 @@ import type {
   CodigosFila,
   CredencialesIngreso,
   JornadaDePreoperacionales,
+  DiaDeObra,
   JornadaFila,
   LlantaFila,
   LlantaNueva,
   ObraFila,
   ObraNueva,
+  PeriodoResumen,
+  ResumenFila,
+  ParteEditado,
+  ParteFila,
   PersonaEnSesionFila,
   PreoperacionalDetalle,
   PersonaFila,
@@ -112,12 +117,23 @@ export const api = {
   obras: {
     listar: () => panel<ObraFila[]>('/obras'),
     crear: (datos: ObraNueva) => panelEnviar<ObraFila>('/obras', 'POST', datos),
+    editar: (id: string, cambios: Partial<ObraNueva>) =>
+      panelEnviar<ObraFila>(`/obras/${id}`, 'PATCH', cambios),
     darDeBaja: (id: string) => panelEnviar<ObraFila>(`/obras/${id}`, 'DELETE'),
   },
 
   personas: {
     listar: () => panel<PersonaFila[]>('/personas'),
     crear: (datos: PersonaNueva) => panelEnviar<PersonaFila>('/personas', 'POST', datos),
+    /**
+     * Corregir una persona ya registrada.
+     *
+     * Manda solo lo que cambió: el endpoint no toca las columnas que no vienen,
+     * y mandarlo todo convertiría cada corrección en un riesgo de pisar un dato
+     * que otro acaba de escribir desde el otro computador.
+     */
+    editar: (id: string, cambios: Partial<PersonaNueva>) =>
+      panelEnviar<PersonaFila>(`/personas/${id}`, 'PATCH', cambios),
     darDeBaja: (id: string) => panelEnviar<PersonaFila>(`/personas/${id}`, 'DELETE'),
     /** Devuelve una contraseña temporal que **solo se puede leer esta vez**. */
     generarClave: (id: string) =>
@@ -130,11 +146,38 @@ export const api = {
   vehiculos: {
     listar: () => panel<VehiculoFila[]>('/vehiculos'),
     crear: (datos: VehiculoNuevo) => panelEnviar<VehiculoFila>('/vehiculos', 'POST', datos),
+    editar: (id: string, cambios: Partial<VehiculoNuevo>) =>
+      panelEnviar<VehiculoFila>(`/vehiculos/${id}`, 'PATCH', cambios),
     darDeBaja: (id: string) => panelEnviar<VehiculoFila>(`/vehiculos/${id}`, 'DELETE'),
+  },
+
+  /** Las cifras del inicio. Viajan contadas, no en filas. */
+  resumen: {
+    de: (periodo: PeriodoResumen) => panel<ResumenFila>(`/resumen?periodo=${periodo}`),
   },
 
   tiposVehiculo: {
     listar: () => panel<TipoVehiculoFila[]>('/tipos-vehiculo'),
+  },
+
+  /**
+   * El parte diario de obra (spec 004).
+   *
+   * `guardar` manda solo las secciones que cambiaron: el parte se llena a lo
+   * largo del día y cada sección se reemplaza entera, pero la que no viaja no
+   * se toca.
+   */
+  partes: {
+    delDia: (fecha: string) => panel<DiaDeObra>(`/partes?fecha=${fecha}`),
+    abrir: (fecha: string, obraId?: string) =>
+      panelEnviar<ParteFila>('/partes', 'POST', { fecha, obraId }),
+    guardar: (id: string, cambios: ParteEditado) =>
+      panelEnviar<ParteFila>(`/partes/${id}`, 'PATCH', cambios),
+    fotos: (id: string) =>
+      panel<{ id: string; itemKey: string | null; disponible: boolean }[]>(`/partes/${id}/foto`),
+    cerrar: (id: string) => panelEnviar<{ id: string }>(`/partes/${id}/cerrar`, 'POST'),
+    anular: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/partes/${id}/anular`, 'POST', { motivo }),
   },
 
   /** Las llantas de un equipo. Retirar no borra: deja el histórico. */

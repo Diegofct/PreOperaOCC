@@ -46,7 +46,14 @@ import {
 // Rutas relativas y no el alias `@/`: drizzle-kit empaqueta este archivo con
 // esbuild por su cuenta y no lee los `paths` del tsconfig, igual que en
 // `src/db/local/schema.ts`.
-import type { ActividadBitacora } from '../../features/bitacoras/tipos';
+import type {
+  ActividadBitacora,
+  ActividadDelParte,
+  FranjaDeClima,
+  MaquinaDelParte,
+  MaterialDelParte,
+  PersonaDelParte,
+} from '../../features/bitacoras/tipos';
 import type { Cargo } from '../../shared/catalogos/cargos';
 import type {
   PlantillaChecklist,
@@ -458,6 +465,63 @@ export const bitacoras = pgTable(
       .on(t.vehiculoId, t.fecha)
       .where(sql`anulado_en is null`),
     index('ix_bitacora_obra_fecha').on(t.obraId, t.fecha),
+  ],
+);
+
+/**
+ * El parte diario de obra. Spec 004.
+ *
+ * Reemplaza a `bitacoras` como documento vivo. La tabla de arriba **no se
+ * borra**: guarda los partes por máquina que se registraron antes de este
+ * cambio, y siguen consultándose de solo lectura.
+ *
+ * Uno por obra y día, con sus siete secciones dentro. Las secciones van como
+ * listas JSON en la misma fila y no en tablas hijas porque el driver de Postgres
+ * habla por HTTP y no da transacciones interactivas: guardar el parte en cinco
+ * tablas serían cinco sentencias que pueden quedarse a medias, y en una sola
+ * fila es un UPDATE que ocurre entero o no ocurre. Ver `bitacoras/tipos.ts`.
+ *
+ * **Solo en el servidor.** El parte se llena desde el panel web, no desde el
+ * celular: siete secciones con fotografías funcionando sin conexión cuestan
+ * varias veces más que la versión web, y quien lo llena —el residente— trabaja
+ * con computador.
+ */
+export const partesDeObra = pgTable(
+  'partes_de_obra',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    /** Quién lo lleva. El trabajo que documenta es el de toda la obra. */
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    /** `YYYY-MM-DD` en hora de Colombia. Es un día del calendario, no un instante. */
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+
+    maquinaria: jsonb('maquinaria').$type<MaquinaDelParte[]>().notNull().default([]),
+    personal: jsonb('personal').$type<PersonaDelParte[]>().notNull().default([]),
+    actividades: jsonb('actividades').$type<ActividadDelParte[]>().notNull().default([]),
+    clima: jsonb('clima').$type<FranjaDeClima[]>().notNull().default([]),
+    laboratorio: jsonb('laboratorio').$type<MaterialDelParte[]>().notNull().default([]),
+    notas: text('notas'),
+
+    cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    // Parcial sobre la anulación, por lo mismo que el de la bitácora por
+    // máquina: sin el predicado, anular un parte dejaría ese día bloqueado para
+    // siempre y la obra se quedaría sin poder registrar lo que hizo.
+    uniqueIndex('ux_parte_obra_fecha')
+      .on(t.obraId, t.fecha)
+      .where(sql`anulado_en is null`),
+    index('ix_parte_fecha').on(t.fecha),
   ],
 );
 
