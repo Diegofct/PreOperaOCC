@@ -41,6 +41,50 @@ export function fechaDeJornada(ahora: number = Date.now()): string {
 }
 
 /**
+ * Suma días a una fecha `YYYY-MM-DD`. Negativo para restar.
+ *
+ * ── Por qué mediodía UTC ──
+ *
+ * Anclar en `T00:00:00Z` y sumar parece lo natural, y es justo lo que falla: la
+ * medianoche UTC es la tarde del día anterior en Colombia, así que al volver a
+ * `YYYY-MM-DD` se pierde un día en cuanto interviene cualquier huso. El mediodía
+ * está a doce horas de las dos fronteras, así que ningún desfase razonable lo
+ * mueve de día.
+ *
+ * ── Por qué está aquí ──
+ *
+ * Estaba copiada **cuatro veces** —en `festivos.ts`, en las dos pantallas del
+ * panel que navegan día a día y en el resumen del inicio—, idéntica en las
+ * cuatro. Cuatro copias de una regla son cuatro sitios donde arreglar el mismo
+ * fallo, y tres que se van a olvidar. Vive donde ya vivía `fechaDeJornada`.
+ */
+export function sumarDias(fecha: string, dias: number): string {
+  const base = new Date(`${fecha}T12:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + dias);
+  return base.toISOString().slice(0, 10);
+}
+
+/** Resta días a una fecha `YYYY-MM-DD`. Se lee mejor que `sumarDias(f, -n)`. */
+export function restarDias(fecha: string, dias: number): string {
+  return sumarDias(fecha, -dias);
+}
+
+/**
+ * Los periodos que el panel ofrece consultar, en días **hacia atrás desde hoy**.
+ *
+ * El cero de `hoy` no es un descuido: el periodo incluye siempre el día de hoy,
+ * así que «la última semana» son siete días contando este, no ocho. Por eso
+ * `semana` es 6 y no 7.
+ *
+ * No se ofrece nada más largo que un mes a propósito: más allá, la pregunta ya
+ * no es «cómo va la operación» sino «qué pasó tal día», y para eso está la
+ * consulta por fecha.
+ */
+export const PERIODOS = { hoy: 0, semana: 6, mes: 29 } as const;
+
+export type Periodo = keyof typeof PERIODOS;
+
+/**
  * Horas que trabajó la máquina, según el horómetro y no según el reloj.
  *
  * Es la cifra que alimenta el mantenimiento preventivo. `null` mientras falte

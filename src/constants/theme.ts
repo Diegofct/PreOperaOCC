@@ -7,6 +7,14 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
+/**
+ * Las medidas viven en `medidas.ts`, que es puro y lo puede importar Node. Se
+ * reexportan enteras para que el resto de la aplicación siga escribiendo
+ * `from '@/constants/theme'` y no se entere de la mudanza.
+ */
+export * from './medidas';
+
+
 // Los colores viven en un módulo sin React Native para poder comprobarlos
 // desde Node. Ver `paleta.ts`.
 export {
@@ -55,18 +63,8 @@ export const Fonts = Platform.select({
  * sí viven en un solo sitio, que es lo que faltaba.
  */
 
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
-} as const;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
 
 /* -------------------------------------------------------------------------
  * Superficie de escritorio: el panel de administración
@@ -77,15 +75,6 @@ export const MaxContentWidth = 800;
  * del operador. Lo único que necesita aparte son bordes: una tabla sin líneas
  * es ilegible, y el móvil no tiene tablas.
  * ---------------------------------------------------------------------- */
-
-/**
- * Ancho útil del panel. Más que `MaxContentWidth`, que es medida de lectura.
- *
- * Calibrado contra la tabla más ancha que hay —personas, con seis columnas y
- * dos botones— en un portátil de 1366 px, que es el suelo realista de la
- * oficina de una obra.
- */
-export const MaxContentWidthPanel = 1280;
 
 
 /**
@@ -186,12 +175,4 @@ export const Texto = {
   cifra: 40,
 } as const;
 
-export const Radio = {
-  sm: 8,
-  md: 12,
-  lg: 16,
-  pastilla: 999,
-} as const;
 
-/** Separación mínima entre dos objetivos táctiles adyacentes. */
-export const SeparacionTactil = 12;

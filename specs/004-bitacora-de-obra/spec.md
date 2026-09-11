@@ -137,6 +137,12 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-35: EL SISTEMA permitirá al residente consultar únicamente las bitácoras de su obra.
 - RF-36: EL SISTEMA conservará y mostrará como registro histórico de solo lectura las
   bitácoras por máquina registradas antes de este cambio.
+  > **Estrechado por 006/RF-28 el 2026-09-11.** Se muestran únicamente las que estén
+  > **cerradas**. Al planificar la spec 006 se miró la base: las seis que existen están
+  > abiertas y son de la misma semana en que se probaba este formato, así que no son trabajo
+  > registrado sino borradores a medias, y arrastrarlos al pie del parte nuevo todos los días
+  > no conservaba nada. Lo que RF-36 promete —que el trabajo ya registrado no desaparezca—
+  > sigue en pie: una bitácora cerrada se seguiría viendo. **Las filas no se borran.**
 - RF-37: EL SISTEMA permitirá al residente anular una bitácora cerrada de su obra, a
   diferencia del preoperacional, cuya anulación es de la gerencia (001/RF-14).
 

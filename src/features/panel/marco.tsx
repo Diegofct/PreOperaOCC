@@ -9,7 +9,7 @@
  * `useListado` sirve la carga y la recarga; `MarcoPantalla` sirve el encabezado,
  * el aviso de error y el ancho de página.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode, type RefObject } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -126,6 +126,7 @@ export function MarcoPantalla({
   error,
   cargando,
   modulo,
+  refDesplazamiento,
   children,
 }: {
   titulo: string;
@@ -133,13 +134,26 @@ export function MarcoPantalla({
   error?: string | null;
   cargando?: boolean;
   modulo?: Modulo;
+  /**
+   * La referencia al desplazamiento de la pantalla, para quien necesite moverlo
+   * —hoy solo el índice del parte diario, que salta a una sección—.
+   *
+   * **Opcional a propósito.** Las otras nueve pantallas no lo pasan y no se
+   * enteran de que existe; exponerlo obligatoriamente habría sido cambiar diez
+   * archivos para que uno pudiera desplazarse.
+   */
+  refDesplazamiento?: RefObject<ScrollView | null>;
   children: ReactNode;
 }) {
   const persona = usePersona();
   const fueraDeAlcance = modulo && persona && !alcanza(persona.rol, modulo, 'ver');
 
   return (
-    <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.contenedor}>
+    <ScrollView
+      ref={refDesplazamiento}
+      style={estilos.pantalla}
+      contentContainerStyle={estilos.contenedor}
+    >
       <View style={estilos.columna}>
         <View style={estilos.encabezado}>
           <Titulo>{titulo}</Titulo>
