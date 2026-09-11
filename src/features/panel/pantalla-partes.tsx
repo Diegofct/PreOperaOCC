@@ -19,8 +19,8 @@
  * La fecha por defecto la decide el servidor, no este navegador: quien mira el
  * panel puede estar en otra ciudad y el parte es de la jornada de la obra.
  */
-import { useCallback, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
 import { actividadesDe, CLAVE_OTRA } from "@/features/bitacoras/actividades";
@@ -43,17 +43,18 @@ import {
   horasDeMaquina,
   medidorDeClase,
   mensajeDeAvance,
+  sumarDias,
   UNIDAD_DE_MEDIDOR,
   validarAvance,
 } from "@/shared/rules/jornada";
 import { alcanza } from "@/shared/rules/permisos";
+import { bloqueosDelCierre, seccionesDelParte } from "@/shared/rules/parte";
 
 import { api } from "./cliente-api";
 import {
   Acciones,
   AccionesFormulario,
   Ayuda,
-  Bloque,
   FilaDeFormulario,
   Aviso,
   Boton,
@@ -66,6 +67,14 @@ import {
   Tabla,
   type Columna,
 } from "./componentes";
+import {
+  DisposicionConIndice,
+  IndiceDeSecciones,
+  MarcoDeSecciones,
+  PieDeSeccion,
+  SeccionEnMarco,
+  useSaltoASeccion,
+} from "./secciones-con-indice";
 import type {
   BitacoraFila,
   DiaDeObra,
@@ -85,13 +94,6 @@ function aNumero(texto: string): number | null {
   if (limpio === "") return null;
   const valor = Number(limpio);
   return Number.isFinite(valor) ? valor : null;
-}
-
-/** Suma días a `YYYY-MM-DD` por mediodía UTC, para no cruzar el día. */
-function sumarDias(fecha: string, dias: number): string {
-  const base = new Date(`${fecha}T12:00:00Z`);
-  base.setUTCDate(base.getUTCDate() + dias);
-  return base.toISOString().slice(0, 10);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -146,6 +148,69 @@ export default function PantallaPartes() {
   const anulado = Boolean(parte?.anuladoEn);
   const editable = Boolean(parte) && !cerrado && !anulado;
 
+  /** Para que el índice pueda llevar la vista a una sección. */
+  const desplazamiento = useRef<ScrollView | null>(null);
+  const salto = useSaltoASeccion(desplazamiento);
+  const [seccionActiva, setSeccionActiva] = useState<string | null>(null);
+  /** Bitácoras del formato viejo **cerradas** ese día. Las abiertas no cuentan. */
+  const [historicoCerradas, setHistoricoCerradas] = useState(0);
+
+  /**
+   * Las fotos del parte, pedidas aquí y no dentro de su sección.
+   *
+   * Se izaron para que el índice pueda decir si ya hay fotografía del día. La
+   * sección las recibe por props y sigue refrescándolas al subir una.
+   */
+  const fotos = useListado<{
+    id: string;
+    itemKey: string | null;
+    disponible: boolean;
+  }>(
+    useCallback(
+      () => (parte ? api.partes.fotos(parte.id) : Promise.resolve([])),
+      [parte],
+    ),
+  );
+  // Las que no llevan `itemKey` son del día; las que lo llevan son de una
+  // actividad y se pintan en su fila.
+  const fotosDelDia = fotos.datos
+    .filter((f) => f.itemKey === null)
+    .map((f) => f.id);
+
+  /**
+   * Lo que el índice enseña. Sale de `shared/rules/parte`, que es la misma regla
+   * que decide qué impide cerrar — así el índice y el servidor no discrepan.
+   *
+   * Refleja **lo guardado**, no lo tecleado: cada sección arranca del parte y a
+   * partir de ahí manda lo suyo, y al guardar se recarga el día. Encender una
+   * entrada por algo escrito y sin guardar sería decir que está lista cuando
+   * todavía se pierde al cerrar el navegador.
+   */
+  const secciones = seccionesDelParte({
+    maquinaria: parte?.maquinaria.length ?? 0,
+    personal: parte?.personal.length ?? 0,
+    actividades: parte?.actividades.length ?? 0,
+    clima: parte?.clima.length ?? 0,
+    laboratorio: parte?.laboratorio.length ?? 0,
+    notas: parte?.notas ?? "",
+    // Todavía no se iza el conteo de fotos: lo hace T17. Hasta entonces es
+    // `null`, que la regla traduce a «comprobando» y nunca a «sin registrar».
+    fotos: fotos.cargando ? null : fotosDelDia.length,
+    historicoCerradas,
+    cerrado,
+    anulado,
+  });
+
+  /**
+   * Qué falta para poder cerrar, dicho **antes** de que alguien pulse Cerrar.
+   *
+   * Sale de `bloqueosDelCierre`, que es literalmente la misma función que llama
+   * la ruta de cierre para rechazar. No es una copia ni una aproximación: si el
+   * índice dijera una cosa y el servidor otra, el residente no sabría a cuál
+   * hacerle caso.
+   */
+  const bloqueos = parte && !cerrado && !anulado ? bloqueosDelCierre(parte) : [];
+
   async function abrir() {
     await dia.ejecutar(() => api.partes.abrir(fecha, obraId ?? undefined));
   }
@@ -157,6 +222,7 @@ export default function PantallaPartes() {
       descripcion="Qué se hizo hoy en la obra: máquinas, personal, actividades, clima y laboratorio. Se llena a lo largo del día y se cierra al terminar la jornada."
       error={dia.error ?? vehiculos.error ?? personas.error ?? obras.error}
       cargando={dia.cargando || vehiculos.cargando || personas.cargando}
+      refDesplazamiento={desplazamiento}
     >
       <Seccion titulo={`Día ${fecha}`}>
         <Acciones>
@@ -226,7 +292,36 @@ export default function PantallaPartes() {
       </Seccion>
 
       {parte ? (
-        <>
+        <DisposicionConIndice
+          alMedir={salto.alMedirDisposicion}
+          indice={
+            <IndiceDeSecciones
+              secciones={secciones}
+              activa={seccionActiva}
+              alElegir={(id) => {
+                setSeccionActiva(id);
+                salto.saltarA(id);
+              }}
+              pie={
+                anulado ? (
+                  <Etiqueta tono="neutro">Anulado</Etiqueta>
+                ) : cerrado ? (
+                  <Etiqueta tono="bueno">Cerrado</Etiqueta>
+                ) : (
+                  <>
+                    <Etiqueta tono="atencion">Falta cerrar</Etiqueta>
+                    {bloqueos.map((texto) => (
+                      <Text key={texto} style={estilos.bloqueo}>
+                        {texto}
+                      </Text>
+                    ))}
+                  </>
+                )
+              }
+            />
+          }
+        >
+          <MarcoDeSecciones>
           <SeccionMaquinaria
             key={`maquinaria-${parte.id}`}
             parte={parte}
@@ -236,6 +331,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionPersonal
             key={`personal-${parte.id}`}
@@ -244,6 +340,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionActividades
             key={`actividades-${parte.id}`}
@@ -251,6 +348,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionClima
             key={`clima-${parte.id}`}
@@ -258,6 +356,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionLaboratorio
             key={`laboratorio-${parte.id}`}
@@ -265,6 +364,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionNotas
             key={`notas-${parte.id}`}
@@ -272,11 +372,15 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
           <SeccionFotoDelDia
             key={`foto-${parte.id}`}
             parte={parte}
             editable={editable}
+            alMedir={salto.alMedirBanda}
+            fotosDelDia={fotosDelDia}
+            alSubir={fotos.recargar}
           />
           <Cierre
             parte={parte}
@@ -286,11 +390,16 @@ export default function PantallaPartes() {
             puedeAnular={alcanza(rol, "bitacoras", "anular")}
             alCambiar={dia.recargar}
             alFallar={dia.setError}
+            alMedir={salto.alMedirBanda}
           />
-        </>
+          <SeccionHistorico
+            fecha={fecha}
+            alContar={setHistoricoCerradas}
+            alMedir={salto.alMedirBanda}
+          />
+          </MarcoDeSecciones>
+        </DisposicionConIndice>
       ) : null}
-
-      <SeccionHistorico fecha={fecha} />
     </MarcoPantalla>
   );
 }
@@ -307,31 +416,60 @@ export default function PantallaPartes() {
  * días que tienen algo, para no ensuciar la pantalla con una sección vacía
  * todos los días de aquí en adelante.
  */
-function SeccionHistorico({ fecha }: { fecha: string }) {
+function SeccionHistorico({
+  fecha,
+  alContar,
+  alMedir,
+}: {
+  fecha: string;
+  /** Cuántas cerradas hay, para que el índice sepa si ofrecer esta entrada. */
+  alContar: (cuantas: number) => void;
+  alMedir: (id: string, y: number) => void;
+}) {
   const jornada = useListado<JornadaFila>(
     useCallback(async () => [await api.bitacoras.delDia(fecha)], [fecha]),
   );
 
-  const bitacoras = jornada.datos[0]?.bitacoras ?? [];
+  /**
+   * Solo las **cerradas** (spec 006 / RF-28).
+   *
+   * Una bitácora abierta no es evidencia: es un borrador que alguien empezó y
+   * nunca terminó. Al mirar la base al planificar esta spec había seis, las seis
+   * abiertas y todas de la misma semana en que se probaba este formato — restos
+   * de pruebas, no trabajo registrado. Arrastrarlas al pie del parte nuevo todos
+   * los días no conservaba nada y ensuciaba el documento.
+   *
+   * Lo que RF-36 de la spec 004 prometía sigue en pie: una bitácora cerrada de
+   * verdad se sigue viendo. Y **ninguna fila se borra** — esto es un filtro de
+   * pantalla, no una baja.
+   */
+  const bitacoras = (jornada.datos[0]?.bitacoras ?? []).filter(
+    (b) => b.cerradaEn !== null && b.anuladoEn === null,
+  );
+
+  useEffect(() => {
+    if (!jornada.cargando) alContar(bitacoras.length);
+  }, [jornada.cargando, bitacoras.length, alContar]);
+
   if (jornada.cargando || bitacoras.length === 0) return null;
 
   const columnas: Columna<BitacoraFila>[] = [
     {
       clave: "equipo",
       titulo: "Equipo",
-      ancho: 160,
+      ancho: 130,
       pintar: (b) => <Celda>{b.vehiculoCodigo}</Celda>,
     },
     {
       clave: "operador",
       titulo: "Operador",
-      ancho: 220,
+      ancho: 170,
       pintar: (b) => <Celda>{b.operadorNombre ?? "—"}</Celda>,
     },
     {
       clave: "horometros",
       titulo: "Horómetros",
-      ancho: 180,
+      ancho: 150,
       pintar: (b) => (
         <Celda>
           {b.horometroInicial ?? "—"} → {b.horometroFinal ?? "—"} h
@@ -341,7 +479,7 @@ function SeccionHistorico({ fecha }: { fecha: string }) {
     {
       clave: "horas",
       titulo: "Horas",
-      ancho: 110,
+      ancho: 80,
       pintar: (b) => {
         const horas = horasDeMaquina(b.horometroInicial, b.horometroFinal);
         return <Celda>{horas === null ? "—" : `${horas} h`}</Celda>;
@@ -350,7 +488,7 @@ function SeccionHistorico({ fecha }: { fecha: string }) {
     {
       clave: "actividades",
       titulo: "Actividades",
-      ancho: 280,
+      ancho: 210,
       pintar: (b) => (
         <Celda>{b.actividades.map((a) => a.nombre).join(", ") || "—"}</Celda>
       ),
@@ -358,7 +496,7 @@ function SeccionHistorico({ fecha }: { fecha: string }) {
     {
       clave: "estado",
       titulo: "Estado",
-      ancho: 130,
+      ancho: 110,
       pintar: (b) =>
         b.anuladoEn ? (
           <Etiqueta tono="malo">Anulada</Etiqueta>
@@ -371,13 +509,18 @@ function SeccionHistorico({ fecha }: { fecha: string }) {
   ];
 
   return (
-    <Seccion titulo={`Bitácoras por máquina de ese día (${bitacoras.length})`}>
+    <SeccionEnMarco
+      id="historico"
+      titulo={`Bitácoras por máquina de ese día (${bitacoras.length})`}
+      alMedir={alMedir}
+      ultima
+    >
       <Aviso tono="info">
         Registros del formato anterior, cuando la bitácora era un documento por
         máquina. Se conservan tal como se cerraron y no se pueden editar.
       </Aviso>
-      <Tabla columnas={columnas} filas={bitacoras} vacio="" />
-    </Seccion>
+      <Tabla columnas={columnas} filas={bitacoras} vacio="" variante="desnuda" />
+    </SeccionEnMarco>
   );
 }
 
@@ -386,6 +529,8 @@ function SeccionHistorico({ fecha }: { fecha: string }) {
 /* ------------------------------------------------------------------------ */
 
 interface PropsSeccion {
+  /** Dónde empieza esta banda, para que el índice pueda saltar a ella. */
+  alMedir: (id: string, y: number) => void;
   parte: ParteFila;
   editable: boolean;
   alGuardar: () => void;
@@ -398,6 +543,7 @@ function SeccionMaquinaria({
   editable,
   alGuardar,
   alFallar,
+  alMedir,
 }: PropsSeccion & { vehiculos: VehiculoFila[] }) {
   // El estado arranca del parte y a partir de ahí manda lo que se teclea. No se
   // vuelve a sincronizar con un efecto a propósito: refrescar desde el servidor
@@ -441,9 +587,18 @@ function SeccionMaquinaria({
   }
 
   return (
-    <Seccion titulo={`Maquinaria (${filas.length})`}>
+    <SeccionEnMarco
+      id="maquinaria"
+      titulo={`Maquinaria (${filas.length})`}
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton titulo="Guardar" onPress={guardar} deshabilitado={guardando} />
+        ) : null
+      }
+    >
       {filas.length > 0 ? (
-        <Bloque>
+        <>
           {filas.map((fila, indice) => {
             const equipo = vehiculos.find((v) => v.id === fila.vehiculoId);
             // Una camioneta se controla por kilómetros y una retroexcavadora por
@@ -461,6 +616,7 @@ function SeccionMaquinaria({
               <FilaDeFormulario
                 key={`${fila.vehiculoId}-${indice}`}
                 ultima={indice === filas.length - 1}
+                apilado={filas.length - indice}
               >
                 <Campo
                   etiqueta="Equipo"
@@ -510,11 +666,11 @@ function SeccionMaquinaria({
               </FilaDeFormulario>
             );
           })}
-        </Bloque>
+        </>
       ) : null}
 
       {editable ? (
-        <Formulario>
+        <PieDeSeccion>
           <Selector
             etiqueta="Añadir máquina"
             valor={null}
@@ -530,20 +686,13 @@ function SeccionMaquinaria({
             vacio="Elija un equipo"
             ancho={260}
           />
-          <AccionesFormulario>
-            <Boton
-              titulo="Guardar maquinaria"
-              onPress={guardar}
-              deshabilitado={guardando}
-            />
-          </AccionesFormulario>
-        </Formulario>
+        </PieDeSeccion>
       ) : null}
 
       {filas.length === 0 && !editable ? (
         <Aviso tono="info">Ese día no se registró ninguna máquina.</Aviso>
       ) : null}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -557,6 +706,7 @@ function SeccionPersonal({
   editable,
   alGuardar,
   alFallar,
+  alMedir,
 }: PropsSeccion & { personas: PersonaFila[] }) {
   const [filas, setFilas] = useState<FilaPersona[]>(() =>
     parte.personal.map((p) => ({
@@ -596,9 +746,18 @@ function SeccionPersonal({
   }
 
   return (
-    <Seccion titulo={`Personal (${filas.length})`}>
+    <SeccionEnMarco
+      id="personal"
+      titulo={`Personal (${filas.length})`}
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton titulo="Guardar" onPress={guardar} deshabilitado={guardando} />
+        ) : null
+      }
+    >
       {filas.length > 0 ? (
-        <Bloque>
+        <>
           {filas.map((fila, indice) => {
             const quien = personas.find((p) => p.id === fila.usuarioId);
             const desglose = desglosarJornada(
@@ -611,6 +770,7 @@ function SeccionPersonal({
               <FilaDeFormulario
                 key={`${fila.usuarioId}-${indice}`}
                 ultima={indice === filas.length - 1}
+                apilado={filas.length - indice}
               >
                 <Campo
                   etiqueta="Persona"
@@ -666,11 +826,11 @@ function SeccionPersonal({
               </FilaDeFormulario>
             );
           })}
-        </Bloque>
+        </>
       ) : null}
 
       {editable ? (
-        <Formulario>
+        <PieDeSeccion>
           <Selector
             etiqueta="Añadir persona"
             valor={null}
@@ -689,20 +849,13 @@ function SeccionPersonal({
             vacio="Elija una persona"
             ancho={280}
           />
-          <AccionesFormulario>
-            <Boton
-              titulo="Guardar personal"
-              onPress={guardar}
-              deshabilitado={guardando}
-            />
-          </AccionesFormulario>
-        </Formulario>
+        </PieDeSeccion>
       ) : null}
 
       {filas.length === 0 && !editable ? (
         <Aviso tono="info">Ese día no se registró personal.</Aviso>
       ) : null}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -715,6 +868,7 @@ function SeccionActividades({
   editable,
   alGuardar,
   alFallar,
+  alMedir,
 }: PropsSeccion) {
   // Las fotos del parte, para repartirlas entre las actividades que las tienen.
   const fotos = useListado<{
@@ -779,11 +933,21 @@ function SeccionActividades({
   }));
 
   return (
-    <Seccion titulo={`Actividades (${filas.length})`}>
+    <SeccionEnMarco
+      id="actividades"
+      titulo={`Actividades (${filas.length})`}
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton titulo="Guardar" onPress={guardar} deshabilitado={guardando} />
+        ) : null
+      }
+    >
       {filas.length > 0 ? (
-        <Bloque>
+        <>
           {filas.map((fila, indice) => (
-            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}>
+            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}
+                apilado={filas.length - indice}>
               <Selector
                 etiqueta="Actividad"
                 valor={fila.clave}
@@ -874,11 +1038,11 @@ function SeccionActividades({
               ) : null}
             </FilaDeFormulario>
           ))}
-        </Bloque>
+        </>
       ) : null}
 
       {editable ? (
-        <Acciones>
+        <PieDeSeccion>
           <Boton
             titulo="Añadir actividad"
             tono="secundario"
@@ -900,18 +1064,13 @@ function SeccionActividades({
               ])
             }
           />
-          <Boton
-            titulo="Guardar actividades"
-            onPress={guardar}
-            deshabilitado={guardando}
-          />
-        </Acciones>
+        </PieDeSeccion>
       ) : null}
 
       {filas.length === 0 && !editable ? (
         <Aviso tono="info">Ese día no se registró ninguna actividad.</Aviso>
       ) : null}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -919,7 +1078,13 @@ function SeccionActividades({
 /* Clima                                                                     */
 /* ------------------------------------------------------------------------ */
 
-function SeccionClima({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
+function SeccionClima({
+  parte,
+  editable,
+  alGuardar,
+  alFallar,
+  alMedir,
+}: PropsSeccion) {
   const [filas, setFilas] = useState<FilaClima[]>(() =>
     parte.clima.map((c) => ({
       condicion: c.condicion,
@@ -953,13 +1118,25 @@ function SeccionClima({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
   }
 
   return (
-    <Seccion
+    <SeccionEnMarco
+      id="clima"
       titulo={`Clima (${filas.length} ${filas.length === 1 ? "tramo" : "tramos"})`}
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton
+            titulo="Guardar"
+            onPress={guardar}
+            deshabilitado={guardando || error !== null}
+          />
+        ) : null
+      }
     >
       {filas.length > 0 ? (
-        <Bloque>
+        <>
           {filas.map((fila, indice) => (
-            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}>
+            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}
+                apilado={filas.length - indice}>
               <Selector
                 etiqueta="Condición"
                 valor={fila.condicion}
@@ -997,13 +1174,13 @@ function SeccionClima({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
               ) : null}
             </FilaDeFormulario>
           ))}
-        </Bloque>
+        </>
       ) : null}
 
       {error ? <Aviso tono="error">{mensajeDeFranja(error)}</Aviso> : null}
 
       {editable ? (
-        <Acciones>
+        <PieDeSeccion>
           <Boton
             titulo="Añadir tramo"
             tono="secundario"
@@ -1014,18 +1191,13 @@ function SeccionClima({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
               ])
             }
           />
-          <Boton
-            titulo="Guardar clima"
-            onPress={guardar}
-            deshabilitado={guardando || error !== null}
-          />
-        </Acciones>
+        </PieDeSeccion>
       ) : null}
 
       {filas.length === 0 && !editable ? (
         <Aviso tono="info">Ese día no se registró el clima.</Aviso>
       ) : null}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -1038,6 +1210,7 @@ function SeccionLaboratorio({
   editable,
   alGuardar,
   alFallar,
+  alMedir,
 }: PropsSeccion) {
   const [filas, setFilas] = useState<FilaMaterial[]>(() =>
     parte.laboratorio.map((m) => ({
@@ -1093,17 +1266,27 @@ function SeccionLaboratorio({
   ];
 
   return (
-    <Seccion titulo={`Laboratorio (${filas.length})`}>
+    <SeccionEnMarco
+      id="laboratorio"
+      titulo={`Laboratorio (${filas.length})`}
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton titulo="Guardar" onPress={guardar} deshabilitado={guardando} />
+        ) : null
+      }
+    >
       {editable ? (
         <>
           {filas.length > 0 ? (
-            <Bloque>
+            <>
               {filas.map((fila, indice) => {
                 const material = materialPorId(fila.material);
                 return (
                   <FilaDeFormulario
                     key={indice}
                     ultima={indice === filas.length - 1}
+                apilado={filas.length - indice}
                   >
                     <Selector
                       etiqueta="Material"
@@ -1135,9 +1318,9 @@ function SeccionLaboratorio({
                   </FilaDeFormulario>
                 );
               })}
-            </Bloque>
+            </>
           ) : null}
-          <Acciones>
+          <PieDeSeccion>
             <Boton
               titulo="Añadir material"
               tono="secundario"
@@ -1148,21 +1331,17 @@ function SeccionLaboratorio({
                 ])
               }
             />
-            <Boton
-              titulo="Guardar laboratorio"
-              onPress={guardar}
-              deshabilitado={guardando}
-            />
-          </Acciones>
+          </PieDeSeccion>
         </>
       ) : (
         <Tabla
           columnas={columnas}
           filas={parte.laboratorio}
           vacio="Ese día no se consumió material de laboratorio."
+          variante="desnuda"
         />
       )}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -1170,7 +1349,13 @@ function SeccionLaboratorio({
 /* Notas                                                                     */
 /* ------------------------------------------------------------------------ */
 
-function SeccionNotas({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
+function SeccionNotas({
+  parte,
+  editable,
+  alGuardar,
+  alFallar,
+  alMedir,
+}: PropsSeccion) {
   const [notas, setNotas] = useState(() => parte.notas ?? "");
   const [guardando, setGuardando] = useState(false);
 
@@ -1188,27 +1373,27 @@ function SeccionNotas({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
   }
 
   return (
-    <Seccion titulo="Notas y observaciones">
+    <SeccionEnMarco
+      id="notas"
+      titulo="Notas y observaciones"
+      alMedir={alMedir}
+      accion={
+        editable ? (
+          <Boton titulo="Guardar" onPress={guardar} deshabilitado={guardando} />
+        ) : null
+      }
+    >
       {editable ? (
-        <Formulario>
-          <Campo
-            etiqueta="Del día"
-            valor={notas}
-            onChange={setNotas}
-            ayuda="Lo que haya que dejar dicho y no quepa en las secciones de arriba."
-          />
-          <AccionesFormulario>
-            <Boton
-              titulo="Guardar notas"
-              onPress={guardar}
-              deshabilitado={guardando}
-            />
-          </AccionesFormulario>
-        </Formulario>
+        <Campo
+          etiqueta="Del día"
+          valor={notas}
+          onChange={setNotas}
+          ayuda="Lo que haya que dejar dicho y no quepa en las secciones de arriba."
+        />
       ) : (
         <Aviso tono="info">{parte.notas ?? "Sin notas ese día."}</Aviso>
       )}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -1227,30 +1412,34 @@ function SeccionNotas({ parte, editable, alGuardar, alFallar }: PropsSeccion) {
 function SeccionFotoDelDia({
   parte,
   editable,
+  alMedir,
+  fotosDelDia,
+  alSubir,
 }: {
   parte: ParteFila;
   editable: boolean;
+  alMedir: (id: string, y: number) => void;
+  /**
+   * Las fotos del día, izadas a la pantalla.
+   *
+   * Antes se pedían aquí dentro, y entonces el índice no tenía forma de saber
+   * cuántas hay para encender su entrada. Se descartó añadir el conteo a la
+   * respuesta del parte: habría que tocar contrato, ruta y serialización para
+   * un dato de presentación que la misma pantalla ya está pidiendo.
+   */
+  fotosDelDia: string[];
+  alSubir: () => void;
 }) {
-  const fotos = useListado<{
-    id: string;
-    itemKey: string | null;
-    disponible: boolean;
-  }>(useCallback(() => api.partes.fotos(parte.id), [parte.id]));
-
-  // Las que no llevan `itemKey` son del día; las que lo llevan son de una
-  // actividad y se pintan en su fila.
-  const delDia = fotos.datos.filter((f) => f.itemKey === null).map((f) => f.id);
-
   return (
-    <Seccion titulo="Fotografía del día">
+    <SeccionEnMarco id="fotografia" titulo="Fotografía del día" alMedir={alMedir}>
       <SubirFoto
         titulo="Añadir fotografía"
         rutaDeSubida={`/api/panel/partes/${parte.id}/foto`}
-        fotos={delDia}
+        fotos={fotosDelDia}
         editable={editable}
-        alSubir={fotos.recargar}
+        alSubir={alSubir}
       />
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
@@ -1266,6 +1455,7 @@ function Cierre({
   puedeAnular,
   alCambiar,
   alFallar,
+  alMedir,
 }: {
   parte: ParteFila;
   editable: boolean;
@@ -1274,6 +1464,7 @@ function Cierre({
   puedeAnular: boolean;
   alCambiar: () => void;
   alFallar: (mensaje: string | null) => void;
+  alMedir: (id: string, y: number) => void;
 }) {
   const [anulando, setAnulando] = useState(false);
   const [motivo, setMotivo] = useState("");
@@ -1310,7 +1501,7 @@ function Cierre({
   if (anulado) return null;
 
   return (
-    <Seccion titulo="Cerrar la jornada">
+    <SeccionEnMarco id="cierre" titulo="Cerrar la jornada" alMedir={alMedir} ultima>
       {editable ? (
         <>
           <Aviso tono="info">
@@ -1364,11 +1555,17 @@ function Cierre({
           </Acciones>
         )
       ) : null}
-    </Seccion>
+    </SeccionEnMarco>
   );
 }
 
 const estilos = StyleSheet.create({
+  /** Lo que impide cerrar, en el pie del índice. Se lee, no se decora. */
+  bloqueo: {
+    fontSize: TextoPanel.micro,
+    color: Colors.light.textSecondary,
+    lineHeight: 16,
+  },
   cabecera: {
     flexDirection: "row",
     alignItems: "center",

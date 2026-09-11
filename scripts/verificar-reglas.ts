@@ -80,6 +80,11 @@ import {
   nombreDeMaterial,
 } from '../src/shared/catalogos/bitacora';
 import { Colors, Estado, Panel } from '../src/constants/paleta';
+import {
+  AnchoContenidoConIndice,
+  MaxContentWidthPanel,
+  Spacing,
+} from '../src/constants/medidas';
 import { normalizar } from '../src/shared/rules/texto';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
 import { vehiculos } from '../src/db/servidor/esquema';
@@ -102,8 +107,16 @@ import {
   horaLocal,
   horasDeMaquina,
   maquinasSinBitacora,
+  PERIODOS,
+  restarDias,
+  sumarDias,
   validarHorometros,
 } from '../src/shared/rules/jornada';
+import {
+  bloqueosDelCierre,
+  seccionesDelParte,
+  type ConteosDelParte,
+} from '../src/shared/rules/parte';
 
 import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
 import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
@@ -511,6 +524,203 @@ prueba('la jornada en obra no cambia de día por la zona del navegador', () => {
   // La frontera exacta: 05:00 UTC es medianoche en Colombia.
   assert.equal(fechaDeJornada(Date.parse('2026-03-04T05:00:00Z')), '2026-03-04');
   assert.equal(fechaDeJornada(Date.parse('2026-03-04T04:59:59Z')), '2026-03-03');
+});
+
+prueba('sumar y restar días no se tropieza con los meses ni con los bisiestos', () => {
+  // Spec 006 / T2. La misma aritmética estaba copiada en cuatro sitios —festivos,
+  // dos pantallas del panel y el resumen—, así que es la primera vez que se
+  // comprueba. Se calcula por mediodía UTC justamente para que ninguno de estos
+  // saltos cruce de día por un huso horario.
+  assert.equal(sumarDias('2026-01-31', 1), '2026-02-01');
+  assert.equal(restarDias('2026-03-01', 1), '2026-02-28');
+
+  // Cambio de año.
+  assert.equal(sumarDias('2026-12-31', 1), '2027-01-01');
+  assert.equal(restarDias('2027-01-01', 1), '2026-12-31');
+
+  // 2028 es bisiesto y tiene 29 de febrero; 2026 no.
+  assert.equal(sumarDias('2028-02-28', 1), '2028-02-29');
+  assert.equal(sumarDias('2028-02-29', 1), '2028-03-01');
+  assert.equal(restarDias('2028-03-01', 1), '2028-02-29');
+  assert.equal(sumarDias('2026-02-28', 1), '2026-03-01');
+
+  // Sumar cero no mueve nada, y restar es sumar con el signo cambiado.
+  assert.equal(sumarDias('2026-09-11', 0), '2026-09-11');
+  assert.equal(restarDias('2026-09-11', 6), sumarDias('2026-09-11', -6));
+});
+
+prueba('los periodos del panel abarcan los días que dicen', () => {
+  // Spec 006 / RF-19. «hoy» es un solo día, así que el desde es el mismo día.
+  assert.equal(restarDias('2026-09-11', PERIODOS.hoy), '2026-09-11');
+  // La última semana son siete días contando hoy, no ocho.
+  assert.equal(restarDias('2026-09-11', PERIODOS.semana), '2026-09-05');
+  // El último mes, treinta.
+  assert.equal(restarDias('2026-09-11', PERIODOS.mes), '2026-08-13');
+});
+
+prueba('el acta que llegó tarde queda fuera por su inicio y dentro por su llegada', () => {
+  // Spec 006 / RF-20, con las fechas reales del caso que originó la spec: el
+  // preoperacional de VOL-01 se inició el 3 de septiembre y el servidor lo
+  // recibió el 7, porque el celular tardó cuatro días en agarrar señal.
+  //
+  // Mirando hoy —11 de septiembre— la última semana empieza el día 5. Filtrar
+  // solo por la fecha de inicio deja el acta fuera y la vuelve invisible en el
+  // panel, que es exactamente el fallo. Por eso la ventana mira las dos fechas.
+  const desde = restarDias('2026-09-11', PERIODOS.semana);
+  assert.ok('2026-09-03' < desde, 'el inicio del acta cae fuera de la última semana');
+  assert.ok('2026-09-07' >= desde, 'pero su llegada sí cae dentro');
+});
+
+/* ------------------------------------------------------------------------ */
+/* El índice del parte diario (spec 006)                                     */
+/* ------------------------------------------------------------------------ */
+
+/** Un parte recién abierto: todo vacío y nada cerrado. */
+const PARTE_VACIO: ConteosDelParte = {
+  maquinaria: 0,
+  personal: 0,
+  actividades: 0,
+  clima: 0,
+  laboratorio: 0,
+  notas: '',
+  fotos: 0,
+  historicoCerradas: 0,
+  cerrado: false,
+  anulado: false,
+};
+
+/** El estado de una sección por su id, para no depender del orden al afirmar. */
+function estadoDe(conteos: ConteosDelParte, id: string) {
+  return seccionesDelParte(conteos).find((s) => s.id === id);
+}
+
+prueba('un parte recién abierto tiene todas sus secciones sin registrar', () => {
+  const secciones = seccionesDelParte(PARTE_VACIO);
+  // Ocho: las siete del parte más el cierre. El histórico no está porque no hay
+  // ninguna bitácora vieja cerrada ese día.
+  assert.equal(secciones.length, 8);
+  assert.ok(secciones.every((s) => s.estado === 'vacio'));
+  // El orden es dato de la regla y no del JSX: si se desalinean, el índice
+  // llevaría a la sección equivocada.
+  assert.deepEqual(
+    secciones.map((s) => s.id),
+    [
+      'maquinaria',
+      'personal',
+      'actividades',
+      'clima',
+      'laboratorio',
+      'notas',
+      'fotografia',
+      'cierre',
+    ],
+  );
+});
+
+prueba('solo se encienden las secciones que tienen algo guardado', () => {
+  const conteos = { ...PARTE_VACIO, maquinaria: 1, personal: 2 };
+  assert.equal(estadoDe(conteos, 'maquinaria')?.estado, 'lleno');
+  assert.equal(estadoDe(conteos, 'maquinaria')?.cuantos, 1);
+  assert.equal(estadoDe(conteos, 'personal')?.estado, 'lleno');
+  assert.equal(estadoDe(conteos, 'personal')?.cuantos, 2);
+  // Las demás siguen apagadas.
+  assert.equal(estadoDe(conteos, 'actividades')?.estado, 'vacio');
+  assert.equal(estadoDe(conteos, 'clima')?.estado, 'vacio');
+});
+
+prueba('unas notas en blanco no cuentan como notas', () => {
+  // Spec 006 / RF-9. Tres espacios es lo que queda cuando alguien escribió algo
+  // y lo borró; el índice no puede darlo por escrito.
+  assert.equal(estadoDe({ ...PARTE_VACIO, notas: '   ' }, 'notas')?.estado, 'vacio');
+  assert.equal(estadoDe({ ...PARTE_VACIO, notas: '\n' }, 'notas')?.estado, 'vacio');
+  assert.equal(estadoDe({ ...PARTE_VACIO, notas: 'Se varó la 02.' }, 'notas')?.estado, 'lleno');
+});
+
+prueba('mientras las fotos no hayan cargado, el índice no dice que no hay', () => {
+  // Spec 006 / RF-8. El conteo de fotos llega por su cuenta, y `null` significa
+  // «todavía no se sabe». Pintarlo como vacío sería mentir durante un segundo, y
+  // es el segundo en que alguien decide que le falta subir la foto del día.
+  assert.equal(estadoDe({ ...PARTE_VACIO, fotos: null }, 'fotografia')?.estado, 'desconocido');
+  assert.equal(estadoDe({ ...PARTE_VACIO, fotos: null }, 'fotografia')?.cuantos, null);
+  assert.equal(estadoDe({ ...PARTE_VACIO, fotos: 0 }, 'fotografia')?.estado, 'vacio');
+  assert.equal(estadoDe({ ...PARTE_VACIO, fotos: 2 }, 'fotografia')?.estado, 'lleno');
+});
+
+prueba('las bitácoras por máquina solo entran si están cerradas', () => {
+  // Spec 006 / RF-28. Las seis que hay en la base están abiertas: son restos de
+  // cuando se probaba el formato viejo, no trabajo registrado.
+  assert.equal(estadoDe(PARTE_VACIO, 'historico'), undefined);
+  const conHistorico = { ...PARTE_VACIO, historicoCerradas: 3 };
+  assert.equal(estadoDe(conHistorico, 'historico')?.estado, 'lleno');
+  assert.equal(estadoDe(conHistorico, 'historico')?.cuantos, 3);
+  // Y va al final, después del cierre: es de otro formato.
+  assert.equal(seccionesDelParte(conHistorico).at(-1)?.id, 'historico');
+});
+
+prueba('el cierre se da por resuelto tanto si se cerró como si se anuló', () => {
+  assert.equal(estadoDe(PARTE_VACIO, 'cierre')?.estado, 'vacio');
+  assert.equal(estadoDe({ ...PARTE_VACIO, cerrado: true }, 'cierre')?.estado, 'lleno');
+  // Un parte anulado ya no se llena: informar de que falta cerrarlo sería pedir
+  // algo que no se puede hacer.
+  assert.equal(estadoDe({ ...PARTE_VACIO, anulado: true }, 'cierre')?.estado, 'lleno');
+});
+
+prueba('un parte sin nada no se puede cerrar, y lo dice con las mismas palabras', () => {
+  // Spec 006 / RF-13. El texto es **literalmente** el que hoy devuelve
+  // `cerrar+api.ts`: si el índice y el servidor dijeran cosas distintas, el
+  // residente no sabría a cuál hacerle caso.
+  const bloqueos = bloqueosDelCierre({ maquinaria: [], personal: [], actividades: [] });
+  assert.deepEqual(bloqueos, [
+    'El parte está vacío. Registre al menos una máquina, una persona o una actividad antes ' +
+      'de cerrarlo.',
+  ]);
+});
+
+prueba('una máquina sin lectura final no deja cerrar, y se nombra', () => {
+  const bloqueos = bloqueosDelCierre({
+    maquinaria: [
+      { codigo: 'VOL-01', claseMedidor: 'odometro', medidorInicial: 45210, medidorFinal: null },
+    ],
+    personal: [],
+    actividades: [],
+  });
+  assert.deepEqual(bloqueos, ['VOL-01: Falta la lectura final (km).']);
+});
+
+prueba('una persona sin hora de salida no deja cerrar, y se nombra', () => {
+  const bloqueos = bloqueosDelCierre({
+    maquinaria: [],
+    personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: null }],
+    actividades: [],
+  });
+  assert.deepEqual(bloqueos, ['A Pedro Cartagena le falta la hora de entrada o de salida.']);
+});
+
+prueba('un parte completo no tiene ningún bloqueo', () => {
+  const bloqueos = bloqueosDelCierre({
+    maquinaria: [
+      { codigo: 'VOL-01', claseMedidor: 'odometro', medidorInicial: 45210, medidorFinal: 45388 },
+    ],
+    personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: '17:00' }],
+    actividades: [{}],
+  });
+  assert.deepEqual(bloqueos, []);
+});
+
+prueba('los bloqueos salen en el mismo orden en que los comprobaba la ruta', () => {
+  // La ruta devolvía **el primero** y paraba. Devolver la lista entera solo es
+  // compatible si el primero es el mismo, así que el orden importa: vacío,
+  // luego máquinas, luego personas.
+  const bloqueos = bloqueosDelCierre({
+    maquinaria: [
+      { codigo: 'RET-02', claseMedidor: 'horometro', medidorInicial: null, medidorFinal: null },
+    ],
+    personal: [{ nombre: 'Ana Ruiz', entrada: null, salida: '17:00' }],
+    actividades: [],
+  });
+  assert.equal(bloqueos.length, 2);
+  assert.equal(bloqueos[0], 'RET-02: Falta la lectura inicial (h).');
+  assert.equal(bloqueos[1], 'A Ana Ruiz le falta la hora de entrada o de salida.');
 });
 
 prueba('el jefe ve exactamente las máquinas que le faltan', () => {
@@ -1026,9 +1236,30 @@ prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
   // la vista es siempre la última —la de los botones—, que es justo la que hay
   // que pulsar. Y no se nota en un monitor grande: se nota en el portátil de la
   // obra. Por eso se cuenta aquí y no se mira a ojo.
-  const LIMITE = 1280; // MaxContentWidthPanel
-  const SEPARACION = 16; // Spacing.three
-  const MARGEN = 32; // Spacing.three a cada lado
+  // Los números salen de los tokens, no de literales con un comentario al lado.
+  // Antes estaban escritos a mano porque `theme.ts` no es importable desde Node
+  // —abre con `global.css` y `react-native`—; desde la spec 006 las medidas
+  // viven en `medidas.ts`, que sí es puro. Un número escrito dos veces es un
+  // número que un día deja de coincidir sin que nadie se entere.
+  const SEPARACION = Spacing.three;
+  const MARGEN = Spacing.three * 2;
+
+  /**
+   * Cuánto ancho tiene de verdad cada pantalla.
+   *
+   * El parte diario tiene **menos**: desde la spec 006 lleva un índice a la
+   * izquierda, así que sus tablas viven dentro de un marco más estrecho y con su
+   * propio relleno. Sin esta distinción la prueba seguiría en verde mientras la
+   * tabla se sale de su marco — y eso no se nota en un monitor grande, se nota
+   * en el portátil de la obra.
+   */
+  const LIMITE_POR_ARCHIVO: Record<string, number> = {
+    // El relleno que se descuenta aquí es el de la **banda** (`Spacing.four` a
+    // cada lado), no el de la tabla: el de la tabla ya va dentro de `MARGEN`.
+    // Restar el equivocado deja el presupuesto 16 puntos largo, que es
+    // justamente lo que no se vería hasta tener la pantalla delante.
+    'pantalla-partes.tsx': AnchoContenidoConIndice - Spacing.four * 2,
+  };
 
   const carpeta = path.join(__dirname, '..', 'src', 'features', 'panel');
   const pantallas = readdirSync(carpeta).filter((f) => f.endsWith('.tsx'));
@@ -1042,7 +1273,8 @@ prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
       tablas++;
       const gasto =
         anchos.reduce((suma, a) => suma + a, 0) + SEPARACION * (anchos.length - 1) + MARGEN;
-      assert.ok(gasto <= LIMITE, `${archivo}: la tabla gasta ${gasto} de ${LIMITE}`);
+      const limite = LIMITE_POR_ARCHIVO[archivo] ?? MaxContentWidthPanel;
+      assert.ok(gasto <= limite, `${archivo}: la tabla gasta ${gasto} de ${limite}`);
     }
   }
 

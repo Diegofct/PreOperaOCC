@@ -19,7 +19,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Estado, Radio, Spacing, TextoPanel } from '@/constants/theme';
-import { fechaDeJornada } from '@/shared/rules/jornada';
+import { fechaDeJornada, type Periodo, sumarDias } from '@/shared/rules/jornada';
 
 import { api } from './cliente-api';
 import {
@@ -42,13 +42,8 @@ import {
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
 import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { useParametroDeDireccion } from './usar-parametro-direccion';
 import { DetallePreoperacional } from './detalle-preoperacional';
-
-function sumarDias(fecha: string, dias: number): string {
-  const base = new Date(`${fecha}T12:00:00Z`);
-  base.setUTCDate(base.getUTCDate() + dias);
-  return base.toISOString().slice(0, 10);
-}
 
 function fechaLarga(fecha: string): string {
   return new Date(`${fecha}T12:00:00Z`).toLocaleDateString('es-CO', {
@@ -69,17 +64,89 @@ function hora(iso: string): string {
   });
 }
 
+/** El día de obra de un instante, `YYYY-MM-DD`, en hora de Colombia. */
+function diaDeObra(iso: string): string {
+  return fechaDeJornada(Date.parse(iso));
+}
+
+/** «5 al 11 de septiembre», o un solo día si los extremos coinciden. */
+function rangoLegible(desde: string, hasta: string): string {
+  if (desde === hasta) return fechaLarga(desde);
+  return `${fechaLarga(desde)} — ${fechaLarga(hasta)}`;
+}
+
+/**
+ * Qué decir cuando la tabla está vacía, que no es una sola cosa.
+ *
+ * Hay cuatro vacíos distintos y se parecían todos: no alcanzar ninguna obra, no
+ * haber nada en el periodo, y que lo escondan la búsqueda o el filtro. El
+ * primero es el que más caro sale —una cuenta mal configurada ve un panel que
+ * parece vacío y nadie sabe por qué— y es el que el servidor nos dice
+ * (spec 006 / RF-24, RF-25).
+ */
+function textoDelVacio(
+  ventana: JornadaDePreoperacionales | undefined,
+  busqueda: string,
+  resultadoFiltro: string | null,
+): string {
+  if (!ventana) return 'Cargando…';
+
+  if (ventana.preoperacionales.length > 0) {
+    const filtros = [
+      busqueda.trim().length > 0 ? `la búsqueda «${busqueda.trim()}»` : null,
+      resultadoFiltro !== null ? 'el filtro de resultado' : null,
+    ].filter((x): x is string => x !== null);
+    return filtros.length > 0
+      ? `Hay ${ventana.preoperacionales.length} preoperacional(es) en este periodo, pero ninguno pasa ${filtros.join(' ni ')}. Quítelo para verlos todos.`
+      : 'Ningún preoperacional coincide con lo que busca.';
+  }
+
+  if (ventana.motivoVacio === 'sin_obra') {
+    return (
+      'Su cuenta no tiene ninguna obra asignada, así que no alcanza ningún registro. ' +
+      'No es que no haya preoperacionales: es que no hay ninguno que le corresponda ver. ' +
+      'Pídale a la gerencia que le asigne su obra.'
+    );
+  }
+
+  return (
+    'Aquí aparecen los preoperacionales que firman los operadores en obra, con su firma y ' +
+    'sus fotos. Ninguno en este periodo: si el operador ya lo llenó, llegará en cuanto su ' +
+    'celular agarre señal.'
+  );
+}
+
 export default function PantallaPreoperacionales() {
-  const [fecha, setFecha] = useState(fechaDeJornada());
+  /**
+   * Se abre en la **última semana**, no en hoy.
+   *
+   * Un acta puede tardar días en subir —el celular sube cuando agarra señal— y
+   * con la pantalla anclada al día de hoy quedaba invisible: para encontrarla
+   * había que pulsar «día anterior» tantas veces como días llevara de retraso,
+   * sospechando que existía. Pasó de verdad con un preoperacional de VOL-01.
+   *
+   * El periodo vive en la dirección, así que recargar no lo pierde y el enlace
+   * se le puede pasar a otro (spec 006 / RF-30).
+   */
+  const [periodo, setPeriodo] = useParametroDeDireccion('periodo', 'semana');
+  /** Un día concreto, cuando se navega a uno. `null` mientras se mire el periodo. */
+  const [dia, setDia] = useState<string | null>(null);
   const [vehiculoId, setVehiculoId] = useState<string | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
 
   const jornada = useListado<JornadaDePreoperacionales>(
-    useCallback(async () => [await api.preoperacionales.delDia(fecha, vehiculoId)], [fecha, vehiculoId]),
+    useCallback(
+      async () => [
+        dia
+          ? await api.preoperacionales.delDia(dia, vehiculoId)
+          : await api.preoperacionales.delPeriodo(periodo as Periodo, vehiculoId),
+      ],
+      [dia, periodo, vehiculoId],
+    ),
   );
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
 
-  const dia = jornada.datos[0];
+  const ventana = jornada.datos[0];
 
   /**
    * Buscar y filtrar lo firmado ese día.
@@ -89,7 +156,7 @@ export default function PantallaPreoperacionales() {
    */
   const [resultadoFiltro, setResultadoFiltro] = useState<string | null>(null);
   const filtrado = useListadoFiltrado(
-    dia?.preoperacionales ?? [],
+    ventana?.preoperacionales ?? [],
     (p) => [p.vehiculoCodigo, p.tipoNombre, p.operadorNombre, p.obraNombre],
     useCallback(
       (p: PreoperacionalFila) => resultadoFiltro === null || p.resultado === resultadoFiltro,
@@ -111,24 +178,34 @@ export default function PantallaPreoperacionales() {
   }
 
   const columnas: Columna<PreoperacionalFila>[] = [
-    { clave: 'hora', titulo: 'Hora', ancho: 80, pintar: (p) => <Celda>{hora(p.iniciadoEn)}</Celda> },
+    {
+      clave: 'dia',
+      titulo: 'Día de trabajo',
+      ancho: 110,
+      // Con un periodo de varios días, la hora sola no ubica nada.
+      pintar: (p) => (
+        <Celda>
+          {diaDeObra(p.iniciadoEn)} · {hora(p.iniciadoEn)}
+        </Celda>
+      ),
+    },
     {
       clave: 'vehiculo',
       titulo: 'Máquina',
-      ancho: 140,
+      ancho: 130,
       pintar: (p) => <Celda>{p.vehiculoCodigo}</Celda>,
     },
-    { clave: 'tipo', titulo: 'Tipo', ancho: 150, pintar: (p) => <Celda>{p.tipoNombre}</Celda> },
+    { clave: 'tipo', titulo: 'Tipo', ancho: 120, pintar: (p) => <Celda>{p.tipoNombre}</Celda> },
     {
       clave: 'operador',
       titulo: 'Operador',
-      ancho: 220,
+      ancho: 190,
       pintar: (p) => <Celda>{p.operadorNombre}</Celda>,
     },
     {
       clave: 'medidores',
       titulo: 'Odóm. / Horóm.',
-      ancho: 160,
+      ancho: 150,
       pintar: (p) => (
         <Celda>
           {p.odometroKm !== null ? `${p.odometroKm} km` : '—'} ·{' '}
@@ -139,7 +216,7 @@ export default function PantallaPreoperacionales() {
     {
       clave: 'resultado',
       titulo: 'Resultado',
-      ancho: 210,
+      ancho: 200,
       pintar: (p) =>
         p.anuladoEn ? (
           <Etiqueta tono="neutro">Anulado</Etiqueta>
@@ -154,9 +231,27 @@ export default function PantallaPreoperacionales() {
         ),
     },
     {
+      clave: 'llego',
+      titulo: 'Llegó',
+      ancho: 110,
+      /**
+       * Cuándo lo recibió el servidor, y una marca si no es el mismo día en que
+       * se firmó. El retraso no es un fallo —el celular sube cuando hay señal—
+       * pero explica por qué un acta aparece en un periodo que no le toca.
+       */
+      pintar: (p) => {
+        const llegada = diaDeObra(p.recibidoEn);
+        return llegada === diaDeObra(p.iniciadoEn) ? (
+          <Celda>{llegada}</Celda>
+        ) : (
+          <Etiqueta tono="atencion">{`${llegada} · tarde`}</Etiqueta>
+        );
+      },
+    },
+    {
       clave: 'acciones',
       titulo: '',
-      ancho: 100,
+      ancho: 90,
       pintar: (p) => <Boton titulo="Ver" tono="secundario" onPress={() => setAbierto(p.id)} />,
     },
   ];
@@ -169,24 +264,51 @@ export default function PantallaPreoperacionales() {
       error={jornada.error ?? vehiculos.error}
       cargando={jornada.cargando || vehiculos.cargando}
     >
-      <View style={estilos.dias}>
-        <Boton titulo="◀ Día anterior" tono="secundario" onPress={() => setFecha(sumarDias(fecha, -1))} />
-        <View style={estilos.fecha}>
-          <Text style={estilos.fechaTexto}>{fechaLarga(fecha)}</Text>
-          {fecha !== fechaDeJornada() ? (
-            <Text style={estilos.fechaAyuda} onPress={() => setFecha(fechaDeJornada())}>
-              Volver a hoy
+      {dia ? (
+        <View style={estilos.dias}>
+          <Boton
+            titulo="◀ Día anterior"
+            tono="secundario"
+            onPress={() => setDia(sumarDias(dia, -1))}
+          />
+          <View style={estilos.fecha}>
+            <Text style={estilos.fechaTexto}>{fechaLarga(dia)}</Text>
+            <Text style={estilos.fechaAyuda} onPress={() => setDia(null)}>
+              Volver al periodo
             </Text>
-          ) : null}
+          </View>
+          <Boton
+            titulo="Día siguiente ▶"
+            tono="secundario"
+            onPress={() => setDia(sumarDias(dia, 1))}
+            deshabilitado={dia >= fechaDeJornada()}
+          />
         </View>
-        <Boton
-          titulo="Día siguiente ▶"
-          tono="secundario"
-          onPress={() => setFecha(sumarDias(fecha, 1))}
-          deshabilitado={fecha >= fechaDeJornada()}
-        />
-      </View>
+      ) : (
+        <View style={estilos.dias}>
+          <Selector
+            etiqueta="Periodo"
+            valor={periodo}
+            opciones={[
+              { valor: 'hoy', etiqueta: 'Hoy' },
+              { valor: 'semana', etiqueta: 'Última semana' },
+              { valor: 'mes', etiqueta: 'Último mes' },
+            ]}
+            onChange={(v) => setPeriodo(v ?? 'semana')}
+            ancho={230}
+          />
+          <View style={estilos.fecha}>
+            <Text style={estilos.fechaTexto}>
+              {ventana ? rangoLegible(ventana.desde, ventana.hasta) : '…'}
+            </Text>
+            <Text style={estilos.fechaAyuda} onPress={() => setDia(fechaDeJornada())}>
+              Ver un día concreto
+            </Text>
+          </View>
+        </View>
+      )}
 
+      <View style={estilos.filtro}>
       <Selector
         etiqueta="Filtrar por máquina"
         valor={vehiculoId}
@@ -200,17 +322,23 @@ export default function PantallaPreoperacionales() {
         vacio="Todas las máquinas"
         ancho={280}
       />
+      </View>
 
-      {dia && dia.pendientes.length > 0 ? (
+      {ventana && ventana.pendientes.length > 0 ? (
         <Aviso tono="error">
-          {dia.pendientes.length === 1
-            ? `Hoy hay 1 máquina sin preoperacional: ${dia.pendientes[0].codigoInterno}. Si está trabajando, se está usando sin inspeccionar.`
-            : `Hoy hay ${dia.pendientes.length} máquinas sin preoperacional (${dia.pendientes.map((m) => m.codigoInterno).join(', ')}). Si están trabajando, se están usando sin inspeccionar.`}
+          {ventana.pendientes.length === 1
+            ? `Hoy hay 1 máquina sin preoperacional: ${ventana.pendientes[0].codigoInterno}. Si está trabajando, se está usando sin inspeccionar.`
+            : `Hoy hay ${ventana.pendientes.length} máquinas sin preoperacional (${ventana.pendientes.map((m) => m.codigoInterno).join(', ')}). Si están trabajando, se están usando sin inspeccionar.`}
         </Aviso>
       ) : null}
 
-      {dia ? (
-        <Seccion titulo="Firmados este día">
+      {ventana ? (
+        <Seccion
+          titulo={dia ? 'Firmados este día' : 'Firmados en el periodo'}
+          // Por encima de la nota del pie, que tiene fondo propio y se pintaba
+          // sobre el desplegable de «Resultado».
+          apilado={1}
+        >
           <BarraDeListado
             busqueda={filtrado.busqueda}
             onBuscar={filtrado.buscar}
@@ -235,11 +363,7 @@ export default function PantallaPreoperacionales() {
           <Tabla
             columnas={columnas}
             filas={filtrado.pagina}
-            vacio={
-              dia.preoperacionales.length === 0
-                ? 'Aquí aparecen los preoperacionales que firman los operadores en obra, con su firma y sus fotos. Ninguno este día: si el operador ya lo llenó, llegará en cuanto su celular agarre señal.'
-                : 'Ningún preoperacional coincide con lo que busca.'
-            }
+            vacio={textoDelVacio(ventana, filtrado.busqueda, resultadoFiltro)}
           />
 
           <Paginacion
@@ -263,7 +387,15 @@ export default function PantallaPreoperacionales() {
 }
 
 const estilos = StyleSheet.create({
-  dias: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  /**
+   * La fila del periodo lleva un desplegable, así que se pinta por encima de lo
+   * que viene debajo. Sin esto, React Native Web deja a todos los hermanos
+   * empatados a `z-index: 0` y la lista abierta se mete detrás del filtro de
+   * máquina y del aviso de flota.
+   */
+  dias: { zIndex: 3, flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  /** El filtro de máquina: por encima de la tabla, por debajo del periodo. */
+  filtro: { zIndex: 2 },
   fecha: { flex: 1, alignItems: 'center' },
   fechaTexto: { fontSize: TextoPanel.seccion, fontWeight: '700', color: Colors.light.text },
   fechaAyuda: { fontSize: TextoPanel.cuerpo, color: Estado.info, fontWeight: '600' },

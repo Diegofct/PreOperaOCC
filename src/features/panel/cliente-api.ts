@@ -12,6 +12,8 @@
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
  */
+import type { Periodo } from '@/shared/rules/jornada';
+
 import type {
   AsignacionFila,
   AsignacionNueva,
@@ -215,6 +217,18 @@ export const api = {
    * evidencia y no se edita — se anula con motivo y se levanta otro.
    */
   preoperacionales: {
+    /**
+     * Un **periodo** —hoy, semana o mes— o un día concreto.
+     *
+     * Sin día, el servidor devuelve la última semana, y una fila entra si su
+     * inicio o su llegada caen dentro. Es lo que hace visible un acta que subió
+     * con retraso sin tener que sospechar que existe.
+     */
+    delPeriodo: (periodo: Periodo, vehiculoId?: string | null) =>
+      panel<JornadaDePreoperacionales>(
+        `/preoperacionales?periodo=${encodeURIComponent(periodo)}` +
+          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : ''),
+      ),
     delDia: (fecha: string, vehiculoId?: string | null) =>
       panel<JornadaDePreoperacionales>(
         `/preoperacionales?fecha=${encodeURIComponent(fecha)}` +

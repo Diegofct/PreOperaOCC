@@ -12,7 +12,13 @@ import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import { desglosarJornada } from '@/shared/rules/horas';
-import { avanceDeMedidor, fechaDeJornada } from '@/shared/rules/jornada';
+import {
+  avanceDeMedidor,
+  fechaDeJornada,
+  PERIODOS,
+  restarDias,
+  type Periodo,
+} from '@/shared/rules/jornada';
 
 /**
  * El resumen del inicio. `GET /api/panel/resumen?periodo=hoy|semana|mes`.
@@ -32,16 +38,6 @@ import { avanceDeMedidor, fechaDeJornada } from '@/shared/rules/jornada';
  * la camioneta y la volqueta se miden en kilómetros y la maquinaria amarilla en
  * horas; sumarlos daría un número que no significa nada.
  */
-
-const PERIODOS = { hoy: 0, semana: 6, mes: 29 } as const;
-type Periodo = keyof typeof PERIODOS;
-
-/** Resta días a una fecha `YYYY-MM-DD` por mediodía UTC, para no cruzar el día. */
-function restarDias(fecha: string, dias: number): string {
-  const base = new Date(`${fecha}T12:00:00Z`);
-  base.setUTCDate(base.getUTCDate() - dias);
-  return base.toISOString().slice(0, 10);
-}
 
 export async function GET(peticion: Request) {
   return responder(async () => {

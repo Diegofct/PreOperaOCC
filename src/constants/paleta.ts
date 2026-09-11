@@ -71,7 +71,15 @@ export const Panel = {
   /** El negro del logotipo. Es el color de las acciones del panel. */
   accion: '#231F20',
   accionPresionada: '#413C3D',
-  /** Fondo tenue del mismo grafito, para el enlace activo de la barra. */
+  /**
+   * Fondo tenue del mismo grafito, para marcar lo activo **sin** una pastilla
+   * sólida: el índice de secciones del parte diario (spec 006).
+   *
+   * Decía «para el enlace activo de la barra» y no era cierto: la barra usa
+   * `accion` sólido, y con razón — entre siete enlaces, uno relleno se localiza
+   * de un vistazo. En una columna de nueve entradas el relleno sólido sería una
+   * hilera de manchas, así que ahí manda este.
+   */
   accionSuave: '#F1F0F0',
   sobreAccion: '#FFFFFF',
 } as const;

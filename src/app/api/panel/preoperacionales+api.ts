@@ -1,4 +1,4 @@
-import { aliasedTable, and, desc, eq, gte, isNull, lt } from 'drizzle-orm';
+import { aliasedTable, and, desc, eq, gte, isNull, lt, or } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
@@ -6,7 +6,13 @@ import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
-import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
+import {
+  DESFASE_COLOMBIA_MS,
+  fechaDeJornada,
+  PERIODOS,
+  restarDias,
+  type Periodo,
+} from '@/shared/rules/jornada';
 
 /**
  * Los preoperacionales firmados. `GET /api/panel/preoperacionales`.
@@ -15,13 +21,27 @@ import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
  * tiene forma de saber qué se inspeccionó ni qué salió mal, que es exactamente
  * lo que OCC quería resolver.
  *
- * Se filtra por día y, si se quiere, por máquina. **Los NO APTO van primero**:
- * un listado ordenado solo por hora entierra el único registro que exige que
- * alguien haga algo hoy.
+ * Se filtra por **periodo** —hoy, la última semana o el último mes— o por un día
+ * concreto, y si se quiere por máquina. **Los NO APTO van primero**: un listado
+ * ordenado solo por hora entierra el único registro que exige que alguien haga
+ * algo hoy.
  *
  * El día se acota en **hora de Colombia**, no en la del navegador ni en UTC: la
  * jornada del 3 de marzo es la del 3 de marzo en obra, y quien mira el panel
  * puede estar en otra parte.
+ *
+ * ── Por qué la ventana mira dos fechas y no una ──
+ *
+ * Un acta tiene dos momentos: cuando el operador la empezó en obra y cuando el
+ * servidor la recibió. Pueden estar a días de distancia, porque el celular sube
+ * cuando agarra señal — y eso no es un fallo, es el diseño.
+ *
+ * Acotar solo por la de inicio esconde lo que llegó tarde. Ocurrió de verdad: un
+ * preoperacional firmado el 3 de septiembre llegó el 7, y el panel —que abría en
+ * el día de hoy y miraba veinticuatro horas de la fecha de inicio— no lo enseñaba
+ * por ninguna parte. La administración daba por incumplido un trabajo que sí se
+ * hizo. Por eso la fila entra si **cualquiera** de sus dos fechas cae dentro
+ * (spec 006 / RF-20).
  */
 const operador = aliasedTable(usuarios, 'operador');
 
@@ -31,15 +51,40 @@ export async function GET(peticion: Request) {
     if (sesion instanceof Response) return sesion;
 
     const parametros = new URL(peticion.url).searchParams;
-    const fecha = parametros.get('fecha')
-      ? fechaDeJornadaZod.parse(parametros.get('fecha'))
-      : fechaDeJornada();
     const vehiculoId = parametros.get('vehiculoId');
+
+    // Un día concreto manda sobre el periodo: se pide a propósito, navegando.
+    const diaPedido = parametros.get('fecha')
+      ? fechaDeJornadaZod.parse(parametros.get('fecha'))
+      : null;
+
+    // Un periodo que no esté en la lista se trata como la última semana en vez
+    // de rechazarse, igual que hace el resumen del inicio: una dirección vieja o
+    // mal copiada enseña algo razonable en lugar de un error.
+    const pedido = parametros.get('periodo');
+    const periodo: Periodo =
+      pedido === 'hoy' || pedido === 'semana' || pedido === 'mes' ? pedido : 'semana';
+
+    const hoy = fechaDeJornada();
+    // Sin día concreto, la ventana arranca por defecto en la última semana, que
+    // es lo que hace visible un acta rezagada sin tener que sospechar que existe.
+    const primerDia = diaPedido ?? restarDias(hoy, PERIODOS[periodo]);
+    const ultimoDia = diaPedido ?? hoy;
 
     // Medianoche en obra, expresada como instante: el día colombiano va de las
     // 05:00 UTC a las 05:00 UTC del siguiente.
-    const desde = new Date(Date.parse(`${fecha}T00:00:00Z`) + DESFASE_COLOMBIA_MS);
-    const hasta = new Date(desde.getTime() + 24 * 60 * 60 * 1000);
+    const medianoche = (dia: string) =>
+      new Date(Date.parse(`${dia}T00:00:00Z`) + DESFASE_COLOMBIA_MS);
+    const UN_DIA = 24 * 60 * 60 * 1000;
+
+    const desde = medianoche(primerDia);
+    const hasta = new Date(medianoche(ultimoDia).getTime() + UN_DIA);
+
+    // El aviso de flota se queda anclado a **hoy** con cualquier periodo
+    // (RF-23): es una alerta sobre máquinas que pueden estar rodando ahora mismo
+    // sin inspeccionar, y diluirla en una semana le quita el filo.
+    const desdeHoy = medianoche(hoy);
+    const hastaHoy = new Date(desdeHoy.getTime() + UN_DIA);
 
     const filas = await baseServidor()
       .select({
@@ -51,6 +96,7 @@ export async function GET(peticion: Request) {
         operadorNombre: operador.nombreCompleto,
         iniciadoEn: preoperacionales.iniciadoEn,
         enviadoEn: preoperacionales.enviadoEn,
+        recibidoEn: preoperacionales.recibidoEn,
         odometroKm: preoperacionales.odometroKm,
         horometroH: preoperacionales.horometroH,
         resultado: preoperacionales.resultado,
@@ -64,8 +110,16 @@ export async function GET(peticion: Request) {
       .leftJoin(obras, eq(obras.id, preoperacionales.obraId))
       .where(
         and(
-          gte(preoperacionales.iniciadoEn, desde),
-          lt(preoperacionales.iniciadoEn, hasta),
+          or(
+            and(
+              gte(preoperacionales.iniciadoEn, desde),
+              lt(preoperacionales.iniciadoEn, hasta),
+            ),
+            and(
+              gte(preoperacionales.recibidoEn, desde),
+              lt(preoperacionales.recibidoEn, hasta),
+            ),
+          ),
           vehiculoId ? eq(preoperacionales.vehiculoId, vehiculoId) : undefined,
           filtroDeObra(sesion, preoperacionales.obraId),
         ),
@@ -89,15 +143,51 @@ export async function GET(peticion: Request) {
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
       .where(and(isNull(vehiculos.eliminadoEn), filtroDeObra(sesion, vehiculos.obraId)));
 
-    const conFormato = new Set(
-      filas.filter((f) => f.anuladoEn === null).map((f) => f.vehiculoId),
-    );
+    /**
+     * Qué máquinas ya tienen preoperacional **hoy**.
+     *
+     * Consulta aparte y no un filtro sobre `filas`: con un periodo de una
+     * semana, `filas` trae actas de otros días, y una máquina inspeccionada el
+     * lunes desaparecería del aviso del viernes sin haberse revisado hoy. El
+     * aviso dejaría de avisar justo de lo que existe para avisar.
+     */
+    const deHoy = await baseServidor()
+      .select({ vehiculoId: preoperacionales.vehiculoId })
+      .from(preoperacionales)
+      .where(
+        and(
+          gte(preoperacionales.iniciadoEn, desdeHoy),
+          lt(preoperacionales.iniciadoEn, hastaHoy),
+          isNull(preoperacionales.anuladoEn),
+          filtroDeObra(sesion, preoperacionales.obraId),
+        ),
+      );
+
+    const conFormato = new Set(deHoy.map((f) => f.vehiculoId));
 
     return ok({
-      fecha,
+      fecha: diaPedido ?? hoy,
+      periodo: diaPedido ? null : periodo,
+      desde: primerDia,
+      hasta: ultimoDia,
       // NO APTO primero: es el único que obliga a alguien a hacer algo hoy.
       preoperacionales: [...filas].sort(porUrgencia),
       pendientes: flota.filter((m) => !conFormato.has(m.vehiculoId)),
+      /**
+       * Por qué está vacío, cuando lo está.
+       *
+       * Lo decide el servidor y no la pantalla: es el servidor quien sabe que no
+       * devolvió nada porque quien pregunta no alcanza ninguna obra. Que lo
+       * dedujera la pantalla mirando si la persona tiene obra sería escribir dos
+       * veces la misma regla, y ya se sabe cómo acaba eso.
+       *
+       * El alcance **no se relaja**: sigue sin ver nada. Solo deja de ser un
+       * vacío mudo (spec 006 / RF-24).
+       */
+      motivoVacio:
+        filas.length > 0 ? null : sesion.rol === 'supervisor' && !sesion.obraId
+          ? 'sin_obra'
+          : 'sin_datos',
     });
   });
 }

@@ -385,10 +385,21 @@ export function Tabla<T extends { id: string }>({
   columnas,
   filas,
   vacio,
+  variante = 'tarjeta',
 }: {
   columnas: Columna<T>[];
   filas: T[];
   vacio: string;
+  /**
+   * `tarjeta` es una tabla apoyada en el lienzo gris, con su fondo y su sombra.
+   * `desnuda` es la misma tabla **dentro** de otra superficie: sin fondo, sin
+   * sombra y sin radio, porque una caja blanca dentro de una caja blanca se lee
+   * como un error de dibujo.
+   *
+   * El valor por defecto es el de siempre, así que las nueve pantallas que ya la
+   * usan no cambian ni un píxel.
+   */
+  variante?: 'tarjeta' | 'desnuda';
 }) {
   if (filas.length === 0) {
     return (
@@ -407,7 +418,7 @@ export function Tabla<T extends { id: string }>({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      style={estilos.tablaMarco}
+      style={[estilos.tablaMarco, variante === 'desnuda' && estilos.tablaDesnuda]}
       // Sin esto, las filas solo miden lo que suman sus columnas: la tabla que
       // cabe de sobra dejaba la cabecera y las bandas cortadas a media tarjeta,
       // con un vacío blanco a la derecha que parecía un error de carga.
@@ -468,9 +479,31 @@ export function Celda({ children }: { children: ReactNode }) {
 /* Estructura de pantalla                                                    */
 /* ------------------------------------------------------------------------ */
 
-export function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
+export function Seccion({
+  titulo,
+  apilado,
+  children,
+}: {
+  titulo: string;
+  /**
+   * Cuánto se levanta esta sección sobre las que vienen **después**.
+   *
+   * Hace falta cuando la sección contiene un desplegable y no es la última de la
+   * pantalla. React Native Web le pone `z-index: 0` a toda vista, así que cada
+   * sección es su propio contexto de apilamiento: el `zIndex` que lleve algo de
+   * dentro —la barra de listado lleva 2— sube dentro de la sección y **no puede
+   * salir de ella**. Fuera, la sección empata a cero con sus hermanas y gana la
+   * última pintada, así que una lista abierta se mete debajo de lo que haya
+   * debajo.
+   *
+   * Opcional a propósito: la mayoría de las pantallas tienen su listado al final
+   * y no necesitan nada. Solo lo pasa quien tiene algo debajo.
+   */
+  apilado?: number;
+  children: ReactNode;
+}) {
   return (
-    <View style={estilos.seccion}>
+    <View style={[estilos.seccion, apilado !== undefined && { zIndex: apilado }]}>
       <Text style={estilos.seccionTitulo}>{titulo}</Text>
       {children}
     </View>
@@ -527,17 +560,33 @@ export function Tarjeta({ children }: { children: ReactNode }) {
 export function FilaDeFormulario({
   children,
   ultima = false,
+  apilado,
 }: {
   children: ReactNode;
   /** La última no lleva línea abajo: si no, parece que falta algo debajo. */
   ultima?: boolean;
+  /**
+   * Cuánto se levanta esta fila sobre las de abajo.
+   *
+   * Hace falta por lo mismo que en las bandas: React Native Web le pone
+   * `z-index: 0` a toda vista, las filas empatan, y con el empate gana la última
+   * pintada. Un desplegable abierto en la primera fila se metía debajo de la
+   * segunda. Se pasa **al revés** —`total - índice`— porque la lista cae hacia
+   * abajo y lo que hay que tapar es lo que viene después.
+   */
+  apilado?: number;
 }) {
-  return <View style={[estilos.filaFormulario, !ultima && estilos.filaConLinea]}>{children}</View>;
-}
-
-/** La tarjeta que agrupa las filas de una sección y su pie de acciones. */
-export function Bloque({ children }: { children: ReactNode }) {
-  return <View style={estilos.bloque}>{children}</View>;
+  return (
+    <View
+      style={[
+        estilos.filaFormulario,
+        !ultima && estilos.filaConLinea,
+        apilado !== undefined && { zIndex: apilado },
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
 /* ------------------------------------------------------------------------ */
@@ -765,15 +814,6 @@ export function Confirmado({ mensaje }: { mensaje: string | null }) {
 const estilos = StyleSheet.create({
   titulo: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
 
-  bloque: {
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: Panel.bordeSuave,
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
-    overflow: 'visible',
-  },
   filaFormulario: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1008,6 +1048,8 @@ const estilos = StyleSheet.create({
     backgroundColor: Colors.light.background,
     boxShadow: Sombra.tarjeta,
   },
+  /** La misma tabla sin superficie propia: ya está dentro de una. */
+  tablaDesnuda: { backgroundColor: 'transparent', boxShadow: 'none', borderRadius: 0 },
   tablaContenido: { minWidth: '100%' },
   tablaCuerpo: { flexGrow: 1 },
   tablaCabecera: {

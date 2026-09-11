@@ -16,6 +16,7 @@
  */
 import { z } from 'zod';
 
+import type { Periodo } from '@/shared/rules/jornada';
 import { IDS_CARGO, type Cargo } from '@/shared/catalogos/cargos';
 import { ROLES, type Rol } from '@/shared/rules/permisos';
 
@@ -426,6 +427,11 @@ export interface PreoperacionalFila {
   operadorNombre: string;
   iniciadoEn: string;
   enviadoEn: string | null;
+  /**
+   * Cuándo lo recibió el servidor. Puede estar a días del inicio: el celular
+   * sube cuando agarra señal, y eso es el diseño y no un fallo (spec 006/RF-21).
+   */
+  recibidoEn: string;
   odometroKm: number | null;
   horometroH: number | null;
   resultado: Resultado | null;
@@ -440,10 +446,21 @@ export interface MaquinaSinFormatoFila {
   tipoNombre: string;
 }
 
+/** Por qué un listado vino vacío. `sin_obra` no es lo mismo que `sin_datos`. */
+export type MotivoVacio = 'sin_obra' | 'sin_datos';
+
 export interface JornadaDePreoperacionales {
+  /** El día pedido, o hoy si se consultó un periodo. */
   fecha: string;
+  /** `null` cuando se pidió un día concreto en vez de un periodo. */
+  periodo: Periodo | null;
+  /** Los extremos de la ventana consultada, en día de obra. */
+  desde: string;
+  hasta: string;
   preoperacionales: PreoperacionalFila[];
+  /** Siempre de **hoy**, sea cual sea el periodo consultado (spec 006/RF-23). */
   pendientes: MaquinaSinFormatoFila[];
+  motivoVacio: MotivoVacio | null;
 }
 
 /** Una respuesta tal como se guardó: se auto-describe, con su etiqueta dentro. */

@@ -17,6 +17,7 @@
  * calendario, no instantes, y tratarlos como instantes es como se termina
  * marcando el festivo un día antes para quien mira desde otro huso.
  */
+import { sumarDias } from './jornada';
 
 /** Domingo de Pascua del año, en `YYYY-MM-DD`. Algoritmo de Meeus/Butcher. */
 export function domingoDePascua(anio: number): string {
@@ -40,13 +41,6 @@ export function domingoDePascua(anio: number): string {
 /** `YYYY-MM-DD` sin pasar por husos horarios. */
 function fecha(anio: number, mes: number, dia: number): string {
   return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-}
-
-/** Suma días a una fecha `YYYY-MM-DD`. Usa mediodía UTC para no cruzar el día. */
-function sumarDias(iso: string, dias: number): string {
-  const base = new Date(`${iso}T12:00:00Z`);
-  base.setUTCDate(base.getUTCDate() + dias);
-  return base.toISOString().slice(0, 10);
 }
 
 /** Día de la semana de una fecha `YYYY-MM-DD`. 0 domingo … 6 sábado. */

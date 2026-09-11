@@ -15,16 +15,21 @@
  * se lleva al servidor —y el sitio donde hacerlo es este archivo, no las
  * pantallas—.
  *
+ * Lo que se busca vive en la dirección de la página, pero eso ya no se resuelve
+ * aquí: lo hace `usar-parametro-direccion`, que el periodo de los
+ * preoperacionales usa igual.
+ *
  * ── Sobre las tildes ──
  *
  * Buscar «topografo» tiene que encontrar a «Topógrafo». En una obra nadie
  * escribe con tildes en un buscador, y un buscador que exige escribirlas es un
  * buscador que no se usa.
  */
-import { Platform } from 'react-native';
 import { useMemo, useState } from 'react';
 
 import { normalizar } from '@/shared/rules/texto';
+
+import { useParametroDeDireccion } from './usar-parametro-direccion';
 
 /** Cuántas filas caben cómodas en pantalla sin obligar a hacer scroll largo. */
 export const POR_PAGINA = 25;
@@ -47,36 +52,14 @@ export interface ListadoFiltrado<T> {
  * @param textoDe  de qué campos de cada fila se puede buscar
  * @param pasaFiltros  los filtros propios de la pantalla, si tiene alguno
  */
-/**
- * Lo que se buscó, guardado en la dirección de la página.
- *
- * Sirve para dos cosas de todos los días: recargar sin perder el filtro —que es
- * lo que pasa cuando alguien pulsa F5 por costumbre— y pasarle a otro el enlace
- * de lo que está mirando en vez de decirle «busca "volqueta" y filtra por La
- * Ceja». Solo existe en el navegador; en el celular no hay barra de direcciones
- * y este ayudante no se usa allí.
- */
-function leerDeLaDireccion(): string {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return '';
-  return new URLSearchParams(window.location.search).get('buscar') ?? '';
-}
-
-function escribirEnLaDireccion(texto: string) {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
-  if (texto.length === 0) url.searchParams.delete('buscar');
-  else url.searchParams.set('buscar', texto);
-  // `replace` y no `push`: escribir en el buscador no debería llenar el
-  // historial de una entrada por letra tecleada.
-  window.history.replaceState(null, '', url.toString());
-}
-
 export function useListadoFiltrado<T>(
   filas: T[],
   textoDe: (fila: T) => (string | null | undefined)[],
   pasaFiltros: (fila: T) => boolean = () => true,
 ): ListadoFiltrado<T> {
-  const [busqueda, setBusqueda] = useState(leerDeLaDireccion);
+  // La búsqueda vive en la dirección: recargar no la pierde y el enlace se puede
+  // pasar. El ayudante es el mismo que usa el periodo de los preoperacionales.
+  const [busqueda, setBusqueda] = useParametroDeDireccion('buscar', '');
   const [paginaActual, setPaginaActual] = useState(1);
 
   const coincidentes = useMemo(() => {
@@ -115,7 +98,6 @@ export function useListadoFiltrado<T>(
     buscar: (texto: string) => {
       setBusqueda(texto);
       setPaginaActual(1);
-      escribirEnLaDireccion(texto);
     },
     paginaActual: pagina,
     irAPagina: setPaginaActual,
