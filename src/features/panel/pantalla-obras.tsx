@@ -98,8 +98,23 @@ export default function PantallaObras() {
     >
       <Seccion titulo="Registrar una obra">
         <Formulario>
-          <Campo etiqueta="Código" valor={codigo} onChange={setCodigo} ayuda="Ej. OBR-001" ancho={160} />
-          <Campo etiqueta="Nombre" valor={nombre} onChange={setNombre} ancho={320} />
+          <Campo
+            etiqueta="Código"
+            obligatorio
+            valor={codigo}
+            onChange={setCodigo}
+            ayuda="Ej. OBR-001"
+            error={listado.errorDe('codigo')}
+            ancho={160}
+          />
+          <Campo
+            etiqueta="Nombre"
+            obligatorio
+            valor={nombre}
+            onChange={setNombre}
+            error={listado.errorDe('nombre')}
+            ancho={320}
+          />
           <Campo etiqueta="Municipio" valor={municipio} onChange={setMunicipio} ancho={220} />
           <AccionesFormulario>
             <Boton titulo="Registrar obra" onPress={crear} deshabilitado={!codigo || !nombre} />

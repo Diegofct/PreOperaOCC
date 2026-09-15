@@ -66,12 +66,14 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
 
         <Campo
           etiqueta={obligatorio ? 'Contraseña temporal' : 'Contraseña actual'}
+          obligatorio
           valor={actual}
           onChange={setActual}
           oculto
         />
         <Campo
           etiqueta="Contraseña nueva"
+          obligatorio
           valor={nueva}
           onChange={setNueva}
           oculto
@@ -80,6 +82,7 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
         />
         <Campo
           etiqueta="Repítala"
+          obligatorio
           valor={repetida}
           onChange={setRepetida}
           oculto

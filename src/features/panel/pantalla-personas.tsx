@@ -326,13 +326,16 @@ export default function PantallaPersonas() {
         <Formulario>
           <Campo
             etiqueta="Usuario"
+            obligatorio
             valor={usuario}
             onChange={setUsuario}
             ayuda="Con esto ingresa. Sin espacios."
+            error={personas.errorDe('usuario')}
             ancho={180}
           />
           <Campo
             etiqueta="Nombre completo"
+            obligatorio
             valor={nombreCompleto}
             onChange={setNombreCompleto}
             ancho={260}
@@ -525,6 +528,7 @@ function VentanaCorregirPersona({
       <Formulario>
         <Campo
           etiqueta="Nombre completo"
+          obligatorio
           valor={nombreCompleto}
           onChange={setNombreCompleto}
           error={faltaNombre ? 'El nombre no puede quedar vacío.' : undefined}

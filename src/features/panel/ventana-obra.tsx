@@ -75,6 +75,7 @@ export function VentanaCorregirObra({
       <Formulario>
         <Campo
           etiqueta="Nombre"
+          obligatorio
           valor={nombre}
           onChange={setNombre}
           error={faltaNombre ? 'El nombre no puede quedar vacío.' : undefined}

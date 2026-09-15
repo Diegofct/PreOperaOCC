@@ -20,10 +20,20 @@
  *  3. **Anillo de foco.** Se puede recorrer el panel entero con el tabulador, y
  *     eso solo sirve si se ve dónde está uno.
  */
-import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import {
+  CampoPanel,
   Colors,
   Estado,
   Marca,
@@ -35,8 +45,13 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
+import { colocarLista, type ColocacionDeLista } from '@/shared/rules/flotante';
+import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
+
+import { CapaFlotante } from './capa-flotante';
+
 /* ------------------------------------------------------------------------ */
-/* Texto y avisos                                                            */
+/* Texto y avisos                                                          */
 /* ------------------------------------------------------------------------ */
 
 export function Titulo({ children }: { children: ReactNode }) {
@@ -194,6 +209,27 @@ export function Boton({
   );
 }
 
+/**
+ * La etiqueta de un campo o de un selector.
+ *
+ * Lo obligatorio lleva «*», y el lector de pantalla oye «obligatorio»: el
+ * asterisco rojo solo no basta, porque el color nunca va solo y un «*» leído en
+ * voz alta no le dice nada a nadie. Se marca **antes** de intentar guardar
+ * (spec 007, RF-17): descubrir que un campo era obligatorio por el rechazo es
+ * descubrirlo tarde.
+ */
+function EtiquetaDeCampo({ texto, obligatorio }: { texto: string; obligatorio?: boolean }) {
+  return (
+    <Text
+      style={estilos.campoEtiqueta}
+      accessibilityLabel={obligatorio ? `${texto}, obligatorio` : texto}
+    >
+      {texto}
+      {obligatorio ? <Text style={estilos.campoObligatorio}> *</Text> : null}
+    </Text>
+  );
+}
+
 export function Campo({
   etiqueta,
   valor,
@@ -204,6 +240,9 @@ export function Campo({
   oculto,
   onEnviar,
   ancho,
+  multilinea,
+  soloLectura,
+  obligatorio,
 }: {
   etiqueta: string;
   valor: string;
@@ -211,6 +250,22 @@ export function Campo({
   ayuda?: string;
   error?: string;
   soloNumeros?: boolean;
+  /**
+   * Área de texto de varios renglones, para observaciones (spec 007, RF-24).
+   *
+   * Sin `ancho`, ocupa **el renglón entero** de su fila de formulario y no solo
+   * el ancho que le sobre: esas filas envuelven, y un área de texto encajada al
+   * lado de dos lecturas de medidor quedaría de cuatro dedos de ancho.
+   */
+  multilinea?: boolean;
+  /**
+   * Se ve pero no se escribe: un valor que calcula el sistema, como el área de
+   * una actividad con largo y ancho (spec 004, RF-58). Lleva fondo apagado para
+   * que no parezca un campo que se olvidó llenar.
+   */
+  soloLectura?: boolean;
+  /** Hay que llenarlo para poder guardar. Se marca en la etiqueta (spec 007, RF-17). */
+  obligatorio?: boolean;
   /** Contraseña: ni se ve al teclear ni la ofrece el autocompletado. */
   oculto?: boolean;
   /** Enter dentro del campo. En un formulario de escritorio se da por hecho. */
@@ -229,20 +284,36 @@ export function Campo({
   const [enfocado, setEnfocado] = useState(false);
 
   return (
-    <View style={[estilos.campo, ancho === undefined ? estilos.campoLleno : { width: ancho }]}>
-      <Text style={estilos.campoEtiqueta}>{etiqueta}</Text>
+    <View
+      style={[
+        estilos.campo,
+        ancho !== undefined
+          ? { width: ancho }
+          : multilinea
+            ? estilos.campoRenglonEntero
+            : estilos.campoLleno,
+      ]}
+    >
+      <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       <TextInput
         value={valor}
         onChangeText={onChange}
         inputMode={soloNumeros ? 'numeric' : 'text'}
         secureTextEntry={oculto}
-        onSubmitEditing={onEnviar}
-        returnKeyType={onEnviar ? 'go' : 'default'}
+        // En un área de texto, Enter es un salto de renglón, no «enviar».
+        onSubmitEditing={multilinea ? undefined : onEnviar}
+        returnKeyType={onEnviar && !multilinea ? 'go' : 'default'}
+        multiline={multilinea}
+        // En la web se traduce a `rows` del `<textarea>`.
+        numberOfLines={multilinea ? 6 : undefined}
         onFocus={() => setEnfocado(true)}
         onBlur={() => setEnfocado(false)}
+        readOnly={soloLectura}
         style={[
           estilos.campoEntrada,
-          enfocado && estilos.campoEnfocado,
+          multilinea && estilos.campoAreaDeTexto,
+          soloLectura && estilos.campoSoloLectura,
+          enfocado && !soloLectura && estilos.campoEnfocado,
           error ? estilos.campoEntradaMal : null,
         ]}
         placeholderTextColor={Colors.light.textSecondary}
@@ -250,6 +321,51 @@ export function Campo({
       {error ? <Text style={estilos.campoError}>{error}</Text> : null}
       {!error && ayuda ? <Text style={estilos.campoAyuda}>{ayuda}</Text> : null}
     </View>
+  );
+}
+
+/**
+ * Una casilla de sí o no.
+ *
+ * La marca es un «✓» de texto y no solo el relleno de color de la caja: el
+ * color nunca va solo, y un lector de pantalla lee la casilla como tal por su
+ * rol. Se construye aquí y no con el `<input type="checkbox">` del navegador
+ * por lo mismo que el `Selector`: React Native Web no lo trae, y el del
+ * navegador no se deja vestir con los tokens del proyecto.
+ */
+export function Casilla({
+  etiqueta,
+  marcada,
+  onChange,
+  deshabilitada,
+}: {
+  etiqueta: string;
+  marcada: boolean;
+  onChange: (marcada: boolean) => void;
+  deshabilitada?: boolean;
+}) {
+  const [enfocada, setEnfocada] = useState(false);
+
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: marcada, disabled: deshabilitada }}
+      onPress={() => onChange(!marcada)}
+      disabled={deshabilitada}
+      onFocus={() => setEnfocada(true)}
+      onBlur={() => setEnfocada(false)}
+      style={({ hovered }) => [
+        estilos.casilla,
+        hovered && !deshabilitada && estilos.campoHover,
+        enfocada && estilos.enfocado,
+        deshabilitada && estilos.botonInactivo,
+      ]}
+    >
+      <View style={[estilos.casillaCaja, marcada && estilos.casillaCajaMarcada]}>
+        <Text style={estilos.casillaMarca}>{marcada ? '✓' : ' '}</Text>
+      </View>
+      <Text style={estilos.selectorValor}>{etiqueta}</Text>
+    </Pressable>
   );
 }
 
@@ -266,9 +382,23 @@ export interface Opcion {
  * navegador, y ahí el picker de React Native se degrada a algo que no se puede
  * estilar con los tokens del proyecto.
  *
- * La lista **flota sobre el contenido** en vez de empujarlo hacia abajo: cuando
- * lo empujaba, abrir el selector de un formulario movía de sitio todo lo que
- * había debajo, incluido el botón que se iba a pulsar después.
+ * **La lista se pinta en la capa flotante** (spec 007, RF-1 a RF-8). Antes
+ * flotaba dentro de su tarjeta, con un `zIndex` que solo la subía dentro de esa
+ * tarjeta: en el navegador, el 2026-09-15, el botón «Añadir actividad» se pintaba
+ * encima de la lista de actividades y la tabla de Asignaciones tapaba la lista de
+ * vehículos. Ahora se mide el botón al abrir, y la lista se coloca en la capa
+ * junto a él —abajo si cabe, arriba si no (`colocarLista`)—, así que nada de la
+ * página la tapa ni la recorta, tampoco dentro de una ventana.
+ *
+ * Se cierra con un clic fuera, con Esc, y con la rueda del ratón fuera de la
+ * lista: la lista va fija en la pantalla, y si la página se moviera debajo
+ * quedaría flotando lejos de su botón (RF-5).
+ *
+ * **Se maneja sin ratón** (RF-9 a RF-14): flechas para moverse, Enter para
+ * elegir y, al cerrar, el foco vuelve al botón para seguir con el tabulador.
+ * Con más de ocho opciones lleva un buscador arriba que no distingue tildes: en
+ * los quince cargos o en cincuenta vehículos, tres letras llegan antes que la
+ * vista.
  */
 export function Selector({
   etiqueta,
@@ -279,6 +409,7 @@ export function Selector({
   permiteVacio = false,
   error,
   ancho,
+  obligatorio,
 }: {
   etiqueta: string;
   valor: string | null;
@@ -288,24 +419,134 @@ export function Selector({
   permiteVacio?: boolean;
   error?: string;
   ancho?: number;
+  /** Hay que elegir algo para poder guardar. Se marca en la etiqueta (spec 007, RF-17). */
+  obligatorio?: boolean;
 }) {
-  const [abierto, setAbierto] = useState(false);
+  const [colocacion, setColocacion] = useState<
+    (ColocacionDeLista & { x: number; anchoBoton: number }) | null
+  >(null);
+  const abierto = colocacion !== null;
   // El foco se lleva aparte porque `focused` no está en los tipos de
   // `Pressable`: solo existe en el React Native de la web.
   const [enfocado, setEnfocado] = useState(false);
+  const boton = useRef<View>(null);
+  const lista = useRef<View>(null);
+  const idLista = useId();
   const elegida = opciones.find((o) => o.valor === valor);
 
+  const [filtro, setFiltro] = useState('');
+  /** La opción marcada con el teclado. Es un índice sobre `entradas`. */
+  const [senalada, setSenalada] = useState(0);
+  const conBuscador = ofreceBusqueda(opciones.length);
+
+  // Lo que se pinta en la lista, en orden. La opción vacía va primero y solo
+  // mientras no se esté buscando: «Sin asignar» no es algo que se busque.
+  const entradas = useMemo<
+    { valor: string | null; etiqueta: string; detalle?: string; vacia?: boolean }[]
+  >(
+    () => [
+      ...(permiteVacio && filtro.trim() === ''
+        ? [{ valor: null, etiqueta: vacio, vacia: true }]
+        : []),
+      ...filtrarOpciones(opciones, filtro),
+    ],
+    [permiteVacio, filtro, vacio, opciones],
+  );
+
+  function abrir() {
+    setFiltro('');
+    // Se abre con la opción actual marcada: bajar desde ahí es lo normal.
+    const valores: (string | null)[] = [
+      ...(permiteVacio ? [null] : []),
+      ...opciones.map((o) => o.valor),
+    ];
+    setSenalada(Math.max(0, valores.indexOf(valor)));
+    boton.current?.measureInWindow((x, y, anchoBoton, altoBoton) => {
+      setColocacion({
+        ...colocarLista({
+          botonY: y,
+          botonAlto: altoBoton,
+          altoLista: CampoPanel.altoListaSelector,
+          altoPantalla: Dimensions.get('window').height,
+          separacion: Spacing.one,
+          margen: Spacing.two,
+          altoMinimo: CampoPanel.altoMinimoListaSelector,
+        }),
+        x,
+        anchoBoton,
+      });
+    });
+  }
+
+  function cerrar() {
+    setColocacion(null);
+  }
+
+
+  function elegir(v: string | null) {
+    onChange(v);
+    cerrar();
+  }
+
+  // La rueda fuera de la lista cierra; dentro, desplaza la lista como siempre.
+  // Solo en la web: es la única superficie del panel, y `window` no existe en
+  // el celular.
+  useEffect(() => {
+    if (!abierto || Platform.OS !== 'web') return;
+    function alGirar(evento: WheelEvent) {
+      const nodo = lista.current as unknown as { contains?: (otro: unknown) => boolean } | null;
+      if (nodo?.contains?.(evento.target)) return;
+      setColocacion(null);
+    }
+    function alRedimensionar() {
+      setColocacion(null);
+    }
+    window.addEventListener('wheel', alGirar, { capture: true, passive: true });
+    window.addEventListener('resize', alRedimensionar);
+    return () => {
+      window.removeEventListener('wheel', alGirar, { capture: true });
+      window.removeEventListener('resize', alRedimensionar);
+    };
+  }, [abierto]);
+
+  // Flechas y Enter mientras la lista está abierta (RF-10, RF-11). Esc lo
+  // atiende la capa flotante. Se escucha en `window` porque el foco puede estar
+  // en el buscador o en ninguna opción, y la lista responde igual.
+  useEffect(() => {
+    if (!abierto || Platform.OS !== 'web') return;
+    function alPulsar(evento: KeyboardEvent) {
+      if (evento.key === 'ArrowDown' || evento.key === 'ArrowUp') {
+        evento.preventDefault();
+        const paso = evento.key === 'ArrowDown' ? 1 : -1;
+        setSenalada((i) => Math.min(Math.max(i + paso, 0), Math.max(entradas.length - 1, 0)));
+      } else if (evento.key === 'Enter') {
+        const entrada = entradas[senalada];
+        if (!entrada) return;
+        evento.preventDefault();
+        evento.stopPropagation();
+        onChange(entrada.valor);
+        setColocacion(null);
+      }
+    }
+    window.addEventListener('keydown', alPulsar, { capture: true });
+    return () => window.removeEventListener('keydown', alPulsar, { capture: true });
+  }, [abierto, entradas, senalada, onChange]);
+
+  // La marcada siempre a la vista, aunque la lista se desplace.
+  useEffect(() => {
+    if (!abierto || Platform.OS !== 'web') return;
+    document.getElementById(`${idLista}-${senalada}`)?.scrollIntoView({ block: 'nearest' });
+  }, [abierto, idLista, senalada]);
+
   return (
-    <View
-      style={[
-        estilos.campo,
-        ancho === undefined ? estilos.campoLleno : { width: ancho },
-        abierto && estilos.campoAbierto,
-      ]}
-    >
-      <Text style={estilos.campoEtiqueta}>{etiqueta}</Text>
+    <View style={[estilos.campo, ancho === undefined ? estilos.campoLleno : { width: ancho }]}>
+      <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       <Pressable
-        onPress={() => setAbierto((a) => !a)}
+        ref={boton}
+        // Con rol de botón, Enter y la barra espaciadora lo abren desde el teclado.
+        accessibilityRole="button"
+        accessibilityLabel={etiqueta}
+        onPress={() => (abierto ? cerrar() : abrir())}
         onFocus={() => setEnfocado(true)}
         onBlur={() => setEnfocado(false)}
         style={({ hovered }) => [
@@ -324,49 +565,123 @@ export function Selector({
         <Text style={estilos.selectorFlecha}>{abierto ? '▲' : '▼'}</Text>
       </Pressable>
 
-      {abierto ? (
-        <>
-          {/* Capa invisible a pantalla completa: un clic fuera cierra la lista,
-              que es lo que cualquiera espera de un desplegable. */}
-          <Pressable style={estilos.telon} onPress={() => setAbierto(false)} />
-          <ScrollView style={estilos.selectorLista} nestedScrollEnabled>
-            {permiteVacio ? (
-              <Pressable
-                onPress={() => {
-                  onChange(null);
-                  setAbierto(false);
-                }}
-                style={({ hovered }) => [estilos.selectorOpcion, hovered && estilos.campoHover]}
-              >
-                <Text style={estilos.selectorVacio}>{vacio}</Text>
-              </Pressable>
-            ) : null}
-            {opciones.map((opcion) => (
-              <Pressable
-                key={opcion.valor}
-                onPress={() => {
-                  onChange(opcion.valor);
-                  setAbierto(false);
-                }}
-                style={({ hovered }) => [
-                  estilos.selectorOpcion,
-                  hovered && estilos.campoHover,
-                  opcion.valor === valor && estilos.selectorOpcionElegida,
-                ]}
-              >
-                <Text style={estilos.selectorValor}>{opcion.etiqueta}</Text>
-                {opcion.detalle ? <Text style={estilos.campoAyuda}>{opcion.detalle}</Text> : null}
-              </Pressable>
-            ))}
-            {opciones.length === 0 ? (
-              <View style={estilos.selectorOpcion}>
-                <Text style={estilos.selectorVacio}>No hay nada que elegir todavía.</Text>
+      <CapaFlotante
+        visible={abierto}
+        alCerrar={cerrar}
+        // De vuelta al botón: quien va con el tabulador sigue desde donde estaba
+        // (RF-9). Cuando la capa ya se fue, no antes: ver `alTerminarDeCerrar`.
+        alTerminarDeCerrar={() => boton.current?.focus()}
+      >
+        {colocacion ? (
+          <View
+            ref={lista}
+            style={[
+              estilos.selectorLista,
+              { left: colocacion.x, width: colocacion.anchoBoton, maxHeight: colocacion.alto },
+              // Hacia arriba se ancla por abajo: si la lista es más corta que su
+              // alto máximo, sigue pegada al botón en vez de dejar un hueco.
+              colocacion.hacia === 'abajo'
+                ? { top: colocacion.top }
+                : { bottom: Dimensions.get('window').height - colocacion.top - colocacion.alto },
+            ]}
+          >
+            {conBuscador ? (
+              <View style={estilos.selectorBuscador}>
+                <TextInput
+                  value={filtro}
+                  onChangeText={(texto) => {
+                    setFiltro(texto);
+                    setSenalada(0);
+                  }}
+                  autoFocus
+                  placeholder="Escriba para buscar"
+                  placeholderTextColor={Colors.light.textSecondary}
+                  accessibilityLabel={`Buscar en ${etiqueta}`}
+                  style={estilos.campoEntrada}
+                />
               </View>
             ) : null}
-          </ScrollView>
-        </>
-      ) : null}
+            <ScrollView style={estilos.selectorDesplazable}>
+              {entradas.map((entrada, indice) => (
+                <OpcionDeLista
+                  key={entrada.valor ?? '__vacia'}
+                  id={`${idLista}-${indice}`}
+                  etiqueta={entrada.etiqueta}
+                  detalle={entrada.detalle}
+                  vacia={entrada.vacia}
+                  elegida={entrada.valor === valor}
+                  senalada={indice === senalada}
+                  alSenalar={() => setSenalada(indice)}
+                  alElegir={() => elegir(entrada.valor)}
+                />
+              ))}
+              {opciones.length === 0 ? (
+                <View style={estilos.selectorOpcion}>
+                  <Text style={estilos.selectorVacio}>No hay nada que elegir todavía.</Text>
+                </View>
+              ) : entradas.length === 0 ? (
+                // RF-14: una lista vacía por un filtro dice por qué lo está.
+                <View style={estilos.selectorOpcion}>
+                  <Text style={estilos.selectorVacio}>
+                    {`Ninguna opción coincide con «${filtro.trim()}».`}
+                  </Text>
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        ) : null}
+      </CapaFlotante>
     </View>
+  );
+}
+
+/**
+ * Una opción de la lista. La elegida lleva «✓» además del fondo: el color nunca
+ * va solo (spec 007, RF-15).
+ */
+function OpcionDeLista({
+  id,
+  etiqueta,
+  detalle,
+  vacia,
+  elegida,
+  senalada,
+  alSenalar,
+  alElegir,
+}: {
+  /** Para llevarla a la vista cuando se marca con el teclado. */
+  id: string;
+  etiqueta: string;
+  detalle?: string;
+  vacia?: boolean;
+  elegida: boolean;
+  /** Marcada con el teclado o bajo el puntero: es la que elige Enter. */
+  senalada: boolean;
+  alSenalar: () => void;
+  alElegir: () => void;
+}) {
+  return (
+    <Pressable
+      nativeID={id}
+      accessibilityRole="menuitem"
+      accessibilityState={{ selected: elegida }}
+      onPress={alElegir}
+      // Puntero y teclado marcan la misma opción: si no, Enter elegiría una
+      // distinta de la que se ve resaltada.
+      onHoverIn={alSenalar}
+      style={[
+        estilos.selectorOpcion,
+        estilos.selectorOpcionFila,
+        elegida && estilos.selectorOpcionElegida,
+        senalada && estilos.campoHover,
+      ]}
+    >
+      <View style={estilos.selectorOpcionTextos}>
+        <Text style={vacia ? estilos.selectorVacio : estilos.selectorValor}>{etiqueta}</Text>
+        {detalle ? <Text style={estilos.campoAyuda}>{detalle}</Text> : null}
+      </View>
+      {elegida ? <Text style={estilos.selectorMarca}>✓</Text> : null}
+    </Pressable>
   );
 }
 
@@ -479,31 +794,16 @@ export function Celda({ children }: { children: ReactNode }) {
 /* Estructura de pantalla                                                    */
 /* ------------------------------------------------------------------------ */
 
-export function Seccion({
-  titulo,
-  apilado,
-  children,
-}: {
-  titulo: string;
-  /**
-   * Cuánto se levanta esta sección sobre las que vienen **después**.
-   *
-   * Hace falta cuando la sección contiene un desplegable y no es la última de la
-   * pantalla. React Native Web le pone `z-index: 0` a toda vista, así que cada
-   * sección es su propio contexto de apilamiento: el `zIndex` que lleve algo de
-   * dentro —la barra de listado lleva 2— sube dentro de la sección y **no puede
-   * salir de ella**. Fuera, la sección empata a cero con sus hermanas y gana la
-   * última pintada, así que una lista abierta se mete debajo de lo que haya
-   * debajo.
-   *
-   * Opcional a propósito: la mayoría de las pantallas tienen su listado al final
-   * y no necesitan nada. Solo lo pasa quien tiene algo debajo.
-   */
-  apilado?: number;
-  children: ReactNode;
-}) {
+/**
+ * Hasta la spec 007 aceptaba `apilado`: un `zIndex` para que la lista abierta de
+ * un selector de esta sección no quedara debajo de la sección siguiente, porque
+ * React Native Web le pone `z-index: 0` a toda vista y cada sección era su propio
+ * contexto de apilamiento. Las listas se pintan ahora en la capa flotante, fuera
+ * de la página, y el parche se retiró.
+ */
+export function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
-    <View style={[estilos.seccion, apilado !== undefined && { zIndex: apilado }]}>
+    <View style={estilos.seccion}>
       <Text style={estilos.seccionTitulo}>{titulo}</Text>
       {children}
     </View>
@@ -560,28 +860,16 @@ export function Tarjeta({ children }: { children: ReactNode }) {
 export function FilaDeFormulario({
   children,
   ultima = false,
-  apilado,
 }: {
   children: ReactNode;
   /** La última no lleva línea abajo: si no, parece que falta algo debajo. */
   ultima?: boolean;
-  /**
-   * Cuánto se levanta esta fila sobre las de abajo.
-   *
-   * Hace falta por lo mismo que en las bandas: React Native Web le pone
-   * `z-index: 0` a toda vista, las filas empatan, y con el empate gana la última
-   * pintada. Un desplegable abierto en la primera fila se metía debajo de la
-   * segunda. Se pasa **al revés** —`total - índice`— porque la lista cae hacia
-   * abajo y lo que hay que tapar es lo que viene después.
-   */
-  apilado?: number;
 }) {
   return (
     <View
       style={[
         estilos.filaFormulario,
         !ultima && estilos.filaConLinea,
-        apilado !== undefined && { zIndex: apilado },
       ]}
     >
       {children}
@@ -692,6 +980,13 @@ export function Cifras({ children }: { children: ReactNode }) {
  * El telón cierra al pulsarlo, igual que el del `Selector`. Es lo que espera
  * cualquiera y evita dejar a alguien atrapado si el botón de cerrar se pierde
  * detrás de un formulario largo.
+ *
+ * **Se pinta en la capa flotante** (spec 007, RF-25 y RF-26). Hasta el
+ * 2026-09-15 el telón vivía dentro del contenido de la página: no cubría la
+ * barra, se desplazaba con la página, y con la lista de vehículos al fondo la
+ * ventana «Corregir» salía con la cabecera escondida bajo la barra. Ahora cubre
+ * la pantalla, va centrada en lo que se ve, y si el formulario es más alto que
+ * la pantalla se desplaza **por dentro**: la cabecera con «Cerrar» no se va.
  */
 export function Modal({
   titulo,
@@ -703,16 +998,23 @@ export function Modal({
   onCerrar: () => void;
 }) {
   return (
-    <View style={estilos.telonModal}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onCerrar} />
-      <View style={estilos.ventana}>
-        <View style={estilos.ventanaCabecera}>
-          <Text style={estilos.ventanaTitulo}>{titulo}</Text>
-          <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
+    <CapaFlotante visible alCerrar={onCerrar} telon="oscuro">
+      {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
+      <View style={estilos.centroModal}>
+        <View style={estilos.ventana}>
+          <View style={estilos.ventanaCabecera}>
+            <Text style={estilos.ventanaTitulo}>{titulo}</Text>
+            <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
+          </View>
+          <ScrollView
+            style={estilos.ventanaDesplazable}
+            contentContainerStyle={estilos.ventanaCuerpo}
+          >
+            {children}
+          </ScrollView>
         </View>
-        <View style={estilos.ventanaCuerpo}>{children}</View>
       </View>
-    </View>
+    </CapaFlotante>
   );
 }
 
@@ -817,7 +1119,11 @@ const estilos = StyleSheet.create({
   filaFormulario: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    alignItems: 'flex-end',
+    // Por arriba y no por abajo (spec 007, RF-23). Alineadas por abajo, la ayuda
+    // que cuelga bajo un campo —«Largo × ancho»— lo empujaba hacia arriba, y en
+    // una misma fila las etiquetas quedaban a tres alturas distintas: visto en la
+    // segunda línea de una actividad el 2026-09-15.
+    alignItems: 'flex-start',
     gap: Spacing.three,
     padding: Spacing.three,
   },
@@ -871,19 +1177,18 @@ const estilos = StyleSheet.create({
   },
   medidorRelleno: { height: '100%', borderRadius: Radio.pastilla },
 
-  telonModal: {
+  // El telón y su color los pone la capa flotante (`Panel.telon`). Esto solo
+  // centra la ventana en la pantalla y deja pasar los clics de fuera.
+  centroModal: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    // El telón oscurece lo de detrás sin ocultarlo: se sigue viendo de qué
-    // lista salió esta ventana.
-    backgroundColor: 'rgba(16, 24, 40, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: Spacing.four,
-    zIndex: 100,
+    pointerEvents: 'box-none',
   },
   ventana: {
     width: '100%',
@@ -893,7 +1198,10 @@ const estilos = StyleSheet.create({
     borderCurve: 'continuous',
     backgroundColor: Colors.light.background,
     boxShadow: Sombra.flotante,
+    // Sin esto el cuerpo no se encoge y la ventana crece más que la pantalla.
+    overflow: 'hidden',
   },
+  ventanaDesplazable: { flexShrink: 1 },
   ventanaCabecera: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -911,7 +1219,6 @@ const estilos = StyleSheet.create({
     alignItems: 'flex-end',
     gap: Spacing.three,
     flexWrap: 'wrap',
-    zIndex: 2,
   },
   cuenta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.one },
   cuentaTexto: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary, fontWeight: '600' },
@@ -984,13 +1291,19 @@ const estilos = StyleSheet.create({
 
   campo: { gap: Spacing.one },
   campoLleno: { alignSelf: 'stretch' },
-  // Los desplegables abiertos van por encima de los campos vecinos.
-  campoAbierto: { zIndex: 10 },
+  campoRenglonEntero: { width: '100%' },
+  campoSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Colors.light.textSecondary },
+  campoAreaDeTexto: {
+    minHeight: CampoPanel.altoAreaDeTexto,
+    // Sin esto el texto nace centrado en vertical, como en un campo de una línea.
+    textAlignVertical: 'top',
+  },
   campoEtiqueta: {
     fontSize: TextoPanel.apoyo,
     fontWeight: '700',
     color: Colors.light.textSecondary,
   },
+  campoObligatorio: { color: Marca.critico },
   campoEntrada: {
     borderWidth: 1,
     borderColor: Panel.borde,
@@ -998,7 +1311,7 @@ const estilos = StyleSheet.create({
     borderCurve: 'continuous',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    minHeight: 38,
+    minHeight: CampoPanel.alto,
     fontSize: TextoPanel.cuerpo,
     color: Colors.light.text,
     backgroundColor: Colors.light.background,
@@ -1008,6 +1321,29 @@ const estilos = StyleSheet.create({
     outlineWidth: 0,
   },
   campoHover: { backgroundColor: Panel.fondoHover },
+  casilla: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: Spacing.two,
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.two,
+    borderRadius: Radio.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  casillaCaja: {
+    width: TextoPanel.seccion + Spacing.one,
+    height: TextoPanel.seccion + Spacing.one,
+    borderRadius: Radio.sm / 2,
+    borderWidth: 1,
+    borderColor: Panel.borde,
+    backgroundColor: Colors.light.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  casillaCajaMarcada: { backgroundColor: Panel.accion, borderColor: Panel.accion },
+  casillaMarca: { fontSize: TextoPanel.apoyo, fontWeight: '800', color: Panel.sobreAccion },
   campoEnfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
   /** El mismo anillo, para lo que se pulsa. */
   enfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
@@ -1019,14 +1355,10 @@ const estilos = StyleSheet.create({
   selectorValor: { fontSize: TextoPanel.cuerpo, color: Colors.light.text },
   selectorVacio: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
   selectorFlecha: { fontSize: TextoPanel.micro, color: Colors.light.textSecondary },
-  telon: { position: 'absolute', top: -1000, left: -2000, right: -2000, height: 4000 },
   selectorLista: {
+    // La posición y el alto los pone `colocarLista` al abrir.
     position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    maxHeight: 240,
-    marginTop: Spacing.one,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: Panel.borde,
     borderRadius: Radio.md,
@@ -1041,6 +1373,15 @@ const estilos = StyleSheet.create({
     borderBottomColor: Panel.bordeSuave,
   },
   selectorOpcionElegida: { backgroundColor: Panel.accionSuave },
+  selectorOpcionFila: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  selectorOpcionTextos: { flex: 1 },
+  selectorBuscador: {
+    padding: Spacing.two,
+    borderBottomWidth: 1,
+    borderBottomColor: Panel.bordeSuave,
+  },
+  selectorDesplazable: { flexShrink: 1 },
+  selectorMarca: { fontSize: TextoPanel.cuerpo, fontWeight: '800', color: Panel.accion },
 
   tablaMarco: {
     borderRadius: Radio.md,
@@ -1117,8 +1458,6 @@ const estilos = StyleSheet.create({
     borderCurve: 'continuous',
     backgroundColor: Colors.light.background,
     boxShadow: Sombra.tarjeta,
-    // Sin esto, un selector abierto queda por debajo de la tabla de abajo.
-    zIndex: 1,
   },
   grupoAcciones: {
     flexDirection: 'row',

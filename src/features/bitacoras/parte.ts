@@ -29,6 +29,7 @@ import {
   type UnidadMaterial,
 } from '@/shared/catalogos/bitacora';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
+import { calcularDimensiones } from '@/shared/rules/dimensiones';
 import type { ClaseDeMedidor } from '@/shared/rules/jornada';
 
 /** Lo que el navegador puede decir de una máquina. */
@@ -36,6 +37,7 @@ export interface MaquinaPedida {
   vehiculoId: string;
   medidorInicial?: number | null;
   medidorFinal?: number | null;
+  observaciones?: string | null;
 }
 
 export function construirMaquina(
@@ -50,6 +52,9 @@ export function construirMaquina(
     claseMedidor,
     medidorInicial: pedida.medidorInicial ?? null,
     medidorFinal: pedida.medidorFinal ?? null,
+    // Siempre presente en lo que se guarda desde el 2026-09-14, aunque vacío:
+    // así solo los partes anteriores lo traen ausente (spec 004, RF-45).
+    observaciones: pedida.observaciones?.trim() ?? '',
   };
 }
 
@@ -91,6 +96,10 @@ export interface ActividadPedida {
 }
 
 export function construirActividadDelParte(pedida: ActividadPedida): ActividadDelParte {
+  // El área y el volumen los recalcula el servidor con la misma regla que usa la
+  // pantalla, y manda él: una petición hecha por fuera con un área que no
+  // cuadra con su largo y su ancho no se guarda así (spec 004, RF-58 a RF-60).
+  const medidas = calcularDimensiones(pedida);
   return {
     // Se conserva el id que traía: es a lo que apuntan sus fotografías. Generar
     // uno nuevo en cada guardado las dejaba huérfanas en silencio.
@@ -104,11 +113,11 @@ export function construirActividadDelParte(pedida: ActividadPedida): ActividadDe
         : nombreDeActividad(pedida.clave),
     descripcion: pedida.descripcion,
     observaciones: pedida.observaciones,
-    longitud: pedida.longitud,
-    ancho: pedida.ancho,
-    alto: pedida.alto,
-    area: pedida.area,
-    volumen: pedida.volumen,
+    longitud: medidas.longitud,
+    ancho: medidas.ancho,
+    alto: medidas.alto,
+    area: medidas.area,
+    volumen: medidas.volumen,
   };
 }
 

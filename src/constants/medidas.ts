@@ -110,6 +110,31 @@ export const AnchoContenidoConIndice =
  */
 export const AnchoMinimoDosColumnas = 1000;
 
+/**
+ * Alturas de los campos del panel.
+ *
+ * `altoAreaDeTexto` es el de las observaciones: da para **seis renglones
+ * visibles** sin desplazarse (spec 007, RF-30). Menos que eso invita a escribir
+ * una línea telegráfica, que es justo lo que no sirve para explicar por qué una
+ * máquina estuvo parada. Empezó en cuatro (RF-24) y en el navegador se quedó
+ * corto.
+ */
+export const CampoPanel = {
+  alto: 38,
+  // Seis renglones de 21 de alto, más el relleno y el borde del campo.
+  altoAreaDeTexto: 146,
+  /**
+   * La lista de un selector, abierta. Da para unas seis opciones sin
+   * desplazarse (spec 007, requisitos no funcionales).
+   */
+  altoListaSelector: 240,
+  /**
+   * Por debajo de esto no se abre hacia ese lado: dos renglones con barra de
+   * desplazamiento no sirven para elegir (spec 007, RF-3).
+   */
+  altoMinimoListaSelector: 120,
+} as const;
+
 export const Radio = {
   sm: 8,
   md: 12,

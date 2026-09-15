@@ -22,6 +22,7 @@ import {
 
 import { alcanza, type Modulo } from '@/shared/rules/permisos';
 
+import { ErrorApi } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
 import { usePersona } from './sesion';
 
@@ -34,12 +35,18 @@ export interface Listado<T> {
   /** Ejecuta una acción y recarga si sale bien; si falla, deja el mensaje puesto. */
   ejecutar: (accion: () => Promise<unknown>) => Promise<boolean>;
   setError: (mensaje: string | null) => void;
+  /**
+   * El error del servidor para un campo del formulario, si lo hubo en el último
+   * `ejecutar` (spec 007, RF-18). Se pasa tal cual al `error` del `Campo`.
+   */
+  errorDe: (campo: string) => string | undefined;
 }
 
 export function useListado<T>(cargar: () => Promise<T[]>): Listado<T> {
   const [datos, setDatos] = useState<T[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [camposConError, setCamposConError] = useState<Record<string, string>>({});
   /**
    * Contador de recargas. Pedir de nuevo el listado es cambiar este número, no
    * llamar a la función de carga: así el efecto es el único sitio que dispara
@@ -84,17 +91,28 @@ export function useListado<T>(cargar: () => Promise<T[]>): Listado<T> {
       try {
         await accion();
         setError(null);
+        setCamposConError({});
         setPulso((p) => p + 1);
         return true;
       } catch (fallo) {
-        setError(mensajeDe(fallo));
+        // Si el servidor dice qué campo falló, el motivo va debajo de ese campo
+        // (spec 007, RF-18) y arriba queda solo el aviso de que hay algo que
+        // corregir. El aviso no se quita del todo: si una pantalla no pinta ese
+        // campo, al menos se sabe que algo falló.
+        const campos = fallo instanceof ErrorApi ? (fallo.campos ?? {}) : {};
+        setCamposConError(campos);
+        setError(
+          Object.keys(campos).length > 0 ? 'Revise los campos marcados.' : mensajeDe(fallo),
+        );
         return false;
       }
     },
     [],
   );
 
-  return { datos, cargando, error, recargar, ejecutar, setError };
+  const errorDe = useCallback((campo: string) => camposConError[campo], [camposConError]);
+
+  return { datos, cargando, error, recargar, ejecutar, setError, errorDe };
 }
 
 /**

@@ -236,6 +236,7 @@ export function SeccionLlantas({ vehiculos }: { vehiculos: VehiculoFila[] }) {
           <>
             <Selector
               etiqueta="Posición"
+              obligatorio
               valor={posicion}
               opciones={libres.map((p) => ({ valor: p.id, etiqueta: p.nombre }))}
               onChange={setPosicion}

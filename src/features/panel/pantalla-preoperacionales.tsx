@@ -308,7 +308,8 @@ export default function PantallaPreoperacionales() {
         </View>
       )}
 
-      <View style={estilos.filtro}>
+      {/* Antes llevaba zIndex para que su lista no quedara bajo la tabla; ya va en la capa flotante. */}
+      <View>
       <Selector
         etiqueta="Filtrar por máquina"
         valor={vehiculoId}
@@ -335,9 +336,6 @@ export default function PantallaPreoperacionales() {
       {ventana ? (
         <Seccion
           titulo={dia ? 'Firmados este día' : 'Firmados en el periodo'}
-          // Por encima de la nota del pie, que tiene fondo propio y se pintaba
-          // sobre el desplegable de «Resultado».
-          apilado={1}
         >
           <BarraDeListado
             busqueda={filtrado.busqueda}
@@ -393,9 +391,8 @@ const estilos = StyleSheet.create({
    * empatados a `z-index: 0` y la lista abierta se mete detrás del filtro de
    * máquina y del aviso de flota.
    */
-  dias: { zIndex: 3, flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  dias: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   /** El filtro de máquina: por encima de la tabla, por debajo del periodo. */
-  filtro: { zIndex: 2 },
   fecha: { flex: 1, alignItems: 'center' },
   fechaTexto: { fontSize: TextoPanel.seccion, fontWeight: '700', color: Colors.light.text },
   fechaAyuda: { fontSize: TextoPanel.cuerpo, color: Estado.info, fontWeight: '600' },

@@ -19,6 +19,7 @@ import {
 } from '../src/features/auth/servidor/cripto';
 import { firmarPeticion } from '../src/features/media/servidor/firma-s3';
 import { respuestaEnviada } from '../src/features/servidor/envios';
+import { duplicadoDe } from '../src/features/servidor/respuestas';
 
 import {
   debeOlvidarEquipo,
@@ -85,7 +86,8 @@ import {
   MaxContentWidthPanel,
   Spacing,
 } from '../src/constants/medidas';
-import { normalizar } from '../src/shared/rules/texto';
+import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
+import { colocarLista } from '../src/shared/rules/flotante';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
 import { vehiculos } from '../src/db/servidor/esquema';
 import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
@@ -114,9 +116,18 @@ import {
 } from '../src/shared/rules/jornada';
 import {
   bloqueosDelCierre,
+  mensajeDeDiaSinTrabajo,
+  mensajeDelRechazoDeCierre,
+  resolverDiaSinTrabajo,
   seccionesDelParte,
+  validarDiaSinTrabajo,
   type ConteosDelParte,
+  type FotosDelParte,
+  type ParteEvaluable,
 } from '../src/shared/rules/parte';
+import { calcularDimensiones } from '../src/shared/rules/dimensiones';
+import { construirActividadDelParte, construirMaquina } from '../src/features/bitacoras/parte';
+import { parteEditado } from '../src/features/panel/contratos';
 
 import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
 import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
@@ -665,63 +676,346 @@ prueba('el cierre se da por resuelto tanto si se cerró como si se anuló', () =
   assert.equal(estadoDe({ ...PARTE_VACIO, anulado: true }, 'cierre')?.estado, 'lleno');
 });
 
-prueba('un parte sin nada no se puede cerrar, y lo dice con las mismas palabras', () => {
-  // Spec 006 / RF-13. El texto es **literalmente** el que hoy devuelve
-  // `cerrar+api.ts`: si el índice y el servidor dijeran cosas distintas, el
-  // residente no sabría a cuál hacerle caso.
-  const bloqueos = bloqueosDelCierre({ maquinaria: [], personal: [], actividades: [] });
-  assert.deepEqual(bloqueos, [
-    'El parte está vacío. Registre al menos una máquina, una persona o una actividad antes ' +
-      'de cerrarlo.',
+/** Un parte con las siete secciones llenas y todo en regla. */
+const PARTE_COMPLETO: ParteEvaluable = {
+  maquinaria: [
+    {
+      codigo: 'VOL-01',
+      claseMedidor: 'odometro',
+      medidorInicial: 45210,
+      medidorFinal: 45388,
+      observaciones: 'Tres viajes a la cantera.',
+    },
+  ],
+  personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: '17:00' }],
+  actividades: [{ id: 'act-1' }, { id: 'act-2' }],
+  clima: [{}],
+  laboratorio: [{}],
+  notas: 'Sin novedad.',
+};
+
+/** Foto del día subida y una de las dos actividades con la suya. */
+const FOTOS_COMPLETAS: FotosDelParte = { delDia: 1, itemsConFoto: ['act-2'] };
+
+const SIN_FOTOS: FotosDelParte = { delDia: 0, itemsConFoto: [] };
+
+prueba('un parte completo no tiene ningún bloqueo', () => {
+  assert.deepEqual(bloqueosDelCierre(PARTE_COMPLETO, FOTOS_COMPLETAS), []);
+});
+
+prueba('un parte vacío nombra las siete secciones que faltan', () => {
+  // Spec 004 / RF-50. Antes bastaba una máquina, una persona o una actividad;
+  // OCC pidió que no se cierre sin haber diligenciado todo el parte.
+  const vacio: ParteEvaluable = {
+    maquinaria: [],
+    personal: [],
+    actividades: [],
+    clima: [],
+    laboratorio: [],
+    notas: null,
+  };
+  assert.deepEqual(bloqueosDelCierre(vacio, SIN_FOTOS), [
+    'Falta llenar: Maquinaria, Personal, Actividades, Clima, Control Calidad de Obra, Notas ' +
+      'y Fotografía del día.',
   ]);
 });
 
+prueba('una sola sección vacía se nombra sola', () => {
+  // Unas notas en blanco son notas sin escribir (006/RF-9).
+  const bloqueos = bloqueosDelCierre({ ...PARTE_COMPLETO, notas: '   ' }, FOTOS_COMPLETAS);
+  assert.deepEqual(bloqueos, ['Falta llenar: Notas.']);
+});
+
+prueba('una máquina sin observaciones no deja cerrar, y se nombra', () => {
+  // Spec 004 / RF-51. Las observaciones de un parte anterior al cambio no
+  // existen: se leen como vacías, y por eso se piden igual.
+  const [maquina] = PARTE_COMPLETO.maquinaria;
+  const sinObservaciones = { ...PARTE_COMPLETO, maquinaria: [{ ...maquina, observaciones: ' ' }] };
+  assert.deepEqual(bloqueosDelCierre(sinObservaciones, FOTOS_COMPLETAS), [
+    'VOL-01: faltan las observaciones del día.',
+  ]);
+  const { observaciones: _, ...anterior } = maquina;
+  assert.deepEqual(
+    bloqueosDelCierre({ ...PARTE_COMPLETO, maquinaria: [anterior] }, FOTOS_COMPLETAS),
+    ['VOL-01: faltan las observaciones del día.'],
+  );
+});
+
 prueba('una máquina sin lectura final no deja cerrar, y se nombra', () => {
-  const bloqueos = bloqueosDelCierre({
-    maquinaria: [
-      { codigo: 'VOL-01', claseMedidor: 'odometro', medidorInicial: 45210, medidorFinal: null },
-    ],
-    personal: [],
-    actividades: [],
-  });
+  const [maquina] = PARTE_COMPLETO.maquinaria;
+  const bloqueos = bloqueosDelCierre(
+    { ...PARTE_COMPLETO, maquinaria: [{ ...maquina, medidorFinal: null }] },
+    FOTOS_COMPLETAS,
+  );
   assert.deepEqual(bloqueos, ['VOL-01: Falta la lectura final (km).']);
 });
 
 prueba('una persona sin hora de salida no deja cerrar, y se nombra', () => {
-  const bloqueos = bloqueosDelCierre({
-    maquinaria: [],
-    personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: null }],
-    actividades: [],
-  });
+  const bloqueos = bloqueosDelCierre(
+    {
+      ...PARTE_COMPLETO,
+      personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: null }],
+    },
+    FOTOS_COMPLETAS,
+  );
   assert.deepEqual(bloqueos, ['A Pedro Cartagena le falta la hora de entrada o de salida.']);
 });
 
-prueba('un parte completo no tiene ningún bloqueo', () => {
-  const bloqueos = bloqueosDelCierre({
-    maquinaria: [
-      { codigo: 'VOL-01', claseMedidor: 'odometro', medidorInicial: 45210, medidorFinal: 45388 },
-    ],
-    personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: '17:00' }],
-    actividades: [{}],
-  });
-  assert.deepEqual(bloqueos, []);
+prueba('basta con que una actividad tenga foto', () => {
+  // Spec 004 / RF-52, corregido el 2026-09-15: una, no todas.
+  assert.deepEqual(
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: [] }),
+    ['Falta la fotografía de al menos una actividad.'],
+  );
+  assert.deepEqual(
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: ['act-1'] }),
+    [],
+  );
 });
 
-prueba('los bloqueos salen en el mismo orden en que los comprobaba la ruta', () => {
-  // La ruta devolvía **el primero** y paraba. Devolver la lista entera solo es
-  // compatible si el primero es el mismo, así que el orden importa: vacío,
-  // luego máquinas, luego personas.
-  const bloqueos = bloqueosDelCierre({
-    maquinaria: [
-      { codigo: 'RET-02', claseMedidor: 'horometro', medidorInicial: null, medidorFinal: null },
-    ],
-    personal: [{ nombre: 'Ana Ruiz', entrada: null, salida: '17:00' }],
-    actividades: [],
-  });
-  assert.equal(bloqueos.length, 2);
-  assert.equal(bloqueos[0], 'RET-02: Falta la lectura inicial (h).');
-  assert.equal(bloqueos[1], 'A Ana Ruiz le falta la hora de entrada o de salida.');
+prueba('la foto de una actividad que no se guardó no cuenta', () => {
+  // Spec 004 / RF-48. La foto se sube mientras se llena la actividad; si esa
+  // actividad se quita sin guardar, su foto queda en el almacén pero no es de
+  // ninguna actividad del parte.
+  assert.deepEqual(
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: ['act-descartada'] }),
+    ['Falta la fotografía de al menos una actividad.'],
+  );
 });
+
+prueba('los bloqueos salen agrupados: secciones, máquinas, personas y fotos', () => {
+  const bloqueos = bloqueosDelCierre(
+    {
+      ...PARTE_COMPLETO,
+      maquinaria: [
+        {
+          codigo: 'RET-02',
+          claseMedidor: 'horometro',
+          medidorInicial: null,
+          medidorFinal: null,
+          observaciones: '',
+        },
+      ],
+      personal: [{ nombre: 'Ana Ruiz', entrada: null, salida: '17:00' }],
+      clima: [],
+    },
+    { delDia: 1, itemsConFoto: [] },
+  );
+  assert.deepEqual(bloqueos, [
+    'Falta llenar: Clima.',
+    'RET-02: Falta la lectura inicial (h).',
+    'RET-02: faltan las observaciones del día.',
+    'A Ana Ruiz le falta la hora de entrada o de salida.',
+    'Falta la fotografía de al menos una actividad.',
+  ]);
+});
+
+/** Un domingo sin trabajo, con lo único que se le exige. */
+const DIA_SIN_TRABAJO: ParteEvaluable = {
+  maquinaria: [],
+  personal: [],
+  actividades: [],
+  clima: [{}],
+  laboratorio: [],
+  notas: 'Domingo, obra cerrada.',
+  sinTrabajo: true,
+  motivoSinTrabajo: 'Domingo.',
+};
+
+prueba('un día sin trabajo se cierra con clima, notas y foto del día', () => {
+  // Spec 004 / RF-54.
+  assert.deepEqual(bloqueosDelCierre(DIA_SIN_TRABAJO, { delDia: 1, itemsConFoto: [] }), []);
+  assert.deepEqual(bloqueosDelCierre(DIA_SIN_TRABAJO, SIN_FOTOS), [
+    'Falta llenar: Fotografía del día.',
+  ]);
+  assert.deepEqual(
+    bloqueosDelCierre({ ...DIA_SIN_TRABAJO, clima: [], notas: '' }, { delDia: 1, itemsConFoto: [] }),
+    ['Falta llenar: Clima y Notas.'],
+  );
+});
+
+prueba('un día sin trabajo exige el motivo', () => {
+  // Spec 004 / RF-53.
+  const sinMotivo = { ...DIA_SIN_TRABAJO, motivoSinTrabajo: '  ' };
+  assert.equal(validarDiaSinTrabajo(sinMotivo), 'sin_motivo');
+  assert.equal(validarDiaSinTrabajo({ ...DIA_SIN_TRABAJO, motivoSinTrabajo: null }), 'sin_motivo');
+  assert.deepEqual(bloqueosDelCierre(sinMotivo, { delDia: 1, itemsConFoto: [] }), [
+    mensajeDeDiaSinTrabajo('sin_motivo'),
+  ]);
+});
+
+prueba('un día con trabajo registrado no se marca como día sin trabajo', () => {
+  // Spec 004 / RF-55. Trabajar la mañana y llover la tarde no es día sin
+  // trabajo: se cierra completo y la lluvia va en el clima.
+  const conMaquina = { ...DIA_SIN_TRABAJO, maquinaria: PARTE_COMPLETO.maquinaria };
+  assert.equal(validarDiaSinTrabajo(conMaquina), 'con_trabajo');
+  assert.equal(
+    validarDiaSinTrabajo({ ...DIA_SIN_TRABAJO, personal: PARTE_COMPLETO.personal }),
+    'con_trabajo',
+  );
+  assert.equal(
+    validarDiaSinTrabajo({ ...DIA_SIN_TRABAJO, actividades: PARTE_COMPLETO.actividades }),
+    'con_trabajo',
+  );
+  assert.deepEqual(bloqueosDelCierre(conMaquina, { delDia: 1, itemsConFoto: [] })[0],
+    mensajeDeDiaSinTrabajo('con_trabajo'));
+  // Sin la marca, no hay nada que validar.
+  assert.equal(validarDiaSinTrabajo(PARTE_COMPLETO), null);
+  assert.equal(validarDiaSinTrabajo(DIA_SIN_TRABAJO), null);
+});
+
+prueba('en un día sin trabajo, el índice dice qué secciones no aplican', () => {
+  // Spec 004 / RF-54. Maquinaria, personal, actividades y control de calidad
+  // no se exigen; decir «sin registrar» invitaría a llenarlas.
+  const conteos = { ...PARTE_VACIO, sinTrabajo: true };
+  for (const id of ['maquinaria', 'personal', 'actividades', 'laboratorio']) {
+    assert.equal(estadoDe(conteos, id)?.estado, 'no_aplica', id);
+  }
+  for (const id of ['clima', 'notas', 'fotografia']) {
+    assert.equal(estadoDe(conteos, id)?.estado, 'vacio', id);
+  }
+});
+
+prueba('la sección de laboratorio se llama Control Calidad de Obra', () => {
+  // Spec 004 / RF-49. El id no cambia: es la llave con la que el índice salta.
+  assert.equal(estadoDe(PARTE_VACIO, 'laboratorio')?.titulo, 'Control Calidad de Obra');
+});
+
+prueba('el rechazo del cierre nombra todo lo que falta, no solo lo primero', () => {
+  // Spec 004 / RF-50. La ruta mandaba el primer bloqueo y paraba; el residente
+  // descubría lo que faltaba de uno en uno a base de pulsar Cerrar.
+  const bloqueos = [
+    'Falta llenar: Clima y Notas.',
+    'VOL-01: faltan las observaciones del día.',
+    'Falta la fotografía de al menos una actividad.',
+  ];
+  assert.equal(
+    mensajeDelRechazoDeCierre(bloqueos),
+    'No se puede cerrar el parte todavía:\n' +
+      '• Falta llenar: Clima y Notas.\n' +
+      '• VOL-01: faltan las observaciones del día.\n' +
+      '• Falta la fotografía de al menos una actividad.',
+  );
+  // Todos, sin recortar: con veinte máquinas sin observaciones son veinte renglones.
+  const muchos = Array.from({ length: 20 }, (_, i) => `M-${i}: faltan las observaciones del día.`);
+  assert.equal(mensajeDelRechazoDeCierre(muchos).split('\n').length, 21);
+});
+
+/* ── Guardar el parte (spec 004, T16) ── */
+
+prueba('guardar una sección no borra las notas del día', () => {
+  // Fallo encontrado en T15: `notas` convertía lo ausente en `null`, y guardar
+  // la maquinaria vaciaba las notas. Ausente no toca; vacío sí borra.
+  const soloMaquinaria = parteEditado.parse({ maquinaria: [] });
+  assert.equal(soloMaquinaria.notas, undefined);
+  assert.equal(parteEditado.parse({ notas: '' }).notas, null);
+  assert.equal(parteEditado.parse({ notas: '   ' }).notas, null);
+  assert.equal(parteEditado.parse({ notas: null }).notas, null);
+  assert.equal(parteEditado.parse({ notas: ' Llovió. ' }).notas, 'Llovió.');
+  // Lo mismo con el motivo del día sin trabajo.
+  assert.equal(soloMaquinaria.motivoSinTrabajo, undefined);
+  assert.equal(soloMaquinaria.sinTrabajo, undefined);
+});
+
+prueba('el servidor recalcula el área aunque llegue otra', () => {
+  // Spec 004 / RF-58. Una petición hecha por fuera con área 99 no la guarda.
+  const actividad = construirActividadDelParte({
+    id: 'act-1',
+    clave: 'otra',
+    texto: 'Excavación',
+    descripcion: '',
+    observaciones: '',
+    longitud: 3,
+    ancho: 4,
+    alto: null,
+    area: 99,
+    volumen: 7,
+  });
+  assert.equal(actividad.area, 12);
+  // Sin alto, el volumen es el que se escribió (RF-60).
+  assert.equal(actividad.volumen, 7);
+  // Y el id que trae se conserva: es a lo que apuntan sus fotos (RF-47).
+  assert.equal(actividad.id, 'act-1');
+});
+
+prueba('las observaciones de la máquina se guardan con ella', () => {
+  // Spec 004 / RF-45.
+  const maquina = construirMaquina(
+    { vehiculoId: 'v-1', medidorInicial: 10, medidorFinal: 12, observaciones: 'Se varó a las 10.' },
+    'RET-01',
+    'horometro',
+  );
+  assert.equal(maquina.observaciones, 'Se varó a las 10.');
+  assert.equal(
+    construirMaquina({ vehiculoId: 'v-1' }, 'RET-01', 'horometro').observaciones,
+    '',
+  );
+});
+
+/** Un parte guardado normal, sin marca de día sin trabajo. */
+const GUARDADO = {
+  sinTrabajo: false,
+  motivoSinTrabajo: null,
+  maquinaria: [],
+  personal: [],
+  actividades: [],
+};
+
+prueba('marcar día sin trabajo guarda la marca y su motivo', () => {
+  // Spec 004 / RF-53.
+  assert.deepEqual(
+    resolverDiaSinTrabajo(GUARDADO, { sinTrabajo: true, motivoSinTrabajo: 'Domingo.' }),
+    { sinTrabajo: true, motivoSinTrabajo: 'Domingo.', error: null },
+  );
+  assert.equal(
+    resolverDiaSinTrabajo(GUARDADO, { sinTrabajo: true, motivoSinTrabajo: null }).error,
+    'sin_motivo',
+  );
+  // Sin motivo en la petición, vale el que ya estaba guardado.
+  assert.equal(
+    resolverDiaSinTrabajo(
+      { ...GUARDADO, sinTrabajo: true, motivoSinTrabajo: 'Paro por lluvia.' },
+      { sinTrabajo: true },
+    ).error,
+    null,
+  );
+});
+
+prueba('no se marca día sin trabajo si ya hay trabajo guardado', () => {
+  // Spec 004 / RF-55. Se mira lo guardado cuando la petición no trae la sección.
+  const conMaquina = { ...GUARDADO, maquinaria: [{}] };
+  assert.equal(
+    resolverDiaSinTrabajo(conMaquina, { sinTrabajo: true, motivoSinTrabajo: 'Lluvia.' }).error,
+    'con_trabajo',
+  );
+  // Y si la misma petición quita las máquinas, ya no hay contradicción.
+  assert.equal(
+    resolverDiaSinTrabajo(conMaquina, {
+      sinTrabajo: true,
+      motivoSinTrabajo: 'Lluvia.',
+      maquinaria: [],
+    }).error,
+    null,
+  );
+});
+
+prueba('en un día marcado sin trabajo no se registran máquinas', () => {
+  // La misma contradicción, entrando por el otro lado.
+  const marcado = { ...GUARDADO, sinTrabajo: true, motivoSinTrabajo: 'Domingo.' };
+  assert.equal(resolverDiaSinTrabajo(marcado, { personal: [{}] }).error, 'con_trabajo');
+});
+
+prueba('quitar la marca de día sin trabajo borra su motivo', () => {
+  // Un motivo sin marca no dice nada, y dejarlo haría creer que ese día no se trabajó.
+  assert.deepEqual(
+    resolverDiaSinTrabajo(
+      { ...GUARDADO, sinTrabajo: true, motivoSinTrabajo: 'Domingo.' },
+      { sinTrabajo: false },
+    ),
+    { sinTrabajo: false, motivoSinTrabajo: null, error: null },
+  );
+});
+
 
 prueba('el jefe ve exactamente las máquinas que le faltan', () => {
   const flota = ['vol-01', 'vol-02', 'ret-01'];
@@ -1185,6 +1479,62 @@ prueba('los tramos de clima pueden cubrir la jornada completa', () => {
   );
 });
 
+prueba('el área de una actividad es largo por ancho', () => {
+  // Spec 004 / RF-58. Lo escrito a mano en el área no cuenta cuando se puede
+  // calcular: si no, un 99 tecleado por error se quedaría como dato.
+  const medidas = calcularDimensiones({ longitud: 3, ancho: 4, alto: null, area: 99, volumen: null });
+  assert.equal(medidas.area, 12);
+  assert.equal(medidas.areaCalculada, true);
+});
+
+prueba('sin ancho, el área es la que se escribió', () => {
+  // Spec 004 / RF-60. No todas las actividades se miden en largo y ancho: una
+  // limpieza de zona puede traer solo el área.
+  const medidas = calcularDimensiones({ longitud: 3, ancho: null, alto: null, area: 25, volumen: null });
+  assert.equal(medidas.area, 25);
+  assert.equal(medidas.areaCalculada, false);
+  // Y sin nada escrito, queda en blanco: cero sería inventarse una medida.
+  assert.equal(
+    calcularDimensiones({ longitud: 3, ancho: null, alto: null, area: null, volumen: null }).area,
+    null,
+  );
+});
+
+prueba('el volumen de una actividad es largo por ancho por alto', () => {
+  // Spec 004 / RF-59.
+  const medidas = calcularDimensiones({ longitud: 2, ancho: 3, alto: 0.5, area: null, volumen: 7 });
+  assert.equal(medidas.volumen, 3);
+  assert.equal(medidas.volumenCalculado, true);
+  assert.equal(medidas.area, 6);
+});
+
+prueba('sin alto, el volumen es el que se escribió', () => {
+  // Spec 004 / RF-60. El área sí se calcula, porque tiene sus dos factores.
+  const medidas = calcularDimensiones({ longitud: 2, ancho: 3, alto: null, area: null, volumen: 40 });
+  assert.equal(medidas.volumen, 40);
+  assert.equal(medidas.volumenCalculado, false);
+  assert.equal(medidas.area, 6);
+  assert.equal(medidas.areaCalculada, true);
+});
+
+prueba('área y volumen calculados se redondean a dos decimales', () => {
+  // 1,15 × 1,15 = 1,3225 y 0,1 × 0,2 da 0,020000000000000004 en coma flotante:
+  // ninguno de los dos debe llegar así a la pantalla ni a la base.
+  assert.equal(
+    calcularDimensiones({ longitud: 1.15, ancho: 1.15, alto: null, area: null, volumen: null }).area,
+    1.32,
+  );
+  assert.equal(
+    calcularDimensiones({ longitud: 0.1, ancho: 0.2, alto: 1, area: null, volumen: null }).volumen,
+    0.02,
+  );
+  // Un valor escrito a mano no se toca: es lo que el residente midió.
+  assert.equal(
+    calcularDimensiones({ longitud: null, ancho: null, alto: null, area: 10.456, volumen: null }).area,
+    10.456,
+  );
+});
+
 prueba('los materiales de laboratorio traen su unidad pegada', () => {
   // Un «3» de cemento sin decir si son bultos o metros cúbicos es el dato que
   // después nadie sabe interpretar.
@@ -1229,6 +1579,102 @@ prueba('buscar encuentra aunque no se escriban las tildes', () => {
   assert.equal(normalizar('  MOTONIVELADORA  '), 'motoniveladora');
   assert.equal(normalizar('Bitácoras'), 'bitacoras');
   assert.equal(normalizar('Peña'), 'pena', 'la eñe no es una ene con tilde, pero se busca igual');
+});
+
+/* ── Errores del servidor debajo de su campo (spec 007, RF-18) ── */
+
+prueba('un duplicado dice qué campo del formulario lo causó', () => {
+  // Las claves son las del contrato del formulario: así la pantalla pinta el
+  // mensaje debajo del campo sin traducir nombres de índices de la base.
+  assert.deepEqual(duplicadoDe('ux_obras_codigo'), {
+    mensaje: 'Ya existe una obra con ese código.',
+    campo: 'codigo',
+  });
+  assert.deepEqual(duplicadoDe('ux_usuarios_usuario'), {
+    mensaje: 'Ese nombre de usuario ya está en uso.',
+    campo: 'usuario',
+  });
+  assert.deepEqual(duplicadoDe('ux_vehiculos_codigo'), {
+    mensaje: 'Ya existe un vehículo con ese código interno.',
+    campo: 'codigoInterno',
+  });
+  // Un índice que no se conoce no inventa campo: el mensaje va arriba, como antes.
+  assert.deepEqual(duplicadoDe('ux_inventado'), { mensaje: 'Ya existe un registro con esos datos.' });
+  assert.deepEqual(duplicadoDe(undefined), { mensaje: 'Ya existe un registro con esos datos.' });
+});
+
+/* ── Los selectores del panel (spec 007) ── */
+
+const TIPOS_DE_PRUEBA = [
+  { valor: 'camioneta', etiqueta: 'Camioneta' },
+  { valor: 'retro', etiqueta: 'Retroexcavadora', detalle: 'Maquinaria amarilla' },
+  { valor: 'vol', etiqueta: 'Volqueta', detalle: 'Camión de carga' },
+];
+
+prueba('el filtro de un selector no distingue tildes ni mayúsculas', () => {
+  // Spec 007 / RF-13. Escribir «camion» tiene que encontrar «Camión».
+  // «Camioneta» por su rótulo, y la volqueta por su detalle: «Camión de carga».
+  assert.deepEqual(filtrarOpciones(TIPOS_DE_PRUEBA, 'camion').map((o) => o.valor), [
+    'camioneta',
+    'vol',
+  ]);
+  assert.deepEqual(filtrarOpciones(TIPOS_DE_PRUEBA, 'RETRO').map((o) => o.valor), ['retro']);
+  assert.deepEqual(filtrarOpciones(TIPOS_DE_PRUEBA, 'amarilla').map((o) => o.valor), ['retro']);
+  // Sin texto, están todas, en su orden.
+  assert.deepEqual(filtrarOpciones(TIPOS_DE_PRUEBA, '  ').map((o) => o.valor), [
+    'camioneta',
+    'retro',
+    'vol',
+  ]);
+});
+
+prueba('un filtro sin coincidencias deja la lista vacía', () => {
+  // Spec 007 / RF-14. La pantalla lo dice; la regla solo no inventa opciones.
+  assert.deepEqual(filtrarOpciones(TIPOS_DE_PRUEBA, 'grúa'), []);
+});
+
+prueba('el selector ofrece buscar a partir de nueve opciones', () => {
+  // Spec 007 / RF-12: «más de ocho».
+  assert.equal(ofreceBusqueda(8), false);
+  assert.equal(ofreceBusqueda(9), true);
+});
+
+/** Una pantalla de portátil y una lista de 240 de alto, con 4 de separación y 8 de margen. */
+const PANTALLA = { altoPantalla: 640, separacion: 4, margen: 8, altoMinimo: 120 };
+
+prueba('la lista abre hacia abajo cuando cabe', () => {
+  // Spec 007 / RF-3.
+  assert.deepEqual(colocarLista({ ...PANTALLA, botonY: 100, botonAlto: 38, altoLista: 240 }), {
+    hacia: 'abajo',
+    top: 142,
+    alto: 240,
+  });
+});
+
+prueba('la lista abre hacia arriba si abajo no cabe y arriba sí', () => {
+  // El filtro de estado al fondo de la pantalla de Vehículos: se abría fuera de la vista.
+  assert.deepEqual(colocarLista({ ...PANTALLA, botonY: 560, botonAlto: 38, altoLista: 240 }), {
+    hacia: 'arriba',
+    top: 316,
+    alto: 240,
+  });
+});
+
+prueba('la lista se recorta al espacio que tiene', () => {
+  // Abajo caben 200: más que el mínimo, así que se queda abajo pero más corta.
+  assert.deepEqual(colocarLista({ ...PANTALLA, botonY: 390, botonAlto: 38, altoLista: 240 }), {
+    hacia: 'abajo',
+    top: 432,
+    alto: 200,
+  });
+  // Arriba caben 88 y abajo 50: ninguno llega al mínimo, y va donde cabe más.
+  assert.deepEqual(colocarLista({ ...PANTALLA, botonY: 100, botonAlto: 478, altoLista: 240 }), {
+    hacia: 'arriba',
+    top: 8,
+    alto: 88,
+  });
+  // Nunca un alto negativo, aunque el botón esté fuera de la pantalla.
+  assert.equal(colocarLista({ ...PANTALLA, botonY: 700, botonAlto: 38, altoLista: 240 }).alto >= 0, true);
 });
 
 prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {

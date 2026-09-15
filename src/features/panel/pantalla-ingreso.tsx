@@ -66,9 +66,10 @@ export default function PantallaIngreso() {
         {error ? <Aviso tono="error">{error}</Aviso> : null}
 
         <View style={estilos.campos}>
-          <Campo etiqueta="Usuario" valor={usuario} onChange={setUsuario} />
+          <Campo etiqueta="Usuario" obligatorio valor={usuario} onChange={setUsuario} />
           <Campo
             etiqueta="Contraseña"
+            obligatorio
             valor={clave}
             onChange={setClave}
             oculto

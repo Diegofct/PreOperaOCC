@@ -21,6 +21,7 @@ import {
 } from '@/features/servidor/respuestas';
 import { validarFranjas, mensajeDeFranja, validarHorario, mensajeDeHorario } from '@/shared/rules/horas';
 import { medidorDeClase, mensajeDeAvance, validarAvance } from '@/shared/rules/jornada';
+import { mensajeDeDiaSinTrabajo, resolverDiaSinTrabajo } from '@/shared/rules/parte';
 
 /**
  * Guardado del parte. `PATCH /api/panel/partes/:id`.
@@ -45,6 +46,8 @@ const COLUMNAS = {
   clima: partesDeObra.clima,
   laboratorio: partesDeObra.laboratorio,
   notas: partesDeObra.notas,
+  sinTrabajo: partesDeObra.sinTrabajo,
+  motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,
@@ -171,6 +174,44 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     }
 
     if (cambios.notas !== undefined) set.notas = cambios.notas;
+
+    // Día sin trabajo (spec 004, RF-53 a RF-55). Se valida **cómo queda el
+    // parte**, no solo lo que llega: el guardado es por sección, y marcar el día
+    // en una petición y registrar una máquina en otra también es contradecirse.
+    const tocaElDia =
+      cambios.sinTrabajo !== undefined ||
+      cambios.motivoSinTrabajo !== undefined ||
+      cambios.maquinaria !== undefined ||
+      cambios.personal !== undefined ||
+      cambios.actividades !== undefined;
+
+    if (tocaElDia) {
+      const [guardado] = await db
+        .select({
+          sinTrabajo: partesDeObra.sinTrabajo,
+          motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+          maquinaria: partesDeObra.maquinaria,
+          personal: partesDeObra.personal,
+          actividades: partesDeObra.actividades,
+        })
+        .from(partesDeObra)
+        .where(eq(partesDeObra.id, id))
+        .limit(1);
+
+      if (!guardado) return noEncontrado('ese parte');
+
+      const dia = resolverDiaSinTrabajo(guardado, cambios);
+      if (dia.error) return errorDePeticion(mensajeDeDiaSinTrabajo(dia.error), 400);
+
+      // Sin transacciones (Neon por HTTP), entre esta lectura y el UPDATE otro
+      // computador puede guardar lo contrario. Es raro y no se esconde: el
+      // cierre vuelve a validar el parte entero con la misma regla, así que un
+      // parte contradictorio no llega a cerrarse.
+      if (cambios.sinTrabajo !== undefined || cambios.motivoSinTrabajo !== undefined) {
+        set.sinTrabajo = dia.sinTrabajo;
+        set.motivoSinTrabajo = dia.motivoSinTrabajo;
+      }
+    }
 
     if (Object.keys(set).length === 0) return errorDePeticion('No llegó nada que guardar.', 400);
 

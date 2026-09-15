@@ -506,6 +506,14 @@ export const partesDeObra = pgTable(
     clima: jsonb('clima').$type<FranjaDeClima[]>().notNull().default([]),
     laboratorio: jsonb('laboratorio').$type<MaterialDelParte[]>().notNull().default([]),
     notas: text('notas'),
+    /**
+     * Un domingo o un paro por lluvia: el día se cierra sin máquinas ni
+     * actividades, con clima, notas y foto (spec 004, RF-53 a RF-55). Columna
+     * propia y no una frase en las notas, porque el cierre tiene que saber qué
+     * exigir sin interpretar lo escrito.
+     */
+    sinTrabajo: boolean('sin_trabajo').notNull().default(false),
+    motivoSinTrabajo: text('motivo_sin_trabajo'),
 
     cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
     anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
