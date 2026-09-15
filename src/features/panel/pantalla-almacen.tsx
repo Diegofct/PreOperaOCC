@@ -1,0 +1,360 @@
+/**
+ * El almacén de la obra (spec 009).
+ *
+ * La tabla responde la pregunta que motivó el módulo: **¿cuánto queda?** Cada
+ * material trae lo que entró, lo que salió y lo que queda, y el stock no se puede
+ * escribir: sale de los movimientos, y lo suma el servidor con la misma regla que
+ * decide si una salida alcanza (RF-17, RF-18).
+ *
+ * ── Quién ve qué ──
+ *
+ * El almacenista y la gerencia registran; el residente consulta (RF-28, RF-29).
+ * Al residente no se le enseñan botones que el servidor le rechazaría: ve la
+ * misma tabla, sin formulario ni acciones de escritura. La gerencia lleva todas
+ * las obras, así que elige en cuál registra y puede filtrar la tabla por obra; el
+ * almacenista y el residente ven siempre la suya, y el marco les avisa si su
+ * cuenta no tiene obra (008/RF-6).
+ *
+ * ── Un material en cero no se esconde ──
+ *
+ * Se señala con la etiqueta «Sin stock», con texto además del color (RF-19). Es
+ * justo el material que hay que pedir, y desaparecer de la tabla sería lo último
+ * que conviene.
+ */
+import { useCallback, useState } from 'react';
+
+import { nombreDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { formatearCantidad, rechazoDeBaja, type TipoMovimiento } from '@/shared/rules/almacen';
+import { alcanza } from '@/shared/rules/permisos';
+
+import { api } from './cliente-api';
+import {
+  Acciones,
+  AccionesFormulario,
+  BarraDeListado,
+  Boton,
+  Campo,
+  Celda,
+  Confirmacion,
+  Confirmado,
+  Etiqueta,
+  Formulario,
+  Paginacion,
+  Seccion,
+  Selector,
+  Tabla,
+  type Columna,
+} from './componentes';
+import type { MaterialDeAlmacenFila, ObraFila } from './contratos';
+import { HistorialAlmacen } from './historial-almacen';
+import { MarcoPantalla, useListado } from './marco';
+import { usePersona } from './sesion';
+import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { OPCIONES_DE_UNIDAD, VentanaCorregirMaterial } from './ventana-material';
+import { VentanaMovimiento } from './ventana-movimiento';
+
+export default function PantallaAlmacen() {
+  const { rol } = usePersona();
+  const puedeRegistrar = alcanza(rol, 'almacen', 'escribir');
+  const esGerencia = alcanza(rol, 'obras', 'listar');
+
+  const materiales = useListado<MaterialDeAlmacenFila>(
+    useCallback(() => api.almacen.materiales.listar(), []),
+  );
+  // Solo la gerencia elige obra: a los demás el servidor les rechazaría el listado.
+  const obras = useListado<ObraFila>(
+    useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
+  );
+
+  const [nombre, setNombre] = useState('');
+  const [unidad, setUnidad] = useState<UnidadAlmacen | null>(null);
+  const [obraId, setObraId] = useState<string | null>(null);
+
+  const [obraFiltro, setObraFiltro] = useState<string | null>(null);
+  const filtrado = useListadoFiltrado(
+    materiales.datos,
+    (m) => [m.nombre, nombreDeUnidad(m.unidad), m.obraNombre],
+    useCallback(
+      (m: MaterialDeAlmacenFila) => obraFiltro === null || m.obraId === obraFiltro,
+      [obraFiltro],
+    ),
+  );
+
+  const [editando, setEditando] = useState<MaterialDeAlmacenFila | null>(null);
+  /**
+   * El id y no la fila: al anular o registrar, la tabla se recarga y el historial
+   * tiene que leer el stock nuevo, no el de la fila que se pulsó.
+   */
+  const [historialDe, setHistorialDe] = useState<string | null>(null);
+  const materialDelHistorial = materiales.datos.find((m) => m.id === historialDe) ?? null;
+  const [moviendo, setMoviendo] = useState<{
+    material: MaterialDeAlmacenFila;
+    tipo: TipoMovimiento;
+  } | null>(null);
+
+  function abrirMovimiento(material: MaterialDeAlmacenFila, tipo: TipoMovimiento) {
+    setHecho(null);
+    materiales.setError(null);
+    setMoviendo({ material, tipo });
+  }
+  const [porDarDeBaja, setPorDarDeBaja] = useState<MaterialDeAlmacenFila | null>(null);
+  const [hecho, setHecho] = useState<string | null>(null);
+
+  async function registrar() {
+    if (!unidad) return;
+    const nombreRegistrado = nombre.trim();
+    const listo = await materiales.ejecutar(() =>
+      api.almacen.materiales.crear({ nombre, unidad, obraId: esGerencia ? obraId : null }),
+    );
+    if (listo) {
+      setHecho(`${nombreRegistrado} quedó registrado.`);
+      setNombre('');
+      setUnidad(null);
+    }
+  }
+
+  function pedirBaja(material: MaterialDeAlmacenFila) {
+    setHecho(null);
+    // RF-7, dicho antes de pedir confirmación y con el texto del servidor: con
+    // stock, preguntar «¿seguro?» para luego rechazarlo sería hacerle perder el
+    // tiempo a quien lo intenta.
+    const rechazo = rechazoDeBaja(material.stock, material.unidad);
+    if (rechazo) {
+      materiales.setError(`${material.nombre}: ${rechazo}`);
+      return;
+    }
+    materiales.setError(null);
+    setPorDarDeBaja(material);
+  }
+
+  const columnas: Columna<MaterialDeAlmacenFila>[] = [
+    {
+      clave: 'material',
+      titulo: 'Material',
+      ancho: 240,
+      pintar: (m) => <Celda>{m.nombre}</Celda>,
+    },
+    {
+      clave: 'unidad',
+      titulo: 'Unidad',
+      ancho: 110,
+      pintar: (m) => <Celda>{nombreDeUnidad(m.unidad)}</Celda>,
+    },
+    {
+      clave: 'obra',
+      titulo: 'Obra',
+      ancho: 150,
+      pintar: (m) => <Celda>{m.obraNombre ?? '—'}</Celda>,
+    },
+    {
+      clave: 'ingresado',
+      titulo: 'Ingresado',
+      ancho: 120,
+      pintar: (m) => <Celda>{formatearCantidad(m.ingresado, m.unidad)}</Celda>,
+    },
+    {
+      clave: 'salido',
+      titulo: 'Salido',
+      ancho: 120,
+      pintar: (m) => <Celda>{formatearCantidad(m.salido, m.unidad)}</Celda>,
+    },
+    {
+      clave: 'stock',
+      titulo: 'Stock',
+      ancho: 140,
+      pintar: (m) =>
+        m.stock === 0 ? (
+          <Etiqueta tono="atencion">Sin stock</Etiqueta>
+        ) : (
+          <Celda>{formatearCantidad(m.stock, m.unidad)}</Celda>
+        ),
+    },
+    {
+      clave: 'acciones',
+      titulo: '',
+      ancho: 260,
+      pintar: (m) => (
+        <Acciones>
+          {/* El historial es de todos los que ven el almacén (RF-29); lo demás, de quien escribe. */}
+          <Boton
+            titulo={historialDe === m.id ? 'Viendo historial' : 'Historial'}
+            tono="secundario"
+            onPress={() => setHistorialDe(m.id)}
+          />
+          {puedeRegistrar ? (
+            <>
+              <Boton titulo="Ingreso" onPress={() => abrirMovimiento(m, 'ingreso')} />
+              <Boton titulo="Salida" onPress={() => abrirMovimiento(m, 'salida')} />
+              <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(m)} />
+              <Boton titulo="Dar de baja" tono="peligro" onPress={() => pedirBaja(m)} />
+            </>
+          ) : null}
+        </Acciones>
+      ),
+    },
+  ];
+
+  const sinMateriales = materiales.datos.length === 0;
+
+  return (
+    <MarcoPantalla
+      modulo="almacen"
+      exigeObra
+      titulo="Almacén"
+      descripcion={
+        puedeRegistrar
+          ? 'El inventario de la obra: lo que entra, lo que sale y cuánto queda. El stock no se escribe: sale de los ingresos y las salidas.'
+          : 'El inventario de su obra: lo que entra, lo que sale y cuánto queda. Lo registra el almacenista; aquí se consulta.'
+      }
+      error={materiales.error ?? obras.error}
+      cargando={materiales.cargando || obras.cargando}
+    >
+      {puedeRegistrar ? (
+        <Seccion titulo="Registrar un material">
+          <Formulario>
+            <Campo
+              etiqueta="Nombre del material"
+              obligatorio
+              valor={nombre}
+              onChange={setNombre}
+              ayuda="Ej. Cemento gris, Tubería PVC 4 pulgadas"
+              error={materiales.errorDe('nombre')}
+              ancho={280}
+            />
+            <Selector
+              etiqueta="Unidad"
+              obligatorio
+              valor={unidad}
+              opciones={OPCIONES_DE_UNIDAD}
+              onChange={(v) => setUnidad(v as UnidadAlmacen | null)}
+              vacio="Elija la unidad"
+              error={materiales.errorDe('unidad')}
+              ancho={220}
+            />
+            {esGerencia ? (
+              <Selector
+                etiqueta="Obra"
+                obligatorio
+                valor={obraId}
+                opciones={obras.datos.map((o) => ({
+                  valor: o.id,
+                  etiqueta: o.nombre,
+                  detalle: o.codigo,
+                }))}
+                onChange={setObraId}
+                vacio="Elija la obra"
+                error={materiales.errorDe('obraId')}
+                ancho={240}
+              />
+            ) : null}
+            <AccionesFormulario>
+              <Boton
+                titulo="Registrar material"
+                onPress={registrar}
+                deshabilitado={!nombre.trim() || !unidad || (esGerencia && !obraId)}
+              />
+            </AccionesFormulario>
+          </Formulario>
+        </Seccion>
+      ) : null}
+
+      <Confirmado mensaje={hecho} />
+
+      {porDarDeBaja ? (
+        <Confirmacion
+          aviso={`${porDarDeBaja.nombre} deja de aparecer en el almacén. No se borra: su historial de ingresos y salidas se conserva, y si se vuelve a comprar se puede registrar de nuevo con el mismo nombre.`}
+          confirmar="Dar de baja"
+          onConfirmar={async () => {
+            const material = porDarDeBaja;
+            setPorDarDeBaja(null);
+            const listo = await materiales.ejecutar(() =>
+              api.almacen.materiales.darDeBaja(material.id),
+            );
+            if (listo) setHecho(`${material.nombre} quedó dado de baja.`);
+          }}
+          onCancelar={() => setPorDarDeBaja(null)}
+        />
+      ) : null}
+
+      {moviendo ? (
+        <VentanaMovimiento
+          material={moviendo.material}
+          tipo={moviendo.tipo}
+          onCerrar={() => setMoviendo(null)}
+          onGuardado={(mensaje) => {
+            setMoviendo(null);
+            setHecho(mensaje);
+            // El stock de la tabla sale del servidor: se vuelve a pedir, no se suma aquí.
+            materiales.recargar();
+          }}
+          onFallo={materiales.setError}
+        />
+      ) : null}
+
+      {editando ? (
+        <VentanaCorregirMaterial
+          material={editando}
+          onCerrar={() => setEditando(null)}
+          onGuardado={(corregido) => {
+            setEditando(null);
+            setHecho(`${corregido} quedó corregido.`);
+            materiales.recargar();
+          }}
+          onFallo={materiales.setError}
+        />
+      ) : null}
+
+      <Seccion titulo="Materiales y stock">
+        <BarraDeListado
+          busqueda={filtrado.busqueda}
+          onBuscar={filtrado.buscar}
+          total={filtrado.total}
+          mostradas={filtrado.coincidencias}
+        >
+          {esGerencia ? (
+            <Selector
+              etiqueta="Obra"
+              valor={obraFiltro}
+              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
+              onChange={setObraFiltro}
+              permiteVacio
+              vacio="Todas las obras"
+              ancho={200}
+            />
+          ) : null}
+        </BarraDeListado>
+
+        <Tabla
+          columnas={columnas}
+          filas={filtrado.pagina}
+          vacio={
+            sinMateriales
+              ? puedeRegistrar
+                ? 'El almacén todavía no tiene materiales. Registre el primero en el formulario de arriba, con la unidad en que se compra y se entrega: después ya no se podrá cambiar si tiene movimientos.'
+                : 'El almacén de su obra todavía no tiene materiales. Los registra el almacenista.'
+              : 'Ningún material coincide con lo que busca.'
+          }
+        />
+
+        <Paginacion
+          pagina={filtrado.paginaActual}
+          porPagina={POR_PAGINA}
+          total={filtrado.coincidencias}
+          onCambiar={filtrado.irAPagina}
+        />
+      </Seccion>
+
+      {materialDelHistorial ? (
+        <HistorialAlmacen
+          material={materialDelHistorial}
+          puedeAnular={alcanza(rol, 'almacen', 'anular')}
+          onCerrar={() => setHistorialDe(null)}
+          onAnulado={(mensaje) => {
+            setHecho(mensaje);
+            materiales.recargar();
+          }}
+        />
+      ) : null}
+    </MarcoPantalla>
+  );
+}

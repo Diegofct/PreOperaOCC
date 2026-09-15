@@ -3,7 +3,7 @@ import { aliasedTable, and, desc, eq, gte, isNull, lt, or } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
-import { filtroDeObra } from '@/features/servidor/alcance';
+import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import {
@@ -185,7 +185,9 @@ export async function GET(peticion: Request) {
        * vacío mudo (spec 006 / RF-24).
        */
       motivoVacio:
-        filas.length > 0 ? null : sesion.rol === 'supervisor' && !sesion.obraId
+        // «Sin obra» es de cualquiera que no sea gerencia, no solo del residente:
+        // desde la spec 008 hay más roles que dependen de su obra.
+        filas.length > 0 ? null : !veTodasLasObras(sesion) && !sesion.obraId
           ? 'sin_obra'
           : 'sin_datos',
     });

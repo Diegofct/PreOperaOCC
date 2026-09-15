@@ -20,7 +20,7 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
-import { alcanza, type Modulo } from '@/shared/rules/permisos';
+import { avisoDeModuloAjeno, sinObraAsignada, type Modulo } from '@/shared/rules/permisos';
 
 import { ErrorApi } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
@@ -145,6 +145,7 @@ export function MarcoPantalla({
   cargando,
   modulo,
   refDesplazamiento,
+  exigeObra,
   children,
 }: {
   titulo: string;
@@ -161,10 +162,17 @@ export function MarcoPantalla({
    * archivos para que uno pudiera desplazarse.
    */
   refDesplazamiento?: RefObject<ScrollView | null>;
+  /**
+   * El módulo solo tiene sentido dentro de una obra (spec 008, RF-6): una cuenta
+   * que no es de gerencia y no tiene obra ve un aviso en lugar del contenido. Sin
+   * él vería un listado vacío, indistinguible de «todavía no hay nada».
+   */
+  exigeObra?: boolean;
   children: ReactNode;
 }) {
   const persona = usePersona();
-  const fueraDeAlcance = modulo && persona && !alcanza(persona.rol, modulo, 'ver');
+  const avisoAjeno = modulo && persona ? avisoDeModuloAjeno(persona.rol, modulo) : null;
+  const sinObra = Boolean(exigeObra && persona && sinObraAsignada(persona.rol, persona.obraId));
 
   return (
     <ScrollView
@@ -178,10 +186,14 @@ export function MarcoPantalla({
           <Text style={estilos.descripcion}>{descripcion}</Text>
         </View>
 
-        {fueraDeAlcance ? (
+        {avisoAjeno ? (
+          // El texto sale de la tabla de permisos: al residente se le dice que es de
+          // la gerencia, y a un almacenista, dónde está su trabajo (008/RF-7).
+          <Aviso tono="info">{avisoAjeno}</Aviso>
+        ) : sinObra ? (
           <Aviso tono="info">
-            Este módulo es de la gerencia. Si necesita registrar o corregir algo aquí,
-            pídaselo a quien lleve la administración.
+            Su cuenta no tiene obra asignada, así que aquí no hay nada que mostrarle. Pídale a la
+            gerencia que le asigne su obra.
           </Aviso>
         ) : (
           <>

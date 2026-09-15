@@ -31,73 +31,101 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
+import { barraCabeEnUnRenglon } from '@/shared/rules/barra';
 import { modulosVisibles, type Modulo } from '@/shared/rules/permisos';
 
 import { ETIQUETA_ROL } from './contratos';
+import { ENLACES_DE_MODULO as ENLACES, type RutaDeModulo } from './modulos';
 import { useSesionPanel } from './sesion';
-
-/**
- * Un enlace por módulo. Qué módulos hay y en qué orden lo dice la tabla de
- * permisos, no esta lista: aquí solo viven la ruta y el rótulo.
- *
- * Así el menú no puede desalinearse de la cerradura. Si algún día se añade un
- * módulo a la tabla y se olvida aquí, TypeScript lo dice — el `Record` obliga a
- * que estén los siete.
- */
-const ENLACES = {
-  inicio: { ruta: '/panel', titulo: 'Inicio' },
-  obras: { ruta: '/panel/obras', titulo: 'Obras' },
-  personas: { ruta: '/panel/personas', titulo: 'Personas' },
-  vehiculos: { ruta: '/panel/vehiculos', titulo: 'Vehículos' },
-  asignaciones: { ruta: '/panel/asignaciones', titulo: 'Asignaciones' },
-  bitacoras: { ruta: '/panel/bitacoras', titulo: 'Bitácoras' },
-  preoperacionales: { ruta: '/panel/preoperacionales', titulo: 'Preoperacionales' },
-  // `as const` conserva las rutas como literales, que es lo que exigen las
-  // rutas tipadas de Expo Router; `satisfies` obliga a que estén los siete.
-} as const satisfies Record<Modulo, { ruta: string; titulo: string }>;
 
 export function BarraNavegacion() {
   const rutaActual = usePathname();
   const { persona, salir, pedirCambioDeClave } = useSesionPanel();
   const { width } = useWindowDimensions();
 
-  // Por debajo del corte, la barra pasa a dos renglones explícitos: marca y
-  // cuenta arriba, enlaces abajo a lo ancho. No se deja a `flexWrap` que lo
-  // resuelva solo porque lo primero que baja de renglón es la cuenta, y
-  // entonces los enlaces vuelven a quedarse pegados a la marca — el defecto de
-  // hoy con otro disfraz.
-  const apretada = width > 0 && width < AnchoMinimoBarraCentrada;
+  // Lo que miden de verdad la marca, la cuenta y cada enlace. Se mide y no se
+  // supone: con los nueve módulos de la gerencia (spec 008) la fila dejó de
+  // caber en una ventana ancha, y un número fijo se vuelve a romper con el
+  // siguiente módulo.
+  const [anchoMarca, setAnchoMarca] = useState(0);
+  const [anchoCuenta, setAnchoCuenta] = useState(0);
+  const [anchosEnlaces, setAnchosEnlaces] = useState<Partial<Record<Modulo, number>>>({});
 
+  const modulos = modulosVisibles(persona?.rol ?? 'operador');
+  const medidos = modulos.map((m) => anchosEnlaces[m]).filter((a): a is number => a !== undefined);
+  const todoMedido = anchoMarca > 0 && anchoCuenta > 0 && medidos.length === modulos.length;
+  const cabe =
+    !todoMedido ||
+    barraCabeEnUnRenglon({
+      anchoDisponible: Math.min(width, MaxContentWidthPanel) - 2 * Spacing.four,
+      marca: anchoMarca,
+      cuenta: anchoCuenta,
+      enlaces: medidos,
+      separacionEnlaces: Spacing.one,
+      separacionLados: Spacing.three,
+    });
+
+  // En dos renglones explícitos —marca y cuenta arriba, enlaces abajo a lo
+  // ancho— cuando la ventana es estrecha **o** cuando lo medido no cabe. No se
+  // deja a `flexWrap` que lo resuelva solo porque lo primero que baja de renglón
+  // es la cuenta, y entonces los enlaces quedan corridos: el defecto de siempre
+  // con otro disfraz.
+  const apretada = width > 0 && (width < AnchoMinimoBarraCentrada || !cabe);
+
+  const enlaces = (
+    <View style={[estilos.enlaces, apretada && estilos.enlacesApretados]}>
+      {modulos.map((modulo) => {
+        const enlace = ENLACES[modulo];
+        const activo = rutaActual === enlace.ruta;
+        return (
+          <EnlaceDeModulo
+            key={enlace.ruta}
+            ruta={enlace.ruta}
+            titulo={enlace.titulo}
+            activo={activo}
+            alMedir={(ancho) =>
+              setAnchosEnlaces((antes) =>
+                antes[modulo] === ancho ? antes : { ...antes, [modulo]: ancho },
+              )
+            }
+          />
+        );
+      })}
+    </View>
+  );
+
+  // En dos renglones los enlaces van **después** de la cuenta, y no solo se ven
+  // después: con `flexWrap` los hijos bajan de renglón en su orden, así que con
+  // los enlaces en medio la cuenta caía a un tercer renglón, debajo de ellos.
+  // Moverlos en el árbol, y no con un `order` de CSS, deja además el orden del
+  // tabulador igual al que se ve.
   return (
     <View style={estilos.barra}>
       <View style={[estilos.contenido, apretada && estilos.contenidoApretado]}>
         <View style={[estilos.marca, apretada && estilos.ladoApretado]}>
-          <Image
-            source={require('@/../assets/obras_civiles_transparente.png')}
-            style={estilos.logotipo}
-            resizeMode="contain"
-            accessibilityLabel="Obras Civiles Colombianas"
-          />
-          <View style={estilos.separadorMarca} />
-          <Text style={estilos.nombre}>PreOpera</Text>
+          {/* Un nivel más adentro para medir lo que ocupa, no lo que reparte el flex. */}
+          <View
+            style={estilos.ladoInterior}
+            onLayout={(e) => setAnchoMarca(Math.ceil(e.nativeEvent.layout.width))}
+          >
+            <Image
+              source={require('@/../assets/obras_civiles_transparente.png')}
+              style={estilos.logotipo}
+              resizeMode="contain"
+              accessibilityLabel="Obras Civiles Colombianas"
+            />
+            <View style={estilos.separadorMarca} />
+            <Text style={estilos.nombre}>PreOpera</Text>
+          </View>
         </View>
 
-        <View style={[estilos.enlaces, apretada && estilos.enlacesApretados]}>
-          {modulosVisibles(persona?.rol ?? 'operador').map((modulo) => {
-            const enlace = ENLACES[modulo];
-            const activo = rutaActual === enlace.ruta;
-            return (
-              <EnlaceDeModulo
-                key={enlace.ruta}
-                ruta={enlace.ruta}
-                titulo={enlace.titulo}
-                activo={activo}
-              />
-            );
-          })}
-        </View>
+        {apretada ? null : enlaces}
 
         <View style={[estilos.cuenta, apretada && estilos.ladoApretado]}>
+          <View
+            style={[estilos.ladoInterior, estilos.cuentaInterior]}
+            onLayout={(e) => setAnchoCuenta(Math.ceil(e.nativeEvent.layout.width))}
+          >
           {persona ? (
             <Pressable
               onPress={() => pedirCambioDeClave(true)}
@@ -116,7 +144,10 @@ export function BarraNavegacion() {
           >
             <Text style={estilos.salirTexto}>Salir</Text>
           </Pressable>
+          </View>
         </View>
+
+        {apretada ? enlaces : null}
       </View>
     </View>
   );
@@ -129,12 +160,11 @@ export function BarraNavegacion() {
  * solo existe en el React Native de la web y no está en los tipos. Es el mismo
  * patrón que usan los campos y los botones del panel desde la spec 005.
  */
-type RutaDeModulo = (typeof ENLACES)[Modulo]['ruta'];
-
 function EnlaceDeModulo({
   ruta,
   titulo,
   activo,
+  alMedir,
 }: {
   /**
    * El literal de la tabla, no un `string` cualquiera. Es lo que le permite a
@@ -145,13 +175,15 @@ function EnlaceDeModulo({
   ruta: RutaDeModulo;
   titulo: string;
   activo: boolean;
+  /** Cuánto mide, para decidir si la barra cabe en un renglón. */
+  alMedir: (ancho: number) => void;
 }) {
   const [enfocado, setEnfocado] = useState(false);
 
   return (
     <Link href={ruta} asChild>
       <Pressable onFocus={() => setEnfocado(true)} onBlur={() => setEnfocado(false)}>
-        <Pastilla activa={activo} enfocada={enfocado}>
+        <Pastilla activa={activo} enfocada={enfocado} alMedir={alMedir}>
           <Text style={[estilos.enlace, activo && estilos.enlaceTextoActivo]}>{titulo}</Text>
         </Pastilla>
       </Pressable>
@@ -170,16 +202,19 @@ function EnlaceDeModulo({
 function Pastilla({
   activa,
   enfocada,
+  alMedir,
   children,
 }: {
   activa: boolean;
   enfocada: boolean;
+  alMedir: (ancho: number) => void;
   children: ReactNode;
 }) {
   const [encima, setEncima] = useState(false);
 
   return (
     <View
+      onLayout={(e) => alMedir(Math.ceil(e.nativeEvent.layout.width))}
       onPointerEnter={() => setEncima(true)}
       onPointerLeave={() => setEncima(false)}
       style={[
@@ -245,6 +280,10 @@ const estilos = StyleSheet.create({
     justifyContent: 'flex-start',
     gap: Spacing.three,
   },
+  /** Lo de dentro de cada lado, sin crecer: es lo que se mide. */
+  ladoInterior: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  /** La cuenta lleva su separación de siempre, más apretada que la de la marca. */
+  cuentaInterior: { gap: Spacing.two },
   /** El logotipo de OCC, con su propia transparencia. Se apoya en el blanco. */
   logotipo: { width: 116, height: 36 },
   /** Separa la marca de la empresa del nombre del sistema. No son lo mismo. */
@@ -291,12 +330,15 @@ const estilos = StyleSheet.create({
     gap: Spacing.two,
   },
 
-  /* ── Régimen de dos renglones, en ventana estrecha ── */
+  /* ── Régimen de dos renglones, en ventana estrecha o cuando no cabe ── */
 
   /** La fila se parte: marca y cuenta arriba, enlaces abajo. */
   contenidoApretado: { flexWrap: 'wrap', rowGap: Spacing.two },
-  /** Los dos lados dejan de repartirse nada y ocupan lo que miden. */
-  ladoApretado: { flexGrow: 0, flexBasis: 'auto' },
+  /**
+   * Los dos lados dejan la base fija y se reparten el renglón de arriba: la marca
+   * queda a la izquierda y la cuenta, con su `flex-end`, a la derecha.
+   */
+  ladoApretado: { flexBasis: 'auto' },
   /** Los enlaces se llevan un renglón entero, y siguen centrados en él. */
   enlacesApretados: { flexBasis: '100%', flexGrow: 1 },
   nombrePersona: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },

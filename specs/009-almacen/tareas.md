@@ -1,0 +1,272 @@
+# Tareas — Spec 009
+
+Tareas de menos de 30 minutos, ordenadas por dependencia. Cada una lleva los RF que
+cubre y una línea `Hecho cuando:` que se pueda comprobar sin interpretar.
+
+**Se implementa una tarea cada vez** (`/sdd:implementar T1`), y al terminarla se para.
+Ninguna tarea se marca sin `npm run verificar`, `npm run typecheck` y `npm run lint`
+en verde.
+
+## Catálogo y reglas
+
+- [x] T1. Catálogo de unidades en `shared/catalogos/almacen.ts`, con sus casos. (RF-2, RF-31)
+      Hecho cuando: en verde que hay once unidades con id, nombre y abreviatura únicos, y que
+      `nombreDeUnidad` devuelve el nombre de una conocida.
+
+- [x] T2. `shared/rules/almacen.ts`: `aCentesimas`, `formatearCantidad` y `validarMovimiento`,
+      con sus casos. (RF-9, RF-10, RF-13)
+      Hecho cuando: en verde que «2,5» y «2.5» dan 250, que «0,001» y «abc» se rechazan, que
+      cantidad cero o negativa, fecha de mañana y salida sin «para qué» dan su falta, y que un
+      ingreso de hoy sin observación pasa.
+
+- [x] T3. `shared/rules/almacen.ts`: totales y stock, rechazos de salida, anulación, baja y
+      cambio de unidad, historial con saldo y filtro, con sus casos. (RF-5, RF-7, RF-15,
+      RF-17, RF-18, RF-20, RF-21, RF-25, RF-26)
+      Hecho cuando: en verde los casos del plan: stock 70 y 100 con la salida anulada; sacar 80
+      con 70 rechazado nombrando «70 bultos» y sacar 70 aceptado; anular un ingreso de 100 con
+      stock 70 rechazado con «−30»; baja con 12 rechazada y con 0 aceptada; cambio de unidad con
+      un movimiento anulado rechazado; saldo en orden de registro y anulados sin saldo; filtro
+      por periodo y tipo.
+
+## Datos
+
+- [x] T4. Tablas `almacen_materiales` y `almacen_movimientos` y el enum de tipo, con su
+      migración aplicada en Neon. (RF-1, RF-3, RF-6, RF-23, RF-27, RF-30)
+      Hecho cuando: `db:generate:servidor` deja `drizzle/servidor/0010_*.sql` solo con
+      `CREATE TYPE`, dos `CREATE TABLE`, el `check` de cantidad y los índices (el único,
+      parcial); `db:migrar:servidor` la aplica y una consulta a Neon lista las dos tablas.
+
+- [x] T5. `baseServidorSerializable()` en `cliente.ts`; en `respuestas.ts`, el duplicado de
+      nombre de material y el conflicto `40001`. (RF-3, RF-16)
+      Hecho cuando: `duplicadoDe('ux_almacen_material_nombre')` devuelve el campo `nombre` (con
+      su caso), un `40001` se responde 409 con el texto del plan, y los tres comandos en verde.
+
+## Servidor
+
+- [x] T6. Contratos del almacén en `contratos.ts` y `api.almacen` en `cliente-api.ts`. (RF-2,
+      RF-4, RF-5, RF-8, RF-11, RF-13, RF-17, RF-20, RF-31)
+      Hecho cuando: `movimientoNuevo` rechaza una salida sin `paraQue` y una unidad fuera del
+      catálogo (con sus casos), y los tres comandos en verde.
+
+- [x] T7. Rutas de materiales: `GET` y `POST` `materiales`, `PATCH materiales/[id]` y
+      `POST materiales/[id]/baja`. (RF-1 a RF-7, RF-17, RF-18, RF-28, RF-29, RF-31)
+      Hecho cuando: con peticiones desde la sesión de gerencia abierta en Chrome, el alta
+      devuelve 201; el mismo nombre con otras tildes devuelve 409 con `campos.nombre`; el
+      listado trae el material con stock 0; y la baja de un material sin movimientos devuelve
+      200. Reiniciado `npm run web` antes.
+      *Escribe en Neon: se pide permiso y se usa un nombre de prueba reconocible.*
+
+- [x] T8. Rutas de movimientos: `GET` y `POST` `movimientos` y `POST movimientos/[id]/anular`,
+      en lote serializable con un reintento. (RF-8 a RF-16, RF-20, RF-21, RF-23 a RF-28,
+      RF-30)
+      Hecho cuando: con peticiones desde la sesión de gerencia en Chrome, sobre el material
+      de prueba, un ingreso de 100 y una salida de 30 devuelven 201; una salida de 80 devuelve
+      409 nombrando 70; la anulación de la salida devuelve 200 y el listado da stock 100; y dos
+      salidas simultáneas de 60 dejan una sola guardada. *Escribe en Neon: se pide permiso.*
+
+## Panel
+
+- [x] T9. Pantalla de Almacén: obra para gerencia, búsqueda, tabla de materiales con
+      ingresado, salido y stock, «Sin stock» con texto, y botones solo para quien escribe;
+      ventana de alta, corrección y baja. (RF-1 a RF-7, RF-17, RF-19, RF-22, RF-28, RF-29,
+      RF-31)
+      Hecho cuando: en Chrome con gerencia se ve la tabla del material de prueba, la búsqueda
+      encuentra «cemento» sin tilde ni mayúscula, y la prueba de ancho de tablas sigue en verde.
+
+- [x] T10. Ventana de movimiento: ingreso y salida, con el aviso de stock antes de enviar.
+      (RF-8 a RF-15, RF-30)
+      Hecho cuando: en Chrome la ventana de salida exige «para qué», avisa si la cantidad supera
+      el stock mostrado, y un ingreso actualiza el stock de la tabla al guardarse.
+
+- [ ] T11. Historial de un material: movimientos con fecha, tipo, cantidad, quién, para qué y
+      saldo; filtros de periodo y tipo; anular con motivo. (RF-20, RF-21, RF-23 a RF-27)
+      Hecho cuando: en Chrome el historial muestra la salida anulada marcada y sin saldo, los
+      filtros la ocultan y la muestran, y no hay botón de editar ni de borrar un movimiento.
+
+## Validación
+
+- [ ] T12. Validación final: recorrido RF por RF de la spec y demo manual. (Todas)
+      Hecho cuando: cada RF tiene su comprobación con resultado, la demo de la spec está hecha
+      con `prueba.almacen` y con `residente1` (las entradas las hace Diego), `npx expo export
+      --platform web` termina sin error con `grep DATABASE_URL dist/client` vacío, los tres
+      comandos están en verde y la spec queda marcada como Cumplida.
+
+## Notas de ejecución
+
+- **T1**: `src/shared/catalogos/almacen.ts` con las once unidades (slugs `bulto`, `kilogramo`,
+  `tonelada`, `metro`, `metro_cuadrado`, `metro_cubico`, `litro`, `galon`, `unidad`, `rollo`,
+  `caja`), `IDS_UNIDAD`, `unidadPorId`, `nombreDeUnidad` y `abreviaturaDeUnidad`. La
+  abreviatura es lo que va detrás de una cantidad («70 bultos», «2,5 m³», «4 und»), y es la que
+  usarán los mensajes de rechazo de T3. `abreviaturaDeUnidad` no estaba en el plan: sale de ahí.
+  Un slug desconocido se muestra tal cual en vez de esconderse. Dos casos nuevos (150
+  verificaciones). No reutiliza `UnidadMaterial` de `catalogos/bitacora.ts`: esa lista es del
+  control de calidad del parte y va pegada a materiales fijos.
+- **T2**: `aCentesimas` acepta coma o punto, signo y hasta dos decimales, y **rechaza «1.000»**
+  (se leería como tres decimales) en vez de tomarlo por un bulto: el separador de miles no se
+  admite al escribir. `formatearCantidad` se hace a mano, sin `toLocaleString`, para que el texto
+  sea idéntico en Node, navegador y servidor; el menos es «−». `validarMovimiento(movimiento,
+  hoy)` devuelve **todas** las faltas con su campo (`cantidad`, `fecha`, `paraQue`), para
+  pintarlas bajo el campo como en la 007; también rechaza una fecha mal formada y una cantidad
+  ilegible (`null`). Cuatro casos nuevos (154 verificaciones).
+- **T3**: `MovimientoRegistrado` (id, tipo, fecha, cantidad en centésimas, `registradoEn` ISO,
+  `anulado`), `totalesDelMaterial`, `rechazoDeSalida`, `rechazoDeAnulacion`, `rechazoDeBaja`,
+  `rechazoDeCambioDeUnidad`, `historialConSaldo` y `filtrarMovimientos`. Diferencias con el plan:
+  - `rechazoDeCambioDeUnidad` recibe también la unidad actual y la nueva: dejar la misma no es un
+    cambio, y el mensaje nombra la unidad en que están los movimientos. Sugiere dar de baja y
+    registrar de nuevo (solo posible si no hay stock, RF-7).
+  - `rechazoDeAnulacion` rechaza además un movimiento **ya anulado** («Este movimiento ya estaba
+    anulado.»), que el contrato de API del plan ya preveía como 409.
+  - El orden del historial es de registro con empate por `id` (UUID v7), y devuelve del más
+    antiguo al más reciente; la pantalla decide si lo invierte.
+  - Los textos exactos: «No alcanza: quedan 70 bultos y la salida es de 80 bultos.», «No se puede
+    anular este ingreso: el stock quedaría en −30 bultos, porque parte de lo que entró ya salió.
+    Anule antes las salidas que correspondan.» y «No se puede dar de baja: todavía quedan 12
+    bultos. Registre la salida de lo que queda antes.»
+  Siete casos nuevos, con el recorrido de la demo (161 verificaciones).
+- **T4**: `tipoMovimientoAlmacen`, `almacenMateriales` y `almacenMovimientos` en `esquema.ts`, con
+  el tipo de unidad importado por ruta relativa (drizzle-kit). Migración
+  `0010_happy_human_robot.sql`: `CREATE TYPE`, dos `CREATE TABLE` (el `check` de cantidad va
+  dentro), seis llaves foráneas, el índice único parcial y dos índices; nada sobre tablas
+  existentes. Aplicada en Neon el 2026-09-15. Consultado: `almacen_materiales` con 9 columnas,
+  `almacen_movimientos` con 13, el tipo con `ingreso` y `salida`, los cinco índices, la
+  restricción `ck_almacen_movimiento_cantidad`, las dos tablas vacías y las 5 personas intactas.
+  `db:generate` del celular: «No schema changes». Las tablas nuevas **no** entran en
+  `esquemaServidor` (el objeto de consultas relacionales), igual que `partes_de_obra` y
+  `llantas`, ni en los disparadores de `actualizado_en`, que son de las réplicas del celular:
+  la corrección de un material pone `actualizado_en` en su propia sentencia (T7).
+- **T5**: `baseServidorSerializable()` en `cliente.ts`, una segunda instancia con
+  `neon(url, { isolationLevel: 'Serializable' })`. **Solo rige dentro de `db.batch`**: una
+  consulta suelta con esta base corre en el aislamiento normal, así que T8 mete cada salida,
+  anulación y baja en un `batch` aunque sea de una sentencia. En `respuestas.ts`:
+  `esChoqueDeSerializacion`, `MENSAJE_DE_CHOQUE`, `responder` convierte un `40001` en 409 con ese
+  texto, y `conReintentoSiChoca(operacion)` repite **una** vez solo ante un `40001`. El reintento
+  no estaba como función en el plan (lo hacía «la ruta»): se sacó a un ayudante para probarlo sin
+  base y para que las tres rutas de T7 y T8 lo usen igual. `duplicadoDe` conoce
+  `ux_almacen_material_nombre` → «Ya hay un material con ese nombre en el almacén de esta obra.»,
+  campo `nombre`. Tres casos asíncronos nuevos, con el error envuelto como lo envuelve Drizzle
+  (`cause.code`), y uno más en el de duplicados (164 verificaciones). `expo export` sin error y
+  `grep DATABASE_URL dist/client` vacío. **Sin comprobar contra Neon** que el choque ocurre de
+  verdad: es el «Hecho cuando» de T8.
+- **T6**: en `contratos.ts`, `materialNuevo` (nombre, unidad de la lista, `obraId` que solo usa
+  gerencia), `materialEditado` (parcial), `movimientoNuevo` (unión discriminada por `tipo`: el
+  ingreso con observación opcional, la salida con `paraQue` obligatorio) y las filas
+  `MaterialDeAlmacenFila` y `MovimientoDeAlmacenFila`, más `ConsultaDeMovimientos` para el filtro.
+  Decisiones al escribirlo:
+  - **Las cantidades van en centésimas enteras en las respuestas** y como texto escrito («2,5»)
+    en las peticiones; el contrato las convierte con `aCentesimas`. Así «1.000» se rechaza igual
+    en el formulario y en una petición hecha por fuera.
+  - **Los textos de las faltas salen de la regla**: se añadió `MENSAJES_DE_MOVIMIENTO` a
+    `shared/rules/almacen.ts` y `validarMovimiento` lo usa. El contrato y la regla dicen lo mismo.
+  - La fecha futura (RF-10) **no** va en el contrato sino en la ruta (T8), con
+    `validarMovimiento` y `fechaDeJornada()`: un contrato que cambia de veredicto según la hora no
+    se puede probar.
+  - El contrato no acepta quién registra ni la obra del movimiento: los pone el servidor.
+  En `cliente-api.ts`, `api.almacen.materiales` (listar, crear, corregir, darDeBaja) y
+  `api.almacen.movimientos` (listar con filtro, registrar, anular). Tres casos nuevos (167
+  verificaciones).
+- **T7**: rutas `materiales+api.ts` (GET, POST), `materiales/[id]+api.ts` (PATCH) y
+  `materiales/[id]/baja+api.ts` (POST). Lo compartido va en
+  `src/features/almacen-obra/servidor/materiales.ts` (lectura al alcance, movimientos en forma de
+  regla, totales con `totalesDelMaterial`, y las guardas en SQL `stockEnSql` y
+  `sinMovimientosEnSql`). La carpeta **no** se llama `almacen`: ya existe
+  `features/media/servidor/almacen.ts`, que es el de imágenes (R2). Decisiones al escribirlo:
+  - **El stock del listado lo calcula la regla** con los movimientos leídos, no un `sum` en SQL:
+    una regla, un solo sitio. El SQL de stock solo existe como guarda de las escrituras, dentro
+    de un lote serializable, y la ruta vuelve a leer y responde con la regla si la guarda no deja.
+  - La baja y el cambio de unidad corren con `conReintentoSiChoca` y su guarda (stock en cero;
+    sin movimientos). El cambio de unidad rechazado va bajo el campo `unidad`.
+  - Regla nueva `aDecimal` (centésimas → «2.50» para `numeric`) con su caso; ida y vuelta exacta.
+  - La gerencia sin `obraId` recibe 400 bajo `obraId`; un almacenista sin obra, 400 con el aviso
+    de pedir su obra.
+  **Comprobado el 2026-09-15** con peticiones desde la sesión de gerencia en Chrome, sobre
+  «Consorcio Antioquia» (permiso de Diego): sin obra → 400 `campos.obraId`; unidad «bultos» →
+  400 `campos.unidad`; alta de «Prueba Cemento T7» en bultos → 201 con stock 0 y 0 movimientos;
+  «  prueba cémento t7 » → 409 `campos.nombre`; corrección a «Prueba Cemento T7 gris» en
+  kilogramos (sin movimientos) → aplicada; baja → aplicada; baja otra vez, corregir el dado de
+  baja y corregir un id inexistente → 404. Consulta a Neon: una sola fila, nombre y unidad
+  corregidos, `nombre_normalizado` sin tilde, creada por `admin` y dada de baja; el listado ya no
+  la trae. `expo export` sin error y `grep DATABASE_URL dist/client` vacío. **Sin comprobar aún**:
+  el rechazo del cambio de unidad y de la baja con stock (necesitan movimientos, T8) y el acceso
+  del residente y del almacenista (necesitan sus sesiones; T12). 168 verificaciones.
+- **T8**: rutas `movimientos+api.ts` (GET historial filtrado, POST ingreso o salida) y
+  `movimientos/[id]/anular+api.ts` (POST). Lo compartido en
+  `src/features/almacen-obra/servidor/movimientos.ts`: `historialDelMaterial` (nombres de quien
+  registró y anuló, aunque estén de baja; saldo con `historialConSaldo` sobre **todo** el
+  historial y el filtro aplicado después, para que el saldo no cambie al filtrar),
+  `leerMovimiento` y `sentenciaDeMovimiento`. Decisiones al escribirlo:
+  - El movimiento se guarda con **un `insert … select … where`** en SQL escrito, dentro del lote
+    serializable: la obra se copia del material en la base, el material tiene que seguir vigente
+    y, si es salida, el stock tiene que alcanzar. Los parámetros llevan tipo (`::date`,
+    `::numeric`, el enum), porque en un `insert … select` Postgres los toma como texto.
+  - La fecha futura se rechaza en la ruta con `validarMovimiento` y `fechaDeJornada()`, con
+    todas las faltas bajo su campo. Los rechazos de stock van bajo `cantidad`.
+  - La anulación de un ingreso lleva la guarda «stock − cantidad ≥ 0» y toda anulación la de
+    `anulado_en is null`, así que dos anulaciones a la vez no anulan dos veces.
+  **Comprobado el 2026-09-15** desde la sesión de gerencia en Chrome, con el material «Prueba
+  Cemento T8» en bultos en «Consorcio Antioquia» (permiso de Diego): ingreso de 100 → 201, saldo
+  100; salida de 30 «Prueba T8: cuneta PR 3» → 201, saldo 70, registrada por Diego; salida de 80
+  → 409 «No alcanza: quedan 70 bultos y la salida es de 80 bultos.»; ingreso con fecha de mañana
+  → 400 bajo `fecha`; listado 100/30/70; **cambiar la unidad → 409** (RF-5) y **dar de baja → 409
+  con «quedan 70 bultos»** (RF-7), que T7 dejó pendientes; anular el ingreso → 409 con «−30
+  bultos» (RF-26); anular la salida → 200 y stock 100; anularla otra vez → 409 «Este movimiento ya
+  estaba anulado.»; **dos salidas de 60 lanzadas a la vez → una 201 (saldo 40) y la otra 409 «No
+  alcanza: quedan 40 bultos…»** (RF-16); stock final 100/60/40 con 3 movimientos; el historial
+  trae la salida anulada sin saldo y con quién la anuló; el filtro por tipo da 2 salidas. `expo
+  export` sin error y `grep DATABASE_URL dist/client` vacío. 168 verificaciones.
+  **Límite de la prueba de simultaneidad:** las dos peticiones salieron a la vez del navegador,
+  pero no hay forma de ver desde fuera si llegaron a chocar dentro de Postgres (40001 o guarda) o
+  si el servidor de desarrollo las atendió una tras otra. El resultado es el correcto en los dos
+  casos; la protección de la base está cubierta por su diseño y por los casos de T5, no por esta
+  prueba. Probarlo directo contra la base escribiría otra salida de prueba: queda a decisión de
+  Diego.
+  **Quedan en la base** (nada se borra): el material «Prueba Cemento T8» con stock 40, su ingreso,
+  la salida de 30 anulada y la salida de 60 «simultánea A».
+- **T9**: `pantalla-almacen.tsx` deja de ser provisional y hay `ventana-material.tsx` para corregir.
+  - Formulario de alta (nombre, unidad de la lista y, solo para gerencia, obra), búsqueda por
+    nombre, unidad y obra, filtro por obra para gerencia, tabla con material, unidad, obra,
+    ingresado, salido y stock (en cero, la etiqueta «Sin stock», RF-19) y acciones «Corregir» y
+    «Dar de baja» **solo para quien escribe**: el residente ve la tabla sin formulario ni botones.
+  - Los anchos de la tabla ya reservan la columna de acciones para los botones de T10 y T11
+    (1236 de 1280; la prueba de ancho la cuenta).
+  - «Dar de baja» con stock no pide confirmación: muestra arriba el texto de `rechazoDeBaja`, el
+    mismo que respondería el servidor.
+  - En la ventana, con movimientos la unidad sale de solo lectura con el texto de
+    `rechazoDeCambioDeUnidad`, en vez de ofrecer un selector que el servidor rechazaría.
+  **Comprobado en Chrome el 2026-09-15** con gerencia, **sin escribir en la base**: se ve «Prueba
+  Cemento T8» con 100 / 60 / 40 bultos y su obra; «cemento» la encuentra y «tuberia» deja la
+  tabla vacía con «Ningún material coincide»; «Dar de baja» muestra «Prueba Cemento T8: No se
+  puede dar de baja: todavía quedan 40 bultos…» sin pedir confirmación; «Corregir» abre la
+  ventana con la unidad bloqueada y el aviso; «Cancelar» la cierra sin guardar. **Defecto
+  hallado y corregido**: dentro de la fila de campos el aviso de la ventana no se partía y se
+  salía por la derecha; se movió encima del formulario, como en la ventana de vehículos, y se
+  volvió a mirar. **Sin comprobar a mano**: la etiqueta «Sin stock» (el único material vigente
+  tiene 40), el alta desde el formulario y la vista del residente y del almacenista (T12). 168
+  verificaciones.
+- **T10**: `ventana-movimiento.tsx`, abierta con los botones «Ingreso» y «Salida» de cada
+  fila (solo quien escribe). Fecha de texto con hoy por defecto (el panel no tiene selector de
+  fecha y el del parte, con «día anterior / siguiente», no sirve aquí), cantidad con la unidad en
+  la etiqueta, «Para qué se usará» en la salida y observación de varias líneas en el ingreso. El
+  aviso de stock insuficiente se calcula **mientras se escribe** con `rechazoDeSalida` y
+  desactiva el botón; las demás faltas (`validarMovimiento`) se pintan al intentar guardar. Lo que
+  responda el servidor bajo `cantidad`, `fecha` o `paraQue` se queda en la ventana. Al guardar,
+  la tabla se vuelve a pedir: el stock no se suma en la pantalla. Con cuatro botones, «Dar de
+  baja» baja a una segunda línea dentro de su columna. **Comprobado en Chrome sin escribir**: la
+  ventana de salida muestra «Stock actual: 40 bultos.»; con 80 dice «No alcanza: quedan 40
+  bultos y la salida es de 80 bultos.» y el botón queda desactivado; con 10 y sin «para qué»
+  marca «Escriba para qué se usará lo que sale.» y no envía; la de ingreso con fecha de mañana y
+  sin cantidad marca las dos faltas y no envía. Consultado después: el material sigue con stock
+  40 y 3 movimientos. **Ingreso real hecho por Diego** (2026-09-15): 10 bultos a «Prueba Cemento
+  T8» desde la ventana; la tabla pasó de 40 a 50 bultos al guardar.
+- **T11 (en curso)**: `historial-almacen.tsx`, una sección debajo de la tabla (no una ventana: siete
+  columnas no caben en una), abierta con «Historial» en cada fila, **también para el residente**.
+  Del más reciente al más antiguo; fecha, tipo, cantidad con signo, «Stock que dejó» (— si está
+  anulado), quién registró y cuándo, para qué u observación y, si está anulado, «Anulado por X el
+  … : motivo» con la etiqueta «Anulado». Filtros Desde / Hasta (texto AAAA-MM-DD, con aviso si está
+  mal escrito) y Tipo, con `filtrarMovimientos` sobre el historial completo: el saldo no cambia al
+  filtrar. Sin botones de editar ni borrar; «Anular» solo con permiso `anular`, en una ventana
+  con motivo obligatorio. Si la anulación dejaría el stock negativo, la ventana muestra el texto
+  de `rechazoDeAnulacion` y solo «Entendido», sin pedir motivo. El historial se vuelve a pedir
+  cuando cambia el stock del material (anulación, o ingreso/salida con el historial abierto). La
+  página guarda el id del material y no la fila, para leer el stock nuevo tras recargar. Tres
+  comandos en verde. **Sin revisar en Chrome**: la extensión negó el permiso de lectura de
+  `localhost:8081` en la pestaña nueva.

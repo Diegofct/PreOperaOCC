@@ -32,10 +32,12 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -54,7 +56,9 @@ import type {
   MaterialDelParte,
   PersonaDelParte,
 } from '../../features/bitacoras/tipos';
+import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
 import type { Cargo } from '../../shared/catalogos/cargos';
+import { ROLES } from '../../shared/rules/permisos';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -70,11 +74,13 @@ import type {
  * de Postgres: aquí escriben varios clientes a la vez y la integridad no puede
  * depender de que todos se porten bien.
  *
- * El rol no se amplía. Los cargos reales de OCC se mapean —residente y director
- * de obra son `supervisor`, gerencia es `admin`—; si hace falta mostrar el cargo
- * exacto, va en una columna aparte.
+ * Los roles salen de `shared/rules/permisos`, que es quien decide qué puede cada
+ * uno: una lista escrita aquí y otra allá acabarían diciendo cosas distintas. Los
+ * cargos reales de OCC se mapean —residente y director de obra son `supervisor`,
+ * gerencia es `admin`— y el oficio va en su propia columna. La spec 008 añadió
+ * `almacenista` y `encargado_planta`; ver el porqué en `permisos.ts`.
  */
-export const rolUsuario = pgEnum('rol_usuario', ['admin', 'supervisor', 'operador']);
+export const rolUsuario = pgEnum('rol_usuario', ROLES);
 export const claseMedidor = pgEnum('clase_medidor', ['odometro', 'horometro', 'ambos']);
 export const estadoVehiculo = pgEnum('estado_vehiculo', [
   'operativo',
@@ -102,6 +108,13 @@ export const operacionSync = pgEnum('operacion_sync', ['upsert', 'delete']);
  *    verificador al activarse, y por eso se puede comprobar en modo avión.
  */
 export const tipoCodigo = pgEnum('tipo_codigo', ['activacion', 'respaldo']);
+
+/**
+ * Lo que le pasa a un material del almacén (spec 009): entra o sale. Como enum de
+ * la base y no como catálogo, a diferencia de las unidades: son dos, no van a
+ * crecer sin una spec, y el stock es una suma con signo que depende de este valor.
+ */
+export const tipoMovimientoAlmacen = pgEnum('tipo_movimiento_almacen', ['ingreso', 'salida']);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -152,11 +165,12 @@ export const usuarios = pgTable(
     rol: rolUsuario('rol').notNull().default('operador'),
     /**
      * Qué hace en la obra: topógrafo, cadenero, maestro… El `rol` de arriba es
-     * el acceso al sistema y no se amplía; esto es el oficio, y son dos cosas
-     * distintas. Los valores viven en `shared/catalogos/cargos`, no en un enum
-     * de la base: son la llave que une a una persona con su cargo en las dos
-     * bases, y un enum aquí obligaría a una migración de tipo por cada cargo
-     * nuevo.
+     * el acceso al sistema, y solo se amplía cuando cambia lo que alguien puede
+     * hacer (spec 008: almacenista y encargado de planta); esto es el oficio, y
+     * son dos cosas distintas. Los valores viven en `shared/catalogos/cargos`,
+     * no en un enum de la base: son la llave que une a una persona con su cargo
+     * en las dos bases, y un enum aquí obligaría a una migración de tipo por
+     * cada cargo nuevo.
      *
      * Nullable porque las personas registradas antes de la spec 002 no tienen
      * cargo, y eso es un estado real, no un dato que falte por descuido.
@@ -575,6 +589,101 @@ export const operacionesIdempotentes = pgTable('operaciones_idempotentes', {
     .notNull()
     .default(sql`now()`),
 });
+
+/* ------------------------------------------------------------------------ */
+/* Almacén de obra (solo del servidor, spec 009)                             */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Los materiales del almacén de cada obra.
+ *
+ * **No hay columna de stock.** El stock se calcula siempre sumando los
+ * movimientos vigentes (RF-18): una columna que se actualiza en cada movimiento es
+ * una cifra que un día deja de cuadrar con su historial, y en un inventario lo que
+ * vale es el historial. Ver la decisión en `specs/009-almacen/plan.md`.
+ *
+ * `nombre_normalizado` lo escribe el servidor con `normalizar` (sin tildes, en
+ * minúsculas) y es lo que lleva el índice único: «Cemento» y «cemento» chocan
+ * aunque lleguen a la vez (RF-3). El índice es **parcial** sobre la baja, así que
+ * un material dado de baja puede volver a registrarse con el mismo nombre.
+ */
+export const almacenMateriales = pgTable(
+  'almacen_materiales',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    nombre: text('nombre').notNull(),
+    nombreNormalizado: text('nombre_normalizado').notNull(),
+    /** Slug de `shared/catalogos/almacen`. Texto y no enum, como el cargo (RF-31). */
+    unidad: text('unidad').$type<UnidadAlmacen>().notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    eliminadoEn: eliminadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_almacen_material_nombre')
+      .on(t.obraId, t.nombreNormalizado)
+      .where(sql`eliminado_en is null`),
+  ],
+);
+
+/**
+ * Cada ingreso y cada salida. **Evidencia: no se edita ni se borra** (RF-23), por
+ * eso no lleva `actualizado_en`. Un movimiento equivocado se anula con motivo, y
+ * desde ese momento deja de contar en el stock sin desaparecer (RF-24, RF-25).
+ *
+ * `obra_id` repite la del material a propósito: el filtro por obra de
+ * `alcance.ts` recibe una columna, y sin ella cada consulta de movimientos tendría
+ * que unirse a los materiales solo para saber de quién son.
+ *
+ * La cantidad es `numeric(14,2)`: exacta, con dos decimales. El `check` repite en la
+ * base lo que ya exigen el contrato y la regla (RF-9), para que ni una petición
+ * hecha por fuera ni una sentencia a mano en la consola dejen una cantidad cero.
+ *
+ * `registrado_por` sale siempre de la sesión: en una salida es el almacenista que
+ * responde por ella (RF-27, RF-30).
+ */
+export const almacenMovimientos = pgTable(
+  'almacen_movimientos',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    materialId: text('material_id')
+      .notNull()
+      .references(() => almacenMateriales.id),
+    tipo: tipoMovimientoAlmacen('tipo').notNull(),
+    /** `YYYY-MM-DD`, el día en la obra. Un día del calendario, no un instante. */
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    cantidad: numeric('cantidad', { precision: 14, scale: 2 }).notNull(),
+    /** Para qué se usará lo que sale. Solo en salidas, y en ellas obligatorio (RF-13). */
+    paraQue: text('para_que'),
+    /** Nota libre de un ingreso (RF-8). */
+    observacion: text('observacion'),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    // Lo lee cada salida y cada anulación para calcular el stock, dentro de un
+    // lote serializable: sin índice, Postgres vigilaría la tabla entera para
+    // detectar choques y abortaría salidas de materiales que no tienen nada que
+    // ver entre sí.
+    index('ix_almacen_movimiento_material').on(t.materialId),
+    index('ix_almacen_movimiento_obra_fecha').on(t.obraId, t.fecha),
+    check('ck_almacen_movimiento_cantidad', sql`${t.cantidad} > 0`),
+  ],
+);
 
 /* ------------------------------------------------------------------------ */
 /* Identidad (solo del servidor)                                             */

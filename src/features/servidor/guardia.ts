@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { credencialesWeb } from '@/db/servidor/esquema';
 import { personaDeLaPeticion, type PersonaEnSesion } from '@/features/auth/servidor/sesion';
-import { alcanza, type Accion, type Modulo } from '@/shared/rules/permisos';
+import { alcanza, motivoDeRechazo, type Accion, type Modulo } from '@/shared/rules/permisos';
 
 import { errorDePeticion } from './respuestas';
 
@@ -73,15 +73,6 @@ export async function requerirAdmin(peticion: Request): Promise<PersonaEnSesion 
   return sesion;
 }
 
-/** Lo que el rechazo tiene que decirle a quien se topa con él. */
-const QUE_SE_INTENTABA: Record<Accion, string> = {
-  ver: 'entrar a este módulo',
-  listar: 'consultar este listado',
-  escribir: 'crear o modificar este registro',
-  anular: 'anular este registro',
-  activar: 'emitir códigos de activación',
-};
-
 /**
  * La puerta con nombre y apellido: además de sesión, exige el permiso concreto.
  *
@@ -103,10 +94,8 @@ export async function requerirPermiso(
   if (sesion instanceof Response) return sesion;
 
   if (!alcanza(sesion.rol, modulo, accion)) {
-    return errorDePeticion(
-      `No puede ${QUE_SE_INTENTABA[accion]}: es una acción de la gerencia.`,
-      403,
-    );
+    // Qué no se puede y quién sí, leído de la misma tabla que decide (008/RF-13).
+    return errorDePeticion(motivoDeRechazo(modulo, accion), 403);
   }
   return sesion;
 }

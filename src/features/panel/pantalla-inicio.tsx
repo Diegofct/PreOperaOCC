@@ -25,14 +25,22 @@
  * equipo, y en el parte de obra la maquinaria y las actividades son secciones
  * separadas. Sin un vínculo entre ellas, cualquier cifra de improductividad
  * sería inventada.
+ *
+ * ── Quien no tiene portada ──
+ *
+ * El almacenista y el encargado de planta no ven el inicio (spec 008, RF-4):
+ * llegan aquí porque el ingreso se pinta sobre `/panel`, o porque alguien
+ * escribió la dirección o recargó. En vez de un aviso, van directo a su módulo.
+ * Por eso la redirección vive aquí y no en el ingreso, que no pasaría por las
+ * otras dos puertas.
  */
-import { Link } from 'expo-router';
+import { Link, Redirect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Spacing } from '@/constants/theme';
 import { horasLegibles } from '@/shared/rules/horas';
-import { alcanza } from '@/shared/rules/permisos';
+import { alcanza, moduloDeEntrada } from '@/shared/rules/permisos';
 
 import { api } from './cliente-api';
 import {
@@ -54,6 +62,7 @@ import {
   type ResumenFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { ENLACES_DE_MODULO } from './modulos';
 import { usePersona } from './sesion';
 
 /** Una cifra del resumen, tal como se lee en la tabla equivalente. */
@@ -64,8 +73,19 @@ interface FilaResumen {
 }
 
 export default function PantallaInicioPanel() {
-  const persona = usePersona();
-  const rol = persona?.rol ?? 'operador';
+  const { rol } = usePersona();
+  const entrada = moduloDeEntrada(rol);
+
+  // El corte va en un componente aparte y antes de la portada: así quien se va a
+  // su módulo no llega a pedir el resumen, que el servidor le negaría.
+  if (entrada && entrada !== 'inicio') {
+    return <Redirect href={ENLACES_DE_MODULO[entrada].ruta} />;
+  }
+  return <Portada />;
+}
+
+function Portada() {
+  const { rol } = usePersona();
   const esGerencia = alcanza(rol, 'obras', 'escribir');
 
   const [periodo, setPeriodo] = useState<PeriodoResumen>('hoy');

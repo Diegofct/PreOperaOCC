@@ -15,6 +15,7 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 
 import type { ActividadBitacora } from '../../features/bitacoras/tipos';
 import type { Cargo } from '../../shared/catalogos/cargos';
+import { ROLES } from '../../shared/rules/permisos';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -51,7 +52,9 @@ export const usuarios = sqliteTable(
   usuario: text('usuario').notNull(),
   nombreCompleto: text('nombre_completo').notNull(),
   documento: text('documento'),
-  rol: text('rol', { enum: ['admin', 'supervisor', 'operador'] })
+  // Texto en SQLite: el `enum` es solo del tipo y no crea restricción. Un teléfono
+  // sin actualizar que reciba un rol nuevo en el pull lo guarda igual (008/RF-19).
+  rol: text('rol', { enum: ROLES })
     .notNull()
     .default('operador'),
   /**

@@ -49,6 +49,9 @@ borra: se anula con motivo, igual que el resto de la evidencia del sistema.
 - RF-6: EL SISTEMA permitirá dar de baja un material sin stock, conservando su historial.
 - RF-7: SI se intenta dar de baja un material con stock, ENTONCES EL SISTEMA lo rechazará
   indicando cuánto queda.
+- RF-31: EL SISTEMA ofrecerá la unidad de medida de un material para elegirla de una lista
+  cerrada: bulto, kilogramo, tonelada, metro, metro cuadrado, metro cúbico, litro, galón,
+  unidad, rollo y caja. *(2026-09-15)*
 
 ### Ingresos (H2)
 
@@ -170,7 +173,7 @@ Resueltas el 2026-09-15:
 - **Salidas**: solo queda anotado el almacenista que la registra y para qué es (RF-11,
   RF-30); RF-12 y RF-14 se retiran.
 
-Sigue abierta, para la fase de clarificación:
+- **Unidades** *(2026-09-15)*: lista cerrada, sin «Otra» (RF-31). Así un mismo material no
+  aparece como «bulto», «bultos» y «Bto». Si falta una unidad, se añade a la lista.
 
-- [NECESITA ACLARACIÓN: ¿la lista de unidades es cerrada (bulto, kg, m, m², m³, galón,
-  unidad…) o el almacenista la escribe libremente?]
+Ninguna abierta.

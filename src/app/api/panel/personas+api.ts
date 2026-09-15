@@ -7,6 +7,7 @@ import { personaNueva } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
+import { motivoParaNoDarRol } from '@/shared/rules/permisos';
 
 /**
  * Las personas: operadores y personal administrativo. `GET` y `POST`.
@@ -57,14 +58,18 @@ export async function POST(peticion: Request) {
 
     const datos = await cuerpoJson(peticion, personaNueva);
 
+    // Nadie da un acceso que no puede dar: la gerencia, el almacenista y el
+    // encargado de planta solo los da la gerencia (001/RF-9, 008/RF-17). Antes
+    // esta ruta solo miraba `admin`, y un residente habría podido registrar a un
+    // almacenista si la tabla de permisos le abriera Personas.
+    const motivo = motivoParaNoDarRol(sesion.rol, datos.rol);
+    if (motivo) return errorDePeticion(motivo, 403);
+
     // Un residente registra gente para su obra y solo para su obra. Se
     // rechaza en vez de corregirse en silencio: si escogió otra obra, o se
     // equivocó o esperaba algo que este sistema no le permite, y en los dos
     // casos conviene que se entere.
     if (!veTodasLasObras(sesion)) {
-      if (datos.rol === 'admin') {
-        return errorDePeticion('Solo la gerencia puede registrar a otra gerencia.', 403);
-      }
       if (datos.obraId && datos.obraId !== sesion.obraId) {
         return errorDePeticion('Solo puede registrar personas en su propia obra.', 403);
       }

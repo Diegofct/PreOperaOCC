@@ -16,6 +16,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { dispositivos, usuarios } from '@/db/servidor/esquema';
 import { leerAccessToken, tokenDeLaPeticion } from '@/features/auth/servidor/tokens';
+import type { Rol } from '@/shared/rules/permisos';
 
 import { errorDePeticion } from './respuestas';
 
@@ -23,7 +24,7 @@ export interface OperadorEnPeticion {
   id: string;
   usuario: string;
   nombreCompleto: string;
-  rol: 'admin' | 'supervisor' | 'operador';
+  rol: Rol;
   obraId: string | null;
   dispositivoId: string;
 }

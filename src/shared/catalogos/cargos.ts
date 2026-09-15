@@ -10,10 +10,12 @@
  *
  * Así que son dos cosas distintas:
  *
- * - **`cargo`** (esto) dice qué hace la persona en la obra. Quince valores, dato
- *   de negocio, se muestra en todas partes.
- * - **`rol`** dice qué puede hacer en el sistema. Tres valores, no se amplía, y
- *   es lo que lee la tabla de `shared/rules/permisos`.
+ * - **`cargo`** (esto) dice qué hace la persona en la obra. Diecisiete valores,
+ *   dato de negocio, se muestra en todas partes.
+ * - **`rol`** dice qué puede hacer en el sistema, y es lo que lee la tabla de
+ *   `shared/rules/permisos`. Eran tres; la spec 008 añadió Almacenista y
+ *   Encargado de Planta, porque ven un módulo que nadie más lleva. Un oficio
+ *   nuevo sigue siendo un cargo, no un rol.
  *
  * Está en `catalogos/` y no en una de las dos bases porque los slugs son la
  * llave que une a una persona con su cargo en el panel y en el celular. Si
@@ -64,6 +66,15 @@ export const CARGOS = [
   { id: 'operador', nombre: 'Operador', rolSugerido: 'operador', operaVehiculos: true },
   { id: 'ayudante', nombre: 'Ayudante', rolSugerido: 'operador', operaVehiculos: false },
   { id: 'maestro', nombre: 'Maestro de obra', rolSugerido: 'operador', operaVehiculos: false },
+  // Spec 008. Son los dos únicos cargos con acceso propio: entran al panel solo a
+  // su módulo, y ninguno lleva máquina, así que no reciben celular (RF-10).
+  { id: 'almacenista', nombre: 'Almacenista', rolSugerido: 'almacenista', operaVehiculos: false },
+  {
+    id: 'encargado_planta',
+    nombre: 'Encargado de Planta',
+    rolSugerido: 'encargado_planta',
+    operaVehiculos: false,
+  },
 ] as const satisfies readonly DefinicionCargo[];
 
 export type Cargo = (typeof CARGOS)[number]['id'];
