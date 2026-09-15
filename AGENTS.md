@@ -7,7 +7,7 @@ Control de la maquinaria de obra civil de OCC —volquetas, camionetas y maquina
 Son dos públicos con dos oficios distintos, y por eso dos superficies:
 
 - **App móvil — el operador.** Levanta el preoperacional de su equipo en obra: con guantes, bajo sol directo y **normalmente sin señal**. Las reglas del formato (ítems que inmovilizan, periodicidades, medidores) deciden ahí mismo si el vehículo queda APTO o NO APTO, sin consultar a nadie.
-- **Dashboard web — la administración** (ingenieros residentes, director de obra, gerencia). Ve lo que registran los operadores, **asigna uno o varios vehículos** a cada operador y lleva las **bitácoras diarias**.
+- **Dashboard web — la administración** (ingenieros residentes, director de obra, gerencia). Ve lo que registran los operadores, **asigna uno o varios vehículos** a cada operador y lleva las **bitácoras diarias**. Desde la spec 008 entran también el **almacenista** y el **encargado de planta**, cada uno solo a su módulo (Almacén y Control Cantera).
 
 La bitácora **se lleva solo desde la web** (`/panel/bitacoras`), y es el **parte diario de la obra**: un documento por obra y por día, con la maquinaria dentro como una sección entre siete —maquinaria, personal, actividades, clima, laboratorio, notas y la fotografía del día—. La spec 004 retiró la vía del celular: lo que el residente llena cada tarde es el día entero de la obra, y eso no se teclea en un teléfono. Lo que documenta sigue siendo el trabajo del operador aunque la llene otra persona — de ahí que cada máquina del parte guarde a quién se le registra, aparte de quién lo escribió.
 
@@ -51,7 +51,9 @@ La frontera entre los dos targets es dura y está vigilada en código: `src/db/l
 
 ### Roles
 
-El enum de `usuarios.rol` es `admin | supervisor | operador` y **no se amplía**. Los cargos reales se mapean: residente y director de obra → `supervisor`; gerencia → `admin`. Si hace falta mostrar el cargo, va en un campo aparte, no en el enum.
+El enum de `usuarios.rol` es `admin | supervisor | operador | almacenista | encargado_planta`. Los cargos reales se mapean: residente y director de obra → `supervisor`; gerencia → `admin`; almacenista → `almacenista`; encargado de planta → `encargado_planta`. El oficio de cada persona va en `usuarios.cargo`, aparte.
+
+**El enum es el acceso, no el oficio, y solo se amplía cuando cambia lo que alguien puede hacer.** Hasta la spec 008 era de tres valores y la regla decía que no se ampliaba. Se amplió porque el almacenista y el encargado de planta no caben en ninguno de los tres: ven **solo su módulo**, y como `supervisor` habrían visto la obra entera. Un cargo nuevo que hace lo mismo que otro (un topógrafo, un maestro) **no** es un rol nuevo: va al catálogo de cargos con el acceso que le toca. Ampliar el enum cuesta una migración de tipo en Postgres, una fila en la tabla de `src/shared/rules/permisos.ts` para cada módulo y decidir quién puede darlo (`PUEDE_DAR`); si no hace falta todo eso, lo que hace falta es un cargo.
 
 ## Comandos
 

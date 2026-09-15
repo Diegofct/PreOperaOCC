@@ -13,7 +13,7 @@ import {
   ok,
   responder,
 } from '@/features/servidor/respuestas';
-import { puedeCambiarRol } from '@/shared/rules/permisos';
+import { motivoParaNoDarRol } from '@/shared/rules/permisos';
 
 /** Editar y dar de baja una persona. `PATCH` y `DELETE /api/panel/personas/:id`. */
 
@@ -67,9 +67,8 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     // llega hasta aquí, así que hoy no rechaza a nadie — y precisamente por eso
     // se escribe, para que siga en pie el día que el permiso de escritura se
     // relaje. Antes esta ruta aceptaba el rol del cuerpo sin mirarlo.
-    if (cambios.rol && !puedeCambiarRol(sesion.rol, cambios.rol)) {
-      return errorDePeticion('No puede dar más permisos de los que usted tiene.', 403);
-    }
+    const motivo = cambios.rol ? motivoParaNoDarRol(sesion.rol, cambios.rol) : null;
+    if (motivo) return errorDePeticion(motivo, 403);
 
     const [fila] = await baseServidor()
       .update(usuarios)

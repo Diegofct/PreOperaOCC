@@ -19,7 +19,12 @@ import {
 } from '../src/features/auth/servidor/cripto';
 import { firmarPeticion } from '../src/features/media/servidor/firma-s3';
 import { respuestaEnviada } from '../src/features/servidor/envios';
-import { duplicadoDe } from '../src/features/servidor/respuestas';
+import {
+  conReintentoSiChoca,
+  duplicadoDe,
+  MENSAJE_DE_CHOQUE,
+  responder,
+} from '../src/features/servidor/respuestas';
 
 import {
   debeOlvidarEquipo,
@@ -39,7 +44,12 @@ import {
 import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/shared/rules/fusion';
 import {
   alcanza,
+  avisoDeModuloAjeno,
+  moduloDeEntrada,
   MODULOS,
+  motivoDeRechazo,
+  motivoParaNoDarRol,
+  sinObraAsignada,
   modulosVisibles,
   puedeCambiarRol,
   type Rol,
@@ -51,6 +61,12 @@ import {
   operaVehiculos,
   rolSugerido,
 } from '../src/shared/catalogos/cargos';
+import {
+  abreviaturaDeUnidad,
+  IDS_UNIDAD,
+  nombreDeUnidad,
+  UNIDADES_ALMACEN,
+} from '../src/shared/catalogos/almacen';
 import { PLANTILLAS_POR_TIPO } from '../src/features/checklists/plantillas';
 import {
   DESGASTE_PARA_CAMBIO,
@@ -88,6 +104,7 @@ import {
 } from '../src/constants/medidas';
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
 import { colocarLista } from '../src/shared/rules/flotante';
+import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
 import { vehiculos } from '../src/db/servidor/esquema';
 import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
@@ -126,8 +143,27 @@ import {
   type ParteEvaluable,
 } from '../src/shared/rules/parte';
 import { calcularDimensiones } from '../src/shared/rules/dimensiones';
+import {
+  aCentesimas,
+  aDecimal,
+  filtrarMovimientos,
+  formatearCantidad,
+  historialConSaldo,
+  rechazoDeAnulacion,
+  rechazoDeBaja,
+  rechazoDeCambioDeUnidad,
+  rechazoDeSalida,
+  totalesDelMaterial,
+  validarMovimiento,
+  type MovimientoRegistrado,
+} from '../src/shared/rules/almacen';
 import { construirActividadDelParte, construirMaquina } from '../src/features/bitacoras/parte';
-import { parteEditado } from '../src/features/panel/contratos';
+import {
+  materialEditado,
+  materialNuevo,
+  movimientoNuevo,
+  parteEditado,
+} from '../src/features/panel/contratos';
 
 import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
 import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
@@ -1175,12 +1211,15 @@ prueba('la gerencia alcanza todos los módulos', () => {
   assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
 });
 
-prueba('el residente solo entra a inicio, asignaciones, bitácoras y preoperacionales', () => {
+prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén y cantera', () => {
+  // Spec 001 / RF-1, ampliado por 008 / RF-12: almacén y cantera, en consulta.
   assert.deepEqual(modulosVisibles('supervisor'), [
     'inicio',
     'asignaciones',
     'bitacoras',
     'preoperacionales',
+    'almacen',
+    'cantera',
   ]);
 });
 
@@ -1230,6 +1269,175 @@ prueba('nadie reparte más permisos de los que tiene', () => {
   assert.ok(puedeCambiarRol('supervisor', 'supervisor'));
   assert.ok(puedeCambiarRol('supervisor', 'operador'));
   assert.ok(puedeCambiarRol('admin', 'admin'));
+});
+
+/* ── Almacenista y Encargado de Planta (spec 008) ── */
+
+prueba('el almacenista solo entra al almacén', () => {
+  // Spec 008 / RF-2.
+  assert.deepEqual(modulosVisibles('almacenista'), ['almacen']);
+});
+
+prueba('el encargado de planta solo entra a control cantera', () => {
+  // Spec 008 / RF-3.
+  assert.deepEqual(modulosVisibles('encargado_planta'), ['cantera']);
+});
+
+prueba('los roles nuevos no tocan nada de los módulos que ya había', () => {
+  // Spec 008 / RF-8 y H3: ni ver, ni listar, ni escribir. Tampoco el inicio.
+  const existentes = ['inicio', 'obras', 'personas', 'vehiculos', 'asignaciones', 'bitacoras', 'preoperacionales'] as const;
+  for (const rol of ['almacenista', 'encargado_planta'] as const) {
+    for (const modulo of existentes) {
+      for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar'] as const) {
+        assert.equal(alcanza(rol, modulo, accion), false, `${rol} ${modulo}/${accion}`);
+      }
+    }
+  }
+  // Y cada uno está fuera del módulo del otro.
+  assert.equal(alcanza('almacenista', 'cantera', 'ver'), false);
+  assert.equal(alcanza('encargado_planta', 'almacen', 'ver'), false);
+});
+
+prueba('almacenista y encargado de planta llevan su módulo entero', () => {
+  for (const [rol, modulo] of [['almacenista', 'almacen'], ['encargado_planta', 'cantera']] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
+      assert.ok(alcanza(rol, modulo, accion), `${rol} ${modulo}/${accion}`);
+    }
+  }
+});
+
+prueba('la gerencia registra en almacén y cantera; el residente solo consulta', () => {
+  // Spec 008 / RF-11, RF-12, RF-13.
+  for (const modulo of ['almacen', 'cantera'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
+      assert.ok(alcanza('admin', modulo, accion), `admin ${modulo}/${accion}`);
+    }
+    assert.ok(alcanza('supervisor', modulo, 'ver'), `supervisor ${modulo}/ver`);
+    assert.ok(alcanza('supervisor', modulo, 'listar'), `supervisor ${modulo}/listar`);
+    assert.equal(alcanza('supervisor', modulo, 'escribir'), false, `supervisor ${modulo}/escribir`);
+    assert.equal(alcanza('supervisor', modulo, 'anular'), false, `supervisor ${modulo}/anular`);
+  }
+  assert.deepEqual(modulosVisibles('supervisor'), [
+    'inicio',
+    'asignaciones',
+    'bitacoras',
+    'preoperacionales',
+    'almacen',
+    'cantera',
+  ]);
+});
+
+prueba('solo la gerencia da los accesos de almacén y de planta', () => {
+  // Spec 008 / RF-17. No están «por encima» del residente: son otros.
+  for (const destino of ['almacenista', 'encargado_planta'] as const) {
+    assert.ok(puedeCambiarRol('admin', destino), destino);
+    assert.equal(puedeCambiarRol('supervisor', destino), false, destino);
+    assert.equal(puedeCambiarRol('almacenista', destino), false, destino);
+    assert.equal(puedeCambiarRol('encargado_planta', destino), false, destino);
+  }
+  // Y ellos no reparten acceso a nadie.
+  assert.equal(puedeCambiarRol('almacenista', 'operador'), false);
+  assert.equal(puedeCambiarRol('encargado_planta', 'supervisor'), false);
+});
+
+prueba('el rechazo de dar un acceso dice quién puede darlo', () => {
+  // Spec 008 / RF-17 y el requisito no funcional de 001: qué no se puede y quién sí.
+  assert.equal(
+    motivoParaNoDarRol('supervisor', 'almacenista'),
+    'Solo la gerencia puede dar el acceso de Almacenista.',
+  );
+  assert.equal(
+    motivoParaNoDarRol('supervisor', 'encargado_planta'),
+    'Solo la gerencia puede dar el acceso de Encargado de Planta.',
+  );
+  assert.equal(
+    motivoParaNoDarRol('supervisor', 'admin'),
+    'Solo la gerencia puede dar el acceso de Gerencia.',
+  );
+  // Si se puede, no hay motivo.
+  assert.equal(motivoParaNoDarRol('admin', 'almacenista'), null);
+  assert.equal(motivoParaNoDarRol('supervisor', 'operador'), null);
+});
+
+prueba('el rechazo del servidor dice quién sí puede hacerlo', () => {
+  // Spec 008 / RF-13: al residente no se le dice que registrar en el almacén «es
+  // de la gerencia», porque también lo hace el almacenista.
+  assert.equal(
+    motivoDeRechazo('almacen', 'escribir'),
+    'No puede crear o modificar este registro: lo hacen la gerencia y el almacenista.',
+  );
+  assert.equal(
+    motivoDeRechazo('cantera', 'anular'),
+    'No puede anular este registro: lo hacen la gerencia y el encargado de planta.',
+  );
+  // Donde solo escribe la gerencia, el texto dice lo mismo que antes, con otras palabras.
+  assert.equal(
+    motivoDeRechazo('obras', 'escribir'),
+    'No puede crear o modificar este registro: lo hace la gerencia.',
+  );
+  // Al almacenista que abre Bitácoras se le dice quién la lleva.
+  assert.equal(
+    motivoDeRechazo('bitacoras', 'listar'),
+    'No puede consultar este listado: lo hacen la gerencia y el residente o el director.',
+  );
+});
+
+prueba('una cuenta sin obra se detecta para todo el que no es gerencia', () => {
+  // Spec 008 / RF-6: el almacenista sin obra no ve nada y se le dice por qué.
+  assert.equal(sinObraAsignada('almacenista', null), true);
+  assert.equal(sinObraAsignada('encargado_planta', null), true);
+  assert.equal(sinObraAsignada('supervisor', null), true);
+  assert.equal(sinObraAsignada('almacenista', 'obra-1'), false);
+  // La gerencia no está adscrita a ninguna obra, y eso no es un fallo de su cuenta.
+  assert.equal(sinObraAsignada('admin', null), false);
+});
+
+prueba('la barra de la gerencia con nueve módulos no cabe en un renglón', () => {
+  // Las medidas de Chrome del 2026-09-15: nueve enlaces que suman 884 más 8
+  // separaciones de 4, en 1232 de ancho útil. Con la marca de 229 y la cuenta de
+  // 160, el lado más ancho manda en los dos: 458 + 916 + 32 = 1406 > 1232.
+  const nueve = [67, 70, 88, 92, 115, 90, 141, 89, 132];
+  const base = { anchoDisponible: 1232, marca: 229, cuenta: 160, separacionEnlaces: 4, separacionLados: 16 };
+  assert.equal(barraCabeEnUnRenglon({ ...base, enlaces: nueve }), false);
+  // Los seis del residente sí caben: 458 + (634 + 5 × 4) + 32 = 1144.
+  assert.equal(barraCabeEnUnRenglon({ ...base, enlaces: [67, 115, 90, 141, 89, 132] }), true);
+  // El lado más ancho es el que manda, no la suma de los dos.
+  assert.equal(
+    barraCabeEnUnRenglon({ anchoDisponible: 100, marca: 30, cuenta: 10, enlaces: [20], separacionEnlaces: 0, separacionLados: 5 }),
+    true,
+  );
+  assert.equal(
+    barraCabeEnUnRenglon({ anchoDisponible: 89, marca: 30, cuenta: 10, enlaces: [20], separacionEnlaces: 0, separacionLados: 5 }),
+    false,
+  );
+});
+
+prueba('cada rol entra por su módulo', () => {
+  // Spec 008 / RF-4.
+  assert.equal(moduloDeEntrada('admin'), 'inicio');
+  assert.equal(moduloDeEntrada('supervisor'), 'inicio');
+  assert.equal(moduloDeEntrada('almacenista'), 'almacen');
+  assert.equal(moduloDeEntrada('encargado_planta'), 'cantera');
+  assert.equal(moduloDeEntrada('operador'), null);
+});
+
+prueba('el aviso de módulo ajeno dice dónde está el trabajo de cada quien', () => {
+  // Spec 008 / RF-7: a un almacenista no se le dice que Bitácoras «es de la gerencia».
+  assert.equal(
+    avisoDeModuloAjeno('almacenista', 'bitacoras'),
+    'Este módulo no es de su cargo. Su trabajo está en Almacén.',
+  );
+  assert.equal(
+    avisoDeModuloAjeno('encargado_planta', 'almacen'),
+    'Este módulo no es de su cargo. Su trabajo está en Control Cantera.',
+  );
+  // Para el residente se conserva el texto de 001/RF-3.
+  assert.equal(
+    avisoDeModuloAjeno('supervisor', 'obras'),
+    'Este módulo es de la gerencia. Si necesita registrar o corregir algo aquí, pídaselo a quien lleve la administración.',
+  );
+  // Si sí lo alcanza, no hay aviso.
+  assert.equal(avisoDeModuloAjeno('almacenista', 'almacen'), null);
 });
 
 /** Una sesión de mentira, con lo justo para preguntarle al alcance. */
@@ -1598,6 +1806,11 @@ prueba('un duplicado dice qué campo del formulario lo causó', () => {
     mensaje: 'Ya existe un vehículo con ese código interno.',
     campo: 'codigoInterno',
   });
+  // Spec 009 / RF-3: el material repetido se pinta bajo su nombre.
+  assert.deepEqual(duplicadoDe('ux_almacen_material_nombre'), {
+    mensaje: 'Ya hay un material con ese nombre en el almacén de esta obra.',
+    campo: 'nombre',
+  });
   // Un índice que no se conoce no inventa campo: el mensaje va arriba, como antes.
   assert.deepEqual(duplicadoDe('ux_inventado'), { mensaje: 'Ya existe un registro con esos datos.' });
   assert.deepEqual(duplicadoDe(undefined), { mensaje: 'Ya existe un registro con esos datos.' });
@@ -1772,13 +1985,28 @@ prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
   }
 });
 
-prueba('están los quince cargos, con slug y rótulo únicos', () => {
-  assert.equal(CARGOS.length, 15);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 15);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 15);
+prueba('están los diecisiete cargos, con slug y rótulo únicos', () => {
+  // Quince de la spec 002 más Almacenista y Encargado de Planta (008/RF-14).
+  assert.equal(CARGOS.length, 17);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 17);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 17);
 });
 
-prueba('solo la dirección y las residencias entran al panel', () => {
+prueba('almacenista y encargado de planta proponen su propio acceso', () => {
+  // Spec 008 / RF-15 y RF-16.
+  assert.equal(nombreDeCargo('almacenista'), 'Almacenista');
+  assert.equal(rolSugerido('almacenista'), 'almacenista');
+  assert.equal(nombreDeCargo('encargado_planta'), 'Encargado de Planta');
+  assert.equal(rolSugerido('encargado_planta'), 'encargado_planta');
+});
+
+prueba('almacenista y encargado de planta no reciben celular', () => {
+  // Spec 008 / RF-10: sin máquina, sin código de activación.
+  assert.equal(operaVehiculos('almacenista'), false);
+  assert.equal(operaVehiculos('encargado_planta'), false);
+});
+
+prueba('solo la dirección y las residencias entran al panel como residente', () => {
   const alPanel = CARGOS.filter((c) => c.rolSugerido === 'supervisor').map((c) => c.id);
   assert.deepEqual(alPanel, ['director', 'residente_1', 'residente_2']);
 });
@@ -1796,6 +2024,261 @@ prueba('un cargo que no existe no sugiere acceso ni máquina', () => {
   assert.equal(rolSugerido('jefe_de_todo'), 'operador');
   assert.equal(operaVehiculos('jefe_de_todo'), false);
   assert.equal(nombreDeCargo(null), 'Sin definir');
+});
+
+/* ── Almacén de obra (spec 009) ── */
+
+prueba('están las once unidades del almacén, con id, nombre y abreviatura únicos', () => {
+  // Spec 009 / RF-31: lista cerrada. Una unidad repetida con otro nombre es
+  // justo el «bulto» y «bultos» que la lista existe para evitar.
+  assert.equal(UNIDADES_ALMACEN.length, 11);
+  assert.equal(new Set(IDS_UNIDAD).size, 11);
+  assert.equal(new Set(UNIDADES_ALMACEN.map((u) => u.nombre)).size, 11);
+  assert.equal(new Set(UNIDADES_ALMACEN.map((u) => u.abreviatura)).size, 11);
+  assert.deepEqual(
+    [...IDS_UNIDAD],
+    ['bulto', 'kilogramo', 'tonelada', 'metro', 'metro_cuadrado', 'metro_cubico', 'litro', 'galon', 'unidad', 'rollo', 'caja'],
+  );
+});
+
+prueba('una unidad se nombra y se abrevia, y una desconocida no se esconde', () => {
+  // Spec 009 / RF-2 y RF-31.
+  assert.equal(nombreDeUnidad('metro_cubico'), 'Metro cúbico');
+  assert.equal(abreviaturaDeUnidad('metro_cubico'), 'm³');
+  assert.equal(abreviaturaDeUnidad('bulto'), 'bultos');
+  assert.equal(nombreDeUnidad('barril'), 'barril');
+});
+
+prueba('una cantidad se lee con coma o punto y hasta dos decimales', () => {
+  // Spec 009, requisito no funcional: medio bulto, 2,5 m de tubería.
+  assert.equal(aCentesimas('2,5'), 250);
+  assert.equal(aCentesimas('2.5'), 250);
+  assert.equal(aCentesimas(' 70 '), 7000);
+  assert.equal(aCentesimas('0,25'), 25);
+  assert.equal(aCentesimas(2.5), 250);
+  assert.equal(aCentesimas('-3'), -300);
+  // Tres decimales no son una cantidad: «1.000» no se lee como un bulto.
+  assert.equal(aCentesimas('0,001'), null);
+  assert.equal(aCentesimas('1.000'), null);
+  assert.equal(aCentesimas('abc'), null);
+  assert.equal(aCentesimas(''), null);
+  // La suma en centésimas no arrastra el error de la coma flotante.
+  assert.equal((aCentesimas('0,1') ?? 0) + (aCentesimas('0,2') ?? 0), aCentesimas('0,3'));
+});
+
+prueba('una cantidad va y vuelve de la base sin perder nada', () => {
+  // `numeric(14,2)` se escribe «2.50» y se lee igual.
+  assert.equal(aDecimal(250), '2.50');
+  assert.equal(aDecimal(7000), '70.00');
+  assert.equal(aDecimal(5), '0.05');
+  assert.equal(aDecimal(-3000), '-30.00');
+  for (const centesimas of [0, 5, 250, 7000, 125075, 99999999999999]) {
+    assert.equal(aCentesimas(aDecimal(centesimas)), centesimas);
+  }
+});
+
+prueba('una cantidad se muestra en su unidad, igual en cualquier entorno', () => {
+  assert.equal(formatearCantidad(7000, 'bulto'), '70 bultos');
+  assert.equal(formatearCantidad(250, 'metro_cubico'), '2,5 m³');
+  assert.equal(formatearCantidad(125075, 'kilogramo'), '1.250,75 kg');
+  assert.equal(formatearCantidad(5, 'litro'), '0,05 L');
+  assert.equal(formatearCantidad(-3000, 'bulto'), '−30 bultos');
+});
+
+prueba('un movimiento sin cantidad válida, con fecha futura o salida sin destino se rechaza', () => {
+  // Spec 009 / RF-9, RF-10 y RF-13: cada falta en su campo, todas a la vez.
+  const hoy = '2026-09-15';
+  const campos = (m: Parameters<typeof validarMovimiento>[0]) =>
+    validarMovimiento(m, hoy).map((f) => f.campo);
+
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: 0 }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: -500 }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: null }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: '2026-09-16', cantidad: 100 }), ['fecha']);
+  assert.deepEqual(campos({ tipo: 'salida', fecha: hoy, cantidad: 3000, paraQue: '   ' }), ['paraQue']);
+  assert.deepEqual(campos({ tipo: 'salida', fecha: '2026-09-16', cantidad: 0 }), [
+    'cantidad',
+    'fecha',
+    'paraQue',
+  ]);
+  assert.equal(
+    validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 0 }, hoy)[0]?.mensaje,
+    'La cantidad tiene que ser mayor que cero.',
+  );
+});
+
+prueba('un ingreso de hoy sin observación y una salida con destino se aceptan', () => {
+  // La observación del ingreso es opcional (RF-8); un día pasado vale (RF-10).
+  const hoy = '2026-09-15';
+  assert.deepEqual(validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 10000 }, hoy), []);
+  assert.deepEqual(
+    validarMovimiento(
+      { tipo: 'salida', fecha: '2026-09-01', cantidad: 3000, paraQue: 'Cuneta PR 3' },
+      hoy,
+    ),
+    [],
+  );
+});
+
+/** El recorrido de la demo de la spec 009: 100 bultos de cemento entran y salen 30. */
+function movimientosDeCemento(salidaAnulada = false): MovimientoRegistrado[] {
+  return [
+    { id: 'm1', tipo: 'ingreso', fecha: '2026-09-10', cantidad: 10000, registradoEn: '2026-09-10T13:00:00.000Z', anulado: false },
+    { id: 'm2', tipo: 'salida', fecha: '2026-09-12', cantidad: 3000, registradoEn: '2026-09-12T15:00:00.000Z', anulado: salidaAnulada },
+  ];
+}
+
+prueba('el stock sale de los movimientos vigentes: 100 entran, 30 salen, quedan 70', () => {
+  // Spec 009 / RF-17, RF-18 y RF-25.
+  assert.deepEqual(totalesDelMaterial(movimientosDeCemento()), {
+    ingresado: 10000,
+    salido: 3000,
+    stock: 7000,
+  });
+  // Anular la salida la deja de contar: el stock vuelve a 100.
+  assert.deepEqual(totalesDelMaterial(movimientosDeCemento(true)), {
+    ingresado: 10000,
+    salido: 0,
+    stock: 10000,
+  });
+  assert.deepEqual(totalesDelMaterial([]), { ingresado: 0, salido: 0, stock: 0 });
+});
+
+prueba('una salida mayor que el stock se rechaza diciendo cuánto queda', () => {
+  // Spec 009 / RF-15. Por exactamente el stock, se acepta y queda en cero.
+  assert.equal(
+    rechazoDeSalida(7000, 8000, 'bulto'),
+    'No alcanza: quedan 70 bultos y la salida es de 80 bultos.',
+  );
+  assert.equal(rechazoDeSalida(7000, 7000, 'bulto'), null);
+  assert.equal(rechazoDeSalida(7000, 2550, 'bulto'), null);
+});
+
+prueba('anular un ingreso que ya salió se rechaza; anular una salida, no', () => {
+  // Spec 009 / RF-26: con 70 en stock, anular el ingreso de 100 dejaría −30.
+  const [ingreso, salida] = movimientosDeCemento();
+  assert.equal(
+    rechazoDeAnulacion(ingreso, 7000, 'bulto'),
+    'No se puede anular este ingreso: el stock quedaría en −30 bultos, porque parte de lo que ' +
+      'entró ya salió. Anule antes las salidas que correspondan.',
+  );
+  assert.equal(rechazoDeAnulacion(salida, 7000, 'bulto'), null);
+  // Con la salida ya anulada, el stock es 100 y el ingreso sí se puede anular.
+  assert.equal(rechazoDeAnulacion(ingreso, 10000, 'bulto'), null);
+  assert.equal(
+    rechazoDeAnulacion({ ...salida, anulado: true }, 10000, 'bulto'),
+    'Este movimiento ya estaba anulado.',
+  );
+});
+
+prueba('un material con stock no se da de baja; sin stock, sí', () => {
+  // Spec 009 / RF-6 y RF-7.
+  assert.equal(
+    rechazoDeBaja(1200, 'bulto'),
+    'No se puede dar de baja: todavía quedan 12 bultos. Registre la salida de lo que queda antes.',
+  );
+  assert.equal(rechazoDeBaja(0, 'bulto'), null);
+});
+
+prueba('la unidad no cambia si hay movimientos, aunque estén anulados', () => {
+  // Spec 009 / RF-5: un movimiento anulado sigue a la vista con su cantidad.
+  assert.match(rechazoDeCambioDeUnidad(1, 'bulto', 'kilogramo') ?? '', /registrados en bultos/);
+  assert.equal(rechazoDeCambioDeUnidad(0, 'bulto', 'kilogramo'), null);
+  assert.equal(rechazoDeCambioDeUnidad(5, 'bulto', 'bulto'), null);
+});
+
+prueba('el historial va en orden de registro, con el stock que dejó cada movimiento', () => {
+  // Spec 009 / RF-20 y RF-25: los anulados siguen en la lista, sin saldo.
+  const otroIngreso: MovimientoRegistrado = {
+    id: 'm3', tipo: 'ingreso', fecha: '2026-09-11', cantidad: 2050, registradoEn: '2026-09-13T08:00:00.000Z', anulado: false,
+  };
+  // Llegan desordenados; la fecha del 11 se registró después que la salida del 12.
+  const historial = historialConSaldo([otroIngreso, ...movimientosDeCemento(true)]);
+  assert.deepEqual(
+    historial.map((m) => [m.id, m.saldo]),
+    [
+      ['m1', 10000],
+      ['m2', null],
+      ['m3', 12050],
+    ],
+  );
+  assert.deepEqual(
+    historialConSaldo(movimientosDeCemento()).map((m) => m.saldo),
+    [10000, 7000],
+  );
+});
+
+/** El primer mensaje que el contrato le pone a un campo, o `undefined` si pasa. */
+function faltaDelContrato(
+  esquema: { safeParse: (dato: unknown) => { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } } },
+  dato: unknown,
+  campo: string,
+): string | undefined {
+  const resultado = esquema.safeParse(dato);
+  return resultado.error?.issues.find((i) => i.path.join('.') === campo)?.message;
+}
+
+prueba('el contrato de una salida exige para qué, con el mismo texto que la regla', () => {
+  // Spec 009 / RF-11 y RF-13. Una petición hecha por fuera no se salta la falta.
+  const salida = { tipo: 'salida', materialId: 'mat-1', fecha: '2026-09-15', cantidad: '30' };
+  assert.equal(
+    faltaDelContrato(movimientoNuevo, salida, 'paraQue'),
+    'Escriba para qué se usará lo que sale.',
+  );
+  assert.equal(
+    faltaDelContrato(movimientoNuevo, { ...salida, paraQue: '  ' }, 'paraQue'),
+    'Escriba para qué se usará lo que sale.',
+  );
+  const valida = movimientoNuevo.parse({ ...salida, paraQue: 'Cuneta PR 3' });
+  assert.equal(valida.cantidad, 3000);
+  // La salida no acepta quién la recibe ni quién la registra (RF-30): se descartan.
+  assert.equal('registradoPor' in movimientoNuevo.parse({ ...salida, paraQue: 'x', registradoPor: 'otro' }), false);
+});
+
+prueba('el contrato convierte la cantidad escrita y rechaza la que no sirve', () => {
+  // Spec 009 / RF-8 y RF-9, con la misma lectura que `aCentesimas`.
+  const ingreso = { tipo: 'ingreso', materialId: 'mat-1', fecha: '2026-09-15' };
+  const parsed = movimientoNuevo.parse({ ...ingreso, cantidad: '2,5' });
+  assert.equal(parsed.cantidad, 250);
+  assert.equal(parsed.tipo === 'ingreso' ? parsed.observacion : 'no', null);
+  assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: '0' }, 'cantidad'), 'La cantidad tiene que ser mayor que cero.');
+  assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: '1.000' }, 'cantidad'), 'Escriba la cantidad, con hasta dos decimales.');
+  assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: 10 }, 'cantidad'), undefined);
+  assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: '5', fecha: '15/09/2026' }, 'fecha'), 'La fecha va en formato AAAA-MM-DD.');
+  assert.equal(movimientoNuevo.safeParse({ ...ingreso, tipo: 'traslado', cantidad: '5' }).success, false);
+});
+
+prueba('un material se registra con una unidad de la lista y nada más', () => {
+  // Spec 009 / RF-2 y RF-31.
+  assert.equal(
+    faltaDelContrato(materialNuevo, { nombre: 'Cemento', unidad: 'bultos' }, 'unidad'),
+    'Elija una unidad de la lista.',
+  );
+  assert.equal(faltaDelContrato(materialNuevo, { nombre: '  ', unidad: 'bulto' }, 'nombre'), 'Falta el nombre del material.');
+  assert.deepEqual(materialNuevo.parse({ nombre: ' Cemento ', unidad: 'bulto' }), {
+    nombre: 'Cemento',
+    unidad: 'bulto',
+    obraId: null,
+  });
+  // Corregir solo el nombre no manda la unidad: ausente es «no se toca» (RF-4).
+  assert.deepEqual(materialEditado.parse({ nombre: 'Cemento gris' }), { nombre: 'Cemento gris' });
+  assert.equal(materialEditado.safeParse({ unidad: 'barril' }).success, false);
+});
+
+prueba('los movimientos se filtran por periodo y por tipo, sin esconder los anulados', () => {
+  // Spec 009 / RF-21. El periodo es de la fecha del movimiento, con los dos extremos.
+  const todos = movimientosDeCemento(true);
+  assert.deepEqual(filtrarMovimientos(todos, { tipo: 'salida' }).map((m) => m.id), ['m2']);
+  assert.deepEqual(
+    filtrarMovimientos(todos, { desde: '2026-09-11', hasta: '2026-09-12' }).map((m) => m.id),
+    ['m2'],
+  );
+  assert.deepEqual(filtrarMovimientos(todos, { hasta: '2026-09-10' }).map((m) => m.id), ['m1']);
+  assert.deepEqual(filtrarMovimientos(todos, {}).map((m) => m.id), ['m1', 'm2']);
+  assert.deepEqual(
+    filtrarMovimientos(todos, { desde: '2026-09-11', tipo: 'ingreso' }).map((m) => m.id),
+    [],
+  );
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1992,7 +2475,61 @@ async function verificarFirmaS3() {
   });
 }
 
+/* ------------------------------------------------------------------------ */
+/* Escrituras simultáneas del almacén (spec 009, RF-16)                      */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * El choque se simula con la misma forma que tiene de verdad: Drizzle envuelve el
+ * error del driver y el código de Postgres queda en `cause`. Contra Neon se
+ * comprueba en T8, con dos salidas lanzadas a la vez.
+ */
+function choqueDePostgres(): Error {
+  return new Error('Failed query: insert into "almacen_movimientos"…', {
+    cause: { code: '40001', message: 'could not serialize access' },
+  });
+}
+
+async function verificarChoques() {
+  await pruebaAsync('un choque de dos salidas simultáneas se repite una vez', async () => {
+    // El primer intento choca y no guardó nada; el segundo ve el stock nuevo.
+    let intentos = 0;
+    const resultado = await conReintentoSiChoca(async () => {
+      intentos += 1;
+      if (intentos === 1) throw choqueDePostgres();
+      return 'guardada';
+    });
+    assert.equal(resultado, 'guardada');
+    assert.equal(intentos, 2);
+  });
+
+  await pruebaAsync('un segundo choque se responde 409 con qué hacer', async () => {
+    let intentos = 0;
+    const respuesta = await responder(() =>
+      conReintentoSiChoca(async () => {
+        intentos += 1;
+        throw choqueDePostgres();
+      }),
+    );
+    assert.equal(intentos, 2);
+    assert.equal(respuesta.status, 409);
+    assert.deepEqual(await respuesta.json(), { error: MENSAJE_DE_CHOQUE });
+  });
+
+  await pruebaAsync('cualquier otro fallo no se reintenta', async () => {
+    let intentos = 0;
+    await assert.rejects(
+      conReintentoSiChoca(async () => {
+        intentos += 1;
+        throw new Error('Failed query', { cause: { code: '23505' } });
+      }),
+    );
+    assert.equal(intentos, 1);
+  });
+}
+
 verificarFirmaS3()
+  .then(verificarChoques)
   .then(verificarCripto)
   .then(() => console.log(`\n${pruebas} verificaciones correctas.\n`))
   .catch((error) => {

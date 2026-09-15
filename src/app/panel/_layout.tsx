@@ -41,6 +41,8 @@ export default function LayoutPanel() {
             name="preoperacionales"
             options={{ title: 'Preoperacionales · PreOpera OCC' }}
           />
+          <Stack.Screen name="almacen" options={{ title: 'Almacén · PreOpera OCC' }} />
+          <Stack.Screen name="cantera" options={{ title: 'Control Cantera · PreOpera OCC' }} />
         </Stack>
       </MarcoSesion>
     </ProveedorSesionPanel>

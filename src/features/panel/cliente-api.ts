@@ -22,12 +22,18 @@ import type {
   ClaveNueva,
   ClaveTemporalFila,
   CodigosFila,
+  ConsultaDeMovimientos,
   CredencialesIngreso,
   JornadaDePreoperacionales,
   DiaDeObra,
   JornadaFila,
   LlantaFila,
   LlantaNueva,
+  MaterialDeAlmacenFila,
+  MaterialEditado,
+  MaterialNuevo,
+  MovimientoDeAlmacenFila,
+  MovimientoNuevo,
   ObraFila,
   ObraNueva,
   PeriodoResumen,
@@ -245,6 +251,42 @@ export const api = {
     urlDeImagen: (mediaId: string) => `/api/panel/media/${mediaId}`,
     anular: (id: string, motivo: string) =>
       panelEnviar<{ id: string }>(`/preoperacionales/${id}/anular`, 'POST', { motivo }),
+  },
+
+  /**
+   * El almacén de cada obra (spec 009).
+   *
+   * Las cantidades de las respuestas vienen en centésimas; las de las peticiones
+   * van como se escribieron. Un movimiento no tiene editar ni borrar: solo anular
+   * (RF-23, RF-24).
+   */
+  almacen: {
+    materiales: {
+      /** `obraId` solo lo tiene en cuenta el servidor para la gerencia. */
+      listar: (obraId?: string | null) =>
+        panel<MaterialDeAlmacenFila[]>(
+          `/almacen/materiales${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`,
+        ),
+      crear: (datos: MaterialNuevo) =>
+        panelEnviar<MaterialDeAlmacenFila>('/almacen/materiales', 'POST', datos),
+      corregir: (id: string, cambios: MaterialEditado) =>
+        panelEnviar<MaterialDeAlmacenFila>(`/almacen/materiales/${id}`, 'PATCH', cambios),
+      darDeBaja: (id: string) =>
+        panelEnviar<{ id: string }>(`/almacen/materiales/${id}/baja`, 'POST'),
+    },
+    movimientos: {
+      listar: ({ materialId, desde, hasta, tipo }: ConsultaDeMovimientos) => {
+        const parametros = new URLSearchParams({ materialId });
+        if (desde) parametros.set('desde', desde);
+        if (hasta) parametros.set('hasta', hasta);
+        if (tipo) parametros.set('tipo', tipo);
+        return panel<MovimientoDeAlmacenFila[]>(`/almacen/movimientos?${parametros.toString()}`);
+      },
+      registrar: (datos: MovimientoNuevo) =>
+        panelEnviar<MovimientoDeAlmacenFila>('/almacen/movimientos', 'POST', datos),
+      anular: (id: string, motivo: string) =>
+        panelEnviar<{ id: string }>(`/almacen/movimientos/${id}/anular`, 'POST', { motivo }),
+    },
   },
 
   asignaciones: {

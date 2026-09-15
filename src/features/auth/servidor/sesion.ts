@@ -22,6 +22,8 @@ import { uuidv7 } from 'uuidv7';
 import { baseServidor } from '@/db/servidor/cliente';
 import { sesionesWeb, usuarios } from '@/db/servidor/esquema';
 
+import type { Rol } from '@/shared/rules/permisos';
+
 import { hashDeToken, tokenAleatorio } from './cripto';
 
 export const NOMBRE_COOKIE = 'preopera_sesion';
@@ -36,7 +38,7 @@ export interface PersonaEnSesion {
   id: string;
   usuario: string;
   nombreCompleto: string;
-  rol: 'admin' | 'supervisor' | 'operador';
+  rol: Rol;
   obraId: string | null;
   debeCambiarClave: boolean;
 }

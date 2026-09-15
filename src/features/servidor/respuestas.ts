@@ -57,6 +57,12 @@ export async function responder(cuerpo: () => Promise<Response>): Promise<Respon
   } catch (fallo) {
     if (fallo instanceof ZodError) return errorDeValidacion(fallo);
 
+    // Un choque de dos escrituras simultáneas que el reintento no resolvió
+    // (spec 009, RF-16). Es un choque de datos, no un fallo: se dice qué hacer.
+    if (esChoqueDeSerializacion(fallo)) {
+      return errorDePeticion(MENSAJE_DE_CHOQUE, 409);
+    }
+
     if (esViolacionDeUnicidad(fallo)) {
       const { mensaje, campo } = duplicadoDe(detallePostgres(fallo)?.constraint);
       return Response.json(
@@ -82,6 +88,40 @@ export async function responder(cuerpo: () => Promise<Response>): Promise<Respon
 
     console.error('[api] error no controlado:', fallo);
     return errorDePeticion('Algo falló en el servidor. Vuelve a intentarlo.', 500);
+  }
+}
+
+/**
+ * Postgres 40001: una transacción serializable chocó con otra que leía y
+ * escribía lo mismo, y Postgres la abortó sin guardar nada.
+ */
+export function esChoqueDeSerializacion(fallo: unknown): boolean {
+  return codigoPostgres(fallo) === '40001';
+}
+
+export const MENSAJE_DE_CHOQUE =
+  'Otro movimiento de este material se registró al mismo tiempo. Revise el stock y vuelva a ' +
+  'intentarlo.';
+
+/**
+ * Ejecuta la operación y, si choca con otra simultánea, **la repite una vez**.
+ *
+ * Postgres abortó la operación sin guardar nada, y la otra ya terminó. Al
+ * repetirla se lee el estado nuevo, así que lo normal es que el reintento dé la
+ * respuesta de verdad: se guarda, o se rechaza con el stock real (009/RF-15). Se
+ * rechaza la que llegó después, que es lo que pide RF-16.
+ *
+ * Una sola vez y no en bucle: si vuelve a chocar hay mucha actividad sobre el
+ * mismo material, y quien registra tiene que mirar el stock antes de insistir.
+ * El segundo choque sube hasta `responder`, que lo convierte en un 409 con
+ * `MENSAJE_DE_CHOQUE`. Cualquier otro fallo sale tal cual, sin reintentar.
+ */
+export async function conReintentoSiChoca<T>(operacion: () => Promise<T>): Promise<T> {
+  try {
+    return await operacion();
+  } catch (fallo) {
+    if (!esChoqueDeSerializacion(fallo)) throw fallo;
+    return operacion();
   }
 }
 
@@ -121,6 +161,12 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
       return { mensaje: 'Ese nombre de usuario ya está en uso.', campo: 'usuario' };
     case 'ux_vehiculos_codigo':
       return { mensaje: 'Ya existe un vehículo con ese código interno.', campo: 'codigoInterno' };
+    case 'ux_almacen_material_nombre':
+      // Spec 009, RF-3. El índice compara el nombre sin tildes ni mayúsculas.
+      return {
+        mensaje: 'Ya hay un material con ese nombre en el almacén de esta obra.',
+        campo: 'nombre',
+      };
     default:
       return { mensaje: 'Ya existe un registro con esos datos.' };
   }

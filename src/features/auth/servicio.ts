@@ -13,6 +13,8 @@
  */
 import { ErrorDelServidor, pedirSinToken, SinConexion } from '@/features/sync/cliente-http';
 
+import type { Rol } from '@/shared/rules/permisos';
+
 import { idDelDispositivo } from './almacen';
 
 export type ErrorAuth =
@@ -26,7 +28,7 @@ export interface UsuarioAutenticado {
   id: string;
   usuario: string;
   nombreCompleto: string;
-  rol: 'admin' | 'supervisor' | 'operador';
+  rol: Rol;
   obraId?: string | null;
 }
 

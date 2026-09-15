@@ -6,14 +6,15 @@
  *  · El **operador** entra al celular con un PIN que elige él mismo en su propio
  *    equipo y que nunca sale de ahí. Desde esta pantalla no se le puede dar
  *    ninguna clave, y por eso no le sale el botón.
- *  · El **residente, el director y la gerencia** entran al panel con contraseña.
+ *  · El **residente, el director, la gerencia, el almacenista y el encargado de
+ *    planta** entran al panel con contraseña.
  *    Gerencia les genera una temporal desde aquí, se la entrega, y ellos la
  *    cambian al entrar. Así nadie acaba conociendo la contraseña definitiva de
  *    otro.
  *
  * **Cargo y acceso son dos campos distintos**, y antes eran uno solo. El cargo es
  * el oficio en la obra —topógrafo, cadenero, maestro—; el acceso es lo que puede
- * hacer en el sistema, y sigue siendo tres valores que no se amplían. Mezclarlos
+ * hacer en el sistema, y solo se amplía cuando cambia eso (spec 008). Mezclarlos
  * dejaba fuera a media obra: un cadenero no es «operador» en ningún sentido útil,
  * pero era la única casilla donde cabía. Elegir el cargo **propone** el acceso; se
  * puede corregir a mano.
@@ -188,6 +189,10 @@ export default function PantallaPersonas() {
       setNombreCompleto('');
       setDocumento('');
       setCargo(null);
+      // El acceso vuelve a su valor inicial con el cargo: si se quedara, la
+      // siguiente persona saldría propuesta con el acceso de la anterior —tras un
+      // almacenista, como almacenista— sin que nadie lo hubiera elegido.
+      setRol('operador');
       setObraId(null);
     }
   }
@@ -221,7 +226,10 @@ export default function PantallaPersonas() {
       ancho: 110,
       pintar: (p) => {
         if (p.rol === 'admin') return <Etiqueta tono="bueno">Gerencia</Etiqueta>;
-        if (p.rol === 'supervisor') return <Etiqueta tono="bueno">Panel</Etiqueta>;
+        // Todo el que no es operador entra al panel: residente, almacenista y
+        // encargado de planta (spec 008). Preguntar solo por el residente dejaba a
+        // un almacenista como «Sin acceso» mientras sí lo tenía.
+        if (p.rol !== 'operador') return <Etiqueta tono="bueno">Panel</Etiqueta>;
         return operaVehiculos(p.cargo) ? (
           <Etiqueta tono="neutro">Celular</Etiqueta>
         ) : (

@@ -17,8 +17,14 @@
 import { z } from 'zod';
 
 import type { Periodo } from '@/shared/rules/jornada';
+import { IDS_UNIDAD, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { IDS_CARGO, type Cargo } from '@/shared/catalogos/cargos';
-import { ROLES, type Rol } from '@/shared/rules/permisos';
+import {
+  aCentesimas,
+  MENSAJES_DE_MOVIMIENTO,
+  type TipoMovimiento,
+} from '@/shared/rules/almacen';
+import { ETIQUETA_ROL, ROLES, type Rol } from '@/shared/rules/permisos';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -111,19 +117,14 @@ export interface ObraFila {
 /* ------------------------------------------------------------------------ */
 
 /**
- * El rol no se amplía: los cargos reales de OCC se mapean sobre estos tres.
- * Residente y director de obra son `supervisor`; gerencia es `admin`.
+ * Los cargos reales de OCC se mapean sobre estos roles: residente y director de
+ * obra son `supervisor`; gerencia es `admin`. Almacenista y Encargado de Planta
+ * tienen el suyo desde la spec 008.
  *
  * La lista vive con la tabla de permisos, no aquí: quien decide qué puede hacer
  * cada rol es quien debe decir cuáles hay.
  */
-export { ROLES, type Rol };
-
-export const ETIQUETA_ROL: Record<Rol, string> = {
-  admin: 'Gerencia',
-  supervisor: 'Residente / Director',
-  operador: 'Operador',
-};
+export { ETIQUETA_ROL, ROLES, type Rol };
 
 export const personaNueva = z.object({
   /**
@@ -790,4 +791,157 @@ export interface ResumenFila {
   minutosPersonal: number;
   minutosExtra: number;
   personasContadas: number;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Almacén de obra (spec 009)                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Las cantidades viajan **en centésimas enteras** en las respuestas —70 bultos es
+ * `7000`—, igual que las usan las reglas de `shared/rules/almacen`. Así ni el
+ * servidor ni la pantalla convierten de decimal a entero más de una vez, que es
+ * donde aparecen los 69,99999999 bultos. Para mostrarlas, `formatearCantidad`.
+ *
+ * En la **petición**, en cambio, la cantidad llega tal como se escribió («2,5»),
+ * y el contrato la convierte con `aCentesimas`: así «1.000» se rechaza igual en
+ * el formulario que en una petición hecha por fuera.
+ */
+const unidadAlmacen = z.enum(IDS_UNIDAD as [UnidadAlmacen, ...UnidadAlmacen[]], {
+  error: 'Elija una unidad de la lista.',
+});
+
+const nombreDeMaterial = z
+  .string({ error: 'Falta el nombre del material.' })
+  .trim()
+  .min(1, 'Falta el nombre del material.')
+  .max(120, 'El nombre del material es demasiado largo.');
+
+export const materialNuevo = z.object({
+  nombre: nombreDeMaterial,
+  unidad: unidadAlmacen,
+  /**
+   * La obra del almacén. **Solo la usa la gerencia**, que lleva todas; al
+   * almacenista y al residente el servidor les pone la suya y esto se ignora
+   * (009/RF-28): si no, un almacenista podría registrar en otra obra.
+   */
+  obraId: idOpcional,
+});
+
+export type MaterialNuevo = z.input<typeof materialNuevo>;
+
+/** Corregir un material: ausente es «no se toca». Cambiar la unidad lo decide la regla (RF-5). */
+export const materialEditado = z.object({
+  nombre: nombreDeMaterial.optional(),
+  unidad: unidadAlmacen.optional(),
+});
+
+export type MaterialEditado = z.input<typeof materialEditado>;
+
+/** La cantidad escrita, convertida a centésimas; mayor que cero (RF-9). */
+const cantidadDeMovimiento = z
+  .union([z.string(), z.number()], { error: MENSAJES_DE_MOVIMIENTO.cantidadIlegible })
+  .transform((valor, contexto) => {
+    const centesimas = aCentesimas(valor);
+    if (centesimas === null) {
+      contexto.addIssue({ code: 'custom', message: MENSAJES_DE_MOVIMIENTO.cantidadIlegible });
+      return z.NEVER;
+    }
+    if (centesimas <= 0) {
+      contexto.addIssue({ code: 'custom', message: MENSAJES_DE_MOVIMIENTO.cantidadNoPositiva });
+      return z.NEVER;
+    }
+    return centesimas;
+  });
+
+const fechaDeMovimiento = z
+  .string({ error: MENSAJES_DE_MOVIMIENTO.fechaMalEscrita })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, MENSAJES_DE_MOVIMIENTO.fechaMalEscrita);
+
+const materialDelMovimiento = z
+  .string({ error: 'Elija el material.' })
+  .trim()
+  .min(1, 'Elija el material.')
+  .max(64);
+
+/**
+ * Un ingreso o una salida. La forma depende del `tipo`, y eso es lo que hace que
+ * una salida sin «para qué» no pase ni siquiera la validación (RF-13), mientras
+ * que el ingreso lleva una observación opcional (RF-8).
+ *
+ * **No lleva quién lo registra** (RF-27, RF-30): lo pone el servidor desde la
+ * sesión. Tampoco la obra: es la de su material.
+ *
+ * La fecha posterior a hoy (RF-10) no se mira aquí sino en la ruta, con
+ * `validarMovimiento`: depende del reloj, y un contrato que cambia de veredicto
+ * según la hora a la que se evalúa no se puede probar.
+ */
+export const movimientoNuevo = z.discriminatedUnion(
+  'tipo',
+  [
+    z.object({
+      tipo: z.literal('ingreso'),
+      materialId: materialDelMovimiento,
+      fecha: fechaDeMovimiento,
+      cantidad: cantidadDeMovimiento,
+      observacion: textoOpcional(300),
+    }),
+    z.object({
+      tipo: z.literal('salida'),
+      materialId: materialDelMovimiento,
+      fecha: fechaDeMovimiento,
+      cantidad: cantidadDeMovimiento,
+      paraQue: z
+        .string({ error: MENSAJES_DE_MOVIMIENTO.sinParaQue })
+        .trim()
+        .min(1, MENSAJES_DE_MOVIMIENTO.sinParaQue)
+        .max(300, 'El «para qué» es demasiado largo.'),
+    }),
+  ],
+  { error: 'El movimiento tiene que ser un ingreso o una salida.' },
+);
+
+export type MovimientoNuevo = z.input<typeof movimientoNuevo>;
+
+/** Un material del almacén con sus totales. Cantidades en centésimas. */
+export interface MaterialDeAlmacenFila {
+  id: string;
+  obraId: string;
+  obraNombre: string | null;
+  nombre: string;
+  unidad: UnidadAlmacen;
+  ingresado: number;
+  salido: number;
+  stock: number;
+  /** Cuántos movimientos tiene, anulados incluidos: decide si la unidad se puede cambiar (RF-5). */
+  movimientos: number;
+}
+
+/** Un movimiento del historial, con el stock que dejó. Cantidades en centésimas. */
+export interface MovimientoDeAlmacenFila {
+  id: string;
+  materialId: string;
+  tipo: TipoMovimiento;
+  fecha: string;
+  cantidad: number;
+  paraQue: string | null;
+  observacion: string | null;
+  /** ISO 8601. Es el orden del historial. */
+  registradoEn: string;
+  /** El nombre de quien lo registró, aunque hoy esté de baja. */
+  registradoPorNombre: string | null;
+  anulado: boolean;
+  anuladoEn: string | null;
+  anuladoPorNombre: string | null;
+  motivoAnulacion: string | null;
+  /** El stock que dejó; `null` si está anulado (RF-20, RF-25). */
+  saldo: number | null;
+}
+
+/** Qué movimientos pedir: los de un material, con el filtro de RF-21. */
+export interface ConsultaDeMovimientos {
+  materialId: string;
+  desde?: string;
+  hasta?: string;
+  tipo?: TipoMovimiento;
 }

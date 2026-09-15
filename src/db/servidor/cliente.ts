@@ -64,4 +64,32 @@ export function baseServidor() {
   return instancia;
 }
 
+let instanciaSerializable: ReturnType<typeof construir> | null = null;
+
+/**
+ * La misma base, con los **lotes** (`db.batch`) en aislamiento `Serializable`.
+ *
+ * Existe por el almacén (spec 009, RF-16). Una salida se guarda solo si el stock
+ * que dan los movimientos alcanza, y ese stock se lee y se escribe en la misma
+ * sentencia. Con el aislamiento normal, dos salidas simultáneas leen el mismo
+ * stock antes de que la otra termine y pasan las dos: el almacén queda en
+ * negativo. En `Serializable`, Postgres detecta que se leyeron el uno al otro y
+ * aborta la segunda con el código `40001`; ver `conReintentoSiChoca`.
+ *
+ * El driver solo aplica este nivel a los lotes, que es lo único que tiene de
+ * transacción por HTTP. Una consulta suelta hecha con esta base corre como
+ * cualquier otra, así que **lo que necesite la garantía va dentro de un
+ * `batch`**, aunque sea de una sola sentencia.
+ *
+ * Es una segunda instancia y no un cambio a `baseServidor`, para no volver
+ * serializables las transacciones de todo el sistema sin necesidad.
+ */
+export function baseServidorSerializable() {
+  instanciaSerializable ??= drizzle(
+    neon(cadenaDeConexion(), { isolationLevel: 'Serializable' }),
+    { schema: esquemaServidor },
+  );
+  return instanciaSerializable;
+}
+
 export { esquemaServidor };
