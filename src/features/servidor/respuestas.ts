@@ -58,7 +58,11 @@ export async function responder(cuerpo: () => Promise<Response>): Promise<Respon
     if (fallo instanceof ZodError) return errorDeValidacion(fallo);
 
     if (esViolacionDeUnicidad(fallo)) {
-      return errorDePeticion(mensajeDeDuplicado(fallo), 409);
+      const { mensaje, campo } = duplicadoDe(detallePostgres(fallo)?.constraint);
+      return Response.json(
+        { error: mensaje, ...(campo ? { campos: { [campo]: mensaje } } : {}) } satisfies ErrorConCampos,
+        { status: 409 },
+      );
     }
 
     // Los dos errores cuyo detalle sí sale hacia afuera, porque los dos dicen
@@ -98,17 +102,27 @@ function esTablaInexistente(fallo: unknown): boolean {
   return codigoPostgres(fallo) === '42P01';
 }
 
-/** Qué índice único se violó, para poder señalar el campo culpable. */
-function mensajeDeDuplicado(fallo: unknown): string {
-  switch (detallePostgres(fallo)?.constraint) {
+/**
+ * Qué índice único se violó: el mensaje y **el campo del formulario** culpable.
+ *
+ * El campo va con el nombre del contrato del panel (`codigo`, `usuario`,
+ * `codigoInterno`), no con el del índice, para que la pantalla pinte el mensaje
+ * debajo de ese campo sin traducir nada (spec 007, RF-18). Hasta el 2026-09-15
+ * solo devolvía el mensaje, y un código repetido se leía arriba de la página,
+ * lejos del campo que había que corregir.
+ *
+ * Un índice que no está aquí no inventa campo: el mensaje sale arriba.
+ */
+export function duplicadoDe(indice: string | undefined): { mensaje: string; campo?: string } {
+  switch (indice) {
     case 'ux_obras_codigo':
-      return 'Ya existe una obra con ese código.';
+      return { mensaje: 'Ya existe una obra con ese código.', campo: 'codigo' };
     case 'ux_usuarios_usuario':
-      return 'Ese nombre de usuario ya está en uso.';
+      return { mensaje: 'Ese nombre de usuario ya está en uso.', campo: 'usuario' };
     case 'ux_vehiculos_codigo':
-      return 'Ya existe un vehículo con ese código interno.';
+      return { mensaje: 'Ya existe un vehículo con ese código interno.', campo: 'codigoInterno' };
     default:
-      return 'Ya existe un registro con esos datos.';
+      return { mensaje: 'Ya existe un registro con esos datos.' };
   }
 }
 

@@ -17,7 +17,7 @@
  */
 import { useState } from 'react';
 
-import { api } from './cliente-api';
+import { api, ErrorApi } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -58,12 +58,15 @@ export function VentanaCorregirVehiculo({
   const [obraId, setObraId] = useState<string | null>(vehiculo.obraId);
   const [estado, setEstado] = useState<EstadoVehiculo>(vehiculo.estado);
   const [guardando, setGuardando] = useState(false);
+  /** El código repetido lo dice el servidor, y se lee debajo del campo (spec 007, RF-18). */
+  const [errorDelCodigo, setErrorDelCodigo] = useState<string | null>(null);
 
   const faltaCodigo = codigoInterno.trim().length === 0;
 
   async function guardar() {
     if (faltaCodigo) return;
     setGuardando(true);
+    setErrorDelCodigo(null);
     try {
       const cambios: Partial<VehiculoNuevo> = {};
       if (codigoInterno !== vehiculo.codigoInterno) cambios.codigoInterno = codigoInterno;
@@ -83,7 +86,11 @@ export function VentanaCorregirVehiculo({
       await api.vehiculos.editar(vehiculo.id, cambios);
       onGuardado(codigoInterno);
     } catch (fallo) {
-      onFallo(mensajeDe(fallo));
+      // Un choque en el código se queda en la ventana, bajo su campo: el aviso de
+      // la página queda detrás del telón y no se vería.
+      const delCodigo = fallo instanceof ErrorApi ? fallo.campos?.codigoInterno : undefined;
+      if (delCodigo) setErrorDelCodigo(delCodigo);
+      else onFallo(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }
@@ -98,9 +105,10 @@ export function VentanaCorregirVehiculo({
       <Formulario>
         <Campo
           etiqueta="Código interno"
+          obligatorio
           valor={codigoInterno}
           onChange={setCodigoInterno}
-          error={faltaCodigo ? 'El código no puede quedar vacío.' : undefined}
+          error={faltaCodigo ? 'El código no puede quedar vacío.' : (errorDelCodigo ?? undefined)}
           ancho={180}
         />
         <Campo etiqueta="Placa" valor={placa} onChange={setPlaca} ancho={140} />

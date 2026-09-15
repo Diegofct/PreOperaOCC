@@ -238,6 +238,7 @@ export function DetallePreoperacional({
             <Seccion titulo="Anular este preoperacional">
               <Campo
                 etiqueta="Motivo"
+                obligatorio
                 valor={motivo}
                 onChange={setMotivo}
                 ayuda="Queda guardado con su nombre. La máquina volverá a aparecer como pendiente del día, y habrá que levantar otro."

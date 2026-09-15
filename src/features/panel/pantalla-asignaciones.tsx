@@ -143,6 +143,7 @@ export default function PantallaAsignaciones() {
         <Formulario>
           <Selector
             etiqueta="Vehículo"
+            obligatorio
             valor={vehiculoId}
             opciones={vehiculos.datos.map((v) => ({
               valor: v.id,
@@ -155,6 +156,7 @@ export default function PantallaAsignaciones() {
           />
           <Selector
             etiqueta="Operador"
+            obligatorio
             valor={usuarioId}
             opciones={operadores.map((p) => ({
               valor: p.id,

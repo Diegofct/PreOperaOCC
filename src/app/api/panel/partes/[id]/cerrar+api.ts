@@ -1,11 +1,11 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { partesDeObra, vehiculos } from '@/db/servidor/esquema';
+import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
-import { bloqueosDelCierre } from '@/shared/rules/parte';
+import { bloqueosDelCierre, mensajeDelRechazoDeCierre } from '@/shared/rules/parte';
 
 /**
  * Cerrar el parte del día. `POST /api/panel/partes/:id/cerrar`.
@@ -35,12 +35,31 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         maquinaria: partesDeObra.maquinaria,
         personal: partesDeObra.personal,
         actividades: partesDeObra.actividades,
+        clima: partesDeObra.clima,
+        laboratorio: partesDeObra.laboratorio,
+        notas: partesDeObra.notas,
+        // Con la marca de día sin trabajo, la regla exige menos (004/RF-54).
+        sinTrabajo: partesDeObra.sinTrabajo,
+        motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
       })
       .from(partesDeObra)
       .where(eq(partesDeObra.id, id))
       .limit(1);
 
     if (!parte) return noEncontrado('ese parte');
+
+    // Las fotos viven en otra tabla, así que se leen aquí y la regla las recibe
+    // ya contadas: sigue siendo pura. Sin `item` son del día; con él, de la
+    // actividad cuyo id lleva.
+    const fotosDelParte = await db
+      .select({ itemKey: media.itemKey })
+      .from(media)
+      .where(and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, id)));
+
+    const fotos = {
+      delDia: fotosDelParte.filter((f) => f.itemKey === null).length,
+      itemsConFoto: fotosDelParte.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
+    };
 
     // Qué impide cerrar lo decide `shared/rules/parte`, y lo decide una sola vez
     // para los dos que preguntan: esta ruta, que rechaza, y el índice del parte
@@ -49,11 +68,11 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     // escribirlo, y el día que discreparan el residente leería en pantalla que
     // puede cerrar mientras el servidor le dice que no.
     //
-    // La regla devuelve todos los problemas; un rechazo HTTP lleva uno, y es el
-    // primero — el mismo que devolvía esta ruta cuando comprobaba en línea,
-    // porque el orden de la lista es justo el que tenían las comprobaciones.
-    const bloqueos = bloqueosDelCierre(parte);
-    if (bloqueos.length > 0) return errorDePeticion(bloqueos[0], 400);
+    // El rechazo los nombra **todos** en un solo mensaje, uno por renglón
+    // (spec 004, RF-50). Antes mandaba el primero, y el residente descubría lo
+    // que le faltaba de uno en uno a base de pulsar Cerrar.
+    const bloqueos = bloqueosDelCierre(parte, fotos);
+    if (bloqueos.length > 0) return errorDePeticion(mensajeDelRechazoDeCierre(bloqueos), 400);
 
     const [fila] = await db
       .update(partesDeObra)

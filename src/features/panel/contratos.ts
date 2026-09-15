@@ -67,6 +67,22 @@ const medidorParcial = z
 
 const idParcial = z.string().trim().min(1).nullable().optional();
 
+/**
+ * Texto de una edición parcial: ausente es `undefined` y no toca la columna;
+ * vacío o `null` la vacía.
+ *
+ * Existe porque `textoOpcional` convierte lo ausente en `null`, y en un `PATCH`
+ * eso borra lo que había sin que nadie lo pidiera.
+ */
+const textoParcial = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullable()
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v && v.length > 0 ? v : null));
+
 /* ------------------------------------------------------------------------ */
 /* Obras                                                                     */
 /* ------------------------------------------------------------------------ */
@@ -596,6 +612,11 @@ export const maquinaDelParte = z.object({
   /** Horas u odómetro según el equipo: lo decide el servidor por su tipo. */
   medidorInicial: medidorParcial,
   medidorFinal: medidorParcial,
+  /**
+   * Lo que pasó con la máquina ese día (spec 004, RF-45). Mil caracteres dan
+   * para un párrafo largo; más ya es un informe y va en las notas del día.
+   */
+  observaciones: textoOpcional(1000).transform((v) => v ?? ''),
 });
 
 export const personaDelParte = z.object({
@@ -612,8 +633,13 @@ export const actividadDelParte = z.object({
    * id nuevo en cada guardado y la foto quedaba apuntando a una actividad que
    * ya no existía. Las demás secciones no lo necesitan porque no llevan
    * adjuntos.
+   *
+   * Desde el 2026-09-15 lo crea el navegador al añadir la actividad, para que
+   * la foto se pueda subir antes de guardar (RF-47). El tope es el largo de un
+   * UUID con holgura: es texto que viaja y se guarda, y sin tope sería una
+   * puerta para meter lo que sea en el parte.
    */
-  id: idParcial,
+  id: z.string().trim().min(1).max(64).nullable().optional(),
   clave: textoObligatorio(60, 'la actividad'),
   /** Solo cuando la actividad es «otra»: qué fue. */
   texto: textoOpcional(120),
@@ -646,7 +672,15 @@ export const parteEditado = z.object({
   actividades: z.array(actividadDelParte).max(40).optional(),
   clima: z.array(franjaDeClima).max(12).optional(),
   laboratorio: z.array(materialDelParte).max(40).optional(),
-  notas: textoOpcional(4000),
+  /**
+   * Parcial y no `textoOpcional`: con aquel, guardar cualquier otra sección
+   * llegaba con `notas: null` y borraba las notas del día (encontrado en
+   * 004/T15, corregido en T16).
+   */
+  notas: textoParcial(4000),
+  /** Día sin trabajo (spec 004, RF-53 a RF-55). Ausente no toca la marca. */
+  sinTrabajo: z.boolean().optional(),
+  motivoSinTrabajo: textoParcial(500),
 });
 
 export type ParteEditado = z.input<typeof parteEditado>;
@@ -658,6 +692,8 @@ export interface MaquinaDelParteFila {
   claseMedidor: 'horometro' | 'odometro';
   medidorInicial: number | null;
   medidorFinal: number | null;
+  /** Ausente en los partes anteriores al 2026-09-14. */
+  observaciones?: string;
 }
 
 export interface PersonaDelParteFila {
@@ -710,6 +746,8 @@ export interface ParteFila {
   clima: FranjaDeClimaFila[];
   laboratorio: MaterialDelParteFila[];
   notas: string | null;
+  sinTrabajo: boolean;
+  motivoSinTrabajo: string | null;
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;

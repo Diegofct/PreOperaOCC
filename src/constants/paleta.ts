@@ -46,6 +46,11 @@ export const Panel = {
   fondoHover: '#EEF3FA',
   /** Anillo de foco del teclado. Navegar sin ratón tiene que verse. */
   foco: '#93C5FD',
+  /**
+   * El fondo oscurecido detrás de una ventana emergente. Oscurece sin ocultar:
+   * se sigue viendo de qué lista salió la ventana (spec 007, RF-25).
+   */
+  telon: 'rgba(16, 24, 40, 0.45)',
 
   /* ── La marca de OCC ── */
 

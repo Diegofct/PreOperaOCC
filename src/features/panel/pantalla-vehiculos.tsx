@@ -206,13 +206,16 @@ export default function PantallaVehiculos() {
         <Formulario>
           <Campo
             etiqueta="Código interno"
+            obligatorio
             valor={codigoInterno}
             onChange={setCodigoInterno}
             ayuda="Ej. VOL-01"
+            error={vehiculos.errorDe('codigoInterno')}
             ancho={160}
           />
           <Selector
             etiqueta="Tipo de equipo"
+            obligatorio
             valor={tipoVehiculoId}
             opciones={tipos.datos.map((t) => ({ valor: t.id, etiqueta: t.nombre }))}
             onChange={setTipoVehiculoId}

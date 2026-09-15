@@ -1,6 +1,6 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: En curso · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57) y 2026-09-15 (RF-52 corregido, RF-58 a RF-60)
 
 ## Contexto y objetivo
 
@@ -54,6 +54,30 @@ tanda: no añade campos, cambia de qué habla el documento.
   un motivo escrito y abrir otra, sin borrar la anulada.
 - RF-8: SI se intenta cerrar una bitácora sin ninguna máquina, ninguna persona y ninguna
   actividad, ENTONCES EL SISTEMA lo rechazará indicando qué falta.
+  > **Reemplazado por RF-50 a RF-55 el 2026-09-14.** OCC pidió que no se pueda cerrar sin
+  > haber diligenciado todo el parte: bastaba una de las tres secciones, ahora hacen falta
+  > las siete. El día sin trabajo, que RF-8 dejaba sin salida, la tiene en RF-53 y RF-54.
+
+### El cierre exige el parte completo (cambio 2026-09-14)
+
+- RF-50: SI se intenta cerrar una bitácora a la que le falta alguna de estas secciones
+  —maquinaria, personal, actividades, clima, control calidad de obra, notas o fotografía del
+  día—, ENTONCES EL SISTEMA lo rechazará nombrando todas las que faltan.
+- RF-51: SI se intenta cerrar una bitácora con una máquina sin observaciones, ENTONCES EL
+  SISTEMA lo rechazará nombrando esa máquina.
+- RF-52: SI se intenta cerrar una bitácora en la que ninguna actividad tiene fotografía,
+  ENTONCES EL SISTEMA lo rechazará indicando que falta la foto de al menos una actividad.
+  > **Corregido el 2026-09-15.** La redacción del 14 exigía foto en cada actividad; OCC
+  > aclaró que basta con una.
+- RF-53: CUANDO el residente marque que ese día no se trabajó, EL SISTEMA exigirá que escriba
+  el motivo.
+- RF-54: MIENTRAS una bitácora esté marcada como día sin trabajo, EL SISTEMA permitirá
+  cerrarla con solo el clima, las notas y la fotografía del día.
+- RF-55: SI se marca como día sin trabajo una bitácora que ya tiene máquinas, personas o
+  actividades registradas, ENTONCES EL SISTEMA lo rechazará indicando que un día con trabajo
+  registrado se cierra completo.
+- RF-56: EL SISTEMA no volverá a evaluar con estas exigencias las bitácoras cerradas antes de
+  este cambio.
 
 ### Maquinaria (H1)
 
@@ -73,6 +97,10 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-14: EL SISTEMA ofrecerá para elegir únicamente las máquinas de la obra de esa bitácora.
 - RF-15: SI se intenta registrar dos veces la misma máquina en la misma bitácora, ENTONCES
   EL SISTEMA lo rechazará.
+- RF-45: EL SISTEMA permitirá escribir, para cada máquina registrada en la bitácora, sus
+  observaciones del día en un cuadro de texto de varias líneas. *(cambio 2026-09-14)*
+- RF-46: EL SISTEMA mostrará las observaciones de cada máquina junto a ella al consultar una
+  bitácora cerrada o anulada. *(cambio 2026-09-14)*
 
 ### Personal (H2)
 
@@ -105,9 +133,22 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-22: CUANDO se elija una actividad, EL SISTEMA habilitará el registro de sus
   dimensiones: longitud, ancho, alto, área y volumen, cada una escrita a mano.
 - RF-23: EL SISTEMA permitirá adjuntar una fotografía a cada actividad.
+  > **Ampliado por RF-47 y RF-48 el 2026-09-14.** Hoy la foto solo se ofrece después de
+  > guardar la actividad, y en la práctica no se encuentra.
+- RF-47: EL SISTEMA permitirá adjuntar la fotografía de una actividad mientras se está
+  llenando, sin exigir que la actividad se haya guardado antes. *(cambio 2026-09-14)*
+- RF-48: SI se adjunta la fotografía de una actividad que luego se descarta sin guardar,
+  ENTONCES EL SISTEMA no la mostrará en la bitácora. *(cambio 2026-09-14)*
 - RF-24: SI la actividad elegida no está en la lista, ENTONCES EL SISTEMA exigirá que se
   escriba cuál fue.
 - RF-25: EL SISTEMA aceptará una actividad sin dimensiones, porque no todas se miden.
+- RF-58: CUANDO una actividad tenga longitud y ancho, EL SISTEMA calculará su área
+  multiplicando la longitud por el ancho. *(cambio 2026-09-15)*
+- RF-59: CUANDO una actividad tenga longitud, ancho y alto, EL SISTEMA calculará su volumen
+  multiplicando las tres medidas. *(cambio 2026-09-15)*
+- RF-60: SI a una actividad le falta alguna de las medidas que hacen falta para calcular su
+  área o su volumen, ENTONCES EL SISTEMA permitirá escribir ese valor a mano.
+  *(cambio 2026-09-15)*
 
 ### Clima (H4)
 
@@ -119,12 +160,19 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-28: SI dos franjas del mismo día se solapan en el tiempo, ENTONCES EL SISTEMA lo
   rechazará indicando cuáles.
 
-### Laboratorio, notas y fotografía (H3, H5)
+### Control Calidad de Obra, notas y fotografía (H3, H5)
+
+> **Renombrada el 2026-09-14** (antes «Laboratorio»). RF-29 y RF-30 siguen en pie con el
+> nombre nuevo.
 
 - RF-29: EL SISTEMA permitirá registrar varios materiales consumidos del laboratorio, cada
   uno elegido de una lista y con la cantidad utilizada y su unidad.
 - RF-30: SI se registra un elemento de laboratorio sin cantidad, ENTONCES EL SISTEMA lo
   rechazará.
+- RF-49: EL SISTEMA llamará «Control Calidad de Obra» a la sección que hasta ahora se llamaba
+  Laboratorio, tanto en el parte como en su índice. *(cambio 2026-09-14)*
+- RF-57: EL SISTEMA mostrará con el nombre nuevo lo ya registrado en esa sección, sin alterar
+  ningún parte existente. *(cambio 2026-09-14)*
 - RF-31: EL SISTEMA permitirá escribir notas u observaciones libres del día.
 - RF-32: EL SISTEMA permitirá adjuntar una fotografía del día a la bitácora.
 - RF-33: EL SISTEMA mostrará las fotografías de la bitácora solo a quien tenga acceso a esa
@@ -159,6 +207,12 @@ tanda: no añade campos, cambia de qué habla el documento.
 - [x] **Reglas** — se conservan las de horas de máquina y lecturas; se añaden las de horario
   de personal y franjas de clima.
 
+Cambio 2026-09-14: **Panel web** (observaciones por máquina, foto de actividad sin guardar
+antes, marca de día sin trabajo, nombre de la sección); **API** (guardar esos datos, cierre
+más exigente); **Datos** (las observaciones de cada máquina y la marca de día sin trabajo con
+su motivo); **Reglas** (lo que impide cerrar, con sus casos nuevos en el guion de
+verificación). **Móvil** y **Sincronización**: sin impacto.
+
 ## Requisitos no funcionales
 
 - Guardar no puede perder lo escrito si el residente cierra el navegador: el parte se llena
@@ -185,6 +239,13 @@ tanda: no añade campos, cambia de qué habla el documento.
 - Una persona que trabajó **cruzando la medianoche**.
 - Una máquina cuyo medidor ya avanzó por un preoperacional del mismo día: RF-13 nunca lo
   hace retroceder.
+- *(cambio 2026-09-14)* Un parte **cerrado antes del cambio** con secciones vacías: sigue
+  cerrado y válido (RF-56). Las exigencias nuevas rigen para lo que se cierre de aquí en
+  adelante.
+- *(cambio 2026-09-14)* Un día en que **se trabajó la mañana y llovió la tarde**: no es día
+  sin trabajo; se cierra completo y la lluvia queda en las franjas de clima (RF-55).
+- *(cambio 2026-09-14)* Una foto de actividad **elegida y abandonada** sin guardar: no
+  aparece en el parte (RF-48). No se borra del almacén: nada se borra.
 
 ## Fuera de alcance
 
@@ -193,13 +254,15 @@ tanda: no añade campos, cambia de qué habla el documento.
 - Migrar las bitácoras por máquina ya registradas al formato nuevo: se conservan como
   histórico de solo lectura (RF-36).
 - Informes, exportación a hoja de cálculo o PDF, y firmas sobre la bitácora.
-- **Calcular solos el área y el volumen** a partir de longitud, ancho y alto. Se escriben a
-  mano en esta iteración: falta definir qué unidad usa cada actividad, y sin eso el cálculo
-  sería correcto unas veces y absurdo otras.
+- ~~**Calcular solos el área y el volumen**~~ — **entra en alcance el 2026-09-15** (RF-58
+  a RF-60). OCC decidió que se multiplica lo que se escribe, en la unidad en que se escriba.
 - El tope de **42 horas semanales**: esta bitácora clasifica el día, no la semana.
 - Cálculo de nómina o de costos a partir de las horas del personal.
 - Comparar lo ejecutado contra lo programado, y cualquier medida de avance de obra.
 - Que las horas del personal alimenten otro módulo.
+- *(cambio 2026-09-14)* Reevaluar o reabrir los partes cerrados antes del cambio (RF-56).
+- *(cambio 2026-09-14)* Cambiar los ítems de Control Calidad de Obra: cambian, pero OCC los
+  enviará más adelante. Por ahora solo cambia el nombre (RF-49).
 
 ## Criterios de finalización
 
@@ -229,8 +292,22 @@ Resueltas el 2026-09-09:
   (RF-28).
 - **Casos límite**: se implementan como están descritos arriba.
 
+Resueltas el 2026-09-14 (entrevista de los Req2 a Req5):
+
+- **Observaciones de maquinaria**: una por máquina, no una para toda la sección (RF-45).
+- **Día sin trabajo**: se marca «no se trabajó» con motivo, y entonces solo se exigen clima,
+  notas y fotografía del día (RF-53, RF-54). Cierra la duda que dejaba RF-8.
+- **Cierre**: exige las siete secciones llenas (RF-50).
+
+Resueltas el 2026-09-15:
+
+- **Control Calidad de Obra** cambia de nombre y también de ítems. Los ítems los enviará OCC;
+  mientras tanto se hace solo el cambio de nombre (RF-49).
+- **Foto para cerrar**: basta con que una actividad la tenga (RF-52, corregido).
+- **Dimensiones**: siguen siendo opcionales (RF-25), pero el área y el volumen se calculan
+  multiplicando, y se escriben a mano solo cuando falta alguna medida (RF-58 a RF-60). Con
+  esto se cierra también la duda de la unidad de medida de cada actividad.
+
 Sigue abierta:
 
-- [NECESITA ACLARACIÓN: la unidad de medida de cada actividad (m, m², m³, km). Es lo que
-  falta para poder calcular solos el área y el volumen.]
-- [NECESITA ACLARACIÓN: un día sin trabajo, ¿cómo se cierra la bitácora? (ver casos límite)]
+- [NECESITA ACLARACIÓN: la lista de ítems de Control Calidad de Obra, que enviará OCC.]

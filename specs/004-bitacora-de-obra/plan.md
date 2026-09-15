@@ -88,3 +88,95 @@ anularlo con motivo y abrir otro para el mismo día.
 - **El parte es un formulario largo.** Si guardar no conserva lo escrito a lo largo del día,
   se pierde una tarde de trabajo. El guardado parcial (RF-5) no es comodidad, es lo que hace
   usable el módulo.
+
+---
+
+# Cambio del 2026-09-14/15 — parte completo, observaciones, foto sin guardar y medidas
+
+> Cubre RF-45 a RF-60 de la spec (Req2 a Req5 de OCC y la corrección del 15). Lo de arriba
+> sigue en pie; esto se suma.
+
+## Módulos y archivos
+
+| Archivo | Qué cambia | RF |
+| --- | --- | --- |
+| `src/shared/rules/dimensiones.ts` | **Nuevo.** `calcularDimensiones`: área = longitud × ancho si están las dos; volumen = longitud × ancho × alto si están las tres; si falta un factor, se respeta el valor escrito a mano. Redondeo a dos decimales | RF-58..60 |
+| `src/shared/rules/parte.ts` | `bloqueosDelCierre` pide las siete secciones, observaciones en cada máquina y foto en al menos una actividad; con día sin trabajo, solo clima, notas y foto del día. `validarDiaSinTrabajo` nueva. `seccionesDelParte` titula «Control Calidad de Obra» —el id `laboratorio` no cambia— y marca «no aplica» lo que un día sin trabajo no exige | RF-49..55 |
+| `src/features/bitacoras/tipos.ts` | `MaquinaDelParte.observaciones` | RF-45, RF-46 |
+| `src/features/bitacoras/parte.ts` | `construirMaquina` guarda las observaciones; `construirActividadDelParte` pasa las medidas por `calcularDimensiones` | RF-45, RF-58..60 |
+| `src/db/servidor/esquema.ts` | `partes_de_obra.sin_trabajo` (booleano, `false` por defecto) y `motivo_sin_trabajo` | RF-53..55 |
+| `src/features/panel/contratos.ts` | Observaciones de la máquina, id de actividad con tope, `sinTrabajo` y `motivoSinTrabajo` en la edición y en `ParteFila` | RF-45, RF-47, RF-53 |
+| `src/app/api/panel/partes/[id]+api.ts` | Guarda lo nuevo; rechaza marcar día sin trabajo con filas registradas o sin motivo | RF-45, RF-53, RF-55 |
+| `src/app/api/panel/partes/[id]/cerrar+api.ts` | Cuenta las fotos en `media` y responde **todos** los bloqueos | RF-50..56 |
+| `src/constants/theme.ts` + `src/features/panel/componentes.tsx` | `Campo` con `lineas`: área de texto de varias líneas, con su alto mínimo en el tema | RF-45 |
+| `src/features/panel/pantalla-partes.tsx` | Observaciones por máquina; id de actividad al añadir y foto inmediata; área y volumen calculados; nombre nuevo de la sección; casilla de día sin trabajo con motivo | RF-45..49, RF-53..60 |
+| `scripts/verificar-reglas.ts` | Casos nuevos y ajuste de los que esperaban el rechazo antiguo de RF-8 | — |
+
+Se reutiliza: `idDeFila` (`bitacoras/tipos.ts`), la ruta de foto del parte —ya acepta
+cualquier `item`—, `SubirFoto`, `validarAvance` y `mensajeDeAvance` (`jornada.ts`),
+`parteEditable`, `requerirPermiso` y `alcanzaLaObra`.
+
+## Modelo de datos
+
+- **Servidor**: dos columnas nuevas en `partes_de_obra`, con migración aditiva. Las filas
+  existentes quedan con `sin_trabajo = false`, que es lo que eran.
+- **Observaciones de la máquina**: van dentro del JSON de `maquinaria`, sin columna. Un
+  parte viejo que no las trae se lee como texto vacío.
+- **Local (celular)**: sin cambios. El parte no viaja al teléfono.
+
+## Decisiones técnicas
+
+- **El id de la actividad nace en el navegador al pulsar «Añadir actividad»**, y con él la
+  foto se sube en el acto. *Descartado:* guardar la sección sin avisar al elegir la foto,
+  porque se guardarían también las filas a medio escribir de las demás actividades. Una
+  foto de una actividad que nunca se guardó no se pinta, porque el parte solo pinta las fotos
+  de actividades que existen (RF-48). El archivo se queda en el almacén: nada se borra.
+- **Área y volumen en una regla pura que llaman la pantalla y el servidor.** *Descartado:*
+  calcular solo en pantalla, porque una petición hecha por fuera guardaría números que no
+  cuadran. El servidor recalcula y manda.
+- **Día sin trabajo en columnas propias.** *Descartado:* una frase convenida dentro de las
+  notas, porque el cierre tendría que interpretar texto para saber qué exigir.
+- **El cierre responde todos los bloqueos juntos.** *Descartado:* seguir mandando el primero,
+  porque RF-50 pide nombrar todo lo que falta. El contrato de orden que documenta
+  `bloqueosDelCierre` deja de ser necesario y su comentario se reescribe.
+- **Las fotos las cuenta la ruta de cierre** y se las pasa a la regla ya contadas (fotos del
+  día e ids de actividad con foto). *Descartado:* que la regla consulte `media`, porque
+  dejaría de ser pura (constitución §3).
+- **RF-56 sale por construcción**: la regla solo corre al cerrar, y un parte ya cerrado no se
+  vuelve a cerrar. No hace falta distinguir fechas.
+
+## Impacto en la sincronización
+
+Ninguno. El parte es exclusivo del panel (ver arriba).
+
+## Contrato de API
+
+- `PATCH /api/panel/partes/:id` — guardia `bitacoras/escribir` y `parteEditable`, como hoy.
+  Nuevos campos opcionales: `maquinaria[].observaciones`, `sinTrabajo`, `motivoSinTrabajo`.
+  Respuestas 400: marcar día sin trabajo con máquinas, personas o actividades (se mira lo
+  que llega en la misma petición o, si no llega, lo guardado); día sin trabajo sin motivo.
+  Como Neon no da transacciones, la comprobación y el `UPDATE` van en la misma sentencia
+  condicionada cuando la petición no trae esas secciones.
+- `POST /api/panel/partes/:id/cerrar` — 400 con todos los bloqueos en un solo mensaje.
+
+## Estrategia de verificación
+
+En `scripts/verificar-reglas.ts`: 3 × 4 da área 12; sin ancho se respeta el área escrita;
+2 × 3 × 0,5 da volumen 3; un parte vacío nombra las siete secciones; una máquina sin
+observaciones se nombra; ninguna actividad con foto bloquea y una ya no; un día sin trabajo
+con clima, notas y foto cierra; día sin trabajo con una máquina se rechaza; sin motivo se
+rechaza; el índice titula «Control Calidad de Obra».
+
+Demo manual en el navegador (reiniciando `npm run web` tras tocar las rutas): intentar cerrar
+un parte vacío y leer las siete faltas; añadir una actividad y subirle foto sin guardar;
+escribir largo 3 y ancho 4 y ver área 12; observaciones de VOL-01 en el área de texto;
+marcar un domingo como día sin trabajo con motivo y cerrarlo solo con clima, notas y foto.
+
+## Riesgos
+
+- **Los partes abiertos hoy con secciones vacías dejan de poder cerrarse.** Es lo que pidió
+  OCC, pero hay que avisar a los residentes antes de desplegar.
+- **Casos de verificación que comparan textos** del cierre antiguo: se ajustan en la misma
+  tarea que cambia la regla, no después.
+- **Fotos huérfanas** de actividades descartadas ocupan espacio en el almacén. Son pocas y
+  pequeñas; limpiarlas sería borrar, y no se hace.

@@ -50,11 +50,12 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 import {
-  IDS_DE_SECCION,
   type EstadoDeSeccion,
   type IdDeSeccion,
   type SeccionDelParte,
 } from '@/shared/rules/parte';
+
+import { Aviso } from './componentes';
 
 /* ------------------------------------------------------------------------ */
 /* El índice                                                                 */
@@ -71,10 +72,14 @@ const GLIFO: Record<EstadoDeSeccion, string> = {
   lleno: '●',
   vacio: '○',
   desconocido: '·',
+  // Un día sin trabajo no exige esa sección (004/RF-54). No es «sin registrar»,
+  // que invitaría a llenarla.
+  no_aplica: '–',
 };
 
 function detalleDe(seccion: SeccionDelParte): string {
   if (seccion.estado === 'desconocido') return 'comprobando';
+  if (seccion.estado === 'no_aplica') return 'no aplica';
   if (seccion.cuantos === null) return seccion.estado === 'lleno' ? 'listo' : 'sin registrar';
   return seccion.cuantos === 0 ? 'sin registrar' : String(seccion.cuantos);
 }
@@ -114,8 +119,9 @@ function EntradaDelIndice({
         {GLIFO[seccion.estado]}
       </Text>
       <Text
+        // Sin corte: «Control Calidad de Obra» se lee entero, en dos renglones si
+        // hace falta (spec 007, RF-27). Cortado decía «Control Calidad …».
         style={[estilos.entradaTitulo, activa && estilos.entradaTituloActiva]}
-        numberOfLines={1}
       >
         {seccion.titulo}
       </Text>
@@ -183,9 +189,10 @@ export function SeccionEnMarco({
   accion,
   ultima,
   alMedir,
+  error,
   children,
 }: {
-  /** Cerrado a los nueve ids de la regla: de ahí sale también el apilado. */
+  /** Cerrado a los nueve ids de la regla: es la llave con la que salta el índice. */
   id: IdDeSeccion;
   titulo: string;
   /** Lo que va a la derecha del rótulo. Normalmente el botón de guardar. */
@@ -193,9 +200,23 @@ export function SeccionEnMarco({
   ultima?: boolean;
   /** Dónde empieza esta banda dentro del marco, para poder saltar a ella. */
   alMedir?: (id: string, y: number) => void;
+  /**
+   * Lo que salió mal al guardar esta sección. Se pinta arriba de su cuerpo, a la
+   * vista de quien pulsó el botón (spec 007, RF-28): en el aviso de arriba de la
+   * página no lo veía nadie que estuviera guardando la sección de cierre.
+   */
+  error?: string | null;
   children: ReactNode;
 }) {
   /**
+   * Las bandas ya no llevan `zIndex` (spec 007). Lo llevaban, descendente,
+   * porque React Native Web le pone `z-index: 0` a toda vista y una lista abierta
+   * en una banda se metía debajo de la siguiente. Desde que las listas se pintan
+   * en la capa flotante, nada de la página puede taparlas, y el parche sobraba.
+   *
+   * Lo que sigue es el comentario que explicaba el parche, por si alguien lo
+   * vuelve a necesitar:
+   *
    * Por qué cada banda lleva su propio `zIndex`, y por qué va al revés.
    *
    * React Native Web le pone `z-index: 0` a toda vista, así que cada banda es su
@@ -210,19 +231,21 @@ export function SeccionEnMarco({
    * Este problema ya se había resuelto una vez, en la bitácora por máquina que
    * la spec 004 retiró. Se perdió con el archivo y volvió con las bandas.
    */
-  const apilado = IDS_DE_SECCION.length - IDS_DE_SECCION.indexOf(id);
 
   return (
     <View
       nativeID={`seccion-${id}`}
       onLayout={(evento) => alMedir?.(id, evento.nativeEvent.layout.y)}
-      style={[estilos.banda, !ultima && estilos.bandaConLinea, { zIndex: apilado }]}
+      style={[estilos.banda, !ultima && estilos.bandaConLinea]}
     >
       <View style={estilos.bandaCabecera}>
         <Text style={estilos.bandaTitulo}>{titulo}</Text>
         {accion ? <View style={estilos.bandaAccion}>{accion}</View> : null}
       </View>
-      <View style={estilos.bandaCuerpo}>{children}</View>
+      <View style={estilos.bandaCuerpo}>
+        {error ? <Aviso tono="error">{error}</Aviso> : null}
+        {children}
+      </View>
     </View>
   );
 }
@@ -393,9 +416,7 @@ const estilos = StyleSheet.create({
   bandaAccion: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   bandaCuerpo: { paddingHorizontal: Spacing.four, gap: Spacing.two },
 
-  /** Puede llevar un selector, así que se pinta por encima de lo que sigue. */
   pie: {
-    zIndex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'flex-end',

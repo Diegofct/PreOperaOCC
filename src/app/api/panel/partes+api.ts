@@ -27,6 +27,8 @@ const COLUMNAS = {
   clima: partesDeObra.clima,
   laboratorio: partesDeObra.laboratorio,
   notas: partesDeObra.notas,
+  sinTrabajo: partesDeObra.sinTrabajo,
+  motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,

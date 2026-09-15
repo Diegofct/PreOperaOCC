@@ -38,7 +38,25 @@ import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
  * tarda. Pintarlo como vacío mientras carga sería mentir durante un segundo, y
  * es justo el segundo en que alguien decide si le falta subir la foto del día.
  */
-export type EstadoDeSeccion = 'lleno' | 'vacio' | 'desconocido';
+export type EstadoDeSeccion = 'lleno' | 'vacio' | 'desconocido' | 'no_aplica';
+
+/**
+ * Cómo se llama cada sección, en el índice y en los mensajes del cierre.
+ *
+ * Una sola tabla para los dos, porque «falta llenar Control Calidad de Obra» y
+ * una entrada del índice que dijera «Laboratorio» serían dos nombres para la
+ * misma cosa. El id `laboratorio` se conserva: es la llave con la que el índice
+ * salta a su banda, y renombrarlo no le aporta nada a quien lee (004/RF-49).
+ */
+export const TITULO_DE_SECCION = {
+  maquinaria: 'Maquinaria',
+  personal: 'Personal',
+  actividades: 'Actividades',
+  clima: 'Clima',
+  laboratorio: 'Control Calidad de Obra',
+  notas: 'Notas',
+  fotografia: 'Fotografía del día',
+} as const;
 
 export interface SeccionDelParte {
   /** Estable. Es la llave con la que el índice salta a su sección. */
@@ -70,16 +88,21 @@ export interface ConteosDelParte {
   historicoCerradas: number;
   cerrado: boolean;
   anulado: boolean;
+  /**
+   * Marcado como día sin trabajo (004/RF-53). Ausente es no marcado, que es lo
+   * que son todos los partes anteriores al cambio.
+   */
+  sinTrabajo?: boolean;
 }
 
 /**
  * Los ids de las secciones, **en el orden en que se pintan**.
  *
- * Se exporta porque hay dos cosas que dependen de este orden y que no se pueden
- * permitir discrepar: el índice, que lleva a cada banda, y el apilado de las
- * bandas —una lista desplegable abierta en la sección de arriba tiene que
- * pintarse por encima de la de abajo, y eso se consigue con un `zIndex`
- * descendente que sale justo de aquí—.
+ * El índice lleva a cada banda por su id, y el orden de esta lista es el orden
+ * del documento. Hasta la spec 007 también salía de aquí el `zIndex`
+ * descendente de las bandas, para que una lista abierta arriba no quedara bajo
+ * la sección de abajo; desde que las listas se pintan en la capa flotante, ese
+ * uso se retiró.
  */
 export const IDS_DE_SECCION = [
   'maquinaria',
@@ -100,6 +123,11 @@ function porCuantos(id: string, titulo: string, cuantos: number): SeccionDelPart
   return { id, titulo, estado: cuantos > 0 ? 'lleno' : 'vacio', cuantos };
 }
 
+/** Algo escrito de verdad: los espacios y saltos que quedan al borrar no cuentan. */
+function hayTexto(texto: string | null | undefined): boolean {
+  return (texto ?? '').trim().length > 0;
+}
+
 /**
  * Las secciones del parte, **en el orden en que se pintan**.
  *
@@ -109,22 +137,38 @@ function porCuantos(id: string, titulo: string, cuantos: number): SeccionDelPart
  * equivocada sin que nada fallara a la vista.
  */
 export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
+  /**
+   * En un día sin trabajo, lo que no se exige y está vacío «no aplica»: decir
+   * «sin registrar» invitaría a llenar la maquinaria de un domingo. Si tiene
+   * algo, se enseña lo que tiene — el parte no esconde datos por una marca, y es
+   * el cierre quien rechaza la contradicción (004/RF-55).
+   */
+  const exigible = (id: string, titulo: string, cuantos: number): SeccionDelParte =>
+    conteos.sinTrabajo && cuantos === 0
+      ? { id, titulo, estado: 'no_aplica', cuantos: null }
+      : porCuantos(id, titulo, cuantos);
+
   const secciones: SeccionDelParte[] = [
-    porCuantos('maquinaria', 'Maquinaria', conteos.maquinaria),
-    porCuantos('personal', 'Personal', conteos.personal),
-    porCuantos('actividades', 'Actividades', conteos.actividades),
-    porCuantos('clima', 'Clima', conteos.clima),
-    porCuantos('laboratorio', 'Laboratorio', conteos.laboratorio),
+    exigible('maquinaria', TITULO_DE_SECCION.maquinaria, conteos.maquinaria),
+    exigible('personal', TITULO_DE_SECCION.personal, conteos.personal),
+    exigible('actividades', TITULO_DE_SECCION.actividades, conteos.actividades),
+    porCuantos('clima', TITULO_DE_SECCION.clima, conteos.clima),
+    exigible('laboratorio', TITULO_DE_SECCION.laboratorio, conteos.laboratorio),
     {
       id: 'notas',
-      titulo: 'Notas',
+      titulo: TITULO_DE_SECCION.notas,
       // Tres espacios es lo que queda cuando alguien escribió algo y lo borró.
-      estado: conteos.notas.trim().length > 0 ? 'lleno' : 'vacio',
+      estado: hayTexto(conteos.notas) ? 'lleno' : 'vacio',
       cuantos: null,
     },
     conteos.fotos === null
-      ? { id: 'fotografia', titulo: 'Fotografía del día', estado: 'desconocido', cuantos: null }
-      : porCuantos('fotografia', 'Fotografía del día', conteos.fotos),
+      ? {
+          id: 'fotografia',
+          titulo: TITULO_DE_SECCION.fotografia,
+          estado: 'desconocido',
+          cuantos: null,
+        }
+      : porCuantos('fotografia', TITULO_DE_SECCION.fotografia, conteos.fotos),
     {
       id: 'cierre',
       titulo: 'Cerrar la jornada',
@@ -156,6 +200,11 @@ export interface MaquinaEvaluable {
   claseMedidor: ClaseDeMedidor;
   medidorInicial: number | null;
   medidorFinal: number | null;
+  /**
+   * Opcional en el tipo porque los partes anteriores al 2026-09-14 no las
+   * traen. Ausente se lee como vacío, y vacío no deja cerrar (004/RF-51).
+   */
+  observaciones?: string;
 }
 
 /** Lo que se mira de una persona. Su horario completo, nada más. */
@@ -165,53 +214,199 @@ export interface PersonaEvaluable {
   salida: string | null;
 }
 
+/** De una actividad solo importa su id: es a lo que apuntan sus fotografías. */
+export interface ActividadEvaluable {
+  id: string;
+}
+
 export interface ParteEvaluable {
   maquinaria: MaquinaEvaluable[];
   personal: PersonaEvaluable[];
-  /** Solo se cuenta cuántas hay: una actividad basta para que el parte no esté vacío. */
-  actividades: unknown[];
+  actividades: ActividadEvaluable[];
+  /** Solo se cuenta si hay: el contenido de cada franja lo valida quien la guarda. */
+  clima: unknown[];
+  /** La sección de Control Calidad de Obra. Ídem. */
+  laboratorio: unknown[];
+  notas: string | null;
+  /** Ausente es no marcado, como en todos los partes anteriores al cambio. */
+  sinTrabajo?: boolean;
+  motivoSinTrabajo?: string | null;
+}
+
+/**
+ * Las fotografías del parte, ya contadas por quien pregunta.
+ *
+ * Llegan aparte y contadas porque viven en otro sitio que el parte —el almacén
+ * de imágenes y su tabla— y leerlas es I/O. La ruta de cierre las consulta y la
+ * pantalla ya las tiene cargadas; la regla solo decide con lo que le dan.
+ */
+export interface FotosDelParte {
+  /** Cuántas fotografías del día tiene el parte. */
+  delDia: number;
+  /**
+   * El id de actividad al que apunta cada foto de actividad. Puede traer ids de
+   * actividades que ya no están en el parte: se subió la foto y la actividad se
+   * quitó sin guardar (004/RF-48). La regla los descarta al cruzarlos.
+   */
+  itemsConFoto: readonly string[];
+}
+
+/* ── El día sin trabajo ─────────────────────────────────────────────────── */
+
+export type ErrorDeDiaSinTrabajo = 'con_trabajo' | 'sin_motivo';
+
+/**
+ * ¿Es válida la marca de día sin trabajo?
+ *
+ * La usan dos: el cierre, y la ruta de guardado, que no deja ni siquiera marcar
+ * un día que ya tiene trabajo registrado. `con_trabajo` va primero porque es el
+ * error de fondo: escribir un motivo no arregla que ese día sí se trabajó.
+ *
+ * Un día en que se trabajó la mañana y llovió la tarde **no** es día sin trabajo:
+ * se cierra completo y la lluvia queda en el clima (004/RF-55).
+ */
+export function validarDiaSinTrabajo(parte: {
+  sinTrabajo?: boolean;
+  motivoSinTrabajo?: string | null;
+  maquinaria: readonly unknown[];
+  personal: readonly unknown[];
+  actividades: readonly unknown[];
+}): ErrorDeDiaSinTrabajo | null {
+  if (!parte.sinTrabajo) return null;
+  if (parte.maquinaria.length > 0 || parte.personal.length > 0 || parte.actividades.length > 0) {
+    return 'con_trabajo';
+  }
+  if (!hayTexto(parte.motivoSinTrabajo)) return 'sin_motivo';
+  return null;
+}
+
+/** Lo que ya está guardado del parte, en lo que toca al día sin trabajo. */
+export interface DiaGuardado {
+  sinTrabajo: boolean;
+  motivoSinTrabajo: string | null;
+  maquinaria: readonly unknown[];
+  personal: readonly unknown[];
+  actividades: readonly unknown[];
+}
+
+/** Lo que trae un guardado parcial. Ausente es «no se toca». */
+export interface CambiosDelDia {
+  sinTrabajo?: boolean;
+  motivoSinTrabajo?: string | null;
+  maquinaria?: readonly unknown[];
+  personal?: readonly unknown[];
+  actividades?: readonly unknown[];
+}
+
+/**
+ * Cómo queda la marca de día sin trabajo después de un guardado, y si es válida.
+ *
+ * El guardado es parcial: una petición puede traer solo la marca, o solo la
+ * maquinaria. Así que no basta con validar lo que llega; hay que validar **cómo
+ * queda el parte** mezclando lo que llega con lo guardado. Sin eso, marcar un
+ * domingo que ya tiene una máquina pasaría porque la petición no trae máquinas,
+ * y registrar una máquina en un día marcado pasaría porque la petición no trae la
+ * marca — y el parte quedaría contradiciéndose (004/RF-55).
+ *
+ * Quitar la marca borra el motivo: un motivo sin marca haría creer a quien lea
+ * el parte que ese día no se trabajó.
+ */
+export function resolverDiaSinTrabajo(
+  guardado: DiaGuardado,
+  cambios: CambiosDelDia,
+): { sinTrabajo: boolean; motivoSinTrabajo: string | null; error: ErrorDeDiaSinTrabajo | null } {
+  const sinTrabajo = cambios.sinTrabajo ?? guardado.sinTrabajo;
+  const motivoSinTrabajo = sinTrabajo
+    ? cambios.motivoSinTrabajo !== undefined
+      ? cambios.motivoSinTrabajo
+      : guardado.motivoSinTrabajo
+    : null;
+
+  const error = validarDiaSinTrabajo({
+    sinTrabajo,
+    motivoSinTrabajo,
+    maquinaria: cambios.maquinaria ?? guardado.maquinaria,
+    personal: cambios.personal ?? guardado.personal,
+    actividades: cambios.actividades ?? guardado.actividades,
+  });
+
+  return { sinTrabajo, motivoSinTrabajo, error };
+}
+
+export function mensajeDeDiaSinTrabajo(error: ErrorDeDiaSinTrabajo): string {
+  return error === 'con_trabajo'
+    ? 'Ese día tiene máquinas, personas o actividades registradas: un día con trabajo se ' +
+        'cierra completo, no como día sin trabajo.'
+    : 'Escriba por qué no se trabajó ese día.';
+}
+
+/* ── El cierre ──────────────────────────────────────────────────────────── */
+
+/** «A, B y C», que es como se lee una lista en español. */
+function enumerar(partes: readonly string[]): string {
+  if (partes.length <= 1) return partes.join('');
+  return `${partes.slice(0, -1).join(', ')} y ${partes.at(-1)}`;
+}
+
+function faltaLlenar(titulos: readonly string[]): string {
+  return `Falta llenar: ${enumerar(titulos)}.`;
 }
 
 /**
  * Lo que impide cerrar, ya redactado y en español. Lista vacía = se puede cerrar.
  *
- * ── Por qué una lista y no el primero ──
+ * ── Qué exige el cierre (spec 004, cambio del 2026-09-14) ──
  *
- * La ruta devolvía el primer problema y paraba, porque un rechazo HTTP lleva un
- * mensaje y no siete. El índice, en cambio, quiere enseñarlos todos: el residente
- * está mirando el documento entero y le sirve saber que le faltan dos cosas, no
- * descubrirlas de una en una a base de pulsar Cerrar.
+ * Hasta entonces bastaba una máquina, una persona o una actividad. OCC pidió que
+ * no se cierre un parte sin haberlo diligenciado entero, así que ahora hacen
+ * falta **las siete secciones** (RF-50), y además:
  *
- * Devolver la lista entera es compatible con lo anterior **solo si el primer
- * elemento es el mismo que devolvía la ruta**, así que el orden de estas tres
- * comprobaciones no es estético: es el contrato. Vacío, luego máquinas, luego
- * personas, cada grupo en el orden en que están registradas.
+ *  · cada máquina con sus dos lecturas —cada una contra el tope de su propio
+ *    medidor, que vive en `validarAvance`— y con sus observaciones (RF-51);
+ *  · cada persona con su hora de entrada y de salida;
+ *  · **al menos una** actividad con fotografía, no todas (RF-52, corregido el
+ *    2026-09-15).
  *
- * ── Qué exige el cierre ──
+ * Un **día sin trabajo** —un domingo, un paro por lluvia— no tiene máquinas ni
+ * actividades que registrar; con la marca y su motivo se exigen solo el clima,
+ * las notas y la foto del día (RF-53, RF-54).
  *
- * Basta **una** de las tres —una máquina, una persona o una actividad—, no las
- * tres: hay días de solo maquinaria y días de solo cuadrilla. Lo que no se
- * perdona es una fila a medias, porque una máquina sin lectura final no dice
- * cuánto trabajó y una persona sin hora de salida no dice cuántas horas hizo.
+ * ── Por qué una lista, y en este orden ──
  *
- * A cada máquina se le exigen **las dos** lecturas, y cada una se valida con el
- * tope de su propio medidor —24 horas de motor u 800 kilómetros en un día—,
- * porque desde la spec 003 la camioneta se mide en kilómetros y la retro en
- * horas. Ese tope vive en `validarAvance`, que es quien sabe de medidores.
+ * El residente está mirando el documento entero en el índice y le sirve saber
+ * todo lo que falta de una vez, no descubrirlo de uno en uno a base de pulsar
+ * Cerrar. Las secciones vacías van juntas en un solo mensaje, porque siete
+ * renglones de «falta X» taparían los que de verdad nombran algo concreto. Luego
+ * máquinas, personas y fotos, cada grupo en el orden en que está registrado.
+ *
+ * Los partes **ya cerrados** antes del cambio no se vuelven a evaluar (RF-56):
+ * esta regla solo corre al cerrar, y un parte cerrado no se vuelve a cerrar.
  */
-export function bloqueosDelCierre(parte: ParteEvaluable): string[] {
+export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): string[] {
   const bloqueos: string[] = [];
 
-  if (
-    parte.maquinaria.length === 0 &&
-    parte.personal.length === 0 &&
-    parte.actividades.length === 0
-  ) {
-    bloqueos.push(
-      'El parte está vacío. Registre al menos una máquina, una persona o una actividad antes ' +
-        'de cerrarlo.',
-    );
+  if (parte.sinTrabajo) {
+    const error = validarDiaSinTrabajo(parte);
+    if (error) bloqueos.push(mensajeDeDiaSinTrabajo(error));
+
+    const faltan: string[] = [];
+    if (parte.clima.length === 0) faltan.push(TITULO_DE_SECCION.clima);
+    if (!hayTexto(parte.notas)) faltan.push(TITULO_DE_SECCION.notas);
+    if (fotos.delDia === 0) faltan.push(TITULO_DE_SECCION.fotografia);
+    if (faltan.length > 0) bloqueos.push(faltaLlenar(faltan));
+
+    return bloqueos;
   }
+
+  const faltan: string[] = [];
+  if (parte.maquinaria.length === 0) faltan.push(TITULO_DE_SECCION.maquinaria);
+  if (parte.personal.length === 0) faltan.push(TITULO_DE_SECCION.personal);
+  if (parte.actividades.length === 0) faltan.push(TITULO_DE_SECCION.actividades);
+  if (parte.clima.length === 0) faltan.push(TITULO_DE_SECCION.clima);
+  if (parte.laboratorio.length === 0) faltan.push(TITULO_DE_SECCION.laboratorio);
+  if (!hayTexto(parte.notas)) faltan.push(TITULO_DE_SECCION.notas);
+  if (fotos.delDia === 0) faltan.push(TITULO_DE_SECCION.fotografia);
+  if (faltan.length > 0) bloqueos.push(faltaLlenar(faltan));
 
   for (const maquina of parte.maquinaria) {
     const error = validarAvance(maquina.claseMedidor, maquina.medidorInicial, maquina.medidorFinal);
@@ -219,6 +414,9 @@ export function bloqueosDelCierre(parte: ParteEvaluable): string[] {
       bloqueos.push(
         `${maquina.codigo}: ${mensajeDeAvance(maquina.claseMedidor, error, maquina.medidorInicial)}`,
       );
+    }
+    if (!hayTexto(maquina.observaciones)) {
+      bloqueos.push(`${maquina.codigo}: faltan las observaciones del día.`);
     }
   }
 
@@ -228,5 +426,27 @@ export function bloqueosDelCierre(parte: ParteEvaluable): string[] {
     }
   }
 
+  // Sin actividades ya lo dice «Falta llenar»; pedirle además la foto a una
+  // actividad que no existe sería decir lo mismo dos veces.
+  if (parte.actividades.length > 0) {
+    const conFoto = new Set(fotos.itemsConFoto);
+    if (!parte.actividades.some((actividad) => conFoto.has(actividad.id))) {
+      bloqueos.push('Falta la fotografía de al menos una actividad.');
+    }
+  }
+
   return bloqueos;
+}
+
+/**
+ * El texto con el que el servidor rechaza un cierre: **todos** los bloqueos, uno
+ * por renglón (004/RF-50).
+ *
+ * La ruta mandaba solo el primero, porque un rechazo lleva un mensaje. Pero así
+ * el residente descubría lo que faltaba de uno en uno, pulsando Cerrar una y otra
+ * vez. No se recorta la lista: si hay veinte máquinas sin observaciones, son
+ * veinte cosas que hacer, y esconder quince no las hace desaparecer.
+ */
+export function mensajeDelRechazoDeCierre(bloqueos: readonly string[]): string {
+  return ['No se puede cerrar el parte todavía:', ...bloqueos.map((b) => `• ${b}`)].join('\n');
 }

@@ -3,7 +3,7 @@
  *
  * Sustituye a la bitácora por máquina. Lo que antes era un documento por equipo
  * y día es ahora uno por **obra** y día, con la maquinaria dentro como una
- * sección entre siete: maquinaria, personal, actividades, clima, laboratorio,
+ * sección entre siete: maquinaria, personal, actividades, clima, control de calidad,
  * notas y la fotografía del día.
  *
  * ── Por qué cada sección guarda por su cuenta ──
@@ -24,6 +24,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
 import { actividadesDe, CLAVE_OTRA } from "@/features/bitacoras/actividades";
+import { idDeFila } from "@/features/bitacoras/tipos";
 import {
   CONDICIONES_CLIMA,
   ETIQUETA_UNIDAD,
@@ -47,18 +48,24 @@ import {
   UNIDAD_DE_MEDIDOR,
   validarAvance,
 } from "@/shared/rules/jornada";
+import { nombreDeCargo } from "@/shared/catalogos/cargos";
+import { calcularDimensiones } from "@/shared/rules/dimensiones";
 import { alcanza } from "@/shared/rules/permisos";
-import { bloqueosDelCierre, seccionesDelParte } from "@/shared/rules/parte";
+import {
+  bloqueosDelCierre,
+  seccionesDelParte,
+  TITULO_DE_SECCION,
+} from "@/shared/rules/parte";
 
 import { api } from "./cliente-api";
 import {
   Acciones,
   AccionesFormulario,
-  Ayuda,
   FilaDeFormulario,
   Aviso,
   Boton,
   Campo,
+  Casilla,
   Celda,
   Etiqueta,
   Formulario,
@@ -96,12 +103,38 @@ function aNumero(texto: string): number | null {
   return Number.isFinite(valor) ? valor : null;
 }
 
+/**
+ * Área y volumen de una fila de actividad, tal como los ve quien la llena.
+ *
+ * Es la misma regla que aplica el servidor al guardar (`calcularDimensiones`),
+ * así que lo que la pantalla enseña calculado es lo que queda guardado.
+ */
+function medidasDe(fila: FilaActividad) {
+  return calcularDimensiones({
+    longitud: aNumero(fila.longitud),
+    ancho: aNumero(fila.ancho),
+    alto: aNumero(fila.alto),
+    area: aNumero(fila.area),
+    volumen: aNumero(fila.volumen),
+  });
+}
+
 /* ------------------------------------------------------------------------ */
 
-type FilaMaquina = { vehiculoId: string; inicial: string; final: string };
+type FilaMaquina = {
+  vehiculoId: string;
+  inicial: string;
+  final: string;
+  /** Lo que pasó con la máquina ese día (spec 004, RF-45). */
+  observaciones: string;
+};
 type FilaPersona = { usuarioId: string; entrada: string; salida: string };
 type FilaActividad = {
-  /** El de la fila guardada. Vacío mientras la actividad no se haya guardado. */
+  /**
+   * Nace en el navegador al pulsar «Añadir actividad», no al guardar: es a lo
+   * que apunta la foto, y así la foto se puede subir antes de guardar
+   * (spec 004, RF-47). El servidor lo conserva.
+   */
   id: string;
   clave: string;
   texto: string;
@@ -193,6 +226,8 @@ export default function PantallaPartes() {
     clima: parte?.clima.length ?? 0,
     laboratorio: parte?.laboratorio.length ?? 0,
     notas: parte?.notas ?? "",
+    // Con la marca, lo que no se exige sale como «no aplica» (RF-54).
+    sinTrabajo: parte?.sinTrabajo ?? false,
     // Todavía no se iza el conteo de fotos: lo hace T17. Hasta entonces es
     // `null`, que la regla traduce a «comprobando» y nunca a «sin registrar».
     fotos: fotos.cargando ? null : fotosDelDia.length,
@@ -209,7 +244,16 @@ export default function PantallaPartes() {
    * índice dijera una cosa y el servidor otra, el residente no sabría a cuál
    * hacerle caso.
    */
-  const bloqueos = parte && !cerrado && !anulado ? bloqueosDelCierre(parte) : [];
+  //
+  // Mientras las fotos cargan no se evalúa: diría «falta la fotografía del día»
+  // durante el segundo en que todavía no se sabe si la hay.
+  const bloqueos =
+    parte && !cerrado && !anulado && !fotos.cargando
+      ? bloqueosDelCierre(parte, {
+          delDia: fotosDelDia.length,
+          itemsConFoto: fotos.datos.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
+        })
+      : [];
 
   async function abrir() {
     await dia.ejecutar(() => api.partes.abrir(fecha, obraId ?? undefined));
@@ -219,7 +263,7 @@ export default function PantallaPartes() {
     <MarcoPantalla
       modulo="bitacoras"
       titulo="Parte diario de obra"
-      descripcion="Qué se hizo hoy en la obra: máquinas, personal, actividades, clima y laboratorio. Se llena a lo largo del día y se cierra al terminar la jornada."
+      descripcion="Qué se hizo hoy en la obra: máquinas, personal, actividades, clima y control de calidad. Se llena a lo largo del día y se cierra al terminar la jornada."
       error={dia.error ?? vehiculos.error ?? personas.error ?? obras.error}
       cargando={dia.cargando || vehiculos.cargando || personas.cargando}
       refDesplazamiento={desplazamiento}
@@ -330,7 +374,6 @@ export default function PantallaPartes() {
             )}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionPersonal
@@ -339,7 +382,6 @@ export default function PantallaPartes() {
             personas={personas.datos}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionActividades
@@ -347,7 +389,6 @@ export default function PantallaPartes() {
             parte={parte}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionClima
@@ -355,7 +396,6 @@ export default function PantallaPartes() {
             parte={parte}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionLaboratorio
@@ -363,7 +403,6 @@ export default function PantallaPartes() {
             parte={parte}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionNotas
@@ -371,7 +410,6 @@ export default function PantallaPartes() {
             parte={parte}
             editable={editable}
             alGuardar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionFotoDelDia
@@ -383,13 +421,15 @@ export default function PantallaPartes() {
             alSubir={fotos.recargar}
           />
           <Cierre
+            // Lleva la marca de día sin trabajo en su estado: cambiar de día
+            // tiene que montarla de nuevo, como a las demás secciones.
+            key={`cierre-${parte.id}`}
             parte={parte}
             editable={editable}
             cerrado={cerrado}
             anulado={anulado}
             puedeAnular={alcanza(rol, "bitacoras", "anular")}
             alCambiar={dia.recargar}
-            alFallar={dia.setError}
             alMedir={salto.alMedirBanda}
           />
           <SeccionHistorico
@@ -534,7 +574,6 @@ interface PropsSeccion {
   parte: ParteFila;
   editable: boolean;
   alGuardar: () => void;
-  alFallar: (mensaje: string | null) => void;
 }
 
 function SeccionMaquinaria({
@@ -542,9 +581,11 @@ function SeccionMaquinaria({
   vehiculos,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion & { vehiculos: VehiculoFila[] }) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   // El estado arranca del parte y a partir de ahí manda lo que se teclea. No se
   // vuelve a sincronizar con un efecto a propósito: refrescar desde el servidor
   // mientras alguien escribe le borraría lo que está escribiendo. Cambiar de día
@@ -554,6 +595,8 @@ function SeccionMaquinaria({
       vehiculoId: m.vehiculoId,
       inicial: m.medidorInicial === null ? "" : String(m.medidorInicial),
       final: m.medidorFinal === null ? "" : String(m.medidorFinal),
+      // Los partes anteriores al 2026-09-14 no las traen.
+      observaciones: m.observaciones ?? "",
     })),
   );
   const [guardando, setGuardando] = useState(false);
@@ -575,6 +618,7 @@ function SeccionMaquinaria({
           vehiculoId: f.vehiculoId,
           medidorInicial: aNumero(f.inicial),
           medidorFinal: aNumero(f.final),
+          observaciones: f.observaciones,
         })),
       });
       alFallar(null);
@@ -589,6 +633,7 @@ function SeccionMaquinaria({
   return (
     <SeccionEnMarco
       id="maquinaria"
+      error={error}
       titulo={`Maquinaria (${filas.length})`}
       alMedir={alMedir}
       accion={
@@ -616,12 +661,13 @@ function SeccionMaquinaria({
               <FilaDeFormulario
                 key={`${fila.vehiculoId}-${indice}`}
                 ultima={indice === filas.length - 1}
-                apilado={filas.length - indice}
               >
                 <Campo
                   etiqueta="Equipo"
                   valor={`${equipo?.codigoInterno ?? fila.vehiculoId}${equipo ? ` · ${equipo.tipoNombre}` : ""}`}
                   onChange={() => {}}
+                  // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
+                  soloLectura
                   ancho={240}
                 />
                 <Campo
@@ -650,6 +696,19 @@ function SeccionMaquinaria({
                       : clase === "odometro"
                         ? `${avance} km recorridos`
                         : `${avance} horas de máquina`
+                  }
+                />
+                {/* Va en su propio renglón de la fila, debajo de las lecturas, y
+                    se sigue viendo cuando el parte ya está cerrado (RF-46). */}
+                <Campo
+                  etiqueta="Observaciones del día"
+                  valor={fila.observaciones}
+                  onChange={(v) => cambiar(indice, "observaciones", v)}
+                  multilinea
+                  ayuda={
+                    editable
+                      ? "Qué pasó con la máquina: fallas, tiempos muertos, traslados. Hace falta para cerrar el parte."
+                      : undefined
                   }
                 />
                 {editable ? (
@@ -681,7 +740,10 @@ function SeccionMaquinaria({
             }))}
             onChange={(v) =>
               v &&
-              setFilas([...filas, { vehiculoId: v, inicial: "", final: "" }])
+              setFilas([
+                ...filas,
+                { vehiculoId: v, inicial: "", final: "", observaciones: "" },
+              ])
             }
             vacio="Elija un equipo"
             ancho={260}
@@ -705,9 +767,11 @@ function SeccionPersonal({
   personas,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion & { personas: PersonaFila[] }) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   const [filas, setFilas] = useState<FilaPersona[]>(() =>
     parte.personal.map((p) => ({
       usuarioId: p.usuarioId,
@@ -748,6 +812,7 @@ function SeccionPersonal({
   return (
     <SeccionEnMarco
       id="personal"
+      error={error}
       titulo={`Personal (${filas.length})`}
       alMedir={alMedir}
       accion={
@@ -770,12 +835,13 @@ function SeccionPersonal({
               <FilaDeFormulario
                 key={`${fila.usuarioId}-${indice}`}
                 ultima={indice === filas.length - 1}
-                apilado={filas.length - indice}
               >
                 <Campo
                   etiqueta="Persona"
                   valor={quien?.nombreCompleto ?? fila.usuarioId}
                   onChange={() => {}}
+                  // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
+                  soloLectura
                   ancho={240}
                 />
                 <Campo
@@ -837,7 +903,8 @@ function SeccionPersonal({
             opciones={libres.map((p) => ({
               valor: p.id,
               etiqueta: p.nombreCompleto,
-              detalle: p.cargo ?? undefined,
+              // El nombre del cargo, no su slug: se leía «residente_1» (004/RF-20).
+              detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
             }))}
             onChange={(v) =>
               // En blanco a propósito: un valor puesto de antemano se queda
@@ -867,9 +934,11 @@ function SeccionActividades({
   parte,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   // Las fotos del parte, para repartirlas entre las actividades que las tienen.
   const fotos = useListado<{
     id: string;
@@ -904,7 +973,7 @@ function SeccionActividades({
     try {
       await api.partes.guardar(parte.id, {
         actividades: filas.map((f) => ({
-          id: f.id || null,
+          id: f.id,
           clave: f.clave,
           texto: f.texto,
           descripcion: f.descripcion,
@@ -912,8 +981,10 @@ function SeccionActividades({
           longitud: aNumero(f.longitud),
           ancho: aNumero(f.ancho),
           alto: aNumero(f.alto),
-          area: aNumero(f.area),
-          volumen: aNumero(f.volumen),
+          // Se manda lo que se ve: calculado si hay factores, escrito si no. El
+          // servidor lo recalcula igual con la misma regla (RF-58 a RF-60).
+          area: medidasDe(f).area,
+          volumen: medidasDe(f).volumen,
         })),
       });
       alFallar(null);
@@ -935,6 +1006,7 @@ function SeccionActividades({
   return (
     <SeccionEnMarco
       id="actividades"
+      error={error}
       titulo={`Actividades (${filas.length})`}
       alMedir={alMedir}
       accion={
@@ -945,9 +1017,10 @@ function SeccionActividades({
     >
       {filas.length > 0 ? (
         <>
-          {filas.map((fila, indice) => (
-            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}
-                apilado={filas.length - indice}>
+          {filas.map((fila, indice) => {
+            const medidas = medidasDe(fila);
+            return (
+            <FilaDeFormulario key={fila.id} ultima={indice === filas.length - 1}>
               <Selector
                 etiqueta="Actividad"
                 valor={fila.clave}
@@ -990,41 +1063,53 @@ function SeccionActividades({
                 soloNumeros
                 ancho={110}
               />
+              {/* Con sus factores escritos, área y volumen se calculan y no se
+                  dejan escribir: escribir ahí no serviría de nada. Sin ellos,
+                  se escriben a mano, y lo escrito se conserva aunque luego se
+                  añada el factor y se vuelva a quitar (RF-58 a RF-60). */}
               <Campo
                 etiqueta="Área"
-                valor={fila.area}
+                valor={medidas.areaCalculada ? String(medidas.area) : fila.area}
                 onChange={(v) => cambiar(indice, "area", v)}
                 soloNumeros
+                soloLectura={medidas.areaCalculada}
+                ayuda={medidas.areaCalculada ? "Largo × ancho" : undefined}
                 ancho={110}
               />
               <Campo
                 etiqueta="Volumen"
-                valor={fila.volumen}
+                valor={medidas.volumenCalculado ? String(medidas.volumen) : fila.volumen}
                 onChange={(v) => cambiar(indice, "volumen", v)}
                 soloNumeros
+                soloLectura={medidas.volumenCalculado}
+                ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
                 ancho={110}
               />
               <Campo
                 etiqueta="Observaciones"
                 valor={fila.observaciones}
                 onChange={(v) => cambiar(indice, "observaciones", v)}
-                ancho={300}
+                multilinea
               />
-              {fila.id ? (
-                <SubirFoto
-                  titulo="Foto de la actividad"
-                  rutaDeSubida={`/api/panel/partes/${parte.id}/foto?item=${fila.id}`}
-                  fotos={fotos.datos
-                    .filter((f) => f.itemKey === fila.id)
-                    .map((f) => f.id)}
-                  editable={editable}
-                  alSubir={fotos.recargar}
-                />
-              ) : (
-                <Ayuda>
-                  Guarde la actividad para poder adjuntarle una fotografía.
-                </Ayuda>
-              )}
+              {/* Toda fila tiene id desde que se añade, así que la foto se sube
+                  sin guardar antes (RF-47). Si la actividad se quita sin
+                  guardar, su foto no es de ninguna actividad del parte y no se
+                  pinta en ningún sitio (RF-48). */}
+              <SubirFoto
+                titulo="Foto de la actividad"
+                rutaDeSubida={`/api/panel/partes/${parte.id}/foto?item=${fila.id}`}
+                fotos={fotos.datos
+                  .filter((f) => f.itemKey === fila.id)
+                  .map((f) => f.id)}
+                editable={editable}
+                alSubir={() => {
+                  fotos.recargar();
+                  // El índice cuenta las fotos por su cuenta para saber si ya
+                  // hay una actividad con foto; recargar el día se lo avisa. No
+                  // desmonta la sección, así que lo escrito sin guardar sigue.
+                  alGuardar();
+                }}
+              />
               {editable ? (
                 <AccionesFormulario>
                   <Boton
@@ -1037,7 +1122,8 @@ function SeccionActividades({
                 </AccionesFormulario>
               ) : null}
             </FilaDeFormulario>
-          ))}
+            );
+          })}
         </>
       ) : null}
 
@@ -1050,7 +1136,7 @@ function SeccionActividades({
               setFilas([
                 ...filas,
                 {
-                  id: "",
+                  id: idDeFila(),
                   clave: opciones[0]?.valor ?? CLAVE_OTRA,
                   texto: "",
                   descripcion: "",
@@ -1082,9 +1168,12 @@ function SeccionClima({
   parte,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  // Con otro nombre que en las demás: aquí `error` ya es el de las franjas.
+  const [errorAlGuardar, alFallar] = useState<string | null>(null);
   const [filas, setFilas] = useState<FilaClima[]>(() =>
     parte.clima.map((c) => ({
       condicion: c.condicion,
@@ -1120,6 +1209,7 @@ function SeccionClima({
   return (
     <SeccionEnMarco
       id="clima"
+      error={errorAlGuardar}
       titulo={`Clima (${filas.length} ${filas.length === 1 ? "tramo" : "tramos"})`}
       alMedir={alMedir}
       accion={
@@ -1135,8 +1225,7 @@ function SeccionClima({
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => (
-            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}
-                apilado={filas.length - indice}>
+            <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}>
               <Selector
                 etiqueta="Condición"
                 valor={fila.condicion}
@@ -1202,16 +1291,18 @@ function SeccionClima({
 }
 
 /* ------------------------------------------------------------------------ */
-/* Laboratorio                                                               */
+/* Control Calidad de Obra (antes «Laboratorio»; el id sigue siendo ese)     */
 /* ------------------------------------------------------------------------ */
 
 function SeccionLaboratorio({
   parte,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   const [filas, setFilas] = useState<FilaMaterial[]>(() =>
     parte.laboratorio.map((m) => ({
       material: m.material,
@@ -1268,7 +1359,8 @@ function SeccionLaboratorio({
   return (
     <SeccionEnMarco
       id="laboratorio"
-      titulo={`Laboratorio (${filas.length})`}
+      error={error}
+      titulo={`${TITULO_DE_SECCION.laboratorio} (${filas.length})`}
       alMedir={alMedir}
       accion={
         editable ? (
@@ -1286,7 +1378,6 @@ function SeccionLaboratorio({
                   <FilaDeFormulario
                     key={indice}
                     ultima={indice === filas.length - 1}
-                apilado={filas.length - indice}
                   >
                     <Selector
                       etiqueta="Material"
@@ -1337,7 +1428,7 @@ function SeccionLaboratorio({
         <Tabla
           columnas={columnas}
           filas={parte.laboratorio}
-          vacio="Ese día no se consumió material de laboratorio."
+          vacio="Ese día no se registró nada en control de calidad."
           variante="desnuda"
         />
       )}
@@ -1353,9 +1444,11 @@ function SeccionNotas({
   parte,
   editable,
   alGuardar,
-  alFallar,
   alMedir,
 }: PropsSeccion) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   const [notas, setNotas] = useState(() => parte.notas ?? "");
   const [guardando, setGuardando] = useState(false);
 
@@ -1375,6 +1468,7 @@ function SeccionNotas({
   return (
     <SeccionEnMarco
       id="notas"
+      error={error}
       titulo="Notas y observaciones"
       alMedir={alMedir}
       accion={
@@ -1388,6 +1482,7 @@ function SeccionNotas({
           etiqueta="Del día"
           valor={notas}
           onChange={setNotas}
+          multilinea
           ayuda="Lo que haya que dejar dicho y no quepa en las secciones de arriba."
         />
       ) : (
@@ -1454,7 +1549,6 @@ function Cierre({
   anulado,
   puedeAnular,
   alCambiar,
-  alFallar,
   alMedir,
 }: {
   parte: ParteFila;
@@ -1463,12 +1557,46 @@ function Cierre({
   anulado: boolean;
   puedeAnular: boolean;
   alCambiar: () => void;
-  alFallar: (mensaje: string | null) => void;
   alMedir: (id: string, y: number) => void;
 }) {
+  // El error de guardar se pinta dentro de esta sección y no arriba de la
+  // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
+  const [error, alFallar] = useState<string | null>(null);
   const [anulando, setAnulando] = useState(false);
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState(false);
+
+  // Día sin trabajo (spec 004, RF-53 a RF-55). Arranca de lo guardado y a partir
+  // de ahí manda lo que se marca, igual que las demás secciones.
+  const [sinTrabajo, setSinTrabajo] = useState(parte.sinTrabajo);
+  const [motivoSinTrabajo, setMotivoSinTrabajo] = useState(
+    parte.motivoSinTrabajo ?? "",
+  );
+  const marcaSinGuardar =
+    sinTrabajo !== parte.sinTrabajo ||
+    (sinTrabajo && motivoSinTrabajo.trim() !== (parte.motivoSinTrabajo ?? ""));
+  const hayTrabajoRegistrado =
+    parte.maquinaria.length > 0 ||
+    parte.personal.length > 0 ||
+    parte.actividades.length > 0;
+
+  async function guardarDia() {
+    setOcupado(true);
+    try {
+      // El servidor valida el motivo y que no haya trabajo registrado, con la
+      // misma regla del cierre; si rechaza, el mensaje sale en el aviso.
+      await api.partes.guardar(
+        parte.id,
+        sinTrabajo ? { sinTrabajo, motivoSinTrabajo } : { sinTrabajo },
+      );
+      alFallar(null);
+      alCambiar();
+    } catch (fallo) {
+      alFallar(mensajeDe(fallo));
+    } finally {
+      setOcupado(false);
+    }
+  }
 
   async function cerrar() {
     setOcupado(true);
@@ -1501,7 +1629,56 @@ function Cierre({
   if (anulado) return null;
 
   return (
-    <SeccionEnMarco id="cierre" titulo="Cerrar la jornada" alMedir={alMedir} ultima>
+    <SeccionEnMarco
+      id="cierre"
+      titulo="Cerrar la jornada"
+      alMedir={alMedir}
+      error={error}
+      ultima
+    >
+      {editable ? (
+        <Formulario>
+          <Casilla
+            etiqueta="Ese día no se trabajó"
+            marcada={sinTrabajo}
+            onChange={setSinTrabajo}
+            // Un día con trabajo registrado se cierra completo (RF-55). Si ya
+            // estaba marcado, se deja desmarcar: es la salida de esa contradicción.
+            deshabilitada={hayTrabajoRegistrado && !sinTrabajo}
+          />
+          {hayTrabajoRegistrado && !sinTrabajo ? (
+            <Text style={estilos.apoyo}>
+              Solo para un día sin máquinas, personas ni actividades registradas,
+              como un domingo o un paro por lluvia.
+            </Text>
+          ) : null}
+          {sinTrabajo ? (
+            <Campo
+              etiqueta="Por qué no se trabajó"
+              obligatorio
+              valor={motivoSinTrabajo}
+              onChange={setMotivoSinTrabajo}
+              multilinea
+              ayuda="Con la marca guardada, para cerrar bastan el clima, las notas y la fotografía del día."
+            />
+          ) : null}
+          {marcaSinGuardar ? (
+            <Acciones>
+              <Boton
+                titulo="Guardar"
+                tono="secundario"
+                onPress={guardarDia}
+                deshabilitado={ocupado}
+              />
+            </Acciones>
+          ) : null}
+        </Formulario>
+      ) : parte.sinTrabajo ? (
+        <Aviso tono="info">
+          {`Día sin trabajo: ${parte.motivoSinTrabajo ?? "sin motivo escrito"}`}
+        </Aviso>
+      ) : null}
+
       {editable ? (
         <>
           <Aviso tono="info">
@@ -1524,10 +1701,11 @@ function Cierre({
           <Formulario>
             <Campo
               etiqueta="Motivo de la anulación"
+              obligatorio
               valor={motivo}
               onChange={setMotivo}
               ayuda="Queda guardado con su nombre. El parte anulado no se borra y el día vuelve a quedar libre."
-              ancho={420}
+              multilinea
             />
             <AccionesFormulario>
               <Acciones>

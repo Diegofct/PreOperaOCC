@@ -97,6 +97,14 @@ export interface MaquinaDelParte {
   claseMedidor: 'horometro' | 'odometro';
   medidorInicial: number | null;
   medidorFinal: number | null;
+  /**
+   * Lo que pasó con la máquina ese día (spec 004, RF-45).
+   *
+   * Opcional en el tipo porque va dentro del JSON y los partes guardados antes
+   * del 2026-09-14 no lo traen: decir que siempre está sería mentirle a quien lo
+   * lea. Ausente se lee como vacío.
+   */
+  observaciones?: string;
 }
 
 /** Una persona que trabajó ese día, con su horario. */
