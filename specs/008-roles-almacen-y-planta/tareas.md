@@ -173,3 +173,6 @@ en verde.
   cubiertos por sus casos), el residente con los dos módulos nuevos (RF-12, cubierto por su caso),
   el formulario que ahora limpia el acceso y un celular de la obra sincronizando (RF-19). Por eso
   T8 sigue sin marcar y la spec sigue `Aprobada`: se cierra con esas comprobaciones.
+- **Diego, 2026-09-16:** entró con los roles nuevos y dice que «va como se requiere». Queda por
+  confirmar de forma explícita, al cerrar la 008, qué comprobó (llegada directa, aviso en
+  Bitácoras, residente) y la prueba con un celular (RF-19).

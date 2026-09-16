@@ -23,13 +23,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
-import { actividadesDe, CLAVE_OTRA } from "@/features/bitacoras/actividades";
-import { idDeFila } from "@/features/bitacoras/tipos";
+import { idDeFila, type ViajeDelParte } from "@/features/bitacoras/tipos";
+import { formatearAbscisa } from "@/shared/rules/cantera";
 import {
   CONDICIONES_CLIMA,
-  ETIQUETA_UNIDAD,
-  MATERIALES_LABORATORIO,
-  materialPorId,
+  ENSAYOS_DE_CALIDAD,
 } from "@/shared/catalogos/bitacora";
 import {
   desglosarJornada,
@@ -49,12 +47,27 @@ import {
   validarAvance,
 } from "@/shared/rules/jornada";
 import { nombreDeCargo } from "@/shared/catalogos/cargos";
-import { calcularDimensiones } from "@/shared/rules/dimensiones";
+import {
+  calcularDimensiones,
+  resolverCantidad,
+  type OrigenDeCantidad,
+} from "@/shared/rules/dimensiones";
+import {
+  ACTIVIDADES_DEL_PRESUPUESTO,
+  actividadPorItem,
+  CLAVE_OTRA_ACTIVIDAD,
+  etiquetaDeActividad,
+  etiquetaDeUnidad,
+  UNIDADES_DE_ACTIVIDAD,
+} from "@/shared/catalogos/presupuesto";
 import { alcanza } from "@/shared/rules/permisos";
 import {
   bloqueosDelCierre,
+  faltaObservacionDelEnsayo,
+  faltasDeActividad,
   seccionesDelParte,
   TITULO_DE_SECCION,
+  type CampoDeActividad,
 } from "@/shared/rules/parte";
 
 import { api } from "./cliente-api";
@@ -83,7 +96,11 @@ import {
   useSaltoASeccion,
 } from "./secciones-con-indice";
 import type {
+  ActividadDelParteFila,
   BitacoraFila,
+  FilaDeControlDeCalidadFila,
+  MaterialDelParteFila,
+  CanteraDelParteFila,
   DiaDeObra,
   JornadaFila,
   ObraFila,
@@ -119,6 +136,29 @@ function medidasDe(fila: FilaActividad) {
   });
 }
 
+/**
+ * La clave de la unidad de una fila: la del presupuesto, la elegida en «otra», o
+ * ninguna si todavía no se eligió (spec 004, RF-66, RF-70).
+ */
+function unidadDe(fila: FilaActividad): string | null {
+  if (fila.clave === CLAVE_OTRA_ACTIVIDAD) return fila.unidad || null;
+  return actividadPorItem(fila.clave)?.unidad ?? null;
+}
+
+/**
+ * La cantidad tal como la ve quien llena la fila: tomada de su medida si la unidad
+ * la tiene, escrita si no. La misma regla que aplica el servidor (RF-67 a RF-69).
+ */
+function cantidadDe(fila: FilaActividad) {
+  return resolverCantidad(unidadDe(fila), medidasDe(fila), aNumero(fila.cantidad));
+}
+
+const AYUDA_DE_CANTIDAD: Record<OrigenDeCantidad, string> = {
+  volumen: "Del volumen",
+  area: "Del área",
+  longitud: "De la longitud",
+};
+
 /* ------------------------------------------------------------------------ */
 
 type FilaMaquina = {
@@ -138,6 +178,10 @@ type FilaActividad = {
   id: string;
   clave: string;
   texto: string;
+  /** La clave de la unidad elegida. Solo en «otra»; en las demás la pone el presupuesto. */
+  unidad: string;
+  /** Lo escrito a mano. Solo cuenta si no se puede tomar de una medida. */
+  cantidad: string;
   descripcion: string;
   observaciones: string;
   longitud: string;
@@ -145,9 +189,24 @@ type FilaActividad = {
   alto: string;
   area: string;
   volumen: string;
+  /**
+   * La fila tal como se guardó, si es de antes de los catálogos de OCC (RF-71): se
+   * enseña de solo lectura y viaja solo con su id, para que el servidor la conserve.
+   */
+  heredada: ActividadDelParteFila | null;
 };
 type FilaClima = { condicion: string; desde: string; hasta: string };
-type FilaMaterial = { material: string; cantidad: string };
+type FilaControlDeCalidad = {
+  id: string;
+  /** El id del catálogo; vacío hasta que se elige. */
+  ensayo: string;
+  observacion: string;
+  /**
+   * El material tal como se guardó, si la fila es de antes de que la sección fuera
+   * de ensayos (RF-63): se ve de solo lectura y viaja solo con su id.
+   */
+  heredado: MaterialDelParteFila | null;
+};
 
 export default function PantallaPartes() {
   const persona = usePersona();
@@ -211,6 +270,26 @@ export default function PantallaPartes() {
     .map((f) => f.id);
 
   /**
+   * Los viajes de cantera del día (spec 010), pedidos aquí por la misma razón que
+   * las fotos: el índice necesita su conteo (RF-28). La sección los recibe ya
+   * decididos —vigentes, fijados o el aviso— por `canteraDelParte` en el servidor.
+   */
+  const cantera = useListado<CanteraDelParteFila>(
+    useCallback(
+      () => (parte ? api.partes.cantera(parte.id).then((c) => [c]) : Promise.resolve([])),
+      [parte],
+    ),
+  );
+  const seccionCantera = cantera.datos[0] ?? null;
+  // Para el índice: `null` mientras carga («comprobando»); sin entrada si la
+  // bitácora se cerró antes del módulo, donde no hay viajes que contar.
+  const conteoCantera = cantera.cargando
+    ? null
+    : seccionCantera?.estado === "antes_del_control"
+      ? undefined
+      : (seccionCantera?.viajes.length ?? 0);
+
+  /**
    * Lo que el índice enseña. Sale de `shared/rules/parte`, que es la misma regla
    * que decide qué impide cerrar — así el índice y el servidor no discrepan.
    *
@@ -234,6 +313,8 @@ export default function PantallaPartes() {
     historicoCerradas,
     cerrado,
     anulado,
+    // Solo hay sección de cantera con un parte en pantalla.
+    cantera: parte ? conteoCantera : undefined,
   });
 
   /**
@@ -405,6 +486,12 @@ export default function PantallaPartes() {
             alGuardar={dia.recargar}
             alMedir={salto.alMedirBanda}
           />
+          <SeccionCantera
+            seccion={seccionCantera}
+            cargando={cantera.cargando}
+            error={cantera.error}
+            alMedir={salto.alMedirBanda}
+          />
           <SeccionNotas
             key={`notas-${parte.id}`}
             parte={parte}
@@ -441,6 +528,91 @@ export default function PantallaPartes() {
         </DisposicionConIndice>
       ) : null}
     </MarcoPantalla>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Control Cantera (spec 010)                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Los viajes de cantera de ese día en esa obra, **de solo lectura** (RF-26, RF-27).
+ *
+ * No hay botones: los viajes se registran y se anulan en su módulo, no aquí. Con
+ * el parte abierto se ven los vigentes; cerrado, los que quedaron fijados al cerrar
+ * (RF-29), aunque después se hayan registrado o anulado otros de ese día (RF-30).
+ * Sin viajes, la sección lo dice en vez de quedar en blanco (RF-31, RF-37).
+ */
+function SeccionCantera({
+  seccion,
+  cargando,
+  error,
+  alMedir,
+}: {
+  seccion: CanteraDelParteFila | null;
+  cargando: boolean;
+  error: string | null;
+  alMedir: (id: string, y: number) => void;
+}) {
+  const viajes = seccion?.viajes ?? [];
+
+  const columnasCantera: Columna<ViajeDelParte>[] = [
+    { clave: "hora", titulo: "Hora", ancho: 70, pintar: (v) => <Celda>{v.hora}</Celda> },
+    {
+      clave: "volqueta",
+      titulo: "Volqueta",
+      ancho: 90,
+      pintar: (v) => <Celda>{v.volqueta}</Celda>,
+    },
+    {
+      clave: "conductor",
+      titulo: "Conductor",
+      ancho: 160,
+      pintar: (v) => <Celda>{v.conductor}</Celda>,
+    },
+    {
+      clave: "material",
+      titulo: "Material",
+      ancho: 150,
+      pintar: (v) => <Celda>{v.material}</Celda>,
+    },
+    { clave: "origen", titulo: "Origen", ancho: 160, pintar: (v) => <Celda>{v.origen}</Celda> },
+    {
+      clave: "destino",
+      titulo: "Destino",
+      ancho: 180,
+      pintar: (v) => (
+        <Celda>
+          {v.destinoObra && v.pr !== null && v.metros !== null
+            ? `Obra, ${formatearAbscisa(v.pr, v.metros)}`
+            : (v.destino ?? "—")}
+        </Celda>
+      ),
+    },
+  ];
+
+  return (
+    <SeccionEnMarco
+      id="cantera"
+      error={error}
+      titulo={`${TITULO_DE_SECCION.cantera} (${viajes.length})`}
+      alMedir={alMedir}
+    >
+      {cargando ? (
+        <Aviso tono="info">Cargando los viajes de cantera…</Aviso>
+      ) : seccion?.aviso ? (
+        <Aviso tono="info">{seccion.aviso}</Aviso>
+      ) : (
+        <>
+          <Tabla columnas={columnasCantera} filas={viajes} vacio="" />
+          <Text style={estilos.apoyo}>
+            {seccion?.estado === "fijados"
+              ? "Fijados al cerrar la bitácora. Lo que se registre o anule después en Control Cantera no cambia esta lista."
+              : "Se registran y se anulan en Control Cantera. Al cerrar la bitácora, esta lista queda fijada."}
+          </Text>
+        </>
+      )}
+    </SeccionEnMarco>
   );
 }
 
@@ -939,6 +1111,10 @@ function SeccionActividades({
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
+  // Lo que le falta a cada «otra», escrito bajo su campo. Solo después de pulsar
+  // Guardar: marcar en rojo una fila recién añadida, antes de escribir nada, es
+  // regañar por adelantado.
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
   // Las fotos del parte, para repartirlas entre las actividades que las tienen.
   const fotos = useListado<{
     id: string;
@@ -950,7 +1126,11 @@ function SeccionActividades({
     parte.actividades.map((a) => ({
       id: a.id,
       clave: a.clave,
-      texto: a.clave === CLAVE_OTRA ? a.nombre : "",
+      texto: a.clave === CLAVE_OTRA_ACTIVIDAD ? a.nombre : "",
+      // Se guarda la etiqueta («m³»); el formulario trabaja con la clave.
+      unidad: UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ?? "",
+      cantidad:
+        a.cantidad === null || a.cantidad === undefined ? "" : String(a.cantidad),
       descripcion: a.descripcion,
       observaciones: a.observaciones,
       longitud: a.longitud === null ? "" : String(a.longitud),
@@ -958,36 +1138,72 @@ function SeccionActividades({
       alto: a.alto === null ? "" : String(a.alto),
       area: a.area === null ? "" : String(a.area),
       volumen: a.volumen === null ? "" : String(a.volumen),
+      // Sin la propiedad `unidad`: se guardó antes del 2026-09-16.
+      heredada: "unidad" in a ? null : a,
     })),
   );
   const [guardando, setGuardando] = useState(false);
 
   function cambiar(indice: number, campo: keyof FilaActividad, valor: string) {
     setFilas(
-      filas.map((f, i) => (i === indice ? { ...f, [campo]: valor } : f)),
+      filas.map((f, i) => {
+        if (i !== indice) return f;
+        const cambiada = { ...f, [campo]: valor };
+        // Al dejar «otra», la unidad elegida para ella ya no es de nadie.
+        if (campo === "clave" && valor !== CLAVE_OTRA_ACTIVIDAD) cambiada.unidad = "";
+        return cambiada;
+      }),
+    );
+  }
+
+  function faltasDe(fila: FilaActividad): Partial<Record<CampoDeActividad, string>> {
+    if (fila.heredada) return {};
+    return Object.fromEntries(
+      faltasDeActividad({
+        otra: fila.clave === CLAVE_OTRA_ACTIVIDAD,
+        texto: fila.texto,
+        unidad: fila.unidad,
+      }).map((f) => [f.campo, f.mensaje]),
     );
   }
 
   async function guardar() {
+    setIntentoGuardar(true);
+    // Lo que la regla ya sabe que se va a rechazar no se manda: el error se ve bajo
+    // su campo, que es donde se corrige.
+    if (filas.some((f) => Object.keys(faltasDe(f)).length > 0)) {
+      alFallar("Falta completar alguna actividad: está marcado bajo su campo.");
+      return;
+    }
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
-        actividades: filas.map((f) => ({
-          id: f.id,
-          clave: f.clave,
-          texto: f.texto,
-          descripcion: f.descripcion,
-          observaciones: f.observaciones,
-          longitud: aNumero(f.longitud),
-          ancho: aNumero(f.ancho),
-          alto: aNumero(f.alto),
-          // Se manda lo que se ve: calculado si hay factores, escrito si no. El
-          // servidor lo recalcula igual con la misma regla (RF-58 a RF-60).
-          area: medidasDe(f).area,
-          volumen: medidasDe(f).volumen,
-        })),
+        actividades: filas.map((f) =>
+          f.heredada
+            ? { id: f.id }
+            : {
+                id: f.id,
+                clave: f.clave,
+                texto: f.texto,
+                unidad:
+                  f.clave === CLAVE_OTRA_ACTIVIDAD
+                    ? UNIDADES_DE_ACTIVIDAD.find((u) => u.id === f.unidad)?.id ?? null
+                    : null,
+                // Se manda lo que se ve: calculado si hay de dónde, escrito si no. El
+                // servidor lo recalcula igual con la misma regla (RF-58 a RF-60, RF-68).
+                cantidad: cantidadDe(f).cantidad,
+                descripcion: f.descripcion,
+                observaciones: f.observaciones,
+                longitud: aNumero(f.longitud),
+                ancho: aNumero(f.ancho),
+                alto: aNumero(f.alto),
+                area: medidasDe(f).area,
+                volumen: medidasDe(f).volumen,
+              },
+        ),
       });
       alFallar(null);
+      setIntentoGuardar(false);
       alGuardar();
     } catch (fallo) {
       alFallar(mensajeDe(fallo));
@@ -996,12 +1212,21 @@ function SeccionActividades({
     }
   }
 
-  // El catálogo depende del tipo de máquina en la bitácora vieja; en el parte de
-  // obra no hay una sola máquina, así que se ofrecen todas.
-  const opciones = actividadesDe(null).map((a) => ({
-    valor: a.clave,
-    etiqueta: a.nombre,
+  // Los ítems del presupuesto con su número delante, y la salida para lo que no
+  // está (RF-64, RF-65, RF-24). El buscador del selector encuentra por número o
+  // por palabras, porque busca en la etiqueta.
+  const opciones = [
+    ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
+      valor: a.item,
+      etiqueta: etiquetaDeActividad(a),
+    })),
+    { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
+  ];
+  const opcionesDeUnidad = UNIDADES_DE_ACTIVIDAD.map((u) => ({
+    valor: u.id,
+    etiqueta: u.etiqueta,
   }));
+  const sinEscribir = () => {};
 
   return (
     <SeccionEnMarco
@@ -1018,83 +1243,11 @@ function SeccionActividades({
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => {
-            const medidas = medidasDe(fila);
-            return (
-            <FilaDeFormulario key={fila.id} ultima={indice === filas.length - 1}>
-              <Selector
-                etiqueta="Actividad"
-                valor={fila.clave}
-                opciones={opciones}
-                onChange={(v) => cambiar(indice, "clave", v ?? "")}
-                ancho={240}
-              />
-              {fila.clave === CLAVE_OTRA ? (
-                <Campo
-                  etiqueta="¿Cuál?"
-                  valor={fila.texto}
-                  onChange={(v) => cambiar(indice, "texto", v)}
-                  ancho={220}
-                />
-              ) : null}
-              <Campo
-                etiqueta="Descripción"
-                valor={fila.descripcion}
-                onChange={(v) => cambiar(indice, "descripcion", v)}
-                ancho={300}
-              />
-              <Campo
-                etiqueta="Longitud"
-                valor={fila.longitud}
-                onChange={(v) => cambiar(indice, "longitud", v)}
-                soloNumeros
-                ancho={110}
-              />
-              <Campo
-                etiqueta="Ancho"
-                valor={fila.ancho}
-                onChange={(v) => cambiar(indice, "ancho", v)}
-                soloNumeros
-                ancho={110}
-              />
-              <Campo
-                etiqueta="Alto"
-                valor={fila.alto}
-                onChange={(v) => cambiar(indice, "alto", v)}
-                soloNumeros
-                ancho={110}
-              />
-              {/* Con sus factores escritos, área y volumen se calculan y no se
-                  dejan escribir: escribir ahí no serviría de nada. Sin ellos,
-                  se escriben a mano, y lo escrito se conserva aunque luego se
-                  añada el factor y se vuelva a quitar (RF-58 a RF-60). */}
-              <Campo
-                etiqueta="Área"
-                valor={medidas.areaCalculada ? String(medidas.area) : fila.area}
-                onChange={(v) => cambiar(indice, "area", v)}
-                soloNumeros
-                soloLectura={medidas.areaCalculada}
-                ayuda={medidas.areaCalculada ? "Largo × ancho" : undefined}
-                ancho={110}
-              />
-              <Campo
-                etiqueta="Volumen"
-                valor={medidas.volumenCalculado ? String(medidas.volumen) : fila.volumen}
-                onChange={(v) => cambiar(indice, "volumen", v)}
-                soloNumeros
-                soloLectura={medidas.volumenCalculado}
-                ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
-                ancho={110}
-              />
-              <Campo
-                etiqueta="Observaciones"
-                valor={fila.observaciones}
-                onChange={(v) => cambiar(indice, "observaciones", v)}
-                multilinea
-              />
-              {/* Toda fila tiene id desde que se añade, así que la foto se sube
-                  sin guardar antes (RF-47). Si la actividad se quita sin
-                  guardar, su foto no es de ninguna actividad del parte y no se
-                  pinta en ningún sitio (RF-48). */}
+            const ultima = indice === filas.length - 1;
+            const fotoDeLaFila = (
+              // Toda fila tiene id desde que se añade, así que la foto se sube sin
+              // guardar antes (RF-47). Si la actividad se quita sin guardar, su
+              // foto no es de ninguna actividad del parte y no se pinta (RF-48).
               <SubirFoto
                 titulo="Foto de la actividad"
                 rutaDeSubida={`/api/panel/partes/${parte.id}/foto?item=${fila.id}`}
@@ -1104,24 +1257,178 @@ function SeccionActividades({
                 editable={editable}
                 alSubir={() => {
                   fotos.recargar();
-                  // El índice cuenta las fotos por su cuenta para saber si ya
-                  // hay una actividad con foto; recargar el día se lo avisa. No
+                  // El índice cuenta las fotos por su cuenta para saber si ya hay
+                  // una actividad con foto; recargar el día se lo avisa. No
                   // desmonta la sección, así que lo escrito sin guardar sigue.
                   alGuardar();
                 }}
               />
-              {editable ? (
-                <AccionesFormulario>
-                  <Boton
-                    titulo="Quitar actividad"
-                    tono="peligro"
-                    onPress={() =>
-                      setFilas(filas.filter((_, i) => i !== indice))
-                    }
+            );
+            const quitar = editable ? (
+              <AccionesFormulario>
+                <Boton
+                  titulo="Quitar actividad"
+                  tono="peligro"
+                  onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+                />
+              </AccionesFormulario>
+            ) : null;
+
+            // Guardada con la lista anterior: se ve como se guardó y no se toca
+            // (RF-71). Quitarla sí, como cualquier fila de un parte abierto.
+            if (fila.heredada) {
+              const h = fila.heredada;
+              const numero = (v: number | null) => (v === null ? "" : String(v));
+              return (
+                <FilaDeFormulario key={fila.id} ultima={ultima}>
+                  <Campo
+                    etiqueta="Actividad"
+                    valor={h.nombre}
+                    onChange={sinEscribir}
+                    soloLectura
+                    ayuda="De la lista anterior: se conserva como se guardó."
+                    ancho={460}
                   />
-                </AccionesFormulario>
-              ) : null}
-            </FilaDeFormulario>
+                  <Campo
+                    etiqueta="Descripción"
+                    valor={h.descripcion}
+                    onChange={sinEscribir}
+                    soloLectura
+                    ancho={300}
+                  />
+                  <Campo etiqueta="Longitud" valor={numero(h.longitud)} onChange={sinEscribir} soloLectura ancho={110} />
+                  <Campo etiqueta="Ancho" valor={numero(h.ancho)} onChange={sinEscribir} soloLectura ancho={110} />
+                  <Campo etiqueta="Alto" valor={numero(h.alto)} onChange={sinEscribir} soloLectura ancho={110} />
+                  <Campo etiqueta="Área" valor={numero(h.area)} onChange={sinEscribir} soloLectura ancho={110} />
+                  <Campo etiqueta="Volumen" valor={numero(h.volumen)} onChange={sinEscribir} soloLectura ancho={110} />
+                  <Campo
+                    etiqueta="Observaciones"
+                    valor={h.observaciones}
+                    onChange={sinEscribir}
+                    soloLectura
+                    multilinea
+                  />
+                  {fotoDeLaFila}
+                  {quitar}
+                </FilaDeFormulario>
+              );
+            }
+
+            const otra = fila.clave === CLAVE_OTRA_ACTIVIDAD;
+            const medidas = medidasDe(fila);
+            const unidad = unidadDe(fila);
+            const cantidad = cantidadDe(fila);
+            const faltas = intentoGuardar ? faltasDe(fila) : {};
+            return (
+              <FilaDeFormulario key={fila.id} ultima={ultima}>
+                <Selector
+                  etiqueta="Actividad"
+                  valor={fila.clave}
+                  opciones={opciones}
+                  onChange={(v) => cambiar(indice, "clave", v ?? "")}
+                  ancho={460}
+                />
+                {otra ? (
+                  <>
+                    <Campo
+                      etiqueta="¿Cuál?"
+                      valor={fila.texto}
+                      onChange={(v) => cambiar(indice, "texto", v)}
+                      error={faltas.texto}
+                      obligatorio
+                      ancho={220}
+                    />
+                    <Selector
+                      etiqueta="Unidad"
+                      valor={fila.unidad || null}
+                      opciones={opcionesDeUnidad}
+                      onChange={(v) => cambiar(indice, "unidad", v ?? "")}
+                      vacio="Elija"
+                      error={faltas.unidad}
+                      obligatorio
+                      ancho={110}
+                    />
+                  </>
+                ) : (
+                  // La unidad del presupuesto se ve, pero no se elige (RF-66).
+                  <Campo
+                    etiqueta="Unidad"
+                    valor={unidad ? etiquetaDeUnidad(unidad) : ""}
+                    onChange={sinEscribir}
+                    soloLectura
+                    ancho={110}
+                  />
+                )}
+                <Campo
+                  etiqueta="Descripción"
+                  valor={fila.descripcion}
+                  onChange={(v) => cambiar(indice, "descripcion", v)}
+                  ancho={300}
+                />
+                <Campo
+                  etiqueta="Longitud"
+                  valor={fila.longitud}
+                  onChange={(v) => cambiar(indice, "longitud", v)}
+                  soloNumeros
+                  ancho={110}
+                />
+                <Campo
+                  etiqueta="Ancho"
+                  valor={fila.ancho}
+                  onChange={(v) => cambiar(indice, "ancho", v)}
+                  soloNumeros
+                  ancho={110}
+                />
+                <Campo
+                  etiqueta="Alto"
+                  valor={fila.alto}
+                  onChange={(v) => cambiar(indice, "alto", v)}
+                  soloNumeros
+                  ancho={110}
+                />
+                {/* Con sus factores escritos, área y volumen se calculan y no se
+                    dejan escribir: escribir ahí no serviría de nada. Sin ellos,
+                    se escriben a mano, y lo escrito se conserva aunque luego se
+                    añada el factor y se vuelva a quitar (RF-58 a RF-60). */}
+                <Campo
+                  etiqueta="Área"
+                  valor={medidas.areaCalculada ? String(medidas.area) : fila.area}
+                  onChange={(v) => cambiar(indice, "area", v)}
+                  soloNumeros
+                  soloLectura={medidas.areaCalculada}
+                  ayuda={medidas.areaCalculada ? "Largo × ancho" : undefined}
+                  ancho={110}
+                />
+                <Campo
+                  etiqueta="Volumen"
+                  valor={medidas.volumenCalculado ? String(medidas.volumen) : fila.volumen}
+                  onChange={(v) => cambiar(indice, "volumen", v)}
+                  soloNumeros
+                  soloLectura={medidas.volumenCalculado}
+                  ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
+                  ancho={110}
+                />
+                {/* Cuánto se hizo, en la unidad de la actividad. Con m³, m² o m y su
+                    medida, sale de ella y no se escribe; con kg, Und o m³-km, o sin
+                    la medida, se escribe a mano (RF-67 a RF-69, RF-74). */}
+                <Campo
+                  etiqueta={unidad ? `Cantidad (${etiquetaDeUnidad(unidad)})` : "Cantidad"}
+                  valor={cantidad.cantidadCalculada ? String(cantidad.cantidad) : fila.cantidad}
+                  onChange={(v) => cambiar(indice, "cantidad", v)}
+                  soloNumeros
+                  soloLectura={cantidad.cantidadCalculada}
+                  ayuda={cantidad.origen ? AYUDA_DE_CANTIDAD[cantidad.origen] : undefined}
+                  ancho={130}
+                />
+                <Campo
+                  etiqueta="Observaciones"
+                  valor={fila.observaciones}
+                  onChange={(v) => cambiar(indice, "observaciones", v)}
+                  multilinea
+                />
+                {fotoDeLaFila}
+                {quitar}
+              </FilaDeFormulario>
             );
           })}
         </>
@@ -1137,8 +1444,10 @@ function SeccionActividades({
                 ...filas,
                 {
                   id: idDeFila(),
-                  clave: opciones[0]?.valor ?? CLAVE_OTRA,
+                  clave: opciones[0]?.valor ?? CLAVE_OTRA_ACTIVIDAD,
                   texto: "",
+                  unidad: "",
+                  cantidad: "",
                   descripcion: "",
                   observaciones: "",
                   longitud: "",
@@ -1146,6 +1455,7 @@ function SeccionActividades({
                   alto: "",
                   area: "",
                   volumen: "",
+                  heredada: null,
                 },
               ])
             }
@@ -1303,30 +1613,48 @@ function SeccionLaboratorio({
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
-  const [filas, setFilas] = useState<FilaMaterial[]>(() =>
-    parte.laboratorio.map((m) => ({
-      material: m.material,
-      cantidad: String(m.cantidad),
-    })),
+  // Lo que le falta a cada ensayo, bajo su campo, solo después de pulsar Guardar.
+  const [intentoGuardar, setIntentoGuardar] = useState(false);
+  const [filas, setFilas] = useState<FilaControlDeCalidad[]>(() =>
+    parte.laboratorio.map((fila) =>
+      "material" in fila
+        ? { id: fila.id, ensayo: "", observacion: "", heredado: fila }
+        : { id: fila.id, ensayo: fila.ensayo, observacion: fila.observacion, heredado: null },
+    ),
   );
   const [guardando, setGuardando] = useState(false);
 
-  function cambiar(indice: number, campo: keyof FilaMaterial, valor: string) {
-    setFilas(
-      filas.map((f, i) => (i === indice ? { ...f, [campo]: valor } : f)),
-    );
+  function cambiar(indice: number, campo: "ensayo" | "observacion", valor: string) {
+    setFilas(filas.map((f, i) => (i === indice ? { ...f, [campo]: valor } : f)));
+  }
+
+  function faltasDe(fila: FilaControlDeCalidad): { ensayo?: string; observacion?: string } {
+    if (fila.heredado) return {};
+    return {
+      ensayo: fila.ensayo ? undefined : "Elija el ensayo.",
+      // La regla que también aplica el servidor (RF-72).
+      observacion: faltaObservacionDelEnsayo(fila.observacion) ?? undefined,
+    };
   }
 
   async function guardar() {
+    setIntentoGuardar(true);
+    // Lo que se va a rechazar no se manda: el error se ve bajo su campo.
+    if (filas.some((f) => Object.values(faltasDe(f)).some(Boolean))) {
+      alFallar("Falta completar algún ensayo: está marcado bajo su campo.");
+      return;
+    }
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
-        laboratorio: filas.map((f) => ({
-          material: f.material,
-          cantidad: aNumero(f.cantidad) ?? 0,
-        })),
+        laboratorio: filas.map((f) =>
+          f.heredado
+            ? { id: f.id }
+            : { id: f.id, ensayo: f.ensayo, observacion: f.observacion },
+        ),
       });
       alFallar(null);
+      setIntentoGuardar(false);
       alGuardar();
     } catch (fallo) {
       alFallar(mensajeDe(fallo));
@@ -1335,24 +1663,27 @@ function SeccionLaboratorio({
     }
   }
 
-  const columnas: Columna<{
-    id: string;
-    material: string;
-    nombre: string;
-    cantidad: number;
-    unidad: string;
-  }>[] = [
+  // Los 17 de la guía de OCC, en su orden. Con más de ocho opciones el selector
+  // trae buscador (RF-61).
+  const opciones = ENSAYOS_DE_CALIDAD.map((e) => ({ valor: e.id, etiqueta: e.nombre }));
+  const sinEscribir = () => {};
+
+  // De solo lectura, las dos formas en la misma tabla: un ensayo dice su
+  // observación; un material de antes, su cantidad (RF-63).
+  const columnas: Columna<FilaDeControlDeCalidadFila>[] = [
     {
-      clave: "material",
-      titulo: "Material",
-      ancho: 260,
-      pintar: (m) => <Celda>{m.nombre}</Celda>,
+      clave: "nombre",
+      titulo: "Ensayo o material",
+      ancho: 240,
+      pintar: (f) => <Celda>{f.nombre}</Celda>,
     },
     {
-      clave: "cantidad",
-      titulo: "Cantidad",
-      ancho: 180,
-      pintar: (m) => <Celda>{`${m.cantidad} ${m.unidad}`}</Celda>,
+      clave: "detalle",
+      titulo: "Observación o cantidad",
+      ancho: 480,
+      pintar: (f) => (
+        <Celda>{"material" in f ? `${f.cantidad} ${f.unidad}` : f.observacion}</Celda>
+      ),
     },
   ];
 
@@ -1370,55 +1701,78 @@ function SeccionLaboratorio({
     >
       {editable ? (
         <>
-          {filas.length > 0 ? (
-            <>
-              {filas.map((fila, indice) => {
-                const material = materialPorId(fila.material);
-                return (
-                  <FilaDeFormulario
-                    key={indice}
-                    ultima={indice === filas.length - 1}
-                  >
-                    <Selector
-                      etiqueta="Material"
-                      valor={fila.material}
-                      opciones={MATERIALES_LABORATORIO.map((m) => ({
-                        valor: m.id,
-                        etiqueta: m.nombre,
-                        detalle: ETIQUETA_UNIDAD[m.unidad],
-                      }))}
-                      onChange={(v) => cambiar(indice, "material", v ?? "")}
-                      ancho={260}
-                    />
-                    <Campo
-                      etiqueta={`Cantidad${material ? ` (${ETIQUETA_UNIDAD[material.unidad]})` : ""}`}
-                      valor={fila.cantidad}
-                      onChange={(v) => cambiar(indice, "cantidad", v)}
-                      soloNumeros
-                      ancho={180}
-                    />
-                    <AccionesFormulario>
-                      <Boton
-                        titulo="Quitar"
-                        tono="peligro"
-                        onPress={() =>
-                          setFilas(filas.filter((_, i) => i !== indice))
-                        }
-                      />
-                    </AccionesFormulario>
-                  </FilaDeFormulario>
-                );
-              })}
-            </>
-          ) : null}
+          {filas.map((fila, indice) => {
+            const ultima = indice === filas.length - 1;
+            const quitar = (
+              <AccionesFormulario>
+                <Boton
+                  titulo="Quitar"
+                  tono="peligro"
+                  onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+                />
+              </AccionesFormulario>
+            );
+
+            // Registrado antes de que la sección fuera de ensayos: se ve como se
+            // guardó y no se toca; quitarlo sí (RF-63).
+            if (fila.heredado) {
+              return (
+                <FilaDeFormulario key={fila.id} ultima={ultima}>
+                  <Campo
+                    etiqueta="Material"
+                    valor={fila.heredado.nombre}
+                    onChange={sinEscribir}
+                    soloLectura
+                    ayuda="De la lista anterior: se conserva como se guardó."
+                    ancho={300}
+                  />
+                  <Campo
+                    etiqueta="Cantidad"
+                    valor={`${fila.heredado.cantidad} ${fila.heredado.unidad}`}
+                    onChange={sinEscribir}
+                    soloLectura
+                    ancho={180}
+                  />
+                  {quitar}
+                </FilaDeFormulario>
+              );
+            }
+
+            const faltas = intentoGuardar ? faltasDe(fila) : {};
+            return (
+              <FilaDeFormulario key={fila.id} ultima={ultima}>
+                <Selector
+                  etiqueta="Ensayo"
+                  valor={fila.ensayo || null}
+                  opciones={opciones}
+                  onChange={(v) => cambiar(indice, "ensayo", v ?? "")}
+                  vacio="Elija el ensayo"
+                  error={faltas.ensayo}
+                  obligatorio
+                  ancho={300}
+                />
+                {/* Obligatoria: si no hay nada que anotar, «Sin observaciones» (RF-72). */}
+                <Campo
+                  etiqueta="Observación"
+                  valor={fila.observacion}
+                  onChange={(v) => cambiar(indice, "observacion", v)}
+                  ayuda={faltas.observacion ? undefined : "Si no hay nada que anotar, escriba «Sin observaciones»."}
+                  error={faltas.observacion}
+                  obligatorio
+                  multilinea
+                />
+                {quitar}
+              </FilaDeFormulario>
+            );
+          })}
           <PieDeSeccion>
             <Boton
-              titulo="Añadir material"
+              titulo="Añadir ensayo"
               tono="secundario"
               onPress={() =>
                 setFilas([
                   ...filas,
-                  { material: MATERIALES_LABORATORIO[0].id, cantidad: "" },
+                  { id: idDeFila(), ensayo: "", observacion: "", heredado: null },
                 ])
               }
             />

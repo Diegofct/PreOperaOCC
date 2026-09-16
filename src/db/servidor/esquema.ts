@@ -51,10 +51,11 @@ import {
 import type {
   ActividadBitacora,
   ActividadDelParte,
+  FilaDeControlDeCalidad,
   FranjaDeClima,
   MaquinaDelParte,
-  MaterialDelParte,
   PersonaDelParte,
+  ViajeDelParte,
 } from '../../features/bitacoras/tipos';
 import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
 import type { Cargo } from '../../shared/catalogos/cargos';
@@ -115,6 +116,9 @@ export const tipoCodigo = pgEnum('tipo_codigo', ['activacion', 'respaldo']);
  * crecer sin una spec, y el stock es una suma con signo que depende de este valor.
  */
 export const tipoMovimientoAlmacen = pgEnum('tipo_movimiento_almacen', ['ingreso', 'salida']);
+
+/** Qué es un sitio de origen o destino de un viaje de cantera (spec 010, RF-1). */
+export const tipoSitioCantera = pgEnum('tipo_sitio_cantera', ['cantera', 'planta', 'otro']);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -518,7 +522,15 @@ export const partesDeObra = pgTable(
     personal: jsonb('personal').$type<PersonaDelParte[]>().notNull().default([]),
     actividades: jsonb('actividades').$type<ActividadDelParte[]>().notNull().default([]),
     clima: jsonb('clima').$type<FranjaDeClima[]>().notNull().default([]),
-    laboratorio: jsonb('laboratorio').$type<MaterialDelParte[]>().notNull().default([]),
+    laboratorio: jsonb('laboratorio').$type<FilaDeControlDeCalidad[]>().notNull().default([]),
+    /**
+     * Los viajes de cantera fijados al cerrar (spec 010, RF-29 y RF-37). **Nula y
+     * sin valor por defecto, a diferencia de las demás secciones**: `null` es «nunca
+     * se fijó» —el parte sigue abierto, o se cerró antes de esta spec— y `[]` es «se
+     * cerró y ese día no hubo viajes». Con `default []`, los partes cerrados antes
+     * afirmarían que no hubo viajes un día que nadie contó.
+     */
+    cantera: jsonb('cantera').$type<ViajeDelParte[]>(),
     notas: text('notas'),
     /**
      * Un domingo o un paro por lluvia: el día se cierra sin máquinas ni
@@ -682,6 +694,148 @@ export const almacenMovimientos = pgTable(
     index('ix_almacen_movimiento_material').on(t.materialId),
     index('ix_almacen_movimiento_obra_fecha').on(t.obraId, t.fecha),
     check('ck_almacen_movimiento_cantidad', sql`${t.cantidad} > 0`),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Control Cantera (solo del servidor, spec 010)                             */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Canteras, plantas y otros sitios de donde sale o a donde llega material.
+ *
+ * **La obra no es un sitio**: como destino es una marca del viaje (`destino_obra`)
+ * y como origen no existe (fuera de alcance). Un sitio «Obra» se podría renombrar,
+ * dar de baja o elegir como origen, y la abscisa no tendría de qué colgarse.
+ *
+ * Mismo esquema de nombres que el almacén: índice único parcial sobre el nombre
+ * normalizado, para que «La Esperanza» y «la esperanza» choquen (RF-3) y un sitio
+ * dado de baja pueda volver a registrarse.
+ */
+export const canteraSitios = pgTable(
+  'cantera_sitios',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    nombre: text('nombre').notNull(),
+    nombreNormalizado: text('nombre_normalizado').notNull(),
+    tipo: tipoSitioCantera('tipo').notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    eliminadoEn: eliminadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_cantera_sitio_nombre')
+      .on(t.obraId, t.nombreNormalizado)
+      .where(sql`eliminado_en is null`),
+  ],
+);
+
+/**
+ * Los materiales de cantera de una obra: afirmado, subbase, arena, triturado.
+ *
+ * Aparte de los del almacén a propósito: estos no tienen stock ni unidad (la
+ * cantidad por viaje está fuera de alcance), y mezclarlos ofrecería «Cemento» en un
+ * viaje de volqueta y «Afirmado» en una salida de bodega.
+ */
+export const canteraMateriales = pgTable(
+  'cantera_materiales',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    nombre: text('nombre').notNull(),
+    nombreNormalizado: text('nombre_normalizado').notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    eliminadoEn: eliminadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_cantera_material_nombre')
+      .on(t.obraId, t.nombreNormalizado)
+      .where(sql`eliminado_en is null`),
+  ],
+);
+
+/**
+ * Cada viaje de volqueta. **Evidencia: no se edita ni se borra** (RF-23), por eso
+ * no lleva `actualizado_en`; se anula con motivo y sigue a la vista (RF-24, RF-25).
+ *
+ * `fecha` y `hora` van separadas y como la obra las escribe, no como un instante:
+ * el viaje cuenta en el día que se escribe (caso límite de la spec), y un instante
+ * con zona horaria se correría de día en la frontera de la medianoche.
+ *
+ * Los `check` repiten en la base lo que exige la regla, para que ni una petición
+ * hecha por fuera ni una sentencia a mano dejen un viaje imposible:
+ *  · destino obra ⇒ sin sitio de destino y con una abscisa de las listas (RF-11,
+ *    RF-16); destino sitio ⇒ con sitio y sin abscisa (RF-15);
+ *  · origen distinto del destino (RF-18).
+ */
+export const canteraViajes = pgTable(
+  'cantera_viajes',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    /** `YYYY-MM-DD`, el día en la obra. */
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    /** "HH:MM", en la obra. */
+    hora: text('hora').notNull(),
+    materialId: text('material_id')
+      .notNull()
+      .references(() => canteraMateriales.id),
+    vehiculoId: text('vehiculo_id')
+      .notNull()
+      .references(() => vehiculos.id),
+    /** Quien condujo (RF-34). No es quien registra: eso es `registrado_por`. */
+    conductorId: text('conductor_id')
+      .notNull()
+      .references(() => usuarios.id),
+    origenId: text('origen_id')
+      .notNull()
+      .references(() => canteraSitios.id),
+    destinoId: text('destino_id').references(() => canteraSitios.id),
+    destinoObra: boolean('destino_obra').notNull(),
+    pr: integer('pr'),
+    metros: integer('metros'),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    // Lo lee el listado por periodo, la sección de la bitácora de un día y el
+    // cierre del parte, que fija los viajes de su obra y su fecha.
+    index('ix_cantera_viaje_obra_fecha').on(t.obraId, t.fecha),
+    check(
+      'ck_cantera_viaje_destino',
+      // `is not null` explícito: un `check` que da desconocido (por un nulo) se
+      // acepta, y sin esto un viaje a la obra sin PR pasaría la restricción.
+      sql`(${t.destinoObra} and ${t.destinoId} is null
+            and ${t.pr} is not null and ${t.metros} is not null
+            and ${t.pr} between 0 and 25
+            and ${t.metros} between 0 and 975 and ${t.metros} % 25 = 0)
+       or (not ${t.destinoObra} and ${t.destinoId} is not null
+            and ${t.pr} is null and ${t.metros} is null)`,
+    ),
+    check(
+      'ck_cantera_viaje_origen_destino',
+      sql`${t.destinoId} is null or ${t.destinoId} <> ${t.origenId}`,
+    ),
+    check('ck_cantera_viaje_hora', sql`${t.hora} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
   ],
 );
 

@@ -149,9 +149,11 @@ export function HistorialAlmacen({
       ancho: 330,
       pintar: (m) => (
         <>
-          <Celda>{(m.tipo === 'salida' ? m.paraQue : m.observacion) ?? '—'}</Celda>
+          <Celda lineas={3}>{(m.tipo === 'salida' ? m.paraQue : m.observacion) ?? '—'}</Celda>
           {m.anulado ? (
-            <Celda>
+            // Hasta cinco renglones: el motivo es lo único que explica la anulación
+            // (RF-24), y en uno solo se cortaba a las pocas palabras.
+            <Celda lineas={5}>
               {`Anulado por ${m.anuladoPorNombre ?? '—'}${m.anuladoEn ? ` el ${momento(m.anuladoEn)}` : ''}: ${m.motivoAnulacion ?? ''}`}
             </Celda>
           ) : null}

@@ -180,3 +180,186 @@ marcar un domingo como día sin trabajo con motivo y cerrarlo solo con clima, no
   tarea que cambia la regla, no después.
 - **Fotos huérfanas** de actividades descartadas ocupan espacio en el almacén. Son pocas y
   pequeñas; limpiarlas sería borrar, y no se hace.
+
+---
+
+# Cambio del 2026-09-16 — catálogos reales de OCC: ensayos y actividades del presupuesto
+
+RF-61 a RF-74, anexos A y B. Lo de arriba sigue en pie; esta sección solo añade.
+
+No toca API de Expo: son pantallas del panel con los componentes que ya existen (`Selector`,
+`Campo`, `Tabla`), rutas `+api.ts` ya escritas y reglas puras. Por eso no se consultó
+`expo-overview` para este cambio.
+
+## Lo que hay hoy y obliga a diseñar con cuidado
+
+Al guardar, el servidor **reconstruye cada fila desde el catálogo**:
+
+- `construirActividadDelParte` pone `nombre = nombreDeActividad(clave)`. Con el catálogo nuevo,
+  una actividad de prueba («excavacion») guardada otra vez se quedaría con el slug como nombre.
+- `construirMaterial` devuelve `null` si el material no está en la lista, y la ruta responde
+  400 a **toda** la sección. Con la lista nueva, un parte abierto con un material de prueba no
+  podría volver a guardar su control de calidad.
+
+Hay 5 partes abiertos (del 9 al 15 de septiembre) y pueden tener filas de las listas de
+prueba. Cambiar solo los catálogos rompería RF-63 y RF-71 en ellos. La pieza central de este
+plan es **conservar las filas heredadas tal como se guardaron**.
+
+## Módulos y archivos
+
+| Archivo | Qué cambia | RF |
+| --- | --- | --- |
+| `scripts/importar-presupuesto.ts` | **Nuevo.** Lee `docs/preupuesto.xlsx` y escribe `src/shared/catalogos/presupuesto.json`. Toma las filas con número entero en la columna C; ítem de la D, descripción de la H (espacios colapsados) y unidad de la I, normalizada. Quita repetidos por ítem y **falla** si un mismo ítem trae dos descripciones o dos unidades, o si una unidad no se reconoce, nombrando la fila. Ordena por ítem (2.8 antes que 2.14.1) | RF-64 |
+| `package.json` | Script `presupuesto` → `tsx scripts/importar-presupuesto.ts` (sin dependencias nuevas: `exceljs` ya está) | RF-64 |
+| `src/shared/catalogos/presupuesto.json` | **Generado**, no se edita a mano: `[{ item, descripcion, unidad }]`, 31 filas | RF-64 |
+| `src/shared/catalogos/presupuesto.ts` | **Nuevo.** `UNIDADES_DE_ACTIVIDAD` (`m3` m³, `m2` m², `m` m, `kg` kg, `und` Und, `m3_km` m³-km), `ACTIVIDADES_DEL_PRESUPUESTO` (el JSON tipado), `actividadPorItem`, `etiquetaDeActividad` («4.1.8 · Excavación…»), `etiquetaDeUnidad` y `CLAVE_OTRA_ACTIVIDAD = 'otra'` | RF-64..66, RF-70 |
+| `src/shared/catalogos/bitacora.ts` | `ENSAYOS_DE_CALIDAD`: los 17 del anexo A, con clave estable y nombre, escritos a mano. Salen `MATERIALES_LABORATORIO`, `materialPorId`, `nombreDeMaterial`, `cantidadLegible`, `UnidadMaterial` y `ETIQUETA_UNIDAD`: las filas viejas se describen solas y nada nuevo los usa. El comentario «pendiente de validación por OCC» se reescribe | RF-61, RF-63 |
+| `src/shared/rules/dimensiones.ts` | `resolverCantidad(unidad, dimensionesResueltas, cantidadEscrita)` → `{ cantidad, cantidadCalculada, origen }`: con m³ y volumen, el volumen; con m² y área, el área; con m y longitud, la longitud; si no, lo escrito o nada | RF-67..69, RF-74 |
+| `src/shared/rules/parte.ts` | `faltasDeActividad` (otra sin cuál → `texto`; otra sin unidad → `unidad`) y `faltaObservacionDelEnsayo`, con sus mensajes. `bloqueosDelCierre` **no cambia**: cuenta filas, y una fila heredada cuenta | RF-24, RF-70, RF-72 |
+| `src/features/bitacoras/tipos.ts` | `ActividadDelParte` gana `item?`, `unidad?` y `cantidad?` (opcionales: los partes viejos no los traen). Nuevo `EnsayoDelParte { id, ensayo, nombre, observacion }` y `FilaDeControlDeCalidad = MaterialDelParte \| EnsayoDelParte`, con `esEnsayo(fila)` | RF-61, RF-63, RF-67, RF-71 |
+| `src/features/bitacoras/parte.ts` | `construirActividadDelParte` usa el presupuesto: nombre = descripción, `item`, `unidad` de la lista (o la elegida si es otra), cantidad por `resolverCantidad`. Devuelve `null` si la clave no es del presupuesto ni «otra». `construirEnsayo` nuevo. `conservarHeredadas(pedidas, guardadas)`: una fila que llega con el id de una **fila heredada** guardada se queda como estaba. Sale `construirMaterial` | RF-63..71 |
+| `src/db/servidor/esquema.ts` | Solo el tipo de `laboratorio`: `$type<FilaDeControlDeCalidad[]>()`. **Sin migración** | RF-61, RF-63 |
+| `src/features/panel/contratos.ts` | `actividadDelParte` gana `unidad` (enum de las seis, opcional) y `cantidad` (`numeroOpcional`), con `superRefine` que llama a `faltasDeActividad`. `ensayoDelParte`: `{ id?, ensayo?, observacion? }`, que o trae ensayo y observación (con `faltaObservacionDelEnsayo`) o solo el id de una fila heredada. `ActividadDelParteFila` y la fila de control de calidad, con los campos nuevos opcionales | RF-61, RF-67, RF-70, RF-72 |
+| `src/app/api/panel/partes/[id]+api.ts` | Si llegan actividades o control de calidad, lee lo guardado (junta la lectura con la del día sin trabajo, que ya existe) y construye con `conservarHeredadas`. 400 si una actividad no es del presupuesto ni otra, si un ensayo no es de la lista o si un id no es de una fila heredada de ese parte | RF-61..74 |
+| `src/features/panel/pantalla-partes.tsx` | **Actividades:** selector con las 31 más «Otra actividad», etiqueta con número de ítem; al lado, «Unidad» de solo lectura, o selector de unidad si es otra; «Cantidad (m³)» calculada y de solo lectura cuando sale de una medida, con la ayuda «Del volumen» / «Del área» / «De la longitud»; las filas heredadas, de solo lectura con su nombre y medidas, y con «Quitar». **Control Calidad de Obra:** selector de ensayo y observación en área de texto, «Añadir ensayo»; las filas heredadas (materiales) de solo lectura con «Quitar»; la tabla de solo lectura mezcla las dos con columnas «Ensayo o material» y «Observación o cantidad» | RF-61..74 |
+| `scripts/verificar-reglas.ts` | Casos nuevos (ver abajo); salen los de `cantidadLegible` y el de materiales repetidos | — |
+| `AGENTS.md` | En «No edites a mano», añadir `src/shared/catalogos/presupuesto.json` (`npm run presupuesto`) | — |
+
+Se reutiliza: `filtrarOpciones`, que ya busca en etiqueta y detalle, así que «4.1.8» y
+«excavación» encuentran la misma opción sin tocar el `Selector`; `calcularDimensiones`; el
+`Campo` con `soloLectura` y `multilinea`; `idDeFila`; la ruta de foto, que ya acepta cualquier
+`item`; y la prueba de ancho de tablas.
+
+**No se toca** `src/features/bitacoras/actividades.ts`: su lista es la de la bitácora vieja por
+máquina (`construirActividad`, rutas `movil/bitacoras` y `panel/bitacoras`), que se conserva
+como histórico. Mezclar los dos catálogos haría que una bitácora vieja cambiara de nombres.
+
+## Modelo de datos
+
+- **Servidor: sin migración.** `actividades` y `laboratorio` ya son `jsonb`. Lo nuevo va
+  dentro de cada fila:
+  - Actividad: `item` («4.1.8», o `null` en otra), `unidad` (la etiqueta congelada, «m³») y
+    `cantidad` (número o `null`). La descripción del presupuesto queda en `nombre`, como hoy.
+  - Control de calidad: una fila nueva es `{ id, ensayo, nombre, observacion }`. Las filas
+    viejas `{ id, material, nombre, cantidad, unidad }` se quedan como están.
+- **Cómo se distingue lo heredado**: una actividad **sin la propiedad `unidad`** se guardó antes
+  del cambio (toda actividad nueva la lleva, también «otra»). Una fila de control de calidad
+  **con `material`** es un material viejo. No se añade versión ni marca: la forma lo dice.
+- **Local (celular)**: sin cambios. El parte no viaja al teléfono.
+
+## Decisiones técnicas
+
+- **El presupuesto se genera con un script desde el Excel.** *Descartado:* escribir a mano las
+  31 descripciones en un `.ts`. Tienen hasta 350 caracteres y comillas de pulgadas: una errata
+  pasaría desapercibida, y la spec deja fuera editarlo desde el panel porque «se actualiza
+  desde el documento de OCC». El script es esa actualización. Es el mismo camino que ya siguen
+  los formatos del preoperacional (`npm run formatos`).
+- **Los 17 ensayos, a mano.** *Descartado:* leer el Word con script. Hace falta descomprimir el
+  `.docx`, y `jszip` solo está como dependencia de `exceljs`; usarlo directamente sería una
+  dependencia nueva sin aprobación (constitución §8) para 17 nombres cortos que no van a
+  cambiar a menudo.
+- **La clave de una actividad es su número de ítem** («4.1.8»). *Descartado:* un slug inventado
+  («excavacion_estructuras_entibado»): el ítem ya es el identificador de OCC, es estable y no
+  choca con las claves de la lista de prueba. Esas claves no se reutilizan nunca.
+- **Unidades propias del presupuesto**, en su catálogo. *Descartado:* reutilizar
+  `UNIDADES_ALMACEN`. No tiene m³-km, tiene bultos, rollos y cajas que no son de un ítem de
+  pago, y atar las dos listas haría que un cambio en el almacén moviera el parte.
+- **La unidad y el nombre los pone el servidor.** El navegador manda la clave, y solo en
+  «otra» manda la unidad. Si la unidad de una actividad del presupuesto viniera del cliente,
+  bastaría con editar la petición para medir el acero en m³.
+- **Filas heredadas: se conservan por id, sin reconstruir.** *Descartado 1:* guardar en ellas lo
+  que diga el navegador: un nombre del cliente es justo lo que `parte.ts` prohíbe.
+  *Descartado 2:* traducir las claves de prueba a ítems del presupuesto: «Excavación» no dice
+  si es la 4.1.1, la 4.1.2 o la 4.1.8, así que traducir sería inventar el dato. *Descartado 3:*
+  rechazar el guardado mientras haya filas viejas: bloquearía los 5 partes abiertos. En pantalla
+  se ven de solo lectura y se pueden quitar, porque quitar una fila de un parte abierto se
+  puede hacer hoy con cualquier fila.
+- **Control de calidad en la misma columna `laboratorio`**, con dos formas de fila. *Descartado:*
+  una columna nueva `control_calidad` con migración. Obligaría a sumar dos columnas en el
+  cierre, en el índice y en la lectura, y el id de la sección ya es `laboratorio` (RF-49). La
+  forma de cada fila basta para distinguirlas.
+- **La cantidad calculada sigue la regla del área y el volumen**: calculada y de solo lectura
+  cuando hay de dónde sacarla, a mano cuando no, y la escrita a mano se respeta solo si no se
+  puede calcular. *Descartado:* dejarla siempre editable, que contradice RF-68 («tomará ese
+  valor»).
+- **Cantidad con m³ y volumen escrito a mano** (sin las tres medidas): RF-68 dice «tenga
+  volumen», no «volumen calculado», así que se toma ese volumen. Igual con el área.
+
+## Impacto en la sincronización
+
+Ninguno. El parte es exclusivo del panel: no hay pull, outbox ni ingesta del celular que
+cambien.
+
+## Contrato de API
+
+`PATCH /api/panel/partes/:id`, con la guardia `bitacoras/escribir` y `parteEditable`, como hoy.
+
+- `actividades[]`: `{ id, clave, texto?, unidad?, cantidad?, descripcion, observaciones,
+  longitud, ancho, alto, area, volumen }`.
+  - `clave` del presupuesto → nombre, ítem y unidad del catálogo; `unidad` se ignora.
+  - `clave = 'otra'` → exige `texto` y `unidad` (400 bajo el campo, con el mensaje de la regla).
+  - `id` de una actividad heredada de ese parte → se conserva guardada; el resto se ignora.
+  - Otra clave → 400 «Esa actividad no está en la lista.».
+- `laboratorio[]`: `{ id?, ensayo, observacion }` o `{ id }`.
+  - Ensayo de la lista con observación → fila nueva. Sin observación → 400 «Escriba la
+    observación del ensayo. Si no hay nada que anotar, escriba "Sin observaciones".».
+  - Ensayo que no es de la lista → 400 «Ese ensayo no está en la lista.».
+  - Solo `id` de un material heredado de ese parte → se conserva. Id que no es → 400.
+- El mismo ensayo repetido no se rechaza (RF-73).
+- **Sin transacciones (Neon por HTTP):** entre leer lo guardado y el `UPDATE`, otro computador
+  podría quitar una fila heredada. Lo peor que pasa es que el segundo guardado la vuelva a
+  dejar, porque la tomó de lo que leyó. No se pierde nada y no se inventa nada. Es el mismo
+  margen que ya acepta el día sin trabajo.
+- `GET /api/panel/partes` y `.../partes/:id` no cambian: devuelven el `jsonb` tal cual.
+
+## Estrategia de verificación
+
+En `scripts/verificar-reglas.ts`:
+
+- **Catálogo:** 31 actividades con ítem único; todas con una unidad de las seis; 4.1.8 en m³,
+  10.1 en kg, 12.9 en Und, 13.1 y 13.9 en m³-km, 6.1.18.1 en m²; ninguna con ítem «otra»;
+  «4.1.8» y «excavación» encuentran la 4.1.8 con `filtrarOpciones`. 17 ensayos, con claves y
+  nombres únicos.
+- **`resolverCantidad`:** m³ con 3 × 4 × 0,5 → 6 calculada; m³ sin alto y 9 escrito → 9 a mano;
+  m² con 3 × 4 → 12; m con longitud 25 → 25; kg con medidas y 500 escrito → 500 a mano; Und sin
+  nada → `null`; m³ con volumen escrito 7 y sin medidas → 7.
+- **Faltas:** otra sin cuál y otra sin unidad, nombradas cada una bajo su campo; ensayo sin
+  observación y con espacios en blanco, rechazado; «Sin observaciones», aceptado.
+- **Construcción:** una actividad del presupuesto guarda la descripción completa, el ítem y la
+  unidad del catálogo aunque el cliente mande otra unidad; otra guarda su texto y su unidad; una
+  clave desconocida da `null`; una fila heredada con su id queda idéntica aunque el cliente
+  mande otro nombre o medidas; un id ajeno no se conserva.
+- **Cierre:** un parte con solo un material heredado en control de calidad no nombra esa
+  sección como falta.
+
+**Script de importación:** correrlo y confirmar 31 filas; romper a propósito una copia del
+Excel (una unidad «mts») y ver que falla nombrando la fila.
+
+**Demo en el navegador** (reiniciando `npm run web`):
+
+- Buscar «4.1.8» y «acero» en el selector.
+- Ver «m³» al lado.
+- Largo 3, ancho 4 y alto 0,5 → cantidad 6 fija.
+- 10.1 → cantidad escrita a mano.
+- Otra actividad sin unidad → error bajo el campo.
+- Dos «Densidad en campo», una sin observación → error.
+- Una actividad o un material de prueba ya guardados en un parte abierto: siguen igual al
+  guardar otra vez.
+- El cierre real va en la T11 de la spec 010, el día que Diego acuerde.
+
+## Riesgos
+
+- **Filas heredadas que se transforman al guardar.** Se detecta con el caso de construcción y en
+  la demo, mirando el `jsonb` antes y después. Se revierte volviendo a la versión anterior de
+  la ruta: los datos no cambian de forma, solo se añaden campos.
+- **El Excel cambia de forma** (otra hoja, columnas corridas). El script falla en voz alta en vez
+  de generar una lista vacía o corrida: exige encontrar el encabezado «DESCRIPCIÓN» en la H y
+  «UND.» en la I.
+- **Ítems que Excel guarda como número** (8.1 frente a 8.10). Se lee el texto que muestra la
+  celda y no su valor; el caso de verificación confirma los ítems del anexo B.
+- **Selector con descripciones largas.** Una opción de 350 caracteres puede desbordar la lista o
+  empujar la fila. Se revisa en Chrome; si pasa, la etiqueta del selector se recorta y la
+  descripción completa va en el `detalle`, que sigue siendo buscable.
+- **Filas viejas de prueba que nadie quita.** Se ven de solo lectura para siempre en ese parte.
+  Es lo que dicen RF-63 y RF-71; si Diego prefiere limpiar los partes de prueba, lo hace él
+  quitándolas desde la pantalla.

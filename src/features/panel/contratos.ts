@@ -24,6 +24,18 @@ import {
   MENSAJES_DE_MOVIMIENTO,
   type TipoMovimiento,
 } from '@/shared/rules/almacen';
+import {
+  faltasDelDestino,
+  MENSAJES_DE_VIAJE,
+  type CanteraDelParte,
+} from '@/shared/rules/cantera';
+import {
+  CLAVE_OTRA_ACTIVIDAD,
+  IDS_UNIDAD_DE_ACTIVIDAD,
+  type UnidadDeActividad,
+} from '@/shared/catalogos/presupuesto';
+import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
+import type { ViajeDelParte } from '@/features/bitacoras/tipos';
 import { ETIQUETA_ROL, ROLES, type Rol } from '@/shared/rules/permisos';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
@@ -651,7 +663,40 @@ export const actividadDelParte = z.object({
   alto: numeroOpcional('El alto'),
   area: numeroOpcional('El área'),
   volumen: numeroOpcional('El volumen'),
+  /**
+   * La clave de la unidad. Solo la usa «otra»: en una actividad del presupuesto
+   * la pone el catálogo y lo que llegue aquí se ignora (spec 004, RF-66, RF-70).
+   */
+  unidad: z
+    .enum(IDS_UNIDAD_DE_ACTIVIDAD as [UnidadDeActividad, ...UnidadDeActividad[]], {
+      error: 'Elija una unidad de la lista.',
+    })
+    .nullish()
+    .transform((v) => v ?? null),
+  /** La escrita a mano; el servidor decide si cuenta (RF-67 a RF-69). No es obligatoria (RF-74). */
+  cantidad: numeroOpcional('La cantidad'),
+}).superRefine((actividad, contexto) => {
+  // La misma regla que la pantalla, para que el error diga lo mismo y bajo el
+  // mismo campo en los dos sitios.
+  const faltas = faltasDeActividad({
+    otra: actividad.clave === CLAVE_OTRA_ACTIVIDAD,
+    texto: actividad.texto,
+    unidad: actividad.unidad,
+  });
+  for (const falta of faltas) {
+    contexto.addIssue({ code: 'custom', path: [falta.campo], message: falta.mensaje });
+  }
 });
+
+/**
+ * Una actividad guardada antes del 2026-09-16, que viaja **solo con su id** para que
+ * el servidor la conserve tal cual (spec 004, RF-71).
+ *
+ * Estricta a propósito: con cualquier otro campo deja de serlo y la fila tiene que
+ * pasar como actividad completa. Si no lo fuera, una «otra» sin unidad se colaría
+ * por aquí y el error perdería su campo.
+ */
+export const actividadConservada = z.object({ id: z.string().trim().min(1).max(64) }).strict();
 
 export const franjaDeClima = z.object({
   condicion: textoObligatorio(40, 'la condición del clima'),
@@ -659,20 +704,37 @@ export const franjaDeClima = z.object({
   hasta: horaDelDia,
 });
 
-export const materialDelParte = z.object({
-  material: textoObligatorio(60, 'el material'),
-  cantidad: z
-    .number()
-    .positive('La cantidad tiene que ser mayor que cero.')
-    .max(100_000, 'Esa cantidad no parece de una obra.'),
-});
+/**
+ * Una fila de Control Calidad de Obra (spec 004, RF-61, RF-72, RF-73).
+ *
+ * O trae un ensayo con su observación —una fila nueva o un ensayo ya guardado—, o
+ * trae **solo el id** de un material guardado antes del 2026-09-16, que el servidor
+ * conserva tal cual (RF-63). Lo que decide si ese id es de verdad una fila
+ * heredada de ese parte es el servidor, no el contrato.
+ */
+export const ensayoDelParte = z
+  .object({
+    id: z.string().trim().min(1).max(64).nullable().optional(),
+    ensayo: z.string().trim().min(1).max(60).nullable().optional(),
+    observacion: z.string().max(2000).nullable().optional(),
+  })
+  .superRefine((fila, contexto) => {
+    if (!fila.ensayo) {
+      if (!fila.id) {
+        contexto.addIssue({ code: 'custom', path: ['ensayo'], message: 'Elija el ensayo.' });
+      }
+      return;
+    }
+    const falta = faltaObservacionDelEnsayo(fila.observacion);
+    if (falta) contexto.addIssue({ code: 'custom', path: ['observacion'], message: falta });
+  });
 
 export const parteEditado = z.object({
   maquinaria: z.array(maquinaDelParte).max(40).optional(),
   personal: z.array(personaDelParte).max(80).optional(),
-  actividades: z.array(actividadDelParte).max(40).optional(),
+  actividades: z.array(z.union([actividadDelParte, actividadConservada])).max(40).optional(),
   clima: z.array(franjaDeClima).max(12).optional(),
-  laboratorio: z.array(materialDelParte).max(40).optional(),
+  laboratorio: z.array(ensayoDelParte).max(40).optional(),
   /**
    * Parcial y no `textoOpcional`: con aquel, guardar cualquier otra sección
    * llegaba con `notas: null` y borraba las notas del día (encontrado en
@@ -717,6 +779,11 @@ export interface ActividadDelParteFila {
   alto: number | null;
   area: number | null;
   volumen: number | null;
+  /** Ausentes en las actividades guardadas antes del 2026-09-16 (RF-71). */
+  item?: string | null;
+  /** La etiqueta: «m³». */
+  unidad?: string;
+  cantidad?: number | null;
 }
 
 export interface FranjaDeClimaFila {
@@ -735,6 +802,19 @@ export interface MaterialDelParteFila {
   unidad: string;
 }
 
+export interface EnsayoDelParteFila {
+  id: string;
+  ensayo: string;
+  nombre: string;
+  observacion: string;
+}
+
+/**
+ * Lo que devuelve la sección Control Calidad de Obra: ensayos, y en los partes
+ * anteriores al 2026-09-16, los materiales que ya tenían (RF-61, RF-63).
+ */
+export type FilaDeControlDeCalidadFila = MaterialDelParteFila | EnsayoDelParteFila;
+
 export interface ParteFila {
   id: string;
   obraId: string;
@@ -745,7 +825,7 @@ export interface ParteFila {
   personal: PersonaDelParteFila[];
   actividades: ActividadDelParteFila[];
   clima: FranjaDeClimaFila[];
-  laboratorio: MaterialDelParteFila[];
+  laboratorio: FilaDeControlDeCalidadFila[];
   notas: string | null;
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
@@ -945,3 +1025,180 @@ export interface ConsultaDeMovimientos {
   hasta?: string;
   tipo?: TipoMovimiento;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Control Cantera (spec 010)                                                */
+/* ------------------------------------------------------------------------ */
+
+export const TIPOS_SITIO = ['cantera', 'planta', 'otro'] as const;
+export type TipoSitio = (typeof TIPOS_SITIO)[number];
+
+export const ETIQUETA_TIPO_SITIO: Record<TipoSitio, string> = {
+  cantera: 'Cantera',
+  planta: 'Planta',
+  otro: 'Otro',
+};
+
+/** El nombre de un sitio o de un material de cantera. Mismos textos para los dos. */
+const nombreDeCatalogo = (que: string) =>
+  z
+    .string({ error: `Falta el nombre del ${que}.` })
+    .trim()
+    .min(1, `Falta el nombre del ${que}.`)
+    .max(120, `El nombre del ${que} es demasiado largo.`);
+
+const tipoDeSitio = z.enum(TIPOS_SITIO, { error: 'Elija si es cantera, planta u otro.' });
+
+/**
+ * Un sitio de origen o destino (RF-1). `obraId` **solo lo usa la gerencia**; al
+ * encargado de planta el servidor le pone la suya (RF-32), como en el almacén.
+ */
+export const sitioNuevo = z.object({
+  nombre: nombreDeCatalogo('sitio'),
+  tipo: tipoDeSitio,
+  obraId: idOpcional,
+});
+export type SitioNuevo = z.input<typeof sitioNuevo>;
+
+/** Corregir un sitio: ausente es «no se toca» (RF-4). */
+export const sitioEditado = z.object({
+  nombre: nombreDeCatalogo('sitio').optional(),
+  tipo: tipoDeSitio.optional(),
+});
+export type SitioEditado = z.input<typeof sitioEditado>;
+
+/** Un material de cantera (RF-2): solo nombre. Sin unidad ni cantidad (fuera de alcance). */
+export const materialDeCanteraNuevo = z.object({
+  nombre: nombreDeCatalogo('material'),
+  obraId: idOpcional,
+});
+export type MaterialDeCanteraNuevo = z.input<typeof materialDeCanteraNuevo>;
+
+export const materialDeCanteraEditado = z.object({
+  nombre: nombreDeCatalogo('material').optional(),
+});
+export type MaterialDeCanteraEditado = z.input<typeof materialDeCanteraEditado>;
+
+/** Un id elegido de una lista, con el texto de la regla si falta. */
+const elegido = (mensaje: string) =>
+  z.string({ error: mensaje }).trim().min(1, mensaje).max(64);
+
+/** PR o metros: un entero o nada. Que esté en su lista lo dice la regla. */
+const parteDeAbscisa = z
+  .number({ error: 'La abscisa va en números enteros.' })
+  .int('La abscisa va en números enteros.')
+  .nullish()
+  .transform((v) => v ?? null);
+
+/**
+ * Un viaje (RF-7, RF-34). `destino` es el id de un sitio o `DESTINO_OBRA`.
+ *
+ * La coherencia del destino con la abscisa —con la obra, PR y metros de sus listas;
+ * con un sitio, ninguno y distinto del origen— la dice `faltasDelDestino`, la misma
+ * función que usa la regla del viaje: el contrato no la vuelve a escribir. La
+ * fecha posterior a hoy (RF-19) se mira en la ruta con `validarViaje`, porque
+ * depende del reloj.
+ *
+ * No lleva quién registra (RF-22): lo pone el servidor desde la sesión.
+ */
+export const viajeNuevo = z
+  .object({
+    obraId: idOpcional,
+    fecha: z
+      .string({ error: MENSAJES_DE_VIAJE.fechaMalEscrita })
+      .regex(/^\d{4}-\d{2}-\d{2}$/, MENSAJES_DE_VIAJE.fechaMalEscrita),
+    hora: z
+      .string({ error: MENSAJES_DE_VIAJE.horaMalEscrita })
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, MENSAJES_DE_VIAJE.horaMalEscrita),
+    materialId: elegido(MENSAJES_DE_VIAJE.sinMaterial),
+    vehiculoId: elegido(MENSAJES_DE_VIAJE.sinVolqueta),
+    conductorId: elegido(MENSAJES_DE_VIAJE.sinConductor),
+    origenId: elegido(MENSAJES_DE_VIAJE.sinOrigen),
+    destino: elegido(MENSAJES_DE_VIAJE.sinDestino),
+    pr: parteDeAbscisa,
+    metros: parteDeAbscisa,
+  })
+  .superRefine((viaje, contexto) => {
+    for (const falta of faltasDelDestino(viaje)) {
+      contexto.addIssue({ code: 'custom', path: [falta.campo], message: falta.mensaje });
+    }
+  });
+export type ViajeNuevo = z.input<typeof viajeNuevo>;
+
+export interface SitioDeCanteraFila {
+  id: string;
+  obraId: string;
+  obraNombre: string | null;
+  nombre: string;
+  tipo: TipoSitio;
+}
+
+export interface MaterialDeCanteraFila {
+  id: string;
+  obraId: string;
+  obraNombre: string | null;
+  nombre: string;
+}
+
+/** Lo que el formulario de viaje ofrece para elegir, ya filtrado por el servidor. */
+export interface OpcionesDeCantera {
+  /** Sitios y materiales **vigentes** (RF-6, RF-9, RF-10). */
+  sitios: SitioDeCanteraFila[];
+  materiales: MaterialDeCanteraFila[];
+  /** Solo las volquetas operativas de la obra (RF-8). */
+  volquetas: { id: string; codigoInterno: string; placa: string | null }[];
+  /** Solo quien conduce u opera, activo y de la obra (RF-35). */
+  conductores: { id: string; nombreCompleto: string; cargo: string | null }[];
+}
+
+/** Un viaje del listado, con nombres. `destino` es `null` si fue a la obra. */
+export interface ViajeFila {
+  id: string;
+  obraId: string;
+  fecha: string;
+  hora: string;
+  materialId: string;
+  material: string;
+  vehiculoId: string;
+  volqueta: string;
+  conductorId: string;
+  conductor: string;
+  origenId: string;
+  origen: string;
+  destinoId: string | null;
+  destino: string | null;
+  destinoObra: boolean;
+  pr: number | null;
+  metros: number | null;
+  /** ISO 8601. */
+  registradoEn: string;
+  registradoPorNombre: string | null;
+  anulado: boolean;
+  anuladoEn: string | null;
+  anuladoPorNombre: string | null;
+  motivoAnulacion: string | null;
+}
+
+/**
+ * Lo que responde registrar o anular un viaje. `aviso` no es un error: dice que la
+ * bitácora de ese día ya está cerrada y no va a cambiar (RF-30).
+ */
+export interface ViajeRegistrado {
+  viaje: ViajeFila;
+  aviso: string | null;
+}
+
+export interface ViajeAnulado {
+  id: string;
+  aviso: string | null;
+}
+
+/** Qué viajes pedir: los de una obra en un periodo (RF-20). */
+export interface ConsultaDeViajes {
+  obraId?: string | null;
+  desde: string;
+  hasta: string;
+}
+
+/** La sección «Control Cantera» de un parte, como la decide `canteraDelParte`. */
+export type CanteraDelParteFila = CanteraDelParte<ViajeDelParte>;

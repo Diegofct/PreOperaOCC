@@ -1,0 +1,157 @@
+[
+  {
+    "item": "2.8",
+    "descripcion": "Demolición de estructuras (Concreto reforzado). Incluye cargue, transporte y disposición de los materiales provenientes de la demolición.",
+    "unidad": "m3"
+  },
+  {
+    "item": "2.14.1",
+    "descripcion": "Retiro de tubería existente de 36\", sin excavación",
+    "unidad": "m"
+  },
+  {
+    "item": "4.1.1",
+    "descripcion": "Excavación en material común de la explanación, canales y préstamos. Incluye cargue y disposición final del material sobrante. No incluye transporte.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.1.2",
+    "descripcion": "Excavación manual en material común. Incluye cargue, transporte y disposición final del material sobrante.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.1.8",
+    "descripcion": "Excavación para estructuras varias en material común en seco. Incluye entibado. Incluye transporte y disposición final de los materiales.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.1.9",
+    "descripcion": "Excavación para estructuras varias en material común en seco sin entibado. Incluye transporte y disposición final de los materiales.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.1.96",
+    "descripcion": "Excavación en material común de la explanación con motoniveladora. Incluye cargue y tranporte del material al sitio de acopio especificado.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.2.2",
+    "descripcion": "Lleno manual compactado con material proveniente de la excavación hasta obtener una densidad mínima del 95%, de la obtenida en el ensayo del Proctor modificado. Incluye selección, acarreo interno y compactación del material.",
+    "unidad": "m3"
+  },
+  {
+    "item": "4.3.8",
+    "descripcion": "Disposición de material para conformación de la calzada. incluye transporte descargue y regado del material. No incluye compactación ni material para la conformación.",
+    "unidad": "m3"
+  },
+  {
+    "item": "5.1.2",
+    "descripcion": "Suministro, colocación, conformación y compactación de afirmado para Bacheo, no incluye transporte. Compactación hasta obtener una densidad mínima del 95%, de la obtenida en el ensayo del Proctor modificado.",
+    "unidad": "m3"
+  },
+  {
+    "item": "5.1.7",
+    "descripcion": "Suministro, colocación y compactación de subbase granular para cimentación de tubería y lleno de zanjas, no incluye transporte. Compactación hasta obtener una densidad mínima del 95%, de la obtenida en el ensayo del Proctor modificado.",
+    "unidad": "m3"
+  },
+  {
+    "item": "5.1.15",
+    "descripcion": "Suministro de sub-base granular, medido suelto. No incluye nivelación, compactación, limpieza ni transporte del material, los cuales serán pagados en su respectivo ítem.",
+    "unidad": "m3"
+  },
+  {
+    "item": "5.2.13",
+    "descripcion": "Proceso de estabilización con material tratado con cal. Incluye colocación y compactación de la mezcla con cal y todo lo necesario para su correcta instalación. El suministro de la cal será pagado en su respectivo ítem.",
+    "unidad": "m3"
+  },
+  {
+    "item": "5.2.16",
+    "descripcion": "Proceso de estabilización con material tratado con cemento. Incluye colocación y compactación de la mezcla con cemento y todo lo necesario para su correcta instalación. El suministro de cemento será pagado en su respectivo ítem.",
+    "unidad": "m3"
+  },
+  {
+    "item": "6.1.18.1",
+    "descripcion": "Concreto Clase F (14 MPa). Solados de E=0.05 m",
+    "unidad": "m2"
+  },
+  {
+    "item": "6.2.4",
+    "descripcion": "Concreto Clase E (17.5 MPa). Elementos varios.",
+    "unidad": "m3"
+  },
+  {
+    "item": "6.2.24",
+    "descripcion": "Suministro, transporte y colocación de Concreto Clase C (28 MPa) para Muros, disipadores, aletas y estribos. Incluye impermeabilizante, formaleta para acabado a la vista, desmoldante, y todos los demás elementos necesarios para su correcta construcción y funcionamiento",
+    "unidad": "m3"
+  },
+  {
+    "item": "6.2.50",
+    "descripcion": "Concreto Clase C (28 MPa). Cunetas.",
+    "unidad": "m3"
+  },
+  {
+    "item": "7.1.1",
+    "descripcion": "Suministro, transporte y aplicación de emulsión asfáltica catiónica de rompimiento lento C.R.L. para imprimación de superficie a pavimentar según normas para la construcción de pavimentos del INVIAS 420-22. Incluye todo lo necesario para su correcta construcción y funcionamiento. Incluye recuperación de superficie y riego inicial con carrotanque.",
+    "unidad": "m2"
+  },
+  {
+    "item": "7.1.12.2",
+    "descripcion": "Tratamiento superficial doble con emulsión CRR-2M.",
+    "unidad": "m2"
+  },
+  {
+    "item": "8.1",
+    "descripcion": "Mantenimiento de obras de drenaje existentes. Incluye limpieza, desmonte vegetación, resane estructura, obras menores.",
+    "unidad": "m"
+  },
+  {
+    "item": "8.13.1",
+    "descripcion": "Suministro e instalación de dren francés de zanja de 0.4 m x 0.9 m, con Geotextil NT2500 y Grava de 3/4\". Incluye tubería de 4\" perforada para drenes. Incluye excavación, transporte de material de excavación, cargue y disposición final del material sobrante.",
+    "unidad": "m"
+  },
+  {
+    "item": "8.18",
+    "descripcion": "Disipadores de energía y sedimentador en Concreto Clase H (Ciclópeo con concreto clase D - 21 MPa)",
+    "unidad": "m3"
+  },
+  {
+    "item": "8.27",
+    "descripcion": "Suministro, transporte y colocación de Tubería PVC Alcantarillado pared interior lisa y exterior corrugada o equivalente unión mecánica de 900 mm (36\")",
+    "unidad": "m"
+  },
+  {
+    "item": "10.1",
+    "descripcion": "Suministro, transporte y colocación de Acero de refuerzo fy=420 Mpa (Grado 60)",
+    "unidad": "kg"
+  },
+  {
+    "item": "12.1",
+    "descripcion": "Suministro, transporte y aplicación con pintura acrílica en frio reflectorizada con microesferas de vidrio para línea de demarcación en pavimento.",
+    "unidad": "m"
+  },
+  {
+    "item": "12.9",
+    "descripcion": "Suministro, transporte e instalación de señal vertical de 75cmx75cm doble (SP/SR/SI), en lámina galvanizada calibre 16, reflectivo tipo IX, estructura metálica tipo pedestal compuesto por un paral en ángulo de 2\"x2\"x1/4\" y brazos en ángulo 2\"x2\"x1/8\"",
+    "unidad": "und"
+  },
+  {
+    "item": "13.1",
+    "descripcion": "Transporte de materiales de afirmado, sub-base, base y mezcla asfáltica para distancias superiores a 1000 m medidos a partir de 100 m. Material compacto (Incluye 30% de expansión).",
+    "unidad": "m3_km"
+  },
+  {
+    "item": "13.2",
+    "descripcion": "Transporte de sobrantes provenientes de la excavación, canales, préstamos para distancias superiores a 1000 m medidos a partir de 100 m. Material compacto (Incluye 30% de expansión).",
+    "unidad": "m3_km"
+  },
+  {
+    "item": "13.9",
+    "descripcion": "Transporte de materiales pétreos para distancias superiores a 1000 m medidos a partir de 100 m. Material medido en planta",
+    "unidad": "m3_km"
+  },
+  {
+    "item": "14.3",
+    "descripcion": "Suministro, transporte e instalación de Bordillo barrera recto 15x35x80 prefabricado para pompeyano, rebajes, entre otros",
+    "unidad": "m"
+  }
+]
