@@ -59,6 +59,8 @@ viajes de ese día, para que el residente vea en un solo documento lo que llegó
   volqueta, su origen y su destino.
 - RF-8: EL SISTEMA ofrecerá como volqueta únicamente los vehículos activos de tipo volqueta de
   la obra.
+  > **Precisado el 2026-09-16**: «activos» es en estado operativo. Una volqueta NO APTO, en
+  > mantenimiento, fuera de servicio o dada de baja no se ofrece.
 - RF-9: EL SISTEMA ofrecerá como origen los sitios vigentes de la obra.
 - RF-10: EL SISTEMA ofrecerá como destino los sitios vigentes de la obra y, además, la propia
   obra.
@@ -72,6 +74,8 @@ viajes de ese día, para que el residente vea en un solo documento lo que llegó
 - RF-16: SI llega un PR o unos metros fuera de esos rangos o que no sean múltiplo de 25,
   ENTONCES EL SISTEMA rechazará el viaje.
 - RF-17: EL SISTEMA mostrará la llegada a la obra como abscisa, con la forma «PR 5 + 300».
+  > **Precisado el 2026-09-16**: los metros van siempre con tres cifras: «PR 0 + 000»,
+  > «PR 5 + 050», «PR 25 + 975».
 - RF-18: SI el origen y el destino son el mismo sitio, ENTONCES EL SISTEMA rechazará el viaje.
 - RF-19: SI la fecha del viaje es posterior al día de hoy, ENTONCES EL SISTEMA lo rechazará.
 - RF-34: EL SISTEMA registrará en cada viaje el conductor de la volqueta. *(2026-09-15)*
@@ -185,5 +189,11 @@ Resueltas el 2026-09-15:
   sola si hubo viajes o no, y eso queda fijado al cerrar (RF-29, RF-31, RF-37).
 - **Conductor**: sí se registra (RF-34, RF-35).
 - **La obra como origen**: no. RF-9 se queda como está y el caso pasa a fuera de alcance.
+
+Resueltas el 2026-09-16, al planificar:
+
+- **Volquetas que se ofrecen**: solo las operativas (RF-8). Una NO APTO no puede trabajar y no
+  debe tener viajes.
+- **Forma de la abscisa**: metros con tres cifras (RF-17).
 
 Ninguna abierta.

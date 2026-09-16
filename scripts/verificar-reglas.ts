@@ -91,11 +91,18 @@ import {
   validarHorario,
 } from '../src/shared/rules/horas';
 import {
-  cantidadLegible,
-  MATERIALES_LABORATORIO,
+  ENSAYOS_DE_CALIDAD,
   nombreDeClima,
-  nombreDeMaterial,
+  nombreDeEnsayo,
 } from '../src/shared/catalogos/bitacora';
+import {
+  ACTIVIDADES_DEL_PRESUPUESTO,
+  actividadPorItem,
+  CLAVE_OTRA_ACTIVIDAD,
+  etiquetaDeActividad,
+  etiquetaDeUnidad,
+  IDS_UNIDAD_DE_ACTIVIDAD,
+} from '../src/shared/catalogos/presupuesto';
 import { Colors, Estado, Panel } from '../src/constants/paleta';
 import {
   AnchoContenidoConIndice,
@@ -133,6 +140,9 @@ import {
 } from '../src/shared/rules/jornada';
 import {
   bloqueosDelCierre,
+  faltaObservacionDelEnsayo,
+  faltasDeActividad,
+  MENSAJES_DE_ACTIVIDAD,
   mensajeDeDiaSinTrabajo,
   mensajeDelRechazoDeCierre,
   resolverDiaSinTrabajo,
@@ -142,7 +152,7 @@ import {
   type FotosDelParte,
   type ParteEvaluable,
 } from '../src/shared/rules/parte';
-import { calcularDimensiones } from '../src/shared/rules/dimensiones';
+import { calcularDimensiones, resolverCantidad } from '../src/shared/rules/dimensiones';
 import {
   aCentesimas,
   aDecimal,
@@ -157,12 +167,43 @@ import {
   validarMovimiento,
   type MovimientoRegistrado,
 } from '../src/shared/rules/almacen';
-import { construirActividadDelParte, construirMaquina } from '../src/features/bitacoras/parte';
 import {
+  canteraDelParte,
+  conductorElegible,
+  DESTINO_OBRA,
+  filtrarViajes,
+  formatearAbscisa,
+  OPCIONES_DE_METROS,
+  OPCIONES_DE_PR,
+  validarAbscisa,
+  validarViaje,
+  volquetaElegible,
+} from '../src/shared/rules/cantera';
+import {
+  conservarHeredadas,
+  construirActividadDelParte,
+  construirEnsayo,
+  construirMaquina,
+  esActividadHeredada,
+  esMaterialHeredado,
+} from '../src/features/bitacoras/parte';
+import {
+  esEnsayo,
+  type ActividadDelParte,
+  type FilaDeControlDeCalidad,
+} from '../src/features/bitacoras/tipos';
+import {
+  actividadDelParte,
+  ensayoDelParte,
+  materialDeCanteraEditado,
+  materialDeCanteraNuevo,
   materialEditado,
   materialNuevo,
   movimientoNuevo,
   parteEditado,
+  sitioEditado,
+  sitioNuevo,
+  viajeNuevo,
 } from '../src/features/panel/contratos';
 
 import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
@@ -953,6 +994,82 @@ prueba('guardar una sección no borra las notas del día', () => {
   assert.equal(soloMaquinaria.sinTrabajo, undefined);
 });
 
+prueba('el contrato del parte pide unidad a «otra» y observación a cada ensayo', () => {
+  // Spec 004, RF-67, RF-70, RF-72 y RF-73.
+  const camposCon = (resultado: { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } }) =>
+    (resultado.error?.issues ?? []).map((i) => [i.path.join('.'), i.message]);
+  const actividad = {
+    id: 'act-1',
+    descripcion: '',
+    observaciones: '',
+    longitud: null,
+    ancho: null,
+    alto: null,
+    area: null,
+    volumen: null,
+  };
+
+  // Otra sin unidad: el error va bajo `unidad`, con el texto de la regla.
+  assert.deepEqual(
+    camposCon(actividadDelParte.safeParse({ ...actividad, clave: 'otra', texto: 'Limpieza' })),
+    [['unidad', MENSAJES_DE_ACTIVIDAD.sinUnidad]],
+  );
+  assert.deepEqual(
+    camposCon(actividadDelParte.safeParse({ ...actividad, clave: 'otra', unidad: 'm3' })),
+    [['texto', MENSAJES_DE_ACTIVIDAD.sinCual]],
+  );
+  // Una unidad que no es de las seis.
+  const inventada = actividadDelParte.safeParse({ ...actividad, clave: 'otra', texto: 'Limpieza', unidad: 'mts' });
+  assert.equal(inventada.success, false);
+  assert.deepEqual(camposCon(inventada).map(([campo]) => campo), ['unidad']);
+  // Completa, con cantidad; y una del presupuesto sin unidad ni cantidad.
+  const otra = actividadDelParte.parse({ ...actividad, clave: 'otra', texto: 'Limpieza', unidad: 'm3', cantidad: 12.5 });
+  assert.equal(otra.unidad, 'm3');
+  assert.equal(otra.cantidad, 12.5);
+  const delPresupuesto = actividadDelParte.parse({ ...actividad, clave: '4.1.8' });
+  assert.equal(delPresupuesto.cantidad, null);
+  assert.equal(actividadDelParte.safeParse({ ...actividad, clave: '10.1', cantidad: -3 }).success, false);
+
+  // Un ensayo sin observación: bajo `observacion`, con el texto de la regla.
+  assert.deepEqual(
+    camposCon(ensayoDelParte.safeParse({ ensayo: 'espesor', observacion: '  ' })),
+    [['observacion', faltaObservacionDelEnsayo('')]],
+  );
+  // Sin ensayo ni id no es nada.
+  assert.deepEqual(camposCon(ensayoDelParte.safeParse({ observacion: 'x' })).map(([c]) => c), ['ensayo']);
+  // Solo el id: una fila heredada que se conserva.
+  assert.equal(ensayoDelParte.safeParse({ id: 'mat-1' }).success, true);
+
+  // En el parte: el mismo ensayo dos veces y un material heredado por su id.
+  const parte = parteEditado.parse({
+    laboratorio: [
+      { ensayo: 'densidad_en_campo', observacion: 'Lote 1' },
+      { ensayo: 'densidad_en_campo', observacion: 'Sin observaciones' },
+      { id: 'mat-1' },
+    ],
+  });
+  assert.equal(parte.laboratorio?.length, 3);
+  // Sin la unión transitoria (004/T29): el error del ensayo sale bajo su campo en el
+  // parte, y un material nuevo con cantidad ya no entra.
+  const sinObservacion = parteEditado.safeParse({ laboratorio: [{ ensayo: 'espesor', observacion: '' }] });
+  assert.equal(sinObservacion.success, false);
+  assert.deepEqual(camposCon(sinObservacion).map(([campo]) => campo), ['laboratorio.0.observacion']);
+  assert.equal(parteEditado.safeParse({ laboratorio: [{ material: 'cemento', cantidad: 4 }] }).success, false);
+
+  // Una actividad heredada viaja solo con su id: una «otra» vieja no tiene unidad y
+  // no pasaría las exigencias de hoy, pero el servidor la conserva sin mirarla (T28).
+  const conHeredada = parteEditado.parse({ actividades: [{ id: 'act-vieja' }, { ...actividad, clave: '4.1.8' }] });
+  assert.equal(conHeredada.actividades?.length, 2);
+  // Pero un id con más campos no es una heredada: sigue pidiendo lo de siempre, y el
+  // error de «otra» sin unidad sigue saliendo bajo su campo.
+  const otraIncompleta = parteEditado.safeParse({ actividades: [{ ...actividad, clave: 'otra', texto: 'Limpieza' }] });
+  assert.equal(otraIncompleta.success, false);
+  assert.ok(
+    camposCon(otraIncompleta).some(([campo, mensaje]) => campo === 'actividades.0.unidad' && mensaje === MENSAJES_DE_ACTIVIDAD.sinUnidad),
+    JSON.stringify(camposCon(otraIncompleta)),
+  );
+});
+
 prueba('el servidor recalcula el área aunque llegue otra', () => {
   // Spec 004 / RF-58. Una petición hecha por fuera con área 99 no la guarda.
   const actividad = construirActividadDelParte({
@@ -966,12 +1083,168 @@ prueba('el servidor recalcula el área aunque llegue otra', () => {
     alto: null,
     area: 99,
     volumen: 7,
-  });
+    unidad: 'm3',
+  })!;
   assert.equal(actividad.area, 12);
   // Sin alto, el volumen es el que se escribió (RF-60).
   assert.equal(actividad.volumen, 7);
   // Y el id que trae se conserva: es a lo que apuntan sus fotos (RF-47).
   assert.equal(actividad.id, 'act-1');
+});
+
+prueba('una actividad del presupuesto se guarda con lo que dice el catálogo', () => {
+  // Spec 004, RF-64, RF-66 a RF-70 y RF-74.
+  const base = {
+    id: 'act-2',
+    texto: null,
+    descripcion: 'Box coulvert PR 5',
+    observaciones: '',
+    longitud: 3,
+    ancho: 4,
+    alto: 0.5,
+    area: null,
+    volumen: null,
+  };
+
+  // La 4.1.8: nombre = descripción completa, ítem y unidad del catálogo aunque el
+  // cliente mande otra unidad y otro texto; cantidad del volumen, no la escrita.
+  const excavacion = construirActividadDelParte({
+    ...base,
+    clave: '4.1.8',
+    texto: 'Otra cosa',
+    unidad: 'kg',
+    cantidad: 99,
+  })!;
+  assert.equal(excavacion.clave, '4.1.8');
+  assert.equal(excavacion.item, '4.1.8');
+  assert.equal(excavacion.nombre, actividadPorItem('4.1.8')!.descripcion);
+  assert.equal(excavacion.unidad, 'm³');
+  assert.equal(excavacion.cantidad, 6);
+  assert.equal(excavacion.volumen, 6);
+  assert.equal(excavacion.descripcion, 'Box coulvert PR 5');
+
+  // La 10.1 (kg): con medidas, la cantidad es la escrita.
+  const acero = construirActividadDelParte({ ...base, clave: '10.1', cantidad: 500 })!;
+  assert.equal(acero.unidad, 'kg');
+  assert.equal(acero.cantidad, 500);
+  // Sin cantidad escrita, queda en blanco (RF-74).
+  assert.equal(construirActividadDelParte({ ...base, clave: '10.1' })!.cantidad, null);
+
+  // Otra actividad: su texto es el nombre, su unidad la elegida, sin ítem.
+  const otra = construirActividadDelParte({
+    ...base,
+    clave: CLAVE_OTRA_ACTIVIDAD,
+    texto: '  Limpieza de derrumbe ',
+    unidad: 'm3',
+    cantidad: null,
+  })!;
+  assert.equal(otra.nombre, 'Limpieza de derrumbe');
+  assert.equal(otra.item, null);
+  assert.equal(otra.unidad, 'm³');
+  // En m³ con sus tres medidas, la cantidad sale del volumen como en una de la lista.
+  assert.equal(otra.cantidad, 6);
+
+  // Una clave que no es del presupuesto ni «otra» no se construye: ni las de la lista
+  // de prueba, ni una otra sin unidad válida.
+  assert.equal(construirActividadDelParte({ ...base, clave: 'excavacion' }), null);
+  assert.equal(
+    construirActividadDelParte({ ...base, clave: CLAVE_OTRA_ACTIVIDAD, texto: 'Algo', unidad: 'mts' }),
+    null,
+  );
+});
+
+prueba('un ensayo se guarda con su nombre y su observación, y puede repetirse', () => {
+  // Spec 004, RF-61, RF-72 y RF-73.
+  const densidad = construirEnsayo({ ensayo: 'densidad_en_campo', observacion: '  98 %, PR 5 + 300 ' })!;
+  assert.equal(densidad.ensayo, 'densidad_en_campo');
+  assert.equal(densidad.nombre, 'Densidad en campo');
+  assert.equal(densidad.observacion, '98 %, PR 5 + 300');
+  assert.ok(esEnsayo(densidad));
+  assert.ok(densidad.id.length > 0);
+  // Dos del mismo ensayo: dos filas distintas.
+  const otraDensidad = construirEnsayo({ ensayo: 'densidad_en_campo', observacion: 'Sin observaciones' })!;
+  assert.notEqual(otraDensidad.id, densidad.id);
+  // Un ensayo que no es de la lista, o sin observación, no se construye.
+  assert.equal(construirEnsayo({ ensayo: 'cemento', observacion: 'x' }), null);
+  assert.equal(construirEnsayo({ ensayo: 'espesor', observacion: '  ' }), null);
+  assert.equal(construirEnsayo({ id: 'mat-1' }), null);
+});
+
+prueba('las filas guardadas antes de los catálogos de OCC se conservan tal cual', () => {
+  // Spec 004, RF-63 y RF-71. Lo que llega del navegador no las toca.
+  const actividadVieja: ActividadDelParte = {
+    id: 'act-vieja',
+    clave: 'excavacion',
+    nombre: 'Excavación',
+    descripcion: 'Zanja',
+    longitud: 2,
+    ancho: 1,
+    alto: null,
+    area: 2,
+    volumen: null,
+    observaciones: '',
+  };
+  const actividadNueva = construirActividadDelParte({
+    id: 'act-nueva',
+    clave: '10.1',
+    descripcion: '',
+    observaciones: '',
+    longitud: null,
+    ancho: null,
+    alto: null,
+    area: null,
+    volumen: null,
+    cantidad: 300,
+  })!;
+  assert.equal(esActividadHeredada(actividadVieja), true);
+  assert.equal(esActividadHeredada(actividadNueva), false);
+
+  const pedidas = [
+    // La heredada, con un nombre y unas medidas que no son las suyas.
+    { id: 'act-vieja', clave: 'excavacion', texto: 'Otro nombre', descripcion: 'Cambiada', observaciones: '', longitud: 9, ancho: 9, alto: 9, area: null, volumen: null },
+    // Una nueva que reclama el id de una fila **no** heredada: se construye, no se copia.
+    { id: 'act-nueva', clave: '10.1', descripcion: '', observaciones: '', longitud: null, ancho: null, alto: null, area: null, volumen: null, cantidad: 450 },
+    // Un id que no está guardado, con clave de prueba: no se construye.
+    { id: 'act-ajena', clave: 'excavacion', descripcion: '', observaciones: '', longitud: null, ancho: null, alto: null, area: null, volumen: null },
+  ];
+  const actividades = conservarHeredadas(
+    pedidas,
+    [actividadVieja, actividadNueva],
+    esActividadHeredada,
+    construirActividadDelParte,
+  );
+  assert.deepEqual(actividades[0], actividadVieja);
+  assert.equal(actividades[1]!.cantidad, 450);
+  assert.equal(actividades[2], null);
+
+  // Control de calidad: el material viejo llega solo con su id y se queda como estaba.
+  const materialViejo: FilaDeControlDeCalidad = {
+    id: 'mat-1',
+    material: 'cemento',
+    nombre: 'Cemento',
+    cantidad: 4,
+    unidad: 'bultos',
+  };
+  assert.equal(esMaterialHeredado(materialViejo), true);
+  assert.equal(esEnsayo(materialViejo), false);
+  const control = conservarHeredadas(
+    [{ id: 'mat-1', ensayo: 'espesor', observacion: 'Intento de cambiarlo' }, { ensayo: 'espesor', observacion: 'Sin observaciones' }, { id: 'mat-ajeno' }],
+    [materialViejo],
+    esMaterialHeredado,
+    construirEnsayo,
+  );
+  assert.deepEqual(control[0], materialViejo);
+  assert.ok(control[1] && esEnsayo(control[1]));
+  assert.equal(control[2], null);
+});
+
+prueba('un material heredado cuenta como Control Calidad de Obra lleno al cerrar', () => {
+  // Spec 004, RF-50 con RF-63: la sección no se vacía por venir de la lista vieja.
+  const bloqueos = bloqueosDelCierre(
+    { ...PARTE_COMPLETO, laboratorio: [{ id: 'mat-1', material: 'cemento', nombre: 'Cemento', cantidad: 4, unidad: 'bultos' }] },
+    FOTOS_COMPLETAS,
+  );
+  assert.ok(!bloqueos.some((b) => b.includes('Control Calidad de Obra')), bloqueos.join(' | '));
 });
 
 prueba('las observaciones de la máquina se guardan con ella', () => {
@@ -1695,6 +1968,86 @@ prueba('el área de una actividad es largo por ancho', () => {
   assert.equal(medidas.areaCalculada, true);
 });
 
+prueba('la cantidad de una actividad sale de la medida que corresponde a su unidad', () => {
+  // Spec 004, RF-67 a RF-69 y RF-74. Se resuelve sobre las medidas ya resueltas:
+  // el volumen y el área son los que se ven, calculados o escritos.
+  const medidas = (longitud: number | null, ancho: number | null, alto: number | null, area: number | null = null, volumen: number | null = null) =>
+    calcularDimensiones({ longitud, ancho, alto, area, volumen });
+
+  // m³ con sus tres medidas: el volumen, y lo escrito a mano no cuenta.
+  assert.deepEqual(resolverCantidad('m3', medidas(3, 4, 0.5), 99), {
+    cantidad: 6,
+    cantidadCalculada: true,
+    origen: 'volumen',
+  });
+  // m³ sin alto: no hay volumen, se escribe a mano.
+  assert.deepEqual(resolverCantidad('m3', medidas(3, 4, null), 9), {
+    cantidad: 9,
+    cantidadCalculada: false,
+    origen: null,
+  });
+  // m³ con el volumen escrito a mano y sin medidas: RF-68 dice «tenga volumen».
+  assert.deepEqual(resolverCantidad('m3', medidas(null, null, null, null, 7), null), {
+    cantidad: 7,
+    cantidadCalculada: true,
+    origen: 'volumen',
+  });
+  // m²: el área. m: la longitud.
+  assert.equal(resolverCantidad('m2', medidas(3, 4, null), null).cantidad, 12);
+  assert.equal(resolverCantidad('m2', medidas(3, 4, null), null).origen, 'area');
+  assert.deepEqual(resolverCantidad('m', medidas(25, null, null), 3), {
+    cantidad: 25,
+    cantidadCalculada: true,
+    origen: 'longitud',
+  });
+  // kg, Und y m³-km: las medidas no dan cuánto se hizo, aunque las haya.
+  assert.deepEqual(resolverCantidad('kg', medidas(3, 4, 0.5), 500), {
+    cantidad: 500,
+    cantidadCalculada: false,
+    origen: null,
+  });
+  assert.equal(resolverCantidad('m3_km', medidas(3, 4, 0.5), 1200).cantidad, 1200);
+  // Und sin nada escrito: queda en blanco, no es obligatoria (RF-74).
+  assert.deepEqual(resolverCantidad('und', medidas(null, null, null), null), {
+    cantidad: null,
+    cantidadCalculada: false,
+    origen: null,
+  });
+  // Sin unidad (una actividad heredada): nada se calcula.
+  assert.equal(resolverCantidad(null, medidas(3, 4, 0.5), null).cantidad, null);
+  // La regla escribe las claves m3, m2 y m sin importar el catálogo: tienen que
+  // seguir siendo claves del catálogo, o la cantidad dejaría de calcularse sin avisar.
+  for (const clave of ['m3', 'm2', 'm']) assert.ok(IDS_UNIDAD_DE_ACTIVIDAD.includes(clave), clave);
+});
+
+prueba('a «Otra actividad» se le exige cuál fue y su unidad', () => {
+  // Spec 004, RF-24 y RF-70. Cada falta bajo su campo.
+  assert.deepEqual(faltasDeActividad({ otra: true, texto: '', unidad: null }), [
+    { campo: 'texto', mensaje: MENSAJES_DE_ACTIVIDAD.sinCual },
+    { campo: 'unidad', mensaje: MENSAJES_DE_ACTIVIDAD.sinUnidad },
+  ]);
+  assert.deepEqual(faltasDeActividad({ otra: true, texto: '   ', unidad: 'm3' }), [
+    { campo: 'texto', mensaje: MENSAJES_DE_ACTIVIDAD.sinCual },
+  ]);
+  assert.deepEqual(faltasDeActividad({ otra: true, texto: 'Limpieza de derrumbe', unidad: null }), [
+    { campo: 'unidad', mensaje: MENSAJES_DE_ACTIVIDAD.sinUnidad },
+  ]);
+  assert.deepEqual(faltasDeActividad({ otra: true, texto: 'Limpieza de derrumbe', unidad: 'm3' }), []);
+  // Una actividad del presupuesto trae nombre y unidad del catálogo: no le falta nada.
+  assert.deepEqual(faltasDeActividad({ otra: false, texto: null, unidad: null }), []);
+});
+
+prueba('un ensayo sin observación se rechaza y «Sin observaciones» vale', () => {
+  // Spec 004, RF-72.
+  const falta = faltaObservacionDelEnsayo('');
+  assert.ok(falta);
+  assert.match(falta, /Sin observaciones/);
+  assert.equal(faltaObservacionDelEnsayo('   \n  '), falta);
+  assert.equal(faltaObservacionDelEnsayo(null), falta);
+  assert.equal(faltaObservacionDelEnsayo('Sin observaciones'), null);
+  assert.equal(faltaObservacionDelEnsayo('Densidad 98 %, lote PR 5'), null);
+});
+
 prueba('sin ancho, el área es la que se escribió', () => {
   // Spec 004 / RF-60. No todas las actividades se miden en largo y ancho: una
   // limpieza de zona puede traer solo el área.
@@ -1743,14 +2096,82 @@ prueba('área y volumen calculados se redondean a dos decimales', () => {
   );
 });
 
-prueba('los materiales de laboratorio traen su unidad pegada', () => {
-  // Un «3» de cemento sin decir si son bultos o metros cúbicos es el dato que
-  // después nadie sabe interpretar.
-  assert.equal(new Set(MATERIALES_LABORATORIO.map((m) => m.id)).size, MATERIALES_LABORATORIO.length);
-  assert.equal(cantidadLegible('cemento', 4), '4 bultos');
-  assert.equal(cantidadLegible('base_granular', 12), '12 m³');
-  assert.equal(nombreDeMaterial('inventado'), 'inventado');
+prueba('las condiciones de clima se nombran como se leen', () => {
+  // Spec 004, RF-26. Hasta el 2026-09-16 este caso probaba también los materiales de
+  // laboratorio, que salieron con la tarea 004/T29.
   assert.equal(nombreDeClima('lloviendo'), 'Lloviendo');
+  assert.equal(nombreDeClima('inventado'), 'inventado');
+});
+
+prueba('las actividades del parte son las del presupuesto de OCC, cada una con su unidad', () => {
+  // Spec 004, RF-64 a RF-66 y anexo B.
+  const items = ACTIVIDADES_DEL_PRESUPUESTO.map((a) => a.item);
+  assert.equal(ACTIVIDADES_DEL_PRESUPUESTO.length, 31);
+  assert.equal(new Set(items).size, 31, 'un ítem repetido');
+  // «otra» es la salida para lo que no está en la lista, no una actividad de ella.
+  assert.ok(!items.includes(CLAVE_OTRA_ACTIVIDAD));
+  // El JSON generado solo puede usar las seis claves del catálogo.
+  for (const actividad of ACTIVIDADES_DEL_PRESUPUESTO) {
+    assert.ok(IDS_UNIDAD_DE_ACTIVIDAD.includes(actividad.unidad), `${actividad.item}: ${actividad.unidad}`);
+    assert.ok(actividad.descripcion.length > 0, actividad.item);
+  }
+
+  const unidadDe = (item: string) => etiquetaDeUnidad(actividadPorItem(item)!.unidad);
+  assert.equal(unidadDe('4.1.8'), 'm³');
+  assert.equal(unidadDe('10.1'), 'kg');
+  assert.equal(unidadDe('12.9'), 'Und');
+  assert.equal(unidadDe('13.1'), 'm³-km');
+  assert.equal(unidadDe('13.9'), 'm³-km');
+  assert.equal(unidadDe('6.1.18.1'), 'm²');
+  assert.equal(unidadDe('14.3'), 'm');
+  assert.equal(actividadPorItem('excavacion'), undefined);
+  assert.equal(etiquetaDeUnidad('inventada'), 'inventada');
+
+  // La descripción completa, con su número delante (RF-65).
+  assert.ok(
+    etiquetaDeActividad(actividadPorItem('4.1.8')!).startsWith(
+      '4.1.8 · Excavación para estructuras varias en material común en seco. Incluye entibado.',
+    ),
+  );
+  assert.ok(actividadPorItem('8.27')!.descripcion.endsWith('900 mm (36")'));
+
+  // Se encuentra por número o por palabras, sin tildes (RF-65).
+  const opciones = ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
+    valor: a.item,
+    etiqueta: etiquetaDeActividad(a),
+  }));
+  assert.deepEqual(filtrarOpciones(opciones, '4.1.8').map((o) => o.valor), ['4.1.8']);
+  assert.ok(filtrarOpciones(opciones, 'excavacion').some((o) => o.valor === '4.1.8'));
+  assert.deepEqual(filtrarOpciones(opciones, 'acero').map((o) => o.valor), ['10.1']);
+});
+
+prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC', () => {
+  // Spec 004, RF-61 y anexo A, en su orden.
+  assert.deepEqual(
+    ENSAYOS_DE_CALIDAD.map((e) => e.nombre),
+    [
+      'Granulometría',
+      'Límite líquido',
+      'Índice de plasticidad',
+      'Equivalente de arena',
+      'Azul de metileno',
+      'Materia orgánica',
+      'Proctor / compactación',
+      'CBR sin cemento',
+      'Sulfatos solubles',
+      'Contenido de cemento',
+      'Muestreo para resistencia',
+      'Moldeo de probetas',
+      'Compresión simple',
+      'Densidad en campo',
+      'Compactación',
+      'Espesor',
+      'Planicidad',
+    ],
+  );
+  assert.equal(new Set(ENSAYOS_DE_CALIDAD.map((e) => e.id)).size, 17);
+  assert.equal(nombreDeEnsayo('densidad_en_campo'), 'Densidad en campo');
+  assert.equal(nombreDeEnsayo('inventado'), 'inventado');
 });
 
 prueba('cada equipo se mide con lo que le corresponde', () => {
@@ -1809,6 +2230,15 @@ prueba('un duplicado dice qué campo del formulario lo causó', () => {
   // Spec 009 / RF-3: el material repetido se pinta bajo su nombre.
   assert.deepEqual(duplicadoDe('ux_almacen_material_nombre'), {
     mensaje: 'Ya hay un material con ese nombre en el almacén de esta obra.',
+    campo: 'nombre',
+  });
+  // Spec 010 / RF-3: sitios y materiales de cantera, también bajo su nombre.
+  assert.deepEqual(duplicadoDe('ux_cantera_sitio_nombre'), {
+    mensaje: 'Ya hay un sitio con ese nombre en esta obra.',
+    campo: 'nombre',
+  });
+  assert.deepEqual(duplicadoDe('ux_cantera_material_nombre'), {
+    mensaje: 'Ya hay un material de cantera con ese nombre en esta obra.',
     campo: 'nombre',
   });
   // Un índice que no se conoce no inventa campo: el mensaje va arriba, como antes.
@@ -2279,6 +2709,244 @@ prueba('los movimientos se filtran por periodo y por tipo, sin esconder los anul
     filtrarMovimientos(todos, { desde: '2026-09-11', tipo: 'ingreso' }).map((m) => m.id),
     [],
   );
+});
+
+/* ── Control Cantera (spec 010) ── */
+
+prueba('el PR se elige de 0 a 25 y los metros de 0 a 975, de 25 en 25', () => {
+  // Spec 010 / RF-12 y RF-13.
+  assert.equal(OPCIONES_DE_PR.length, 26);
+  assert.equal(OPCIONES_DE_PR[0], 0);
+  assert.equal(OPCIONES_DE_PR.at(-1), 25);
+  assert.equal(OPCIONES_DE_METROS.length, 40);
+  assert.deepEqual(OPCIONES_DE_METROS.slice(0, 3), [0, 25, 50]);
+  assert.equal(OPCIONES_DE_METROS.at(-1), 975);
+});
+
+prueba('la llegada a la obra se escribe como abscisa, con los metros en tres cifras', () => {
+  // Spec 010 / RF-17, precisado el 2026-09-16.
+  assert.equal(formatearAbscisa(5, 300), 'PR 5 + 300');
+  assert.equal(formatearAbscisa(25, 975), 'PR 25 + 975');
+  assert.equal(formatearAbscisa(0, 50), 'PR 0 + 050');
+  assert.equal(formatearAbscisa(0, 0), 'PR 0 + 000');
+});
+
+prueba('una abscisa incompleta nombra lo que falta y una fuera de rango se rechaza', () => {
+  // Spec 010 / RF-14 y RF-16.
+  const faltas = (pr: number | null, metros: number | null) =>
+    validarAbscisa(pr, metros).map((f) => `${f.campo}: ${f.mensaje}`);
+  assert.deepEqual(faltas(null, 300), ['pr: Falta el PR de llegada.']);
+  assert.deepEqual(faltas(5, null), ['metros: Faltan los metros de llegada.']);
+  assert.deepEqual(faltas(null, null), ['pr: Falta el PR de llegada.', 'metros: Faltan los metros de llegada.']);
+  assert.deepEqual(faltas(26, 300), ['pr: El PR va de 0 a 25.']);
+  assert.deepEqual(faltas(-1, 300), ['pr: El PR va de 0 a 25.']);
+  assert.deepEqual(faltas(2.5, 300), ['pr: El PR va de 0 a 25.']);
+  assert.deepEqual(faltas(5, 980), ['metros: Los metros van de 0 a 975, de 25 en 25.']);
+  assert.deepEqual(faltas(5, 310), ['metros: Los metros van de 0 a 975, de 25 en 25.']);
+  assert.deepEqual(faltas(25, 975), []);
+  assert.deepEqual(faltas(0, 0), []);
+});
+
+/** Un viaje completo de la demo: VOL-01 de La Esperanza a la obra en PR 5 + 300. */
+function viajeALaObra(): Parameters<typeof validarViaje>[0] {
+  return {
+    fecha: '2026-09-16',
+    hora: '07:30',
+    materialId: 'afirmado',
+    vehiculoId: 'vol-01',
+    conductorId: 'pedro',
+    origenId: 'la-esperanza',
+    destino: DESTINO_OBRA,
+    pr: 5,
+    metros: 300,
+  };
+}
+
+prueba('un viaje completo a la obra o entre sitios se acepta', () => {
+  // Spec 010 / RF-7, RF-11 y RF-15: de una planta a otra, sin abscisa.
+  const hoy = '2026-09-16';
+  assert.deepEqual(validarViaje(viajeALaObra(), hoy), []);
+  assert.deepEqual(
+    validarViaje({ ...viajeALaObra(), destino: 'planta-norte', pr: null, metros: null }, hoy),
+    [],
+  );
+  // Un día pasado, y una hora de hoy todavía por llegar, valen: solo se mira el día.
+  assert.deepEqual(validarViaje({ ...viajeALaObra(), fecha: '2026-09-01', hora: '23:59' }, hoy), []);
+});
+
+prueba('un viaje con fecha futura, sin conductor o entre el mismo sitio se rechaza en su campo', () => {
+  // Spec 010 / RF-15, RF-18, RF-19 y RF-34.
+  const hoy = '2026-09-16';
+  const campos = (cambios: Partial<Parameters<typeof validarViaje>[0]>) =>
+    validarViaje({ ...viajeALaObra(), ...cambios }, hoy).map((f) => `${f.campo}: ${f.mensaje}`);
+
+  assert.deepEqual(campos({ fecha: '2026-09-17' }), ['fecha: La fecha no puede ser posterior a hoy.']);
+  assert.deepEqual(campos({ conductorId: null }), ['conductorId: Elija el conductor.']);
+  assert.deepEqual(campos({ hora: '7:30' }), ['hora: La hora va como HH:MM, de 00:00 a 23:59.']);
+  assert.deepEqual(campos({ hora: '24:00' }), ['hora: La hora va como HH:MM, de 00:00 a 23:59.']);
+  assert.deepEqual(campos({ destino: 'la-esperanza', pr: null, metros: null }), [
+    'destino: El origen y el destino no pueden ser el mismo sitio.',
+  ]);
+  // Con otro destino, una abscisa que se quedó en el formulario no se guarda: se rechaza.
+  assert.deepEqual(campos({ destino: 'planta-norte' }), [
+    'pr: El PR y los metros solo se anotan cuando el destino es la obra.',
+    'metros: El PR y los metros solo se anotan cuando el destino es la obra.',
+  ]);
+  assert.deepEqual(campos({ metros: null }), ['metros: Faltan los metros de llegada.']);
+  // Todo vacío: se nombra cada campo, de una vez.
+  assert.deepEqual(
+    validarViaje(
+      { fecha: '', hora: '', materialId: null, vehiculoId: null, conductorId: null, origenId: null, destino: null, pr: null, metros: null },
+      hoy,
+    ).map((f) => f.campo),
+    ['fecha', 'hora', 'materialId', 'vehiculoId', 'conductorId', 'origenId', 'destino'],
+  );
+});
+
+prueba('solo la volqueta operativa de la obra se ofrece para un viaje', () => {
+  // Spec 010 / RF-8, precisado el 2026-09-16, y sus casos límite.
+  const vol01 = { obraId: 'antioquia', tipoVehiculoId: 'volqueta', estado: 'operativo', dadoDeBaja: false };
+  assert.equal(volquetaElegible(vol01, 'antioquia'), true);
+  assert.equal(volquetaElegible({ ...vol01, obraId: 'otra' }, 'antioquia'), false, 'trasladada');
+  assert.equal(volquetaElegible({ ...vol01, obraId: null }, 'antioquia'), false, 'sin obra');
+  assert.equal(volquetaElegible({ ...vol01, estado: 'en_mantenimiento' }, 'antioquia'), false);
+  assert.equal(volquetaElegible({ ...vol01, estado: 'no_apto' }, 'antioquia'), false);
+  assert.equal(volquetaElegible({ ...vol01, estado: 'fuera_servicio' }, 'antioquia'), false);
+  assert.equal(volquetaElegible({ ...vol01, dadoDeBaja: true }, 'antioquia'), false);
+  assert.equal(volquetaElegible({ ...vol01, tipoVehiculoId: 'camioneta' }, 'antioquia'), false);
+});
+
+prueba('como conductor solo sale quien conduce u opera, activo y de la obra', () => {
+  // Spec 010 / RF-35. El cargo lo decide el mismo catálogo que da celular.
+  const pedro = { obraId: 'antioquia', cargo: 'conductor', activo: true, dadoDeBaja: false };
+  assert.equal(conductorElegible(pedro, 'antioquia'), true);
+  assert.equal(conductorElegible({ ...pedro, cargo: 'operador' }, 'antioquia'), true);
+  assert.equal(conductorElegible({ ...pedro, cargo: 'cadenero_1' }, 'antioquia'), false);
+  assert.equal(conductorElegible({ ...pedro, cargo: 'encargado_planta' }, 'antioquia'), false);
+  assert.equal(conductorElegible({ ...pedro, cargo: null }, 'antioquia'), false);
+  assert.equal(conductorElegible({ ...pedro, activo: false }, 'antioquia'), false);
+  assert.equal(conductorElegible({ ...pedro, dadoDeBaja: true }, 'antioquia'), false);
+  assert.equal(conductorElegible({ ...pedro, obraId: 'otra' }, 'antioquia'), false);
+});
+
+prueba('los viajes se filtran por volqueta, material, origen y destino, sin esconder anulados', () => {
+  // Spec 010 / RF-21 y RF-25.
+  const viajes = [
+    { id: 'v1', vehiculoId: 'vol-01', materialId: 'afirmado', origenId: 'esperanza', destinoId: null, destinoObra: true, anulado: false },
+    { id: 'v2', vehiculoId: 'vol-02', materialId: 'afirmado', origenId: 'esperanza', destinoId: 'planta', destinoObra: false, anulado: true },
+    { id: 'v3', vehiculoId: 'vol-01', materialId: 'arena', origenId: 'planta', destinoId: null, destinoObra: true, anulado: false },
+  ];
+  const ids = (filtro: Parameters<typeof filtrarViajes>[1]) => filtrarViajes(viajes, filtro).map((v) => v.id);
+  assert.deepEqual(ids({}), ['v1', 'v2', 'v3']);
+  assert.deepEqual(ids({ vehiculoId: 'vol-01' }), ['v1', 'v3']);
+  assert.deepEqual(ids({ materialId: 'afirmado' }), ['v1', 'v2']);
+  assert.deepEqual(ids({ origenId: 'planta' }), ['v3']);
+  assert.deepEqual(ids({ destino: DESTINO_OBRA }), ['v1', 'v3']);
+  assert.deepEqual(ids({ destino: 'planta' }), ['v2']);
+  assert.deepEqual(ids({ vehiculoId: 'vol-01', materialId: 'arena', destino: DESTINO_OBRA }), ['v3']);
+});
+
+prueba('la bitácora dice qué pasó con la cantera, también cuando no hubo viajes', () => {
+  // Spec 010 / RF-26, RF-29, RF-31 y RF-37.
+  const viaje = { id: 'v1' };
+  const abierta = canteraDelParte({ cerrado: false, fijados: null, vigentes: [viaje] });
+  assert.deepEqual([abierta.estado, abierta.viajes.length, abierta.aviso], ['vigentes', 1, null]);
+
+  const abiertaSinViajes = canteraDelParte({ cerrado: false, fijados: null, vigentes: [] });
+  assert.equal(abiertaSinViajes.aviso, 'Todavía no hay viajes de cantera registrados para este día.');
+
+  // Cerrada: manda lo fijado, aunque hoy haya otros vigentes (RF-30).
+  const cerrada = canteraDelParte({ cerrado: true, fijados: [viaje], vigentes: [] });
+  assert.deepEqual([cerrada.estado, cerrada.viajes.length, cerrada.aviso], ['fijados', 1, null]);
+
+  const cerradaSinViajes = canteraDelParte({ cerrado: true, fijados: [], vigentes: [viaje] });
+  assert.deepEqual(
+    [cerradaSinViajes.estado, cerradaSinViajes.viajes.length, cerradaSinViajes.aviso],
+    ['fijados', 0, 'Ese día no se registraron viajes de cantera.'],
+  );
+
+  // Cerrada antes del módulo: no se afirma que no hubo viajes.
+  const antigua = canteraDelParte({ cerrado: true, fijados: null, vigentes: [viaje] });
+  assert.deepEqual(
+    [antigua.estado, antigua.viajes.length, antigua.aviso],
+    ['antes_del_control', 0, 'Esta bitácora se cerró antes de que existiera el control de cantera.'],
+  );
+});
+
+prueba('Control Cantera sale en el índice con su conteo y nunca como pendiente', () => {
+  // Spec 010 / RF-28 y RF-36.
+  // Sin conteo, la pantalla todavía no la pide y no sale.
+  assert.equal(estadoDe(PARTE_VACIO, 'cantera'), undefined);
+  // Va justo después de Control Calidad de Obra.
+  const ids = seccionesDelParte({ ...PARTE_VACIO, cantera: 3 }).map((s) => s.id);
+  assert.equal(ids[ids.indexOf('laboratorio') + 1], 'cantera');
+  assert.deepEqual(
+    { ...estadoDe({ ...PARTE_VACIO, cantera: 3 }, 'cantera') },
+    { id: 'cantera', titulo: 'Control Cantera', estado: 'lleno', cuantos: 3 },
+  );
+  assert.equal(estadoDe({ ...PARTE_VACIO, cantera: null }, 'cantera')?.estado, 'desconocido');
+  // Cero viajes: «–» y «sin viajes», no «○ sin registrar».
+  const sinViajes = estadoDe({ ...PARTE_VACIO, cantera: 0 }, 'cantera');
+  assert.equal(sinViajes?.estado, 'no_aplica');
+  assert.equal(sinViajes?.detalle, 'sin viajes');
+  // Las demás secciones no cambian por tenerla.
+  assert.equal(seccionesDelParte({ ...PARTE_VACIO, cantera: 0 }).length, seccionesDelParte(PARTE_VACIO).length + 1);
+});
+
+prueba('el contrato del viaje exige la abscisa con la obra y la rechaza con un sitio', () => {
+  // Spec 010 / RF-11, RF-14, RF-15, RF-16, RF-18 y RF-34. Mismos textos que la regla.
+  const base = {
+    fecha: '2026-09-16',
+    hora: '07:30',
+    materialId: 'afirmado',
+    vehiculoId: 'vol-01',
+    conductorId: 'pedro',
+    origenId: 'la-esperanza',
+  };
+  const aLaObra = viajeNuevo.parse({ ...base, destino: DESTINO_OBRA, pr: 5, metros: 300 });
+  assert.deepEqual([aLaObra.pr, aLaObra.metros, aLaObra.obraId], [5, 300, null]);
+
+  const faltas = (dato: unknown) =>
+    viajeNuevo.safeParse(dato).error?.issues.map((i) => `${i.path.join('.')}: ${i.message}`) ?? [];
+
+  assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5 }), [
+    'metros: Faltan los metros de llegada.',
+  ]);
+  assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5, metros: 310 }), [
+    'metros: Los metros van de 0 a 975, de 25 en 25.',
+  ]);
+  assert.deepEqual(faltas({ ...base, destino: 'planta', pr: 5, metros: null }), [
+    'pr: El PR y los metros solo se anotan cuando el destino es la obra.',
+  ]);
+  assert.deepEqual(faltas({ ...base, destino: 'la-esperanza' }), [
+    'destino: El origen y el destino no pueden ser el mismo sitio.',
+  ]);
+  assert.deepEqual(faltas({ ...base, conductorId: '', destino: 'planta' }), [
+    'conductorId: Elija el conductor.',
+  ]);
+  // Un viaje entre sitios sin abscisa pasa, con pr y metros en null.
+  const entreSitios = viajeNuevo.parse({ ...base, destino: 'planta' });
+  assert.deepEqual([entreSitios.pr, entreSitios.metros], [null, null]);
+});
+
+prueba('sitios y materiales de cantera se registran con nombre, y el sitio con su tipo', () => {
+  // Spec 010 / RF-1, RF-2 y RF-4.
+  assert.deepEqual(sitioNuevo.parse({ nombre: ' La Esperanza ', tipo: 'cantera' }), {
+    nombre: 'La Esperanza',
+    tipo: 'cantera',
+    obraId: null,
+  });
+  assert.equal(
+    sitioNuevo.safeParse({ nombre: 'La Esperanza', tipo: 'botadero' }).error?.issues[0]?.message,
+    'Elija si es cantera, planta u otro.',
+  );
+  assert.equal(
+    materialDeCanteraNuevo.safeParse({ nombre: '  ' }).error?.issues[0]?.message,
+    'Falta el nombre del material.',
+  );
+  // Corregir solo el nombre no manda el tipo: ausente es «no se toca».
+  assert.deepEqual(sitioEditado.parse({ nombre: 'La Esperanza 2' }), { nombre: 'La Esperanza 2' });
+  assert.deepEqual(materialDeCanteraEditado.parse({}), {});
 });
 
 /* ------------------------------------------------------------------------ */

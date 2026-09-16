@@ -19,10 +19,12 @@ import type {
   AsignacionNueva,
   BitacoraEditada,
   BitacoraNueva,
+  CanteraDelParteFila,
   ClaveNueva,
   ClaveTemporalFila,
   CodigosFila,
   ConsultaDeMovimientos,
+  ConsultaDeViajes,
   CredencialesIngreso,
   JornadaDePreoperacionales,
   DiaDeObra,
@@ -30,12 +32,23 @@ import type {
   LlantaFila,
   LlantaNueva,
   MaterialDeAlmacenFila,
+  MaterialDeCanteraEditado,
+  MaterialDeCanteraFila,
+  MaterialDeCanteraNuevo,
   MaterialEditado,
   MaterialNuevo,
   MovimientoDeAlmacenFila,
   MovimientoNuevo,
   ObraFila,
   ObraNueva,
+  OpcionesDeCantera,
+  SitioDeCanteraFila,
+  SitioEditado,
+  SitioNuevo,
+  ViajeAnulado,
+  ViajeFila,
+  ViajeNuevo,
+  ViajeRegistrado,
   PeriodoResumen,
   ResumenFila,
   ParteEditado,
@@ -104,6 +117,10 @@ const enviar = <T>(ruta: string, metodo: string, datos?: unknown) =>
 const panel = <T>(ruta: string) => pedir<T>(`/api/panel${ruta}`);
 const panelEnviar = <T>(ruta: string, metodo: string, datos?: unknown) =>
   enviar<T>(`/api/panel${ruta}`, metodo, datos);
+
+/** `?obraId=…` si hay obra, o nada. */
+const conObra = (obraId?: string | null) =>
+  obraId ? `?obraId=${encodeURIComponent(obraId)}` : '';
 
 export const api = {
   /**
@@ -184,6 +201,8 @@ export const api = {
     fotos: (id: string) =>
       panel<{ id: string; itemKey: string | null; disponible: boolean }[]>(`/partes/${id}/foto`),
     cerrar: (id: string) => panelEnviar<{ id: string }>(`/partes/${id}/cerrar`, 'POST'),
+    /** La sección «Control Cantera»: vigentes si está abierto, fijados si está cerrado. */
+    cantera: (id: string) => panel<CanteraDelParteFila>(`/partes/${id}/cantera`),
     anular: (id: string, motivo: string) =>
       panelEnviar<{ id: string }>(`/partes/${id}/anular`, 'POST', { motivo }),
   },
@@ -286,6 +305,48 @@ export const api = {
         panelEnviar<MovimientoDeAlmacenFila>('/almacen/movimientos', 'POST', datos),
       anular: (id: string, motivo: string) =>
         panelEnviar<{ id: string }>(`/almacen/movimientos/${id}/anular`, 'POST', { motivo }),
+    },
+  },
+
+  /**
+   * El control de cantera (spec 010).
+   *
+   * `obraId` solo lo tiene en cuenta el servidor para la gerencia. Un viaje no se
+   * edita ni se borra: se anula (RF-23, RF-24). Registrar y anular responden un
+   * `aviso` cuando la bitácora de ese día ya está cerrada (RF-30).
+   */
+  cantera: {
+    opciones: (obraId?: string | null) =>
+      panel<OpcionesDeCantera>(`/cantera/opciones${conObra(obraId)}`),
+    sitios: {
+      listar: (obraId?: string | null) =>
+        panel<SitioDeCanteraFila[]>(`/cantera/sitios${conObra(obraId)}`),
+      crear: (datos: SitioNuevo) =>
+        panelEnviar<SitioDeCanteraFila>('/cantera/sitios', 'POST', datos),
+      corregir: (id: string, cambios: SitioEditado) =>
+        panelEnviar<SitioDeCanteraFila>(`/cantera/sitios/${id}`, 'PATCH', cambios),
+      darDeBaja: (id: string) => panelEnviar<{ id: string }>(`/cantera/sitios/${id}/baja`, 'POST'),
+    },
+    materiales: {
+      listar: (obraId?: string | null) =>
+        panel<MaterialDeCanteraFila[]>(`/cantera/materiales${conObra(obraId)}`),
+      crear: (datos: MaterialDeCanteraNuevo) =>
+        panelEnviar<MaterialDeCanteraFila>('/cantera/materiales', 'POST', datos),
+      corregir: (id: string, cambios: MaterialDeCanteraEditado) =>
+        panelEnviar<MaterialDeCanteraFila>(`/cantera/materiales/${id}`, 'PATCH', cambios),
+      darDeBaja: (id: string) =>
+        panelEnviar<{ id: string }>(`/cantera/materiales/${id}/baja`, 'POST'),
+    },
+    viajes: {
+      listar: ({ obraId, desde, hasta }: ConsultaDeViajes) => {
+        const parametros = new URLSearchParams({ desde, hasta });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<ViajeFila[]>(`/cantera/viajes?${parametros.toString()}`);
+      },
+      registrar: (datos: ViajeNuevo) =>
+        panelEnviar<ViajeRegistrado>('/cantera/viajes', 'POST', datos),
+      anular: (id: string, motivo: string) =>
+        panelEnviar<ViajeAnulado>(`/cantera/viajes/${id}/anular`, 'POST', { motivo }),
     },
   },
 

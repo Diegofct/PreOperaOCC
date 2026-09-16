@@ -74,3 +74,62 @@ export function calcularDimensiones(medidas: Dimensiones): DimensionesResueltas 
     volumenCalculado,
   };
 }
+
+/* ------------------------------------------------------------------------ */
+/* Cantidad: cuánto se hizo, en la unidad de la actividad                    */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * De qué medida sale la cantidad según la unidad (spec 004, RF-67 a RF-69).
+ *
+ * Solo tres unidades se pueden leer en las medidas: un metro cúbico es un volumen,
+ * un metro cuadrado un área y un metro una longitud. El acero (kg), las señales
+ * (Und) y el transporte (m³-km) no: con largo, ancho y alto no se sabe cuántos
+ * kilos se pusieron ni cuántos kilómetros recorrió cada metro cúbico. Esas se
+ * escriben a mano, **aunque la actividad traiga medidas**.
+ *
+ * Las claves son las de `UNIDADES_DE_ACTIVIDAD` (`shared/catalogos/presupuesto.ts`),
+ * escritas aquí para que la regla no dependa del catálogo; el guion de verificación
+ * comprueba que coinciden.
+ */
+const MEDIDA_DE_LA_UNIDAD: Record<string, OrigenDeCantidad> = {
+  m3: 'volumen',
+  m2: 'area',
+  m: 'longitud',
+};
+
+export type OrigenDeCantidad = 'volumen' | 'area' | 'longitud';
+
+export interface CantidadResuelta {
+  cantidad: number | null;
+  /** Salió de una medida: se muestra pero no se deja escribir. */
+  cantidadCalculada: boolean;
+  /** De cuál, para decírselo a quien la lee («Del volumen»). */
+  origen: OrigenDeCantidad | null;
+}
+
+/**
+ * La cantidad de una actividad: tomada de su medida si la unidad la tiene y la
+ * medida existe; si no, la escrita a mano, o nada (RF-74: no es obligatoria).
+ *
+ * Recibe las medidas **ya resueltas** por `calcularDimensiones`, así que el
+ * volumen puede ser calculado o escrito: RF-68 dice «tenga volumen», no «volumen
+ * calculado». Y como con el área y el volumen, lo escrito a mano solo se respeta
+ * cuando no hay de dónde tomarla: si no, un número tecleado antes de completar las
+ * medidas se quedaría como dato.
+ *
+ * Sin unidad —una actividad guardada antes del 2026-09-16— no se calcula nada.
+ */
+export function resolverCantidad(
+  unidad: string | null,
+  medidas: Pick<Dimensiones, 'longitud' | 'area' | 'volumen'>,
+  cantidadEscrita: number | null,
+): CantidadResuelta {
+  const origen = unidad ? MEDIDA_DE_LA_UNIDAD[unidad] : undefined;
+  const valor = origen ? medidas[origen] : null;
+
+  if (origen && valor !== null) {
+    return { cantidad: valor, cantidadCalculada: true, origen };
+  }
+  return { cantidad: cantidadEscrita, cantidadCalculada: false, origen: null };
+}

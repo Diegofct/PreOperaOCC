@@ -30,6 +30,66 @@
 import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
 
 /* ------------------------------------------------------------------------ */
+/* Lo que se exige a una fila al guardar (cambio del 2026-09-16)             */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Los textos de lo que le falta a una actividad. Los usan el contrato del servidor y
+ * la pantalla, así que dicen lo mismo en los dos sitios.
+ */
+export const MENSAJES_DE_ACTIVIDAD = {
+  sinCual: 'Escriba cuál fue la actividad.',
+  sinUnidad: 'Elija la unidad de la actividad.',
+} as const;
+
+export type CampoDeActividad = 'texto' | 'unidad';
+
+export interface FaltaDeActividad {
+  campo: CampoDeActividad;
+  mensaje: string;
+}
+
+/**
+ * Lo que le falta a una actividad para guardarse (spec 004, RF-24 y RF-70).
+ *
+ * Solo «Otra actividad» puede quedarse corta: una del presupuesto trae su nombre y
+ * su unidad del catálogo. A «otra» se le pide cuál fue —sin eso no describe nada— y
+ * su unidad, porque sin unidad su cantidad es un número que nadie sabe leer.
+ *
+ * Recibe `otra` ya decidido y no la clave: la regla no importa el catálogo del
+ * presupuesto, y comparar con la clave es trabajo de quien lo tiene a mano.
+ */
+export function faltasDeActividad(actividad: {
+  otra: boolean;
+  texto?: string | null;
+  unidad?: string | null;
+}): FaltaDeActividad[] {
+  if (!actividad.otra) return [];
+  const faltas: FaltaDeActividad[] = [];
+  if (!actividad.texto?.trim()) {
+    faltas.push({ campo: 'texto', mensaje: MENSAJES_DE_ACTIVIDAD.sinCual });
+  }
+  if (!actividad.unidad) {
+    faltas.push({ campo: 'unidad', mensaje: MENSAJES_DE_ACTIVIDAD.sinUnidad });
+  }
+  return faltas;
+}
+
+/**
+ * El rechazo de un ensayo sin observación, o `null` si la tiene (spec 004, RF-72).
+ *
+ * Obligatoria por decisión de OCC: un ensayo registrado sin decir nada no deja
+ * constancia de nada. Cuando de verdad no hay nada que anotar, se escribe «Sin
+ * observaciones», y el mensaje lo dice para que nadie tenga que adivinarlo. Unos
+ * espacios o un salto de línea no son una observación.
+ */
+export function faltaObservacionDelEnsayo(observacion: string | null | undefined): string | null {
+  return observacion?.trim()
+    ? null
+    : 'Escriba la observación del ensayo. Si no hay nada que anotar, escriba «Sin observaciones».';
+}
+
+/* ------------------------------------------------------------------------ */
 /* Qué secciones tiene el parte y cuáles están llenas                        */
 /* ------------------------------------------------------------------------ */
 
@@ -54,6 +114,7 @@ export const TITULO_DE_SECCION = {
   actividades: 'Actividades',
   clima: 'Clima',
   laboratorio: 'Control Calidad de Obra',
+  cantera: 'Control Cantera',
   notas: 'Notas',
   fotografia: 'Fotografía del día',
 } as const;
@@ -65,6 +126,12 @@ export interface SeccionDelParte {
   estado: EstadoDeSeccion;
   /** Cuántos registros tiene. `null` cuando no se cuenta o aún no se sabe. */
   cuantos: number | null;
+  /**
+   * Lo que dice el índice en vez de la cifra, cuando la cifra sola engañaría.
+   * Hoy solo lo usa Control Cantera con cero viajes: «sin viajes» y no «sin
+   * registrar», porque no hay nada pendiente de llenar (010/RF-36).
+   */
+  detalle?: string;
 }
 
 /**
@@ -93,6 +160,13 @@ export interface ConteosDelParte {
    * que son todos los partes anteriores al cambio.
    */
   sinTrabajo?: boolean;
+  /**
+   * Cuántos viajes de cantera tiene ese día (010/RF-28): `null` mientras cargan.
+   * **Ausente es que la pantalla todavía no los pide**, y entonces la sección no
+   * sale en el índice: una entrada «comprobando» que nunca termina sería peor que
+   * no tenerla.
+   */
+  cantera?: number | null;
 }
 
 /**
@@ -110,13 +184,14 @@ export const IDS_DE_SECCION = [
   'actividades',
   'clima',
   'laboratorio',
+  'cantera',
   'notas',
   'fotografia',
   'cierre',
   'historico',
 ] as const;
 
-/** El id de una sección del parte. Cerrado: no hay más que estas nueve. */
+/** El id de una sección del parte. Cerrado: no hay más que estas diez. */
 export type IdDeSeccion = (typeof IDS_DE_SECCION)[number];
 
 function porCuantos(id: string, titulo: string, cuantos: number): SeccionDelParte {
@@ -126,6 +201,23 @@ function porCuantos(id: string, titulo: string, cuantos: number): SeccionDelPart
 /** Algo escrito de verdad: los espacios y saltos que quedan al borrar no cuentan. */
 function hayTexto(texto: string | null | undefined): boolean {
   return (texto ?? '').trim().length > 0;
+}
+
+/**
+ * Control Cantera en el índice (010/RF-28), o nada si la pantalla no la pide.
+ *
+ * **No es exigible** (RF-36): los viajes no se llenan en la bitácora sino en su
+ * módulo, y un día sin viajes es un día normal. Con cero, «–» y «sin viajes», que
+ * no invitan a registrar nada; nunca «○ sin registrar».
+ */
+function seccionDeCantera(cuantos: number | null | undefined): SeccionDelParte[] {
+  if (cuantos === undefined) return [];
+  const titulo = TITULO_DE_SECCION.cantera;
+  if (cuantos === null) return [{ id: 'cantera', titulo, estado: 'desconocido', cuantos: null }];
+  if (cuantos === 0) {
+    return [{ id: 'cantera', titulo, estado: 'no_aplica', cuantos: 0, detalle: 'sin viajes' }];
+  }
+  return [{ id: 'cantera', titulo, estado: 'lleno', cuantos }];
 }
 
 /**
@@ -154,6 +246,7 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
     exigible('actividades', TITULO_DE_SECCION.actividades, conteos.actividades),
     porCuantos('clima', TITULO_DE_SECCION.clima, conteos.clima),
     exigible('laboratorio', TITULO_DE_SECCION.laboratorio, conteos.laboratorio),
+    ...seccionDeCantera(conteos.cantera),
     {
       id: 'notas',
       titulo: TITULO_DE_SECCION.notas,

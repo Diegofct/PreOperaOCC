@@ -167,6 +167,14 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
         mensaje: 'Ya hay un material con ese nombre en el almacén de esta obra.',
         campo: 'nombre',
       };
+    case 'ux_cantera_sitio_nombre':
+      // Spec 010, RF-3. Mismo criterio: sin tildes ni mayúsculas.
+      return { mensaje: 'Ya hay un sitio con ese nombre en esta obra.', campo: 'nombre' };
+    case 'ux_cantera_material_nombre':
+      return {
+        mensaje: 'Ya hay un material de cantera con ese nombre en esta obra.',
+        campo: 'nombre',
+      };
     default:
       return { mensaje: 'Ya existe un registro con esos datos.' };
   }

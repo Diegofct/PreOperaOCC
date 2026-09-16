@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
+import { viajesParaFijarAlCerrar } from '@/features/cantera/servidor/parte';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 import { bloqueosDelCierre, mensajeDelRechazoDeCierre } from '@/shared/rules/parte';
@@ -74,9 +75,13 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     const bloqueos = bloqueosDelCierre(parte, fotos);
     if (bloqueos.length > 0) return errorDePeticion(mensajeDelRechazoDeCierre(bloqueos), 400);
 
+    // Los viajes de cantera de ese día quedan fijados **en la misma sentencia** que
+    // cierra (spec 010, RF-29 y RF-37): lista vacía si no hubo. Leerlos antes y
+    // escribirlos aquí dejaría fuera un viaje registrado entre medias. No bloquean
+    // el cierre (RF-36): `bloqueosDelCierre` no los mira.
     const [fila] = await db
       .update(partesDeObra)
-      .set({ cerradoEn: new Date() })
+      .set({ cerradoEn: new Date(), cantera: viajesParaFijarAlCerrar() })
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
       .returning({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn });
 

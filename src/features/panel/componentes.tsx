@@ -532,6 +532,22 @@ export function Selector({
     return () => window.removeEventListener('keydown', alPulsar, { capture: true });
   }, [abierto, entradas, senalada, onChange]);
 
+  /**
+   * El cursor en el buscador en cuanto la lista se abre, **también dentro de una
+   * ventana**. El `autoFocus` solo no basta ahí: la caja se crea mientras la
+   * ventana de fuera todavía vigila el foco (React Native Web activa la capa de
+   * arriba un instante después), y esa ventana se lo quita y lo deja en su botón
+   * «Cerrar». Lo tecleado no llegaba al buscador. Se vio en el formulario de viaje
+   * de cantera (spec 010, T9) con el selector de PR, de 26 opciones. Pedirlo en la
+   * siguiente vuelta, con la capa ya activa, lo resuelve.
+   */
+  const buscador = useRef<TextInput>(null);
+  useEffect(() => {
+    if (!abierto || !conBuscador) return;
+    const pedido = setTimeout(() => buscador.current?.focus(), 0);
+    return () => clearTimeout(pedido);
+  }, [abierto, conBuscador]);
+
   // La marcada siempre a la vista, aunque la lista se desplace.
   useEffect(() => {
     if (!abierto || Platform.OS !== 'web') return;
@@ -564,6 +580,12 @@ export function Selector({
         </Text>
         <Text style={estilos.selectorFlecha}>{abierto ? '▲' : '▼'}</Text>
       </Pressable>
+      {/*
+        El motivo, escrito bajo el selector como bajo un campo de texto (spec 007,
+        RF-18). Hasta el 2026-09-16 solo se pintaba el borde en rojo: se veía que algo
+        estaba mal pero no qué, y el color quedaba como única señal.
+      */}
+      {error ? <Text style={estilos.campoError}>{error}</Text> : null}
 
       <CapaFlotante
         visible={abierto}
@@ -588,6 +610,7 @@ export function Selector({
             {conBuscador ? (
               <View style={estilos.selectorBuscador}>
                 <TextInput
+                  ref={buscador}
                   value={filtro}
                   onChangeText={(texto) => {
                     setFiltro(texto);
@@ -782,9 +805,20 @@ function Fila({ alterna, children }: { alterna: boolean; children: ReactNode }) 
 }
 
 /** Texto normal dentro de una celda. */
-export function Celda({ children }: { children: ReactNode }) {
+export function Celda({
+  children,
+  lineas = 1,
+}: {
+  children: ReactNode;
+  /**
+   * Cuántos renglones puede ocupar antes de cortarse con «…». Uno por defecto, que
+   * es lo que mantiene las filas parejas. Más solo para texto que hay que leer
+   * entero —el motivo de una anulación—: cortado ahí, no dice nada.
+   */
+  lineas?: number;
+}) {
   return (
-    <Text style={estilos.celda} numberOfLines={1}>
+    <Text style={estilos.celda} numberOfLines={lineas}>
       {children}
     </Text>
   );

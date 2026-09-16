@@ -137,6 +137,17 @@ export interface ActividadDelParte {
   area: number | null;
   volumen: number | null;
   observaciones: string;
+  /**
+   * El ítem del presupuesto («4.1.8»), o `null` en «Otra actividad» (spec 004,
+   * RF-64). Los tres campos que siguen **faltan** en las actividades guardadas
+   * antes del 2026-09-16: su ausencia es lo que las distingue como heredadas, así
+   * que no se rellenan al leer.
+   */
+  item?: string | null;
+  /** La etiqueta de la unidad, congelada con el parte: «m³» (RF-66, RF-70). */
+  unidad?: string;
+  /** Cuánto se hizo, en esa unidad; `null` si no se anotó (RF-67 a RF-69, RF-74). */
+  cantidad?: number | null;
 }
 
 /** Un tramo del día con su clima. */
@@ -149,7 +160,13 @@ export interface FranjaDeClima {
   hasta: string;
 }
 
-/** Un material del laboratorio consumido ese día. */
+/**
+ * Un material del laboratorio consumido ese día.
+ *
+ * **Solo en partes guardados antes del 2026-09-16.** Desde entonces Control
+ * Calidad de Obra registra ensayos (`EnsayoDelParte`); estas filas se siguen
+ * leyendo y conservando tal como se guardaron (spec 004, RF-63).
+ */
 export interface MaterialDelParte {
   id: string;
   material: string;
@@ -157,6 +174,56 @@ export interface MaterialDelParte {
   cantidad: number;
   /** La unidad del catálogo, congelada el día del parte. */
   unidad: string;
+}
+
+/** Un ensayo o control de Control Calidad de Obra (spec 004, RF-61, RF-72). */
+export interface EnsayoDelParte {
+  id: string;
+  /** El id del catálogo: `densidad_en_campo`. */
+  ensayo: string;
+  /** Su nombre, congelado con el parte. */
+  nombre: string;
+  /** Obligatoria: «Sin observaciones» si no hay nada que anotar. */
+  observacion: string;
+}
+
+/**
+ * Lo que guarda la sección Control Calidad de Obra: ensayos, y en los partes
+ * anteriores al cambio, los materiales que ya tenían.
+ *
+ * Las dos formas conviven en la misma columna en vez de abrir una nueva: el id de
+ * la sección sigue siendo `laboratorio` (RF-49) y el cierre la cuenta como una
+ * sola. Se distinguen por su forma, sin marca añadida.
+ */
+export type FilaDeControlDeCalidad = MaterialDelParte | EnsayoDelParte;
+
+export function esEnsayo(fila: FilaDeControlDeCalidad): fila is EnsayoDelParte {
+  return 'ensayo' in fila;
+}
+
+/**
+ * Un viaje de cantera tal como queda fijado en el parte al cerrarlo (spec 010,
+ * RF-29).
+ *
+ * Lleva **nombres y no ids**: si después se corrige el nombre de un sitio o de un
+ * material, la bitácora cerrada tiene que seguir diciendo lo que decía ese día. Lo
+ * arma la sentencia de cierre en la base, no el navegador.
+ */
+export interface ViajeDelParte {
+  id: string;
+  /** "HH:MM", en la obra. */
+  hora: string;
+  material: string;
+  /** El código interno de la volqueta: «VOL-01». */
+  volqueta: string;
+  conductor: string;
+  origen: string;
+  /** El nombre del sitio de destino, o `null` si el destino fue la obra. */
+  destino: string | null;
+  destinoObra: boolean;
+  /** Solo con destino obra. */
+  pr: number | null;
+  metros: number | null;
 }
 
 /** Un identificador nuevo para una fila de sección. */

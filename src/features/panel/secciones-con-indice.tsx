@@ -78,6 +78,8 @@ const GLIFO: Record<EstadoDeSeccion, string> = {
 };
 
 function detalleDe(seccion: SeccionDelParte): string {
+  // Lo que la regla quiera decir en vez de la cifra manda (hoy, «sin viajes»).
+  if (seccion.detalle) return seccion.detalle;
   if (seccion.estado === 'desconocido') return 'comprobando';
   if (seccion.estado === 'no_aplica') return 'no aplica';
   if (seccion.cuantos === null) return seccion.estado === 'lleno' ? 'listo' : 'sin registrar';

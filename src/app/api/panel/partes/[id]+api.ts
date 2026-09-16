@@ -4,10 +4,13 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { partesDeObra, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import {
   construirActividadDelParte,
+  construirEnsayo,
   construirFranja,
   construirMaquina,
-  construirMaterial,
   construirPersona,
+  conservarHeredadas,
+  esActividadHeredada,
+  esMaterialHeredado,
 } from '@/features/bitacoras/parte';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { parteEditado } from '@/features/panel/contratos';
@@ -155,26 +158,6 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       });
     }
 
-    if (cambios.actividades) {
-      set.actividades = cambios.actividades.map((a) => construirActividadDelParte(a));
-    }
-
-    if (cambios.clima) {
-      const error = validarFranjas(cambios.clima);
-      if (error) return errorDePeticion(mensajeDeFranja(error), 400);
-      set.clima = cambios.clima.map((c) => construirFranja(c));
-    }
-
-    if (cambios.laboratorio) {
-      const filas = cambios.laboratorio.map((m) => construirMaterial(m));
-      if (filas.some((f) => f === null)) {
-        return errorDePeticion('Ese material no está en la lista.', 400);
-      }
-      set.laboratorio = filas;
-    }
-
-    if (cambios.notas !== undefined) set.notas = cambios.notas;
-
     // Día sin trabajo (spec 004, RF-53 a RF-55). Se valida **cómo queda el
     // parte**, no solo lo que llega: el guardado es por sección, y marcar el día
     // en una petición y registrar una máquina en otra también es contradecirse.
@@ -185,22 +168,78 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       cambios.personal !== undefined ||
       cambios.actividades !== undefined;
 
+    // Lo guardado se lee una sola vez, y solo si hace falta: para el día sin trabajo
+    // y para conservar las filas heredadas de actividades y control de calidad
+    // (RF-63, RF-71), que no se pueden reconstruir desde ningún catálogo.
+    const guardado =
+      tocaElDia || cambios.laboratorio !== undefined
+        ? (
+            await db
+              .select({
+                sinTrabajo: partesDeObra.sinTrabajo,
+                motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+                maquinaria: partesDeObra.maquinaria,
+                personal: partesDeObra.personal,
+                actividades: partesDeObra.actividades,
+                laboratorio: partesDeObra.laboratorio,
+              })
+              .from(partesDeObra)
+              .where(eq(partesDeObra.id, id))
+              .limit(1)
+          )[0]
+        : undefined;
+
+    if ((tocaElDia || cambios.laboratorio !== undefined) && !guardado) {
+      return noEncontrado('ese parte');
+    }
+
+    // Sin transacciones (Neon por HTTP), entre esta lectura y el UPDATE otro
+    // computador puede guardar lo contrario. En las filas heredadas lo peor que pasa
+    // es que un guardado vuelva a dejar una que el otro quitó, tomada de lo que se
+    // leyó: no se pierde nada y no se inventa nada.
+
+    if (cambios.actividades) {
+      // Una fila con el id de una actividad heredada se queda como estaba; las demás
+      // se construyen, y una que no es del presupuesto ni una «otra» completa no se
+      // guarda (spec 004, RF-64, RF-70, RF-71).
+      const filas = conservarHeredadas(
+        cambios.actividades,
+        guardado!.actividades,
+        esActividadHeredada,
+        // Solo con id y sin ser heredada de este parte no es nada que construir.
+        (fila) => ('clave' in fila ? construirActividadDelParte(fila) : null),
+      );
+      if (filas.some((f) => f === null)) {
+        return errorDePeticion('Esa actividad no está en la lista.', 400);
+      }
+      set.actividades = filas;
+    }
+
+    if (cambios.clima) {
+      const error = validarFranjas(cambios.clima);
+      if (error) return errorDePeticion(mensajeDeFranja(error), 400);
+      set.clima = cambios.clima.map((c) => construirFranja(c));
+    }
+
+    if (cambios.laboratorio) {
+      // Un material heredado que llega con su id se queda como estaba (RF-63); lo
+      // demás es un ensayo que se construye (RF-61, RF-72).
+      const filas = conservarHeredadas(
+        cambios.laboratorio,
+        guardado!.laboratorio,
+        esMaterialHeredado,
+        construirEnsayo,
+      );
+      if (filas.some((f) => f === null)) {
+        return errorDePeticion('Ese ensayo no está en la lista.', 400);
+      }
+      set.laboratorio = filas;
+    }
+
+    if (cambios.notas !== undefined) set.notas = cambios.notas;
+
     if (tocaElDia) {
-      const [guardado] = await db
-        .select({
-          sinTrabajo: partesDeObra.sinTrabajo,
-          motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
-          maquinaria: partesDeObra.maquinaria,
-          personal: partesDeObra.personal,
-          actividades: partesDeObra.actividades,
-        })
-        .from(partesDeObra)
-        .where(eq(partesDeObra.id, id))
-        .limit(1);
-
-      if (!guardado) return noEncontrado('ese parte');
-
-      const dia = resolverDiaSinTrabajo(guardado, cambios);
+      const dia = resolverDiaSinTrabajo(guardado!, cambios);
       if (dia.error) return errorDePeticion(mensajeDeDiaSinTrabajo(dia.error), 400);
 
       // Sin transacciones (Neon por HTTP), entre esta lectura y el UPDATE otro

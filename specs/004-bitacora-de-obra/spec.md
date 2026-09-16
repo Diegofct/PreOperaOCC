@@ -1,6 +1,6 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57) y 2026-09-15 (RF-52 corregido, RF-58 a RF-60)
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60) y 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74)
 
 ## Contexto y objetivo
 
@@ -130,8 +130,12 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 - RF-21: EL SISTEMA permitirá registrar varias actividades, cada una elegida de una lista, y
   añadir tantas como haga falta.
+  > **Precisado por RF-64 y RF-65 el 2026-09-16.** La lista deja de ser la propuesta de
+  > prueba y pasa a ser el presupuesto de la obra.
 - RF-22: CUANDO se elija una actividad, EL SISTEMA habilitará el registro de sus
   dimensiones: longitud, ancho, alto, área y volumen, cada una escrita a mano.
+  > **Ampliado por RF-67 a RF-69 el 2026-09-16.** Las dimensiones se conservan y se añade la
+  > cantidad —cuánto se hizo— en la unidad de la actividad.
 - RF-23: EL SISTEMA permitirá adjuntar una fotografía a cada actividad.
   > **Ampliado por RF-47 y RF-48 el 2026-09-14.** Hoy la foto solo se ofrece después de
   > guardar la actividad, y en la práctica no se encuentra.
@@ -150,6 +154,31 @@ tanda: no añade campos, cambia de qué habla el documento.
   área o su volumen, ENTONCES EL SISTEMA permitirá escribir ese valor a mano.
   *(cambio 2026-09-15)*
 
+#### Actividades del presupuesto (cambio 2026-09-16)
+
+- RF-64: EL SISTEMA ofrecerá como lista de actividades los ítems del presupuesto de obra
+  (Anexo B), la misma para todas las obras, cada uno con su número de ítem de pago, su
+  descripción y su unidad de medida, y sin repetir los que el presupuesto trae en varios
+  capítulos o en varias vías.
+- RF-65: EL SISTEMA mostrará cada actividad de la lista con su número de ítem delante de la
+  descripción, y permitirá encontrarla escribiendo el número o palabras de la descripción.
+- RF-66: CUANDO se elija una actividad de la lista, EL SISTEMA mostrará junto a ella su
+  unidad de medida.
+- RF-67: EL SISTEMA permitirá registrar, para cada actividad, la cantidad —cuánto se hizo
+  de ella ese día— en la unidad de esa actividad, además de sus dimensiones.
+- RF-68: CUANDO la unidad de la actividad sea m³ y tenga volumen, m² y tenga área, o m y
+  tenga longitud, EL SISTEMA tomará ese valor como cantidad, igual que calcula el área y el
+  volumen (RF-58, RF-59).
+- RF-69: SI la unidad de la actividad es kg, Und o m³-km, o le falta la medida de la que se
+  toma según RF-68, ENTONCES EL SISTEMA permitirá escribir la cantidad a mano.
+- RF-70: CUANDO se elija «Otra actividad», EL SISTEMA exigirá escribir cuál fue (RF-24) y
+  elegir su unidad de la lista de unidades del presupuesto —m³, m², m, kg, Und o m³-km—, y
+  le pedirá los mismos datos que a una actividad de la lista.
+- RF-71: EL SISTEMA mostrará las actividades registradas antes de este cambio con el nombre
+  que tenían al guardarse, sin unidad ni cantidad, y sin alterar ningún parte existente.
+- RF-74: EL SISTEMA aceptará una actividad sin cantidad, igual que la acepta sin
+  dimensiones (RF-25).
+
 ### Clima (H4)
 
 - RF-26: EL SISTEMA permitirá registrar varias franjas de clima en el mismo día, cada una
@@ -167,8 +196,23 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 - RF-29: EL SISTEMA permitirá registrar varios materiales consumidos del laboratorio, cada
   uno elegido de una lista y con la cantidad utilizada y su unidad.
+  > **Reemplazado por RF-61 y RF-62 el 2026-09-16.** OCC envió los ítems: la sección registra
+  > ensayos y controles practicados, no materiales consumidos.
 - RF-30: SI se registra un elemento de laboratorio sin cantidad, ENTONCES EL SISTEMA lo
   rechazará.
+  > **Obsoleto desde el 2026-09-16.** Un ensayo no lleva cantidad (RF-62).
+- RF-61: EL SISTEMA permitirá registrar en Control Calidad de Obra varios ensayos o
+  controles, cada uno elegido de la lista de ensayos de OCC (Anexo A) y con una observación o
+  resultado escrito. *(cambio 2026-09-16)*
+- RF-62: EL SISTEMA no pedirá cantidad ni unidad para un ensayo. *(cambio 2026-09-16)*
+- RF-72: SI se registra un ensayo sin observación, ENTONCES EL SISTEMA lo rechazará
+  indicando que, si no hay nada que anotar, se escriba «Sin observaciones».
+  *(cambio 2026-09-16)*
+- RF-73: EL SISTEMA permitirá registrar el mismo ensayo varias veces en la misma bitácora.
+  *(cambio 2026-09-16)*
+- RF-63: EL SISTEMA mostrará tal como se guardaron —material, cantidad y unidad— los
+  elementos registrados en esta sección antes de este cambio, sin alterar ningún parte
+  existente. *(cambio 2026-09-16)*
 - RF-49: EL SISTEMA llamará «Control Calidad de Obra» a la sección que hasta ahora se llamaba
   Laboratorio, tanto en el parte como en su índice. *(cambio 2026-09-14)*
 - RF-57: EL SISTEMA mostrará con el nombre nuevo lo ya registrado en esa sección, sin alterar
@@ -213,6 +257,13 @@ más exigente); **Datos** (las observaciones de cada máquina y la marca de día
 su motivo); **Reglas** (lo que impide cerrar, con sus casos nuevos en el guion de
 verificación). **Móvil** y **Sincronización**: sin impacto.
 
+Cambio 2026-09-16: **Panel web** (lista de actividades con número de ítem y unidad, cantidad
+y observación obligatoria en cada ensayo de Control Calidad de Obra); **API** (guardar esos
+datos y seguir leyendo los de antes); **Datos** (unidad y cantidad en cada
+actividad; ensayo y observación en Control Calidad de Obra, conviviendo con los materiales ya
+registrados); **Reglas** (de qué medida sale la cantidad de una actividad, con sus casos). **Móvil**
+y **Sincronización**: sin impacto.
+
 ## Requisitos no funcionales
 
 - Guardar no puede perder lo escrito si el residente cierra el navegador: el parte se llena
@@ -246,6 +297,19 @@ verificación). **Móvil** y **Sincronización**: sin impacto.
   sin trabajo; se cierra completo y la lluvia queda en las franjas de clima (RF-55).
 - *(cambio 2026-09-14)* Una foto de actividad **elegida y abandonada** sin guardar: no
   aparece en el parte (RF-48). No se borra del almacén: nada se borra.
+- *(cambio 2026-09-16)* Un parte **abierto** que ya tiene actividades o materiales de las
+  listas de prueba: lo guardado se sigue viendo como se guardó (RF-63, RF-71); lo que se
+  añada desde ahora usa las listas nuevas.
+- *(cambio 2026-09-16)* Una actividad de **m³ con longitud y ancho pero sin alto**: no hay
+  volumen calculado, así que la cantidad se escribe a mano (RF-69).
+- *(cambio 2026-09-16)* **Otra actividad en m³** con sus tres medidas: la cantidad sale del
+  volumen, como en una actividad de la lista (RF-68, RF-70).
+- *(cambio 2026-09-16)* **Dos densidades en campo** el mismo día, de lotes distintos: dos
+  filas del mismo ensayo, cada una con su observación (RF-73).
+- *(cambio 2026-09-16)* El presupuesto escribe la misma unidad de dos formas («m3-Km» y
+  «m3-km»): es una sola unidad, m³-km.
+- *(cambio 2026-09-16)* Una misma actividad aparece en el presupuesto bajo varios capítulos
+  (la 4.1.8 en alcantarillas y en cunetas) y en las dos vías: sale una sola vez (RF-64).
 
 ## Fuera de alcance
 
@@ -261,8 +325,17 @@ verificación). **Móvil** y **Sincronización**: sin impacto.
 - Comparar lo ejecutado contra lo programado, y cualquier medida de avance de obra.
 - Que las horas del personal alimenten otro módulo.
 - *(cambio 2026-09-14)* Reevaluar o reabrir los partes cerrados antes del cambio (RF-56).
-- *(cambio 2026-09-14)* Cambiar los ítems de Control Calidad de Obra: cambian, pero OCC los
-  enviará más adelante. Por ahora solo cambia el nombre (RF-49).
+- ~~*(cambio 2026-09-14)* Cambiar los ítems de Control Calidad de Obra~~ — **entra en alcance
+  el 2026-09-16** (RF-61 a RF-63): OCC envió la lista.
+- *(cambio 2026-09-16)* Los rubros del presupuesto que no son trabajo de obra: planes de
+  manejo ambiental y de tránsito, caracterización vial, primas de garantías y actualización
+  de precios.
+- *(cambio 2026-09-16)* Cargar o editar el presupuesto desde el panel: la lista se actualiza
+  desde el documento de OCC.
+- *(cambio 2026-09-16)* Comparar la cantidad de una actividad contra la cantidad del presupuesto, y
+  el precio de cada ítem.
+- *(cambio 2026-09-16)* Registrar los valores de un ensayo como datos (resultados numéricos,
+  norma, lote) o decidir si cumple lo exigido: la observación es texto.
 
 ## Criterios de finalización
 
@@ -271,7 +344,8 @@ verificación). **Móvil** y **Sincronización**: sin impacto.
   manual.
 - Las migraciones existen en las dos bases y las bitácoras anteriores siguen consultándose.
 - Demo manual: llenar el parte de un día completo con dos máquinas, tres personas, dos
-  actividades con fotografía, tres franjas de clima, un elemento de laboratorio, una nota y
+  actividades con fotografía, tres franjas de clima, un ensayo de control de calidad con su
+  observación *(cambio 2026-09-16; antes «un elemento de laboratorio»)*, una nota y
   la foto del día; cerrarlo; comprobar que el medidor de las máquinas avanzó; anularlo con
   motivo y abrir otro para el mismo día.
 
@@ -308,6 +382,88 @@ Resueltas el 2026-09-15:
   multiplicando, y se escriben a mano solo cuando falta alguna medida (RF-58 a RF-60). Con
   esto se cierra también la duda de la unidad de medida de cada actividad.
 
-Sigue abierta:
+Resueltas el 2026-09-16 (Diego, con los documentos de OCC):
 
-- [NECESITA ACLARACIÓN: la lista de ítems de Control Calidad de Obra, que enviará OCC.]
+- **Ítems de Control Calidad de Obra**: los 17 ensayos de la guía de OCC (Anexo A). Se anota
+  el ensayo y una observación, sin cantidad (RF-61, RF-62). Deja sin efecto la resolución del
+  2026-09-09 que definía la sección como material consumido.
+- **Actividades**: los ítems del presupuesto de obra, con número de ítem y unidad (Anexo B,
+  RF-64 a RF-66). Se conservan las dimensiones y se añade la cantidad: cuánto se hizo, en la
+  unidad de la actividad. Con m³, m² y m sale sola del volumen, el área o la longitud; con kg,
+  Und y m³-km (acero, señales, transporte), que las medidas no dan, se escribe a mano (RF-67
+  a RF-69). «Otra actividad» se conserva (RF-24, RF-70).
+- **Un presupuesto para todas las obras** (RF-64).
+- **Observación del ensayo obligatoria**; si no hay nada, «Sin observaciones» (RF-72).
+- **El mismo ensayo puede repetirse** el mismo día (RF-73).
+- **La cantidad no es obligatoria**, como las dimensiones (RF-74). Diego avisa que puede
+  cambiar más adelante según lo que pida OCC.
+- **Otra actividad** lleva cuál fue, su unidad elegida de la lista de unidades del
+  presupuesto y los mismos datos que las demás (RF-70).
+
+Siguen abiertas: ninguna.
+
+## Anexo A — Ensayos de Control Calidad de Obra *(2026-09-16)*
+
+Fuente: guía «Tabla práctica de ensayos y controles — material tratado con cemento» de OCC,
+primera tabla, columna «Ensayo / Control». Se incluyen en este orden:
+
+1. Granulometría
+2. Límite líquido
+3. Índice de plasticidad
+4. Equivalente de arena
+5. Azul de metileno
+6. Materia orgánica
+7. Proctor / compactación
+8. CBR sin cemento
+9. Sulfatos solubles
+10. Contenido de cemento
+11. Muestreo para resistencia
+12. Moldeo de probetas
+13. Compresión simple
+14. Densidad en campo
+15. Compactación
+16. Espesor
+17. Planicidad
+
+## Anexo B — Actividades del presupuesto *(2026-09-16)*
+
+Fuente: presupuesto de obra de OCC (Formulario 1, propuesta económica): columna «Ítem de
+pago», «Descripción» y «Und.». Las descripciones de abajo están **resumidas**; en la lista se
+usa la descripción completa del presupuesto.
+
+| Ítem | Actividad | Unidad |
+| --- | --- | --- |
+| 2.8 | Demolición de estructuras (concreto reforzado) | m³ |
+| 2.14.1 | Retiro de tubería existente de 36", sin excavación | m |
+| 4.1.1 | Excavación en material común de la explanación, canales y préstamos | m³ |
+| 4.1.2 | Excavación manual en material común | m³ |
+| 4.1.8 | Excavación para estructuras varias en material común en seco, con entibado | m³ |
+| 4.1.9 | Excavación para estructuras varias en material común en seco, sin entibado | m³ |
+| 4.1.96 | Excavación en material común de la explanación con motoniveladora | m³ |
+| 4.2.2 | Lleno manual compactado con material proveniente de la excavación | m³ |
+| 4.3.8 | Disposición de material para conformación de la calzada | m³ |
+| 5.1.2 | Afirmado para bacheo | m³ |
+| 5.1.7 | Subbase granular para cimentación de tubería y lleno de zanjas | m³ |
+| 5.1.15 | Suministro de sub-base granular, medido suelto | m³ |
+| 5.2.13 | Estabilización con material tratado con cal | m³ |
+| 5.2.16 | Estabilización con material tratado con cemento | m³ |
+| 6.1.18.1 | Concreto Clase F (14 MPa). Solados de E=0.05 m | m² |
+| 6.2.4 | Concreto Clase E (17.5 MPa). Elementos varios | m³ |
+| 6.2.24 | Concreto Clase C (28 MPa) para muros, disipadores, aletas y estribos | m³ |
+| 6.2.50 | Concreto Clase C (28 MPa). Cunetas | m³ |
+| 7.1.1 | Emulsión asfáltica C.R.L. para imprimación | m² |
+| 7.1.12.2 | Tratamiento superficial doble con emulsión CRR-2M | m² |
+| 8.1 | Mantenimiento de obras de drenaje existentes | m |
+| 8.13.1 | Dren francés de zanja de 0.4 m × 0.9 m | m |
+| 8.18 | Disipadores de energía y sedimentador en concreto ciclópeo | m³ |
+| 8.27 | Tubería PVC alcantarillado de 900 mm (36") | m |
+| 10.1 | Acero de refuerzo fy=420 MPa (Grado 60) | kg |
+| 12.1 | Pintura acrílica reflectorizada para línea de demarcación | m |
+| 12.9 | Señal vertical de 75 × 75 cm doble | Und |
+| 13.1 | Transporte de afirmado, sub-base, base y mezcla asfáltica a más de 1000 m | m³-km |
+| 13.2 | Transporte de sobrantes de excavación, canales y préstamos a más de 1000 m | m³-km |
+| 13.9 | Transporte de materiales pétreos a más de 1000 m, medido en planta | m³-km |
+| 14.3 | Bordillo barrera recto 15 × 35 × 80 prefabricado | m |
+
+> **Corregido el 2026-09-16 (T21).** La tabla se escribió con 30 filas y le faltaba la 14.3,
+> aunque el texto ya decía 31. La importación del presupuesto la encontró.

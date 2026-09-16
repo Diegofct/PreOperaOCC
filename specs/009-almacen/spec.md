@@ -1,6 +1,6 @@
 # Spec 009 — Almacén de obra
 
-> Estado: Aprobada · Fecha: 2026-09-14 · Aprobada: 2026-09-15
+> Estado: Cumplida · Fecha: 2026-09-14 · Aprobada: 2026-09-15 · Cumplida: 2026-09-16
 
 ## Contexto y objetivo
 

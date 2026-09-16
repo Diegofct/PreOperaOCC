@@ -78,14 +78,14 @@ en verde.
       Hecho cuando: en Chrome la ventana de salida exige «para qué», avisa si la cantidad supera
       el stock mostrado, y un ingreso actualiza el stock de la tabla al guardarse.
 
-- [ ] T11. Historial de un material: movimientos con fecha, tipo, cantidad, quién, para qué y
+- [x] T11. Historial de un material: movimientos con fecha, tipo, cantidad, quién, para qué y
       saldo; filtros de periodo y tipo; anular con motivo. (RF-20, RF-21, RF-23 a RF-27)
       Hecho cuando: en Chrome el historial muestra la salida anulada marcada y sin saldo, los
       filtros la ocultan y la muestran, y no hay botón de editar ni de borrar un movimiento.
 
 ## Validación
 
-- [ ] T12. Validación final: recorrido RF por RF de la spec y demo manual. (Todas)
+- [x] T12. Validación final: recorrido RF por RF de la spec y demo manual. (Todas)
       Hecho cuando: cada RF tiene su comprobación con resultado, la demo de la spec está hecha
       con `prueba.almacen` y con `residente1` (las entradas las hace Diego), `npx expo export
       --platform web` termina sin error con `grep DATABASE_URL dist/client` vacío, los tres
@@ -257,7 +257,7 @@ en verde.
   sin cantidad marca las dos faltas y no envía. Consultado después: el material sigue con stock
   40 y 3 movimientos. **Ingreso real hecho por Diego** (2026-09-15): 10 bultos a «Prueba Cemento
   T8» desde la ventana; la tabla pasó de 40 a 50 bultos al guardar.
-- **T11 (en curso)**: `historial-almacen.tsx`, una sección debajo de la tabla (no una ventana: siete
+- **T11**: `historial-almacen.tsx`, una sección debajo de la tabla (no una ventana: siete
   columnas no caben en una), abierta con «Historial» en cada fila, **también para el residente**.
   Del más reciente al más antiguo; fecha, tipo, cantidad con signo, «Stock que dejó» (— si está
   anulado), quién registró y cuándo, para qué u observación y, si está anulado, «Anulado por X el
@@ -268,5 +268,53 @@ en verde.
   de `rechazoDeAnulacion` y solo «Entendido», sin pedir motivo. El historial se vuelve a pedir
   cuando cambia el stock del material (anulación, o ingreso/salida con el historial abierto). La
   página guarda el id del material y no la fila, para leer el stock nuevo tras recargar. Tres
-  comandos en verde. **Sin revisar en Chrome**: la extensión negó el permiso de lectura de
-  `localhost:8081` en la pestaña nueva.
+  comandos en verde.
+  **Comprobado en Chrome el 2026-09-16** con gerencia, **sin escribir**: el historial de «Prueba
+  Cemento T8» trae los 4 movimientos del más reciente al más antiguo (+10 → 50, −60 → 40, −30
+  anulada sin saldo con «Anulado por Diego… : Prueba T8: salida registrada por error», +100 →
+  100), cada uno con quién y cuándo; «Salidas» deja 2 filas; «Desde 2026-09-16» deja la tabla vacía
+  con «Ningún movimiento coincide…»; «15/09» avisa «La fecha va en formato AAAA-MM-DD.» sin filtrar;
+  «Anular» sobre el ingreso de 100 dice «…el stock quedaría en −50 bultos…» y solo «Entendido»;
+  «Anular» sobre el de 10 pide motivo y sin él marca «Escriba por qué se anula.» y no envía.
+  Consultado después: stock 50, 4 movimientos, 1 anulado. **Defecto hallado y corregido**: el
+  motivo de la anulación se cortaba en un renglón («Prueb…»); `Celda` recibe ahora `lineas`
+  (uno por defecto) y el historial usa 3 para el «para qué» y 5 para la anulación. Vuelto a mirar:
+  se lee entero. Tres comandos en verde.
+- **T12, primera pasada (2026-09-16) — sin cerrar.** `verificar` (168), `typecheck` y `lint` en
+  verde; `expo export` sin error y `grep DATABASE_URL dist/client` vacío. Recorrido RF por RF:
+  | RF | Comprobación | Resultado |
+  | --- | --- | --- |
+  | 1 | Material con su obra; listado filtrado por `alcance.ts`; alta del almacenista con su obra | verde en código y API (gerencia); almacenista pendiente de demo |
+  | 2, 31 | Casos 2031, 2044, 2251; alta en T7 | verde |
+  | 3 | Índice único parcial; caso 1794; 409 bajo `nombre` en T7 | verde |
+  | 4 | Corrección de nombre en T7 | verde |
+  | 5 | Caso 2183; 409 en T8; unidad bloqueada en la ventana (T9) | verde |
+  | 6, 7 | Caso 2174; baja en T7 y 409 con stock en T8; aviso sin confirmar en T9 | verde |
+  | 8 | Caso 2110; ingreso en T8; ingreso de Diego desde la ventana (T10) | verde |
+  | 9 | Casos 2088, 2238; `check` en la base | verde |
+  | 10 | Caso 2088; 400 bajo `fecha` en T8; ventana en T10 | verde |
+  | 11, 13 | Casos 2088, 2221; ventana en T10 | verde |
+  | 12, 14 | Retirados | — |
+  | 15 | Caso 2147; 409 en T8; aviso en vivo en T10 | verde |
+  | 16 | Casos 2494 y siguientes; dos salidas a la vez en T8 | verde, con el límite anotado en T8 |
+  | 17, 18 | Caso 2131; listado de T7/T8; tabla de T9 | verde |
+  | 19 | Etiqueta «Sin stock» en `pantalla-almacen.tsx` | **pendiente de demo** (ningún material vigente está en cero) |
+  | 20 | Caso 2190; historial en T11 | verde |
+  | 21 | Caso 2268; filtros en T11 | verde |
+  | 22 | Búsqueda en T9 | verde |
+  | 23 | Sin rutas de edición ni borrado; sin botones en T11 | verde |
+  | 24, 25, 27 | Anulación en T8; historial en T11 | verde |
+  | 26 | Caso 2157; 409 en T8; ventana en T11 | verde |
+  | 28 | Casos 1276, 1309; `requerirPermiso` y obra de la sesión en las rutas | verde en reglas y código; **pendiente de demo** con `prueba.almacen` |
+  | 29 | Caso 1309; pantalla sin formulario ni acciones de escritura para quien no escribe | **pendiente de demo** con `residente1` |
+  | 30 | `registrado_por` desde la sesión; «Diego» en el historial | verde |
+  Alcance: sin precios, proveedor, factura, traslados ni informes; nada fuera de la spec salvo los
+  arreglos de `Celda` (`lineas`) y del aviso de la ventana, ambos de presentación. Constitución: la
+  regla vive en `shared/rules` y la usan pantalla y servidor; nada se borra; secretos solo en
+  `+api.ts`, comprobado.
+  **Falta para cerrar**: la demo con `prueba.almacen` (registrar, ingresar, sacar, anular y ver
+  «Sin stock») y con `residente1` (ver tabla e historial sin botones de escribir). Las entradas las
+  hace Diego.
+- **T12, cierre (2026-09-16):** Diego hizo la demo con `prueba.almacen` y con `residente1` y la dio
+  por buena («Ya lo probé con ambas cuentas»). Con eso quedan comprobados RF-19, RF-28 y RF-29, y
+  la spec pasa a **Cumplida**. No se vio desde aquí el detalle de cada paso de esa demo.
