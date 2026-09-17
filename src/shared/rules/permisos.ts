@@ -142,13 +142,19 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
   },
   // El residente consulta el almacén y la cantera de su obra, pero no registra ni
-  // anula (spec 008, RF-12 y RF-13): es el trabajo de otro oficio, y si un
-  // movimiento está mal, quien lo corrige es quien lo registró o la gerencia.
+  // anula (spec 008, RF-12 y RF-13): es el trabajo de otro oficio.
+  //
+  // **En el almacén, anular es solo de la gerencia** desde el 2026-09-17 (spec
+  // 009, RF-38), y lo pidió ella: un movimiento anulado cambia el stock, y quien
+  // se equivoca al teclearlo no es quien decide borrarlo de la cuenta. El
+  // almacenista sigue registrando; si hay un error, se lo pide a gerencia. En
+  // cantera no se tocó: el encargado de planta sigue anulando sus viajes, que no
+  // mueven inventario.
   almacen: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
     supervisor: ['ver', 'listar'],
     operador: NADA,
-    almacenista: ['ver', 'listar', 'escribir', 'anular'],
+    almacenista: ['ver', 'listar', 'escribir'],
     encargado_planta: NADA,
   },
   cantera: {

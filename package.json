@@ -66,6 +66,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
     "formatos": "tsx scripts/import-formatos.ts",
     "presupuesto": "tsx scripts/importar-presupuesto.ts",
+    "materiales": "tsx scripts/importar-materiales.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.local.ts",
     "db:generate:servidor": "drizzle-kit generate --config drizzle.config.servidor.ts",
     "db:migrar:servidor": "tsx --env-file=.env scripts/migrar-servidor.ts",

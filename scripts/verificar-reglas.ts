@@ -67,6 +67,7 @@ import {
   nombreDeUnidad,
   UNIDADES_ALMACEN,
 } from '../src/shared/catalogos/almacen';
+import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '../src/shared/catalogos/materiales';
 import { PLANTILLAS_POR_TIPO } from '../src/features/checklists/plantillas';
 import {
   DESGASTE_PARA_CAMBIO,
@@ -1573,10 +1574,27 @@ prueba('los roles nuevos no tocan nada de los módulos que ya había', () => {
 
 prueba('almacenista y encargado de planta llevan su módulo entero', () => {
   for (const [rol, modulo] of [['almacenista', 'almacen'], ['encargado_planta', 'cantera']] as const) {
-    for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir'] as const) {
       assert.ok(alcanza(rol, modulo, accion), `${rol} ${modulo}/${accion}`);
     }
   }
+  // El encargado de planta sigue anulando sus viajes (spec 010); el almacenista
+  // ya no anula sus movimientos (spec 009, RF-38).
+  assert.ok(alcanza('encargado_planta', 'cantera', 'anular'));
+  assert.equal(alcanza('almacenista', 'almacen', 'anular'), false);
+});
+
+prueba('en el almacén solo anula la gerencia', () => {
+  // Spec 009 / RF-38 y RF-39: lo pidió gerencia el 2026-09-17. Escribir no cambia.
+  assert.ok(alcanza('almacenista', 'almacen', 'escribir'));
+  assert.equal(alcanza('almacenista', 'almacen', 'anular'), false);
+  assert.ok(alcanza('admin', 'almacen', 'anular'));
+  assert.equal(alcanza('supervisor', 'almacen', 'anular'), false);
+  // Y el 403 de la guardia nombra a quien sí puede (spec 008, RF-13).
+  assert.equal(
+    motivoDeRechazo('almacen', 'anular'),
+    'No puede anular este registro: lo hace la gerencia.',
+  );
 });
 
 prueba('la gerencia registra en almacén y cantera; el residente solo consulta', () => {
@@ -2469,6 +2487,38 @@ prueba('están las once unidades del almacén, con id, nombre y abreviatura úni
     [...IDS_UNIDAD],
     ['bulto', 'kilogramo', 'tonelada', 'metro', 'metro_cuadrado', 'metro_cubico', 'litro', 'galon', 'unidad', 'rollo', 'caja'],
   );
+});
+
+prueba('la lista de materiales de OCC llega entera y sin repetidos', () => {
+  // Spec 009 / RF-32 y RF-35, anexo A: 367 filas del documento, 351 nombres. La
+  // cuenta se comprueba aquí y no en el script porque es lo que ve el almacenista.
+  assert.equal(MATERIALES_DE_OCC.length, 351);
+  assert.equal(new Set(MATERIALES_DE_OCC.map((m) => normalizar(m))).size, 351);
+  for (const nombre of MATERIALES_DE_OCC) {
+    assert.ok(nombre.trim().length > 0, 'un nombre vacío');
+    assert.equal(nombre, nombre.trim());
+  }
+
+  // Tal como los escribe OCC, con sus tildes: si se perdieran, nadie los encuentra.
+  for (const nombre of ['Agua', 'Cemento gris', 'Adoquín e=8cm', 'Acero PDR-60']) {
+    assert.ok(MATERIALES_DE_OCC.includes(nombre), nombre);
+  }
+
+  // «Otro» es la salida para lo que no está en la lista (RF-33), no un material
+  // de ella: ninguno se llama así.
+  assert.ok(!MATERIALES_DE_OCC.some((m) => normalizar(m) === CLAVE_OTRO_MATERIAL));
+});
+
+prueba('un material se encuentra escribiendo parte de su nombre', () => {
+  // Spec 009 / RF-36, con el mismo buscador del selector (007/RF-13).
+  const opciones = MATERIALES_DE_OCC.map((m) => ({ valor: m, etiqueta: m }));
+  const nombres = (texto: string) => filtrarOpciones(opciones, texto).map((o) => o.valor);
+
+  assert.ok(nombres('cemento').includes('Cemento gris'));
+  assert.ok(nombres('acero').includes('Acero PDR-60'));
+  // Sin tildes y en minúsculas, que es como se escribe en una obra.
+  assert.ok(nombres('adoquin').includes('Adoquín e=8cm'));
+  assert.deepEqual(nombres('material que no existe'), []);
 });
 
 prueba('una unidad se nombra y se abrevia, y una desconocida no se esconde', () => {

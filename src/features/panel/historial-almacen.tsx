@@ -4,7 +4,8 @@
  *
  * Va en una sección de la página y no en una ventana: es una tabla de siete
  * columnas, y en una ventana emergente cabría a medias. Lo ven todos los que ven
- * el almacén, residente incluido (RF-29); anular es solo de quien escribe.
+ * el almacén, residente incluido (RF-29); anular, solo la gerencia (RF-38). El
+ * botón sale de la tabla de permisos, así que este archivo no distingue cargos.
  *
  * ── Un movimiento no se edita ni se borra ──
  *

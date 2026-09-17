@@ -15,6 +15,14 @@
  * almacenista y el residente ven siempre la suya, y el marco les avisa si su
  * cuenta no tiene obra (008/RF-6).
  *
+ * ── El nombre se elige, no se escribe ──
+ *
+ * Desde el 2026-09-17 el material sale de la lista de OCC, con «Otro» al final
+ * para lo que no esté (RF-32, RF-33). Escribir el nombre a mano dejaba cada
+ * almacén con su propio idioma —«cemento», «Cemento gris», «cto gris»— y esos tres
+ * son tres materiales distintos para el inventario. La unidad se sigue eligiendo
+ * aparte (RF-34).
+ *
  * ── Un material en cero no se esconde ──
  *
  * Se señala con la etiqueta «Sin stock», con texto además del color (RF-19). Es
@@ -24,6 +32,7 @@
 import { useCallback, useState } from 'react';
 
 import { nombreDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/materiales';
 import { formatearCantidad, rechazoDeBaja, type TipoMovimiento } from '@/shared/rules/almacen';
 import { alcanza } from '@/shared/rules/permisos';
 
@@ -53,6 +62,23 @@ import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { OPCIONES_DE_UNIDAD, VentanaCorregirMaterial } from './ventana-material';
 import { VentanaMovimiento } from './ventana-movimiento';
 
+/**
+ * La salida para lo que no esté y, detrás, los materiales de OCC (RF-32, RF-33).
+ *
+ * **«Otro» va primero, y no al final como en las actividades del parte.** Visto en
+ * Chrome: con 351 opciones, al final hay que recorrerlas todas, y buscar «otro»
+ * saca antes nueve geotextiles que dicen «u Otros» en su nombre. Es la opción a la
+ * que se llega justo cuando la búsqueda no encontró nada, así que tiene que estar
+ * donde se ve sin buscar.
+ *
+ * Se arma una vez y fuera del componente: son 351 opciones y no cambian entre
+ * pantallas. El selector pone el buscador solo, por ser más de ocho (007/RF-12).
+ */
+const OPCIONES_DE_MATERIAL = [
+  { valor: CLAVE_OTRO_MATERIAL, etiqueta: 'Otro' },
+  ...MATERIALES_DE_OCC.map((m) => ({ valor: m, etiqueta: m })),
+];
+
 export default function PantallaAlmacen() {
   const { rol } = usePersona();
   const puedeRegistrar = alcanza(rol, 'almacen', 'escribir');
@@ -66,8 +92,16 @@ export default function PantallaAlmacen() {
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
 
+  /**
+   * Lo elegido en la lista de OCC: un nombre, o «Otro» (RF-32, RF-33). `nombre`
+   * es lo que se escribe, y solo cuenta con «Otro»: escrito y luego elegido de la
+   * lista, lo que vale es la lista.
+   */
+  const [elegido, setElegido] = useState<string | null>(null);
   const [nombre, setNombre] = useState('');
   const [unidad, setUnidad] = useState<UnidadAlmacen | null>(null);
+  const otroMaterial = elegido === CLAVE_OTRO_MATERIAL;
+  const nombreRegistrado = otroMaterial ? nombre.trim() : (elegido ?? '');
   const [obraId, setObraId] = useState<string | null>(null);
 
   const [obraFiltro, setObraFiltro] = useState<string | null>(null);
@@ -101,13 +135,19 @@ export default function PantallaAlmacen() {
   const [hecho, setHecho] = useState<string | null>(null);
 
   async function registrar() {
-    if (!unidad) return;
-    const nombreRegistrado = nombre.trim();
+    if (!unidad || nombreRegistrado === '') return;
+    // Elegido o escrito, al servidor va un nombre: no distingue de dónde salió, y
+    // RF-3 impide repetir uno vigente venga de donde venga.
     const listo = await materiales.ejecutar(() =>
-      api.almacen.materiales.crear({ nombre, unidad, obraId: esGerencia ? obraId : null }),
+      api.almacen.materiales.crear({
+        nombre: nombreRegistrado,
+        unidad,
+        obraId: esGerencia ? obraId : null,
+      }),
     );
     if (listo) {
       setHecho(`${nombreRegistrado} quedó registrado.`);
+      setElegido(null);
       setNombre('');
       setUnidad(null);
     }
@@ -212,15 +252,27 @@ export default function PantallaAlmacen() {
       {puedeRegistrar ? (
         <Seccion titulo="Registrar un material">
           <Formulario>
-            <Campo
-              etiqueta="Nombre del material"
+            <Selector
+              etiqueta="Material"
               obligatorio
-              valor={nombre}
-              onChange={setNombre}
-              ayuda="Ej. Cemento gris, Tubería PVC 4 pulgadas"
-              error={materiales.errorDe('nombre')}
+              valor={elegido}
+              opciones={OPCIONES_DE_MATERIAL}
+              onChange={setElegido}
+              vacio="Elija el material"
+              error={otroMaterial ? undefined : materiales.errorDe('nombre')}
               ancho={280}
             />
+            {otroMaterial ? (
+              <Campo
+                etiqueta="¿Cuál?"
+                obligatorio
+                valor={nombre}
+                onChange={setNombre}
+                ayuda="El nombre con el que se pide en la obra"
+                error={materiales.errorDe('nombre')}
+                ancho={280}
+              />
+            ) : null}
             <Selector
               etiqueta="Unidad"
               obligatorio
@@ -251,7 +303,7 @@ export default function PantallaAlmacen() {
               <Boton
                 titulo="Registrar material"
                 onPress={registrar}
-                deshabilitado={!nombre.trim() || !unidad || (esGerencia && !obraId)}
+                deshabilitado={!nombreRegistrado || !unidad || (esGerencia && !obraId)}
               />
             </AccionesFormulario>
           </Formulario>
