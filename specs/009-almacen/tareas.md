@@ -318,3 +318,142 @@ en verde.
 - **T12, cierre (2026-09-16):** Diego hizo la demo con `prueba.almacen` y con `residente1` y la dio
   por buena («Ya lo probé con ambas cuentas»). Con eso quedan comprobados RF-19, RF-28 y RF-29, y
   la spec pasa a **Cumplida**. No se vio desde aquí el detalle de cada paso de esa demo.
+
+---
+
+## Cambio del 2026-09-17 (RF-32 a RF-39)
+
+Cinco tareas. T13 es independiente de las demás y se puede hacer y ver sola; T14 a T16 son la
+lista de materiales, en el orden de siempre —datos, catálogo, pantalla—; T17 valida el cambio
+entero.
+
+- [x] T13. Anular deja de ser del almacenista. (RF-38, RF-39)
+      En `permisos.ts`, quitar `'anular'` de `almacenista` en el módulo `almacen`, y que el
+      comentario diga por qué, con la fecha. Invertir el caso del guion que hoy afirma que el
+      almacenista anula.
+      Hecho cuando: en el guion, el almacenista alcanza `escribir` y no `anular` en `almacen`,
+      el `admin` sí, el residente sigue en `ver` y `listar`, y `motivoDeRechazo` para anular
+      nombra a la gerencia; los tres comandos en verde.
+
+- [x] T14. Script `npm run materiales`. (RF-35, anexo A)
+      `scripts/importar-materiales.ts` lee `docs/materiales y equipos.xlsx`, hoja
+      `MATERIALES`, toma solo la columna C, descarta repetidos con la normalización de la
+      búsqueda y escribe `src/shared/catalogos/materiales.json`. Entrada en `package.json`.
+      Hecho cuando: corre y deja 351 nombres; con el encabezado movido en una copia, falla
+      nombrando la fila y **no escribe**; los tres comandos en verde.
+
+- [x] T15. Catálogo `materiales.ts` con su caso. (RF-32, RF-35, RF-36)
+      Tipa el JSON, expone `MATERIALES_DE_OCC` y `CLAVE_OTRO_MATERIAL`, con el bloque de
+      comentario que explica por qué es catálogo del código y no tabla de la base.
+      Hecho cuando: en el guion, 351 nombres, ninguno vacío ni repetido normalizando, los del
+      anexo A presentes tal como los escribe OCC, y `filtrarOpciones` encuentra «cemento» y
+      «acero»; los tres comandos en verde.
+
+- [x] T16. El alta del material elige de la lista, con «Otro». (RF-32, RF-33, RF-34, RF-37)
+      En `pantalla-almacen.tsx`, el campo «Nombre» pasa a `Selector` con los nombres más
+      «Otro»; el campo de texto aparece solo con «Otro» y es obligatorio entonces. La unidad
+      sigue como está (RF-34) y la ventana de corrección no se toca (RF-4).
+      Hecho cuando: en Chrome, se registra un material de la lista y otro con «Otro»; con
+      «Otro» y sin escribir nada no se puede guardar; los materiales ya registrados siguen
+      listándose y admitiendo movimientos; los tres comandos en verde.
+
+- [x] T17. Validación del cambio RF por RF con demo. (RF-32 a RF-39)
+      Hecho cuando: cada RF tiene su comprobación con resultado escrito; la demo del plan está
+      hecha —registrar desde la lista y con «Otro», el historial **sin** botón de anular como
+      `prueba.almacen` y **con** él como gerencia—; `expo export` sin error y
+      `grep DATABASE_URL dist/client` vacío; los tres comandos en verde; la spec vuelve a
+      **Cumplida**.
+      *La demo escribe en la base real: pedir permiso y nombres antes.*
+
+### Notas de ejecución del cambio del 2026-09-17
+
+- **T13**: el cambio fue quitar `'anular'` de `almacenista` en el módulo `almacen` de
+  `permisos.ts`. No hizo falta tocar ni la pantalla ni la ruta: el botón del historial se
+  pinta con `alcanza(rol, 'almacen', 'anular')` y `anular+api.ts` abre con
+  `requerirPermiso(peticion, 'almacen', 'anular')`, así que los dos siguen a la tabla. El
+  comentario del módulo explica ahora por qué la gerencia se quedó con la anulación, y se
+  corrigió el del encabezado de `historial-almacen.tsx`, que decía «anular es solo de quien
+  escribe» y había dejado de ser verdad.
+- El caso que afirmaba que el almacenista lleva su módulo **entero** se partió: escribir sí,
+  anular no, y el encargado de planta sigue anulando en cantera (la 010 no cambió). Caso
+  nuevo «en el almacén solo anula la gerencia», con el texto del 403: «No puede anular este
+  registro: lo hace la gerencia.» Se comprobó que fallaba antes de tocar la tabla.
+- 191 verificaciones (eran 190); `typecheck` y `lint` sin hallazgos. No se tocó base de
+  datos ni nada que lea un secreto, así que no hubo migración ni `expo export`.
+- **Falta verlo en el navegador**: que `prueba.almacen` abra un historial y no vea el botón,
+  y que la gerencia sí. Va en T17, con el resto de la demo.
+- Anotado y **no tocado** (fuera de T13): en `pantalla-almacen.tsx` el aviso de la baja de un
+  material y el resto del módulo siguen igual; la corrección de un material sigue con campo
+  de texto libre, como dice el plan.
+- **T14**: `scripts/importar-materiales.ts`, hermano del de presupuesto, con su entrada en
+  `package.json`. Lee la hoja `MATERIALES` por nombre —la otra, EQUIPOS, ni se abre— y toma
+  solo la columna C. **351 materiales, con 16 filas repetidas ofrecidas una sola vez**, que
+  es lo que decía el anexo A. Decisiones al escribirlo:
+  - El encabezado de la columna se busca como la fila que dice «MATERIALES» en la C **con la
+    A vacía**: el título de la hoja también lo dice, pero ocupa la fila entera.
+  - Las filas de datos son las que traen código del INVIAS (`^[A-Z]\d+$`) en la columna A.
+    Los títulos y los encabezados no lo tienen.
+  - Los repetidos se comparan con `normalizar` de `shared/rules/texto.ts`, la misma del
+    buscador del panel: dos nombres que el buscador no puede distinguir no salen dos veces.
+  - **Orden alfabético**, no el del documento, que no está ordenado del todo. Se compara sin
+    tildes para que «Ácido» no quede al final.
+  - **Salida: un JSON de nombres a secas.** El código del INVIAS, la unidad y el precio se
+    descartan; lo que se guarda en la base sigue siendo el nombre.
+  - Guarda mínima: menos de 300 nombres se trata como lista rota, no como lista corta.
+- **T14, fallos probados** (sobre copias, con el JSON bueno intacto —mismo `md5` antes y
+  después—): encabezado cambiado → «No encontré el encabezado «MATERIALES» en la columna C»;
+  fila con código y sin nombre → «Fila 10: el material B002001 no tiene nombre.»; hoja con
+  tres materiales → «Solo encontré 3 materiales…, y se esperan al menos 300.» Los tres con
+  código de salida 1 y sin escribir nada.
+- **T14, fuera del guion**: `AGENTS.md` suma `materiales.json` a la lista de archivos que no
+  se editan a mano, junto a su comando. 191 verificaciones, `typecheck` y `lint` en verde;
+  los casos del catálogo van en T15, que es donde entra al código de la aplicación.
+- **T15**: `src/shared/catalogos/materiales.ts` tipa el JSON y expone `MATERIALES_DE_OCC` y
+  `CLAVE_OTRO_MATERIAL`. **La lista son nombres a secas, sin id inventado**: lo que se guarda
+  de un material es su nombre, y una clave propia habría que traducirla al guardar y dejaría
+  sin ninguna a los materiales escritos a mano antes de este cambio (RF-37). El nombre
+  elegido y el escrito con «Otro» entran por el mismo camino, así que el servidor no cambia.
+- **T15, casos** (dos, 193 verificaciones): la lista llega con 351 nombres, ninguno vacío ni
+  con espacios de sobra, ninguno repetido normalizando, cuatro del anexo A presentes con sus
+  tildes, y ninguno que se llame «otro» —que es lo que haría chocar la salida de RF-33—; y el
+  buscador encuentra «cemento», «acero» y «adoquin» sin tilde, con `filtrarOpciones`, el mismo
+  del selector. Se comprobó que fallaban antes de escribir el catálogo.
+- **T15**: `typecheck` y `lint` en verde. No se tocó base de datos ni nada que lea un secreto.
+- **T16**: en `pantalla-almacen.tsx`, «Nombre del material» pasó a un `Selector` con las 351
+  opciones, y el campo de texto —ahora «¿Cuál?»— solo aparece con «Otro» (RF-32, RF-33). Lo
+  que se manda al servidor sigue siendo un nombre, elegido o escrito, así que la ruta no se
+  tocó. La unidad y la obra se quedaron como estaban (RF-34). El error del servidor bajo
+  `nombre` se pinta bajo el selector, o bajo «¿Cuál?» cuando es lo que se está escribiendo.
+- **T16, decisión tomada en el navegador**: **«Otro» va primero en la lista**, no al final
+  como «Otra actividad» en el parte. Con 351 opciones, al final hay que recorrerlas todas, y
+  al buscar «otro» salen antes nueve geotextiles cuyo nombre dice «u Otros». Es la opción a la
+  que se llega cuando la búsqueda no encontró nada: tiene que verse sin buscar.
+- **T16, revisado en Chrome sin guardar** (sesión de gerencia, `/panel/almacen`): la lista
+  abre con «Otro» arriba y los materiales detrás en orden alfabético; escribir «adoquin» sin
+  tilde saca los cuatro «Adoquín» (RF-36); al elegir «Otro» aparece «¿Cuál?» con su ayuda y el
+  botón sigue deshabilitado hasta llenarlo. **No se registró ningún material**: eso escribe en
+  la base real y va en T17, con Diego.
+- **T16**: 193 verificaciones, `typecheck` y `lint` en verde.
+
+### T17 — validación del cambio del 2026-09-17
+
+| RF | Cómo se comprobó | Resultado |
+| --- | --- | --- |
+| 32 | Demo de Diego: registró un material eligiéndolo de la lista | verde |
+| 33 | Demo de Diego: registró otro con «Otro», escribiendo el nombre | verde |
+| 34 | La unidad se sigue eligiendo aparte, también con «Otro» | verde |
+| 35 | Caso del catálogo: 351 nombres, ninguno repetido normalizando | verde |
+| 36 | En Chrome: «adoquin» sin tilde saca los cuatro «Adoquín» | verde |
+| 37 | Los materiales de antes siguen listándose y admitiendo movimientos | verde |
+| 38 | Demo de Diego: la gerencia **sí** ve «Anular» en el historial | verde |
+| 39 | Demo de Diego con `prueba.almacen`: el botón **ya no aparece**; el 403 del servidor sale de la misma tabla, con su caso en el guion | verde en pantalla y en reglas; el 403 no se provocó a mano |
+
+**Hallado en la demo, y no es un defecto:** al almacenista no se le ofrece elegir obra al
+registrar un material. Es lo que dicen 009/RF-1 y 008/RF-5 —registra siempre en la suya, y el
+servidor se la pone «mande lo que mande»—, así que ofrecerle el selector sería ofrecerle algo
+que el servidor ignora. Queda anotado porque a Diego le llamó la atención la diferencia con
+la gerencia.
+
+**Cierre:** `npx expo export --platform web` sin error, `grep DATABASE_URL dist/client` vacío,
+`dist` borrado. 193 verificaciones, `typecheck` y `lint` en verde. **La spec 009 vuelve a
+Cumplida.**

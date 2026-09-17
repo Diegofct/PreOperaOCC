@@ -1,6 +1,6 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60) y 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74)
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60), 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74) y 2026-09-17 (la actividad sin número de ítem, RF-75 a RF-77)
 
 ## Contexto y objetivo
 
@@ -162,6 +162,8 @@ tanda: no añade campos, cambia de qué habla el documento.
   capítulos o en varias vías.
 - RF-65: EL SISTEMA mostrará cada actividad de la lista con su número de ítem delante de la
   descripción, y permitirá encontrarla escribiendo el número o palabras de la descripción.
+  > **Reemplazado por RF-75 y RF-76 el 2026-09-17.** El número de ítem no se muestra ni se
+  > busca: la actividad se reconoce por su descripción.
 - RF-66: CUANDO se elija una actividad de la lista, EL SISTEMA mostrará junto a ella su
   unidad de medida.
 - RF-67: EL SISTEMA permitirá registrar, para cada actividad, la cantidad —cuánto se hizo
@@ -178,6 +180,16 @@ tanda: no añade campos, cambia de qué habla el documento.
   que tenían al guardarse, sin unidad ni cantidad, y sin alterar ningún parte existente.
 - RF-74: EL SISTEMA aceptará una actividad sin cantidad, igual que la acepta sin
   dimensiones (RF-25).
+
+#### La actividad se lee por su descripción (cambio 2026-09-17)
+
+- RF-75: EL SISTEMA mostrará cada actividad únicamente con su descripción, sin el número de
+  ítem, tanto al elegirla de la lista como en la actividad ya registrada y en el parte.
+  *(cambio 2026-09-17, reemplaza RF-65)*
+- RF-76: EL SISTEMA permitirá encontrar una actividad escribiendo palabras de su
+  descripción, y no por su número de ítem. *(cambio 2026-09-17, reemplaza RF-65)*
+- RF-77: EL SISTEMA conservará las actividades registradas antes de este cambio tal como se
+  guardaron, y las mostrará también sin el número de ítem. *(cambio 2026-09-17)*
 
 ### Clima (H4)
 
@@ -264,6 +276,10 @@ actividad; ensayo y observación en Control Calidad de Obra, conviviendo con los
 registrados); **Reglas** (de qué medida sale la cantidad de una actividad, con sus casos). **Móvil**
 y **Sincronización**: sin impacto.
 
+Cambio 2026-09-17: **Panel web** (la actividad se muestra y se busca solo por su
+descripción). **API**, **Datos**, **Reglas**, **Móvil** y **Sincronización**: sin impacto —
+no cambia lo que se guarda, solo lo que se lee en pantalla.
+
 ## Requisitos no funcionales
 
 - Guardar no puede perder lo escrito si el residente cierra el navegador: el parte se llena
@@ -310,6 +326,11 @@ y **Sincronización**: sin impacto.
   «m3-km»): es una sola unidad, m³-km.
 - *(cambio 2026-09-16)* Una misma actividad aparece en el presupuesto bajo varios capítulos
   (la 4.1.8 en alcantarillas y en cunetas) y en las dos vías: sale una sola vez (RF-64).
+- *(cambio 2026-09-17)* **Dos excavaciones que solo se distinguen al final de la frase**
+  («con entibado» / «sin entibado»): sin el número delante, lo que las separa es la
+  descripción completa, que se muestra entera (RF-75).
+- *(cambio 2026-09-17)* Quien conoce el presupuesto y **escribe «4.1.8» en el buscador**: no
+  encuentra nada; busca por palabras de la descripción (RF-76).
 
 ## Fuera de alcance
 
@@ -336,6 +357,8 @@ y **Sincronización**: sin impacto.
   el precio de cada ítem.
 - *(cambio 2026-09-16)* Registrar los valores de un ensayo como datos (resultados numéricos,
   norma, lote) o decidir si cumple lo exigido: la observación es texto.
+- *(cambio 2026-09-17)* Cruzar el parte con el presupuesto por número de ítem: el número
+  deja de verse y de buscarse (RF-75, RF-76).
 
 ## Criterios de finalización
 
@@ -400,6 +423,12 @@ Resueltas el 2026-09-16 (Diego, con los documentos de OCC):
 - **Otra actividad** lleva cuál fue, su unidad elegida de la lista de unidades del
   presupuesto y los mismos datos que las demás (RF-70).
 
+Resueltas el 2026-09-17 (Diego, petición de gerencia):
+
+- **El número de ítem no se muestra**: la actividad se lee por su descripción, en la lista y
+  en el parte (RF-75). Tampoco se busca por él (RF-76). Las 31 descripciones del presupuesto
+  son distintas entre sí, así que ninguna queda sin forma de reconocerse.
+
 Siguen abiertas: ninguna.
 
 ## Anexo A — Ensayos de Control Calidad de Obra *(2026-09-16)*
@@ -430,6 +459,9 @@ primera tabla, columna «Ensayo / Control». Se incluyen en este orden:
 Fuente: presupuesto de obra de OCC (Formulario 1, propuesta económica): columna «Ítem de
 pago», «Descripción» y «Und.». Las descripciones de abajo están **resumidas**; en la lista se
 usa la descripción completa del presupuesto.
+
+> **Desde el 2026-09-17** el número de ítem se queda en esta tabla y en el documento de OCC:
+> sirve para saber de dónde sale cada actividad, pero no se muestra en el panel (RF-75).
 
 | Ítem | Actividad | Unidad |
 | --- | --- | --- |

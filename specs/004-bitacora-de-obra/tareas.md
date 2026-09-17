@@ -664,3 +664,26 @@ reemplazarlos al llenar el parte de verdad.
 dist/client` vacío; `dist` borrado. Los scripts temporales de SQL se borraron. Tres comandos
 en verde (190). La spec 004 sigue **En curso**: falta T12, la validación de toda la spec, que
 incluye cerrar un parte.
+
+---
+
+## Cambio del 2026-09-17 (RF-75 a RF-77)
+
+Dos tareas. La primera es el cambio entero; la segunda lo valida. T12, la validación de toda
+la spec, sigue yendo al final de todo.
+
+- [ ] T31. La actividad se ofrece y se lee solo con su descripción. (RF-75, RF-76, RF-77)
+      `etiquetaDeActividad` devuelve la descripción sola; el comentario del bloque pasa a
+      decir por qué ya no lleva el número, y con él el comentario de las `opciones` de
+      `pantalla-partes.tsx`. El `valor` de la opción sigue siendo el ítem y el campo `item`
+      de lo guardado no se toca.
+      Hecho cuando: en el guion, `etiquetaDeActividad(4.1.8)` es exactamente la descripción;
+      `filtrarOpciones(opciones, '4.1.8')` no devuelve nada y «excavacion» y «acero» siguen
+      encontrando la suya; los tres comandos en verde.
+
+- [ ] T32. Validación del cambio RF por RF con demo. (RF-75, RF-76, RF-77)
+      Hecho cuando: en Chrome, con `npm run web` reiniciado, la lista de Actividades se ve
+      sin números (RF-75), «acero» encuentra y «10.1» no encuentra nada (RF-76), y las
+      actividades ya guardadas del parte del 16 se ven sin número y siguen igual al guardar
+      otra vez (RF-77); cada RF con su resultado escrito en las notas; los tres comandos en
+      verde.

@@ -190,3 +190,106 @@ simultáneo.
 - **Unidad que falta en la lista**: se añade al catálogo y se despliega; no toca la base.
 - **Migración**: solo crea tablas nuevas. Si hubiera que revertir, no hay datos de otras
   tablas en juego.
+
+---
+
+## Cambio del 2026-09-17 — anular solo la gerencia y la lista de materiales de OCC
+
+Dos cosas sin relación entre sí, que se hacen en el mismo cambio porque llegaron juntas. La
+primera es de una línea; la segunda es un catálogo nuevo, como el presupuesto de la spec 004.
+
+### 1. Anular pasa a ser de la gerencia (RF-38, RF-39)
+
+Ya está casi hecho por cómo se construyó el módulo: la tabla de permisos de
+`src/shared/rules/permisos.ts` tiene la acción `anular` por separado de `escribir`, el botón
+del historial se pinta con `alcanza(rol, 'almacen', 'anular')` y la ruta
+`movimientos/[id]/anular+api.ts` abre con `requerirPermiso(peticion, 'almacen', 'anular')`.
+
+**El cambio es quitar `'anular'` de la fila del almacenista en `almacen`.** Con eso:
+
+- **RF-39, la pantalla** — el historial deja de ofrecer el botón, sin tocar
+  `historial-almacen.tsx`.
+- **RF-39, el servidor** — la ruta responde 403 sola, con el texto que arma
+  `motivoDeRechazo` desde la misma tabla (008/RF-13), que pasará a decir que la anulación la
+  hace la gerencia. Eso es exactamente lo que quedó pendiente de comprobar contra el servidor
+  en 008/T8.
+- **RF-38** — la gerencia (`admin`) conserva las cuatro acciones y no se toca.
+
+El comentario de la tabla explica hoy que el almacenista anula lo suyo; pasa a decir por qué
+ya no, con su fecha. El caso del guion que afirma lo contrario se invierte.
+
+Lo que **no** se hace: ninguna vía para que el almacenista pida la anulación desde el panel.
+Queda escrito como fuera de alcance; se lo pide a gerencia por fuera.
+
+### 2. El material se elige de la lista de OCC (RF-32 a RF-37)
+
+Mismo camino que el presupuesto de la 004, y por las mismas razones: 351 nombres con tildes,
+comillas de pulgadas y calibres no se copian a mano sin erratas.
+
+**Script `npm run materiales`** (`scripts/importar-materiales.ts`), hermano de
+`importar-presupuesto.ts`: lee `docs/materiales y equipos.xlsx`, hoja `MATERIALES`, y escribe
+`src/shared/catalogos/materiales.json`, que no se edita a mano. De cada fila toma **solo la
+columna C**, el nombre. El código, la unidad y el precio se descartan a propósito: el precio
+está fuera de alcance y la unidad la elige el almacenista (RF-34).
+
+- Se queda con las filas cuya columna A es un código de material (`B…`), que es lo que
+  separa los datos de los encabezados y de las franjas de título.
+- **Repetidos (RF-35):** se comparan sin tildes, sin mayúsculas y sin espacios de más —la
+  misma normalización que ya usa la búsqueda del panel— y se conserva la primera aparición,
+  con la escritura del documento. De 367 filas salen 351 nombres.
+- **Falla en voz alta:** si no encuentra el encabezado esperado, si una fila con código no
+  tiene nombre, o si salen menos de 300 nombres, no escribe nada y dice en qué fila fue. Una
+  lista vacía o a medias sería peor que no correr el script.
+
+**Catálogo `src/shared/catalogos/materiales.ts`**, como `presupuesto.ts`: tipa el JSON,
+expone `MATERIALES_DE_OCC` y la clave `CLAVE_OTRO_MATERIAL = 'otro'`. Va en `catalogos/`
+—no en una tabla de la base— porque es una lista de referencia igual para todas las obras;
+lo que se guarda en la base sigue siendo el material de la obra con su nombre.
+
+**Alta del material** (`pantalla-almacen.tsx`): el campo de texto «Nombre» pasa a ser un
+`Selector` con los 351 nombres más «Otro», y el campo de texto solo aparece cuando se elige
+«Otro» (RF-33). La búsqueda dentro del selector ya es la que pide RF-36 —`filtrarOpciones`
+ignora tildes y mayúsculas—, así que no hay nada nuevo que escribir para eso. Lo que se
+manda al servidor sigue siendo un nombre, elegido o escrito: **la petición no cambia de
+forma**.
+
+**El servidor no cambia.** Con «Otro» cualquier nombre es válido, así que validar contra la
+lista no añadiría nada, y RF-3 (no repetir un nombre vigente en la obra) ya trata igual a los
+dos caminos. Tampoco hay migración: ni una columna nueva.
+
+**La ventana de corrección se queda con su campo de texto** (RF-4). Corregir es arreglar una
+errata de un material que ya existe, y uno registrado con «Otro» no está en la lista: dejarlo
+como selector obligaría a elegir otra cosa para poder guardar.
+
+**Nada de lo registrado se toca (RF-37):** los materiales existentes se listan y se mueven
+igual; el catálogo solo alimenta el formulario de alta.
+
+### Qué se comprueba
+
+En `scripts/verificar-reglas.ts`:
+
+- **Permisos:** el almacenista alcanza `escribir` pero no `anular` en `almacen`; el `admin`
+  sí; el residente sigue solo en `ver` y `listar`; el texto de `motivoDeRechazo` para anular
+  nombra a la gerencia.
+- **Catálogo:** 351 nombres, ninguno vacío, ninguno repetido con la normalización de la
+  búsqueda, y unos cuantos del anexo A presentes tal como los escribe OCC. Que buscar
+  «cemento» y «acero» devuelva lo suyo con `filtrarOpciones`.
+
+**Script:** correrlo sobre el Excel y confirmar el conteo; sobre una copia con el encabezado
+movido, ver que falla nombrando la fila y no escribe.
+
+**Demo en el navegador** (reiniciando `npm run web`): registrar un material desde la lista y
+otro con «Otro»; abrir un historial con movimientos como `prueba.almacen` y **no ver el botón
+de anular**; verlo como gerencia; comprobar que los materiales de antes siguen con su unidad.
+
+### Riesgos
+
+- **Un almacén sin salida para un error.** Si la gerencia no está disponible, el almacenista
+  convive con un movimiento equivocado hasta que alguien lo anule. Es lo que pidió gerencia y
+  queda escrito; si estorba en la obra, se revierte quitando una palabra de la tabla.
+- **Un selector de 351 opciones.** El buscador lo hace usable, pero hay que verlo: si la
+  lista se siente lenta o el nombre se corta, se trata como en la 004 —etiqueta recortada y
+  texto completo en el `detalle`—.
+- **Nombres del INVIAS que no son los de OCC en obra** («Cemento Asfaltico 60-70» donde el
+  almacén dice «cemento»). Para eso está «Otro», y por eso la lista no es cerrada.
+- **El Excel cambia de forma.** El script se detiene sin escribir, como el del presupuesto.

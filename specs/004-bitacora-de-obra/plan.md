@@ -363,3 +363,57 @@ Excel (una unidad «mts») y ver que falla nombrando la fila.
 - **Filas viejas de prueba que nadie quita.** Se ven de solo lectura para siempre en ese parte.
   Es lo que dicen RF-63 y RF-71; si Diego prefiere limpiar los partes de prueba, lo hace él
   quitándolas desde la pantalla.
+
+---
+
+## Cambio del 2026-09-17 — la actividad sin su número de ítem (RF-75 a RF-77)
+
+Es el cambio más pequeño de esta spec: **no toca datos, ni API, ni reglas**. Solo cambia el
+texto con el que se ofrece y se lee una actividad.
+
+### Qué se guarda, y por qué no cambia
+
+Lo guardado ya está bien: `nombre` es la descripción del presupuesto, sin número (lo pone
+`construirActividadDelParte` desde el catálogo), y el número vive aparte, en `item`. Ese
+campo **se queda**: es la llave con la que el servidor sabe qué actividad del presupuesto se
+eligió y lo único que permitiría cruzar el parte con el presupuesto más adelante. Decisión de
+Diego del 2026-09-17: el número se va de la pantalla, no de la base.
+
+Por lo mismo, el `valor` de cada opción del selector sigue siendo el ítem («4.1.8»): es la
+clave que viaja en la petición, no un texto que alguien lea.
+
+### El único cambio
+
+`etiquetaDeActividad`, en `src/shared/catalogos/presupuesto.ts`, devuelve hoy
+`«4.1.8 · Excavación…»` y pasa a devolver solo la descripción. Con eso caen los tres RF a la
+vez:
+
+- **RF-75** — la lista de actividades del panel se arma con esa función
+  (`pantalla-partes.tsx`, las `opciones`), así que deja de enseñar el número al elegir.
+- **RF-76** — el buscador del selector filtra sobre la etiqueta (`filtrarOpciones`), de modo
+  que al salir el número de la etiqueta deja de encontrarse por él. No hay que tocar el
+  buscador.
+- **RF-77** — la actividad ya registrada y el parte se pintan con `fila.nombre`, que nunca
+  tuvo el número. No hay nada que hacer, y hay que comprobarlo mirando, no suponiéndolo.
+
+Se actualizan los comentarios que explican la decisión contraria: el bloque de
+`etiquetaDeActividad` («el número va delante porque es por donde busca quien conoce el
+presupuesto») y el comentario de las `opciones` en `pantalla-partes.tsx`. Cambiar la decisión
+sin cambiar el comentario deja el archivo mintiendo.
+
+### Qué se comprueba
+
+- El caso del guion que hoy exige que «4.1.8» encuentre la actividad pasa a exigir lo
+  contrario: «4.1.8» no encuentra nada y «excavación» sí. Es el mismo caso, invertido.
+- En el navegador: abrir Actividades, ver la lista sin números, buscar «acero» y encontrar,
+  buscar «10.1» y no encontrar, y ver una actividad ya guardada del parte del 16 sin número.
+
+### Riesgos
+
+- **Dos actividades que se parecen.** Sin el número, lo que las separa es el final de la
+  frase. Las 31 descripciones son distintas entre sí (comprobado sobre el catálogo generado),
+  y el selector muestra la descripción completa; si alguna se recorta en pantalla, se trata
+  como el riesgo ya anotado del cambio anterior: la etiqueta se recorta y el texto completo
+  va en el `detalle`.
+- **Que alguien de OCC busque por número** y crea que la actividad no está. Es lo que Diego
+  decidió; queda escrito en los casos límite de la spec.
