@@ -353,8 +353,6 @@ export const api = {
   asignaciones: {
     listar: () => panel<AsignacionFila[]>('/asignaciones'),
     crear: (datos: AsignacionNueva) => panelEnviar<AsignacionFila>('/asignaciones', 'POST', datos),
-    confirmar: (id: string) =>
-      panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'confirmar' }),
     cerrar: (id: string) =>
       panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'cerrar' }),
   },

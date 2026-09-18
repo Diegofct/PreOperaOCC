@@ -57,7 +57,6 @@ import {
 } from './componentes';
 import {
   ETIQUETA_PERIODO,
-  type AsignacionFila,
   type PeriodoResumen,
   type ResumenFila,
 } from './contratos';
@@ -94,15 +93,6 @@ function Portada() {
     useCallback(async () => [await api.resumen.de(periodo)], [periodo]),
   );
 
-  // El residente necesita saber si alguien tomó una máquina sin asignación; la
-  // gerencia lo ve en su módulo. Solo se pide donde se usa.
-  const asignaciones = useListado<AsignacionFila>(
-    useCallback(
-      () => (esGerencia ? Promise.resolve([]) : api.asignaciones.listar()),
-      [esGerencia],
-    ),
-  );
-
   const datos = resumen.datos[0];
 
   return (
@@ -114,19 +104,13 @@ function Portada() {
           ? 'Lo que están haciendo las obras: qué se inspeccionó, cuánto trabajaron las máquinas y la gente, y qué quedó sin cerrar.'
           : 'Lo que falta por hacer hoy en su obra. Lo de arriba es lo que no puede quedarse sin resolver antes de que termine la jornada.'
       }
-      error={resumen.error ?? asignaciones.error}
+      error={resumen.error}
       cargando={resumen.cargando}
     >
       {!datos ? null : esGerencia ? (
         <VistaGerencia datos={datos} periodo={periodo} onPeriodo={setPeriodo} />
       ) : (
-        <VistaResidente
-          datos={datos}
-          sinConfirmar={
-            asignaciones.datos.filter((a) => a.origen === 'autoasignada' && a.hasta === null)
-              .length
-          }
-        />
+        <VistaResidente datos={datos} />
       )}
     </MarcoPantalla>
   );
@@ -249,11 +233,10 @@ function VistaGerencia({
 /* Residente                                                                 */
 /* ------------------------------------------------------------------------ */
 
-function VistaResidente({ datos, sinConfirmar }: { datos: ResumenFila; sinConfirmar: number }) {
+function VistaResidente({ datos }: { datos: ResumenFila }) {
   const todoEnOrden =
     datos.sinInspeccionar === 0 &&
     datos.noAptos === 0 &&
-    sinConfirmar === 0 &&
     datos.partes === datos.partesCerrados;
 
   return (
@@ -278,14 +261,6 @@ function VistaResidente({ datos, sinConfirmar }: { datos: ResumenFila; sinConfir
           {datos.sinInspeccionar === 1
             ? 'Queda 1 máquina sin preoperacional. Si está trabajando, se está usando sin inspeccionar.'
             : `Quedan ${datos.sinInspeccionar} máquinas sin preoperacional. Si están trabajando, se están usando sin inspeccionar.`}
-        </Aviso>
-      ) : null}
-
-      {sinConfirmar > 0 ? (
-        <Aviso tono="error">
-          {sinConfirmar === 1
-            ? 'Un operador tomó una máquina sin asignación previa. Confírmela en Asignaciones.'
-            : `${sinConfirmar} operadores tomaron máquinas sin asignación previa. Confírmelas en Asignaciones.`}
         </Aviso>
       ) : null}
 

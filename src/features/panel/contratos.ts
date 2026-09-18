@@ -252,12 +252,17 @@ export const asignacionNueva = z.object({
 export type AsignacionNueva = z.input<typeof asignacionNueva>;
 
 /**
- * Lo que se le puede hacer a una asignación existente. Son dos cosas y no una:
- * `confirmar` acepta lo que el operador se autoasignó en obra, `cerrar` termina
- * la asignación. Ninguna de las dos borra la fila.
+ * Lo que se le puede hacer a una asignación existente: cerrarla. No la borra.
+ *
+ * Hubo una segunda acción, `confirmar`, para aceptar la máquina que un operador
+ * se había tomado en obra por su cuenta. Desde la spec 012 el celular ya no
+ * puede tomar ninguna, así que no queda nada que aceptar. Se mantiene el campo
+ * `accion` con un solo valor —en vez de un cuerpo vacío— porque un panel viejo
+ * abierto en otra pestaña sigue mandando `confirmar`, y aquí es donde se le
+ * responde 400 en vez de dejarlo pasar como si no hubiera pedido nada.
  */
 export const asignacionEditada = z.object({
-  accion: z.enum(['confirmar', 'cerrar'], { error: 'La acción solo puede ser confirmar o cerrar.' }),
+  accion: z.enum(['cerrar'], { error: 'La acción solo puede ser cerrar.' }),
 });
 
 export interface AsignacionFila {
@@ -270,7 +275,7 @@ export interface AsignacionFila {
   obraNombre: string | null;
   desde: string;
   hasta: string | null;
-  /** `autoasignada` la escogió el operador en obra y espera confirmación. */
+  /** `autoasignada`: se la puso el operador cuando eso se podía, antes de la spec 012. */
   origen: 'supervisor' | 'autoasignada';
   confirmadaEn: string | null;
 }

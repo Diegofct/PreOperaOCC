@@ -8,14 +8,19 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /**
- * Las dos cosas que se le hacen a una asignación viva: confirmarla o cerrarla.
+ * Lo que se le hace a una asignación viva: cerrarla.
  * `PATCH /api/panel/asignaciones/:id`.
  *
- * Van juntas en un solo endpoint con un campo `accion` en vez de aceptar cambios
- * libres de columnas, porque no son ediciones: son dos hechos del negocio con
- * efectos distintos, y dejar que el cliente ponga `origen` o `hasta` a mano
- * permitiría reabrir una asignación cerrada o marcar como confirmada una que
- * nadie miró.
+ * Va con un campo `accion` en vez de aceptar cambios libres de columnas porque
+ * no es una edición: es un hecho del negocio, y dejar que el cliente ponga
+ * `hasta` u `origen` a mano permitiría reabrir una asignación cerrada o
+ * cambiarle a posteriori cómo se tomó esa máquina.
+ *
+ * Hasta la spec 012 había una segunda acción, `confirmar`, para aceptar lo que
+ * un operador se hubiera autoasignado desde el celular. Ya no se puede tomar
+ * ninguna máquina desde el celular, así que no hay nada que confirmar; las
+ * columnas `origen` y `confirmadaEn` se quedan porque las filas de antes las
+ * tienen llenas y eso es evidencia de cómo se operó esa máquina.
  */
 
 const COLUMNAS = {
@@ -43,23 +48,13 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       return noEncontrado('esa asignación');
     }
 
-    const { accion } = await cuerpoJson(peticion, asignacionEditada);
-
-    /**
-     * Confirmar pasa `origen` a 'supervisor', que es lo que apaga el aviso en
-     * el celular, y deja fecha en `confirmadaEn` para no perder el hecho de que
-     * la máquina se tomó sin asignación previa. `confirmadaPor` se queda vacío
-     * hasta que exista el ingreso: es mejor no saber quién confirmó que
-     * atribuírselo a alguien inventado.
-     */
-    const cambios =
-      accion === 'confirmar'
-        ? { origen: 'supervisor' as const, confirmadaEn: new Date() }
-        : { hasta: new Date() };
+    // Se valida aunque solo quede un valor: es lo que rechaza el `confirmar` de
+    // un panel viejo abierto en otra pestaña, con un 400 en vez de un cierre.
+    await cuerpoJson(peticion, asignacionEditada);
 
     const [fila] = await baseServidor()
       .update(asignaciones)
-      .set(cambios)
+      .set({ hasta: new Date() })
       .where(and(eq(asignaciones.id, id), isNull(asignaciones.eliminadoEn)))
       .returning(COLUMNAS);
 

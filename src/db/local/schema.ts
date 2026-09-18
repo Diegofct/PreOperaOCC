@@ -135,11 +135,13 @@ export const asignaciones = sqliteTable(
     desde: integer('desde').notNull(),
     hasta: integer('hasta'),
     /**
-     * Quién decidió esta asignación. `autoasignada` la escogió el propio
-     * operador porque no tenía ninguna vigente: el dashboard la muestra en
-     * amarillo para que el supervisor la confirme. Dejarlo trabajar y marcarlo
-     * es mejor que bloquearlo — un operador bloqueado arranca la máquina sin
-     * preoperacional, que es justo lo que este sistema existe para evitar.
+     * Quién decidió esta asignación. Hoy siempre `supervisor`: desde la spec 012
+     * la administración es la única que asigna, y el celular no escribe en esta
+     * tabla — solo replica lo que baja del servidor.
+     *
+     * `autoasignada` se conserva porque describe filas que ya existen: las que
+     * un operador se puso a sí mismo cuando eso se podía. Quitar el valor sería
+     * reescribir cómo se operó esa máquina, y en este proyecto nada se borra.
      */
     origen: text('origen', { enum: ['supervisor', 'autoasignada'] })
       .notNull()

@@ -11,7 +11,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { FilaUsuario, PildoraSincronizacion } from '@/components/ui/cabecera-inicio';
 import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants/theme';
 import { useSesion } from '@/features/auth/sesion';
-import { drenarEnSegundoPlano } from '@/features/sync/motor';
+import { sincronizacionCompleta } from '@/features/sync/motor';
 import { contarPendientes, reencolarFallidas } from '@/features/sync/outbox';
 
 import { asignacionesVigentesDe, historialDe, type VehiculoDelOperador } from './repositorio';
@@ -62,21 +62,30 @@ export function InicioOperador() {
    * dio por perdido y vuelve a intentar la subida. Es la salida para el registro
    * que el servidor rechazó por un fallo que ya se corrigió: sin esto, un acta
    * firmada se queda varada en el teléfono sin manera de sacarla.
+   *
+   * **Desde la spec 012 también baja**, no solo sube. Antes, un operador sin
+   * máquina se escogía una y seguía; ahora espera a que se la asignen, y si
+   * deslizar solo subiera, la asignación que el residente acaba de registrar no
+   * llegaría hasta que el operador cerrara y reabriera la app. Eso convertiría
+   * esta pantalla en un callejón sin salida (RF-10).
+   *
+   * **No se espera**: se relee lo local de inmediato y se vuelve a leer si la
+   * sincronización llega a completarse. Un `await` aquí sería un spinner
+   * esperando al servidor, que es lo que esta app no hace en ninguna pantalla.
    */
   const refrescar = useCallback(async () => {
     await reencolarFallidas();
-    drenarEnSegundoPlano();
+    void sincronizacionCompleta().then(() => void cargar());
     await cargar();
   }, [cargar]);
 
   const principal = asignados[0] ?? null;
   const hayVarios = asignados.length > 1;
 
+  // Sin vehículo vigente no hay preoperacional que empezar (RF-9). El botón ni
+  // siquiera se pinta; la guarda está por si alguien lo vuelve a pintar.
   function empezar() {
-    if (!principal) {
-      router.push('/vehiculo');
-      return;
-    }
+    if (!principal) return;
     router.push({ pathname: '/preoperacional', params: { vehiculoId: principal.id } });
   }
 
@@ -105,9 +114,13 @@ export function InicioOperador() {
             <Text style={estilos.detalleVehiculo}>{principal.obraNombre}</Text>
           ) : null}
 
+          {/* Hasta que el script de la spec 012 las cierre, un operador puede
+              seguir viendo una máquina que se puso él mismo. Decía «su
+              supervisor debe confirmarlo», y desde que el panel perdió esa
+              acción eso dejó de ser verdad. */}
           {principal.origen === 'autoasignada' ? (
             <Text style={estilos.autoasignado}>
-              Autoasignado por usted. Su supervisor debe confirmarlo.
+              Esta máquina la escogió usted, no se la asignaron. Avísele a su residente.
             </Text>
           ) : null}
 
@@ -121,30 +134,32 @@ export function InicioOperador() {
         </View>
       ) : (
         <View style={estilos.tarjetaVacia}>
-          <Text style={estilos.detalleVehiculo}>
-            No tiene ningún vehículo asignado. Escoja la máquina que va a operar hoy.
+          <Text style={estilos.tituloVacia}>No tiene ningún vehículo asignado</Text>
+          <Text style={estilos.textoVacia}>
+            Pídale a su residente que le asigne la máquina que va a operar. Cuando la
+            registre, deslice esta pantalla hacia abajo y aparecerá aquí.
           </Text>
         </View>
       )}
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={empezar}
-        style={({ pressed }) => [estilos.botonPrimario, pressed && estilos.botonPresionado]}
-      >
-        <Text style={estilos.botonPrimarioTexto}>
-          {principal ? 'Hacer preoperacional' : 'Escoger vehículo'}
-        </Text>
-      </Pressable>
-
       {principal ? (
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push('/vehiculo')}
-          style={({ pressed }) => [estilos.botonSecundario, pressed && estilos.presionado]}
-        >
-          <Text style={estilos.botonSecundarioTexto}>Cambiar de vehículo</Text>
-        </Pressable>
+        <>
+          <Pressable
+            accessibilityRole="button"
+            onPress={empezar}
+            style={({ pressed }) => [estilos.botonPrimario, pressed && estilos.botonPresionado]}
+          >
+            <Text style={estilos.botonPrimarioTexto}>Hacer preoperacional</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/vehiculo')}
+            style={({ pressed }) => [estilos.botonSecundario, pressed && estilos.presionado]}
+          >
+            <Text style={estilos.botonSecundarioTexto}>Cambiar de vehículo</Text>
+          </Pressable>
+        </>
       ) : null}
 
       <Text style={estilos.tituloSeccion}>Últimos registros</Text>
@@ -206,8 +221,11 @@ const estilos = StyleSheet.create({
   tarjetaVacia: {
     padding: Spacing.four,
     borderRadius: Radio.lg,
-    backgroundColor: Colors.light.backgroundElement,
+    gap: Spacing.two,
+    backgroundColor: Estado.atencionFondo,
   },
+  tituloVacia: { fontSize: Texto.etiqueta, fontWeight: '800', color: Estado.atencion },
+  textoVacia: { fontSize: Texto.base, lineHeight: 26, color: Estado.atencion },
   etiqueta: {
     fontSize: Texto.pie,
     fontWeight: '600',

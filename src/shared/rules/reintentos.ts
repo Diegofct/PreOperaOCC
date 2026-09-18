@@ -46,6 +46,23 @@ export function esperaDeReintento(intentos: number): number {
   return Math.min(espera, ESPERA_MAXIMA_MS);
 }
 
+/**
+ * ¿Este código de respuesta es un «no lo intentes más»?
+ *
+ * Vivía dentro de `push.ts` y sube aquí porque de esta distinción depende que un
+ * teléfono pueda seguir subiendo: un fallo **transitorio** corta la tanda y la
+ * fila vuelve a la cola —la red se cayó, el servidor se reinició—, mientras que
+ * uno **definitivo** marca esa fila como fallida y deja pasar a las de atrás.
+ *
+ * 400 y 422 son los dos que el servidor usa para decir «esto no va a funcionar
+ * nunca»: el envío no valida, o la operación ya no existe (spec 012, RF-5). Un
+ * 404 **no** entra: casi siempre significa que la ruta todavía no está publicada
+ * en ese servidor, y eso sí se arregla esperando.
+ */
+export function fallaDefinitiva(estado: number): boolean {
+  return estado === 400 || estado === 422;
+}
+
 /** Se agotaron los intentos: la fila deja de reintentarse sola. */
 export function debeRendirse(intentos: number): boolean {
   return intentos >= INTENTOS_MAXIMOS;

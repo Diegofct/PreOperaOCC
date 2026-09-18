@@ -73,6 +73,7 @@
     "db:sembrar:servidor": "tsx --env-file=.env scripts/sembrar-servidor.ts",
     "crear-admin": "tsx --env-file=.env scripts/crear-admin.ts",
     "revisar:preoperacionales": "tsx --env-file=.env scripts/revisar-preoperacionales.ts",
+    "cerrar:autoasignadas": "tsx --env-file=.env scripts/cerrar-autoasignadas.ts",
     "verificar": "tsx scripts/verificar-reglas.ts"
   },
   "private": true

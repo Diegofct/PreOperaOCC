@@ -11,13 +11,15 @@ import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/
 /**
  * Qué operador lleva qué máquina. `GET` y `POST /api/panel/asignaciones`.
  *
- * Es la consulta con la que arranca la app del operador, y por eso la decisión
- * la toma la administración desde aquí. El móvil solo tiene el respaldo: si un
- * operador llega a obra sin ninguna asignación vigente, escoge él mismo y la
- * fila queda marcada `autoasignada` para que aparezca destacada en este listado
- * hasta que alguien la confirme. Bloquearlo sería peor — un operador bloqueado
- * arranca la máquina sin preoperacional, que es justo lo que este sistema existe
- * para evitar.
+ * Es la consulta con la que arranca la app del operador, y desde la spec 012
+ * **esta es la única puerta por la que se decide**: el celular no puede asignar
+ * nada. Un operador sin asignación no levanta ningún preoperacional hasta que
+ * alguien de aquí se la registre, y esa es la contrapartida asumida —está
+ * argumentada en `AGENTS.md`—.
+ *
+ * Las filas con `origen = 'autoasignada'` que devuelve el `GET` son de antes del
+ * cambio. Se siguen mostrando con su etiqueta porque dicen la verdad sobre cómo
+ * se tomó esa máquina; ya no hay nada que confirmar sobre ellas.
  */
 
 const persona = aliasedTable(usuarios, 'persona');

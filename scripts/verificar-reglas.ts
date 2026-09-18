@@ -122,6 +122,7 @@ import {
   debeRendirse,
   esperaDeReintento,
   ESPERA_MAXIMA_MS,
+  fallaDefinitiva,
   INTENTOS_MAXIMOS,
   siguienteIntento,
 } from '../src/shared/rules/reintentos';
@@ -196,6 +197,7 @@ import {
 } from '../src/features/bitacoras/tipos';
 import {
   actividadDelParte,
+  asignacionEditada,
   ensayoDelParte,
   materialDeCanteraEditado,
   materialDeCanteraNuevo,
@@ -1715,6 +1717,36 @@ prueba('los reintentos se acaban y la fila deja de volver sola a la cola', () =>
 
   assert.equal(debeRendirse(INTENTOS_MAXIMOS - 1), false);
   assert.equal(debeRendirse(INTENTOS_MAXIMOS), true);
+});
+
+prueba('el rechazo de una asignación del celular no atasca la cola', () => {
+  // Spec 012 / RF-4 y RF-5. El servidor responde 422 a las autoasignaciones de un
+  // teléfono sin actualizar, y **eso tiene que ser definitivo**: si se tratara
+  // como un fallo pasajero, esa fila se reintentaría ocho veces cortando la tanda
+  // cada vez, y los preoperacionales firmados que van detrás no subirían.
+  assert.equal(fallaDefinitiva(422), true);
+  assert.equal(fallaDefinitiva(400), true);
+  // Lo que sí puede arreglarse esperando no se da por perdido.
+  assert.equal(fallaDefinitiva(409), false);
+  assert.equal(fallaDefinitiva(500), false);
+  assert.equal(fallaDefinitiva(404), false);
+
+  // Y una vez marcada definitiva, no vuelve sola a la cola.
+  const resultado = siguienteIntento(0, 1_000_000, { definitivo: fallaDefinitiva(422) });
+  assert.equal(resultado.estado, 'fallida');
+  assert.equal(resultado.proximoIntentoEn, 0);
+});
+
+prueba('confirmar una asignación ya no es una acción que el panel pueda pedir', () => {
+  // Spec 012 / RF-15 y RF-18. Confirmar existía para aceptar lo que un operador se
+  // había tomado en obra; sin autoasignación no hay nada que aceptar. Cerrar se
+  // queda, que es la otra mitad del trabajo de la administración.
+  //
+  // El caso vive aquí y no en la pantalla porque la pantalla se puede quedar
+  // vieja en una pestaña abierta: lo que de verdad cierra la puerta es que el
+  // contrato del servidor no admita la palabra.
+  assert.equal(asignacionEditada.safeParse({ accion: 'cerrar' }).success, true);
+  assert.equal(asignacionEditada.safeParse({ accion: 'confirmar' }).success, false);
 });
 
 prueba('un error que reintentar no arregla se rinde de una vez', () => {
