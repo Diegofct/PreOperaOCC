@@ -19,7 +19,7 @@ import {
 import { drenarEnSegundoPlano } from '@/features/sync/motor';
 import { encolar } from '@/features/sync/outbox';
 import { desfaseDeReloj } from '@/features/sync/reloj';
-import { periodicidadesAplicables } from '@/shared/rules/inspeccion';
+import { borradorCaduco, periodicidadesAplicables } from '@/shared/rules/inspeccion';
 
 import type {
   Periodicidad,
@@ -233,6 +233,12 @@ export interface Borrador {
   odometroKm: number | null;
   horometroH: number | null;
   observaciones: string;
+  /**
+   * Se descartó un borrador anterior porque su formato ya no es el vigente, y
+   * este es uno nuevo (spec 011, RF-27). La pantalla lo dice: si no, el operador
+   * ve su formulario en blanco y cree que la app le perdió el trabajo.
+   */
+  formatoCambio?: boolean;
 }
 
 /**
@@ -262,7 +268,21 @@ export async function abrirBorrador(
     .limit(1);
 
   const existente = existentes[0];
-  if (existente) {
+  // Un borrador empezado con otro formato no se retoma: se descarta y se abre
+  // uno nuevo, porque seguir llenándolo daría un acta que mezcla dos formatos
+  // (spec 011, RF-27 y RF-28). Baja lógica: aquí no se borra nada.
+  const caduco =
+    existente !== undefined &&
+    borradorCaduco(existente.plantillaVersion, encontrada.plantilla.version);
+
+  if (caduco) {
+    await db
+      .update(preoperacionales)
+      .set({ estadoSync: 'descartado' satisfies EstadoSync, actualizadoEn: Date.now() })
+      .where(eq(preoperacionales.id, existente.id));
+  }
+
+  if (existente && !caduco) {
     return {
       id: existente.id,
       vehiculo,
@@ -295,6 +315,7 @@ export async function abrirBorrador(
   });
 
   return {
+    formatoCambio: caduco,
     id,
     vehiculo,
     plantilla: encontrada.plantilla,

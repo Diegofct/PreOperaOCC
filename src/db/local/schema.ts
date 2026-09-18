@@ -28,7 +28,13 @@ import type {
 export type { ActividadBitacora };
 
 /** Estado de un registro capturado frente al servidor. */
-export type EstadoSync = 'borrador' | 'pendiente' | 'sincronizado' | 'rechazado';
+/**
+ * `descartado` es un borrador que se empezó con un formato anterior al vigente
+ * (spec 011, RF-27). No se borra —aquí no se borra nada— pero deja de ser el
+ * borrador que se retoma: sin ese estado volvería a ser el más reciente en
+ * cuanto se firmara el nuevo, y se descartaría otra vez en bucle.
+ */
+export type EstadoSync = 'borrador' | 'pendiente' | 'sincronizado' | 'rechazado' | 'descartado';
 
 const ahora = sql`(unixepoch() * 1000)`;
 

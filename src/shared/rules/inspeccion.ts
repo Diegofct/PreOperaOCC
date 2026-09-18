@@ -20,6 +20,27 @@ const DIAS_MENSUAL = 30;
 const MS_POR_DIA = 86_400_000;
 
 /**
+ * ¿Este borrador se empezó con un formato que ya no es el vigente?
+ *
+ * Un preoperacional a medio llenar guarda la versión del formato con el que
+ * empezó. Si entre medias se publicó otro —la spec 011 recortó los cinco—, lo
+ * guardado tiene respuestas de ítems que ya no existen y le faltan los que
+ * entraron. Seguir llenándolo produciría un acta que mezcla dos formatos, y eso
+ * no hay forma de verificarlo después: la huella firmada no cuadraría con
+ * ninguna plantilla.
+ *
+ * Se descarta y se empieza de nuevo (spec 011, RF-27). Se pierde lo tecleado,
+ * que es el mal menor: un borrador nunca se ha subido y nada firmado se toca.
+ *
+ * Cualquier diferencia cuenta, no solo «la vigente es mayor»: un equipo que se
+ * quedó con una plantilla que el catálogo ya no trae tampoco puede seguir,
+ * porque el formulario que se le pintaría no sería el de su borrador.
+ */
+export function borradorCaduco(versionDelBorrador: number, versionVigente: number): boolean {
+  return versionDelBorrador !== versionVigente;
+}
+
+/**
  * Qué periodicidades toca revisar hoy.
  *
  * El formato dice "cada 15 días" y "cada 30 días" sin anclarse a un día del
