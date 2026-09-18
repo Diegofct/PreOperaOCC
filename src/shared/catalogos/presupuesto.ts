@@ -68,14 +68,24 @@ export function actividadPorItem(item: string): ActividadDelPresupuesto | undefi
 }
 
 /**
- * «4.1.8 · Excavación para estructuras varias…», con la descripción entera.
+ * La descripción entera, sin el número de ítem (RF-75).
  *
- * El número va delante porque es por donde busca quien conoce el presupuesto, y la
- * descripción completa porque dos excavaciones se distinguen al final de la frase
- * («con entibado» / «sin entibado») (RF-65).
+ * Hasta el 2026-09-17 iba «4.1.8 · Excavación para estructuras varias…», porque el
+ * número es por donde busca quien conoce el presupuesto. OCC pidió quitarlo: en el
+ * parte la actividad se reconoce por lo que dice, y el número era ruido delante de
+ * cada renglón. Con él se va también la búsqueda por número (RF-76), porque el
+ * buscador del selector filtra sobre esta etiqueta.
+ *
+ * **El ítem no desaparece, solo deja de verse**: sigue siendo la clave de la opción
+ * y se guarda con la actividad (`construirActividadDelParte`). Es lo único que
+ * permitiría cruzar un parte con el presupuesto más adelante.
+ *
+ * La descripción va completa porque dos excavaciones se distinguen al final de la
+ * frase («con entibado» / «sin entibado»), y sin el número delante eso es lo único
+ * que las separa. Las 31 son distintas entre sí, y el guion lo comprueba.
  */
 export function etiquetaDeActividad(actividad: ActividadDelPresupuesto): string {
-  return `${actividad.item} · ${actividad.descripcion}`;
+  return actividad.descripcion;
 }
 
 /**

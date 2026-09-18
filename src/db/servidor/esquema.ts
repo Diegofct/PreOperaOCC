@@ -314,9 +314,13 @@ export const asignaciones = pgTable(
     desde: timestamp('desde', { withTimezone: true, mode: 'date' }).notNull(),
     hasta: timestamp('hasta', { withTimezone: true, mode: 'date' }),
     /**
-     * Quién decidió esta asignación. `autoasignada` la escogió el propio
-     * operador porque no tenía ninguna vigente; el panel la muestra destacada
-     * para que el supervisor la confirme.
+     * Quién decidió esta asignación. Hoy siempre `supervisor`: desde la spec 012
+     * solo la administración asigna, y el endpoint del celular responde 422.
+     *
+     * `autoasignada` se conserva para las filas de antes del cambio, que el
+     * panel sigue mostrando con su etiqueta. El valor **no se retira del enum**:
+     * describe cómo se operó esa máquina y quitarlo sería reescribir la
+     * historia.
      */
     origen: origenAsignacion('origen').notNull().default('supervisor'),
     /**

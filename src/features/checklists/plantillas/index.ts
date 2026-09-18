@@ -8,16 +8,19 @@
  */
 import type { PlantillaChecklist } from '../types';
 
-// La camioneta y la volqueta van por la v2: la spec 003 les quitó el horómetro,
-// y quitar un ítem cambia la huella del formato, así que sube la versión. Los
-// archivos `.v1.json` de esas dos se quedan en la carpeta como registro de lo
-// que se firmó antes; no se importan aquí, pero sus filas siguen vivas en la
-// base del servidor, que es de donde se resuelve un acta ya firmada.
-import camioneta from './camioneta.v2.json';
-import motoniveladora from './motoniveladora.v1.json';
-import retrocargador from './retrocargador.v1.json';
-import retroexcavadora from './retroexcavadora.v1.json';
-import volqueta from './volqueta.v2.json';
+// Aquí se importa **solo la versión vigente** de cada formato. Las anteriores se
+// quedan en la carpeta como registro de lo que se firmó antes y sus filas siguen
+// vivas en la base del servidor, que es de donde se resuelve un acta ya firmada;
+// no se importan porque nadie debe volver a llenar un formato viejo.
+//
+// La camioneta y la volqueta van por la v3 y las tres amarillas por la v2: la
+// spec 003 quitó el horómetro de las dos primeras y la spec 011 podó las cinco.
+// Cada poda cambia la huella del formato, y por eso sube la versión.
+import camioneta from './camioneta.v3.json';
+import motoniveladora from './motoniveladora.v2.json';
+import retrocargador from './retrocargador.v2.json';
+import retroexcavadora from './retroexcavadora.v2.json';
+import volqueta from './volqueta.v3.json';
 
 export const PLANTILLAS: PlantillaChecklist[] = [
   camioneta,

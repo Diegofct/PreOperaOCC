@@ -1,14 +1,14 @@
 /**
  * Qué operador lleva qué máquina.
  *
- * Es la consulta con la que arranca la app del operador, y por eso la decisión
- * se toma aquí y no en el celular. El móvil solo tiene el respaldo: si alguien
- * llega a obra sin ninguna asignación vigente, escoge él mismo y la fila llega
- * marcada como autoasignada. Esas aparecen destacadas arriba, esperando que
- * alguien las confirme.
+ * Es la consulta con la que arranca la app del operador, y **la única puerta
+ * por la que se decide**: desde la spec 012 el celular no puede tomar ninguna
+ * máquina por su cuenta. Un operador que llega a obra sin asignación no
+ * inspecciona nada hasta que alguien de aquí se la registre.
  *
- * Confirmar no es un trámite: es el momento en que la administración se entera
- * de que una máquina se está operando sin que nadie lo hubiera previsto.
+ * La etiqueta «Sin confirmar» se queda para las filas de antes del cambio. Ya
+ * no hay nada que confirmar, pero esas filas siguen diciendo la verdad sobre
+ * cómo se tomó esa máquina, y eso es evidencia.
  */
 import { useCallback, useState } from 'react';
 
@@ -18,7 +18,6 @@ import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
-  Aviso,
   Boton,
   Celda,
   Etiqueta,
@@ -57,9 +56,6 @@ export default function PantallaAsignaciones() {
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
 
   const operadores = personas.datos.filter((p) => p.rol === 'operador');
-  const porConfirmar = asignaciones.datos.filter(
-    (a) => a.origen === 'autoasignada' && a.hasta === null,
-  );
 
   async function crear() {
     if (!vehiculoId || !usuarioId) return;
@@ -107,12 +103,6 @@ export default function PantallaAsignaciones() {
       pintar: (a) =>
         a.hasta !== null ? null : (
           <Acciones>
-            {a.origen === 'autoasignada' ? (
-              <Boton
-                titulo="Confirmar"
-                onPress={() => asignaciones.ejecutar(() => api.asignaciones.confirmar(a.id))}
-              />
-            ) : null}
             <Boton
               titulo="Cerrar"
               tono="secundario"
@@ -131,14 +121,6 @@ export default function PantallaAsignaciones() {
       error={asignaciones.error ?? vehiculos.error ?? personas.error}
       cargando={asignaciones.cargando || vehiculos.cargando || personas.cargando}
     >
-      {porConfirmar.length > 0 ? (
-        <Aviso tono="info">
-          {porConfirmar.length === 1
-            ? 'Hay 1 asignación que un operador se hizo en obra y está sin confirmar.'
-            : `Hay ${porConfirmar.length} asignaciones que operadores se hicieron en obra y están sin confirmar.`}
-        </Aviso>
-      ) : null}
-
       <Seccion titulo="Asignar un vehículo">
         <Formulario>
           <Selector
@@ -177,7 +159,7 @@ export default function PantallaAsignaciones() {
         <Tabla
           columnas={columnas}
           filas={asignaciones.datos}
-          vacio="Todavía no hay asignaciones. Un operador sin asignación puede escoger su máquina desde el celular, y aparecerá aquí para confirmar."
+          vacio="Todavía no hay asignaciones. Hasta que se registre una, el operador no puede levantar el preoperacional de ninguna máquina."
         />
       </Seccion>
     </MarcoPantalla>

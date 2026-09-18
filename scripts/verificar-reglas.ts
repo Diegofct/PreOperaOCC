@@ -34,6 +34,7 @@ import {
 } from '../src/features/auth/escalera';
 import type { PlantillaChecklist, RespuestaItem } from '../src/features/checklists/types';
 import {
+  borradorCaduco,
   evaluarPreoperacional,
   itemsAplicables,
   itemsMarcablesEnBloque,
@@ -121,6 +122,7 @@ import {
   debeRendirse,
   esperaDeReintento,
   ESPERA_MAXIMA_MS,
+  fallaDefinitiva,
   INTENTOS_MAXIMOS,
   siguienteIntento,
 } from '../src/shared/rules/reintentos';
@@ -195,6 +197,7 @@ import {
 } from '../src/features/bitacoras/tipos';
 import {
   actividadDelParte,
+  asignacionEditada,
   ensayoDelParte,
   materialDeCanteraEditado,
   materialDeCanteraNuevo,
@@ -207,13 +210,45 @@ import {
   viajeNuevo,
 } from '../src/features/panel/contratos';
 
-import camioneta from '../src/features/checklists/plantillas/camioneta.v2.json';
-import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
-import volqueta from '../src/features/checklists/plantillas/volqueta.v2.json';
+import camioneta from '../src/features/checklists/plantillas/camioneta.v3.json';
+import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v2.json';
+import volqueta from '../src/features/checklists/plantillas/volqueta.v3.json';
+import camionetaAnterior from '../src/features/checklists/plantillas/camioneta.v2.json';
+import motoniveladoraAnterior from '../src/features/checklists/plantillas/motoniveladora.v1.json';
+import retrocargadorAnterior from '../src/features/checklists/plantillas/retrocargador.v1.json';
+import retroexcavadoraAnterior from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
+import volquetaAnterior from '../src/features/checklists/plantillas/volqueta.v2.json';
+import { ITEMS_NUEVOS, ITEMS_RETIRADOS } from '../src/features/checklists/plantillas/ajustes';
 
 const VOLQUETA = volqueta as PlantillaChecklist;
 const CAMIONETA = camioneta as PlantillaChecklist;
 const RETROEXCAVADORA = retroexcavadora as PlantillaChecklist;
+
+/**
+ * Los formatos **anteriores** a la spec 011, tal como se firmaron hasta hoy. La
+ * poda se comprueba contra ellos: una clave que no existiera aquí sería una clave
+ * mal escrita, y el ítem seguiría saliéndole al operador sin que nada fallara.
+ */
+const FORMATOS_ANTERIORES: Record<string, PlantillaChecklist> = {
+  volqueta: volquetaAnterior as PlantillaChecklist,
+  camioneta: camionetaAnterior as PlantillaChecklist,
+  motoniveladora: motoniveladoraAnterior as PlantillaChecklist,
+  retrocargador: retrocargadorAnterior as PlantillaChecklist,
+  retroexcavadora: retroexcavadoraAnterior as PlantillaChecklist,
+};
+
+/** Los formatos **vigentes**, los que hoy le salen al operador. */
+const FORMATOS_VIGENTES: Record<string, PlantillaChecklist> = {
+  volqueta: VOLQUETA,
+  camioneta: CAMIONETA,
+  motoniveladora: PLANTILLAS_POR_TIPO.get('motoniveladora')!,
+  retrocargador: PLANTILLAS_POR_TIPO.get('retrocargador')!,
+  retroexcavadora: RETROEXCAVADORA,
+};
+
+function clavesDe(plantilla: PlantillaChecklist): Set<string> {
+  return new Set(plantilla.secciones.flatMap((s) => s.items).map((i) => i.key));
+}
 
 const MS_DIA = 86_400_000;
 let pruebas = 0;
@@ -257,10 +292,178 @@ function responderTodo(
 
 console.log('\nReglas del preoperacional\n');
 
-prueba('la volqueta importada tiene los 86 ítems del formato', () => {
-  const items = VOLQUETA.secciones.flatMap((s) => s.items);
-  assert.equal(items.length, 86);
-  assert.equal(items.filter((i) => i.inmoviliza).length, 16);
+prueba('los cinco formatos quedan con los ítems que acordó la spec 011', () => {
+  // Spec 011 / RF-1 a RF-5. Eran 86, 58, 53, 48 y 52 antes de la poda.
+  const esperados: Record<string, number> = {
+    volqueta: 55,
+    camioneta: 39,
+    motoniveladora: 42,
+    retrocargador: 40,
+    retroexcavadora: 43,
+  };
+
+  for (const [tipo, cuantos] of Object.entries(esperados)) {
+    const items = FORMATOS_VIGENTES[tipo].secciones.flatMap((s) => s.items);
+    assert.equal(items.length, cuantos, tipo);
+  }
+  assert.equal(VOLQUETA.secciones.flatMap((s) => s.items).filter((i) => i.inmoviliza).length, 15);
+});
+
+prueba('cada formato tiene los ítems que inmovilizan que acordó la spec 011', () => {
+  // Spec 011 / RF-12 a RF-16, anexo C. Las tres amarillas venían con **cero**:
+  // una motoniveladora con la cabina rota salía APTA.
+  const esperados: Record<string, number> = {
+    volqueta: 15,
+    camioneta: 12,
+    motoniveladora: 12,
+    retrocargador: 8,
+    retroexcavadora: 7,
+  };
+  for (const [tipo, cuantos] of Object.entries(esperados)) {
+    const items = FORMATOS_VIGENTES[tipo].secciones.flatMap((s) => s.items);
+    assert.equal(items.filter((i) => i.inmoviliza).length, cuantos, tipo);
+  }
+
+  // Y las claves concretas, no solo la cuenta: un número cuadra por casualidad.
+  const inmoviliza = (tipo: string, clave: string) =>
+    FORMATOS_VIGENTES[tipo].secciones
+      .flatMap((s) => s.items)
+      .find((i) => i.key === clave)?.inmoviliza === true;
+
+  for (const tipo of ['motoniveladora', 'retrocargador', 'retroexcavadora']) {
+    assert.ok(inmoviliza(tipo, 'cabina__cinturon_de_seguridad'), `${tipo}: cinturón`);
+    assert.ok(inmoviliza(tipo, 'cabina__estructura_cabina'), `${tipo}: estructura de cabina`);
+    assert.ok(inmoviliza(tipo, 'luces_y_senales__farolas_delanteras'), `${tipo}: farolas`);
+    assert.ok(inmoviliza(tipo, 'adicionales__kit_de_seguridad'), `${tipo}: kit`);
+  }
+  // La palanca que impide que el brazo se mueva solo, donde existe.
+  assert.ok(inmoviliza('retrocargador', 'cabina__palanca_de_bloqueo_de_seguridad'));
+  assert.ok(inmoviliza('retroexcavadora', 'cabina__palanca_de_bloqueo_de_seguridad'));
+  // Los tres frenos de la motoniveladora, que son todo lo que tiene.
+  assert.ok(inmoviliza('motoniveladora', 'cabina__freno_de_servicio'));
+  assert.ok(inmoviliza('motoniveladora', 'cabina__freno_de_estacionamiento'));
+  assert.ok(inmoviliza('motoniveladora', 'cabina__parada_de_emergencia'));
+  // Tren de rodaje: llantas en las de ruedas, orugas en la de cadenas.
+  assert.ok(inmoviliza('motoniveladora', 'ruedas__llantas_eje_3'));
+  assert.ok(inmoviliza('retrocargador', 'ruedas__llantas_eje_2'));
+  assert.ok(inmoviliza('retroexcavadora', 'tren_de_rodaje__orugas_eslabones_zapatas_y_pernos'));
+  // Los resumidos del anexo B y la marca que hereda la camioneta.
+  assert.ok(inmoviliza('volqueta', 'frenos__los_frenos_responden_bien'));
+  assert.ok(inmoviliza('volqueta', 'dirreccion__direccion_sin_juego_ni_ruidos'));
+  assert.ok(inmoviliza('volqueta', 'adicionales__documentos_al_dia'));
+  assert.ok(inmoviliza('camioneta', 'chasis__direccion_sin_juego_ni_ruidos'));
+  assert.ok(inmoviliza('camioneta', 'capot_o_careta__ventilador_correas_y_bomba_de_agua'));
+});
+
+prueba('un borrador de otra versión del formato no se puede seguir llenando', () => {
+  // Spec 011 / RF-27 y RF-28. Lo que se evita es un acta que mezcle dos formatos:
+  // respuestas de ítems que ya no existen y ninguna de los que entraron.
+  assert.equal(borradorCaduco(2, 3), true);
+  assert.equal(borradorCaduco(3, 3), false);
+  // Una versión más alta que la vigente no debería existir, pero si el equipo
+  // quedó con una plantilla que el catálogo ya no trae, tampoco se sigue: el
+  // formulario que se pintaría no sería el del borrador.
+  assert.equal(borradorCaduco(4, 3), true);
+});
+
+prueba('una máquina amarilla con el cinturón malo queda NO APTO', () => {
+  // Spec 011 / RF-17. Antes de esta spec este mismo caso daba «apto con
+  // observaciones»: ninguna de las tres amarillas tenía un solo ítem que
+  // inmovilizara, así que el preoperacional no podía parar nada.
+  const MOTONIVELADORA = FORMATOS_VIGENTES.motoniveladora;
+  const p = periodicidadesAplicables(Date.now(), MOTONIVELADORA);
+  const evaluacion = evaluarPreoperacional(
+    MOTONIVELADORA,
+    p,
+    responderTodo(MOTONIVELADORA, p, { 'cabina__cinturon_de_seguridad': 'no_conforme' }),
+  );
+
+  assert.equal(evaluacion.resultado, 'no_apto');
+  assert.equal(evaluacion.inmovilizantes.length, 1);
+  assert.equal(evaluacion.inmovilizantes[0].itemKey, 'cabina__cinturon_de_seguridad');
+});
+
+prueba('ningún ítem retirado por la spec 011 sigue en su formato', () => {
+  // Spec 011 / RF-6. El de T1 comprueba que existían; este, que ya no están.
+  for (const [tipo, retiradas] of Object.entries(ITEMS_RETIRADOS)) {
+    const vigentes = clavesDe(FORMATOS_VIGENTES[tipo]);
+    for (const clave of retiradas) {
+      assert.ok(!vigentes.has(clave), `${tipo}: sigue ${clave}`);
+    }
+  }
+  // La sección entera que desaparece: RODAJE repetía lo que ya pregunta RUEDAS.
+  assert.ok(!CAMIONETA.secciones.some((s) => s.key === 'rodaje'));
+  // FRENOS y DIRRECCIÓN se quedan sin ninguno de sus ítems de taller, pero la
+  // sección sobrevive con el ítem resumido que el operador sí puede responder.
+  const frenos = VOLQUETA.secciones.find((s) => s.key === 'frenos');
+  const direccion = VOLQUETA.secciones.find((s) => s.key === 'dirreccion');
+  assert.equal(frenos?.items.length, 1);
+  assert.equal(direccion?.items.length, 1);
+});
+
+prueba('los ítems resumidos de la spec 011 están donde deben', () => {
+  // Spec 011 / RF-9 a RF-11: donde se fue un sistema entero entra un ítem que el
+  // operador sí puede responder antes de arrancar.
+  for (const [tipo, nuevos] of Object.entries(ITEMS_NUEVOS)) {
+    const vigente = FORMATOS_VIGENTES[tipo];
+    for (const esperado of nuevos) {
+      const seccion = vigente.secciones.find((s) => s.key === esperado.seccion);
+      assert.ok(seccion, `${tipo}: falta la sección ${esperado.seccion}`);
+      const item = seccion.items.find((i) => i.key === esperado.clave);
+      assert.ok(item, `${tipo}: falta ${esperado.clave}`);
+      assert.equal(item.label, esperado.label);
+      assert.equal(item.tipo, 'conformidad');
+      assert.equal(item.periodicidad, 'diaria');
+      // Se responde marcando, y una falla se documenta con foto como las demás.
+      assert.equal(item.exigirFoto, 'no_conforme');
+      assert.ok((item.ayuda ?? '').length > 0, `${tipo}: ${esperado.clave} sin instructivo`);
+    }
+  }
+
+  // Los tres de la volqueta y el de la camioneta, cada uno en su sección.
+  assert.equal(VOLQUETA.secciones.find((s) => s.key === 'frenos')?.items[0].label,
+    'Los frenos responden bien');
+  assert.equal(CAMIONETA.secciones.find((s) => s.key === 'chasis')?.items.at(-1)?.key,
+    'chasis__direccion_sin_juego_ni_ruidos');
+});
+
+prueba('los formatos de la spec 011 suben de versión', () => {
+  // Spec 011 / RF-24: quitar un ítem cambia la huella, así que cambia la versión.
+  // Las anteriores se quedan en la carpeta y en la base: hay actas firmadas.
+  const esperada: Record<string, number> = {
+    volqueta: 3,
+    camioneta: 3,
+    motoniveladora: 2,
+    retrocargador: 2,
+    retroexcavadora: 2,
+  };
+  for (const [tipo, version] of Object.entries(esperada)) {
+    assert.equal(FORMATOS_VIGENTES[tipo].version, version, tipo);
+    assert.equal(FORMATOS_ANTERIORES[tipo].version, version - 1, `${tipo} anterior`);
+  }
+});
+
+prueba('la poda no cambia la periodicidad de lo que se queda', () => {
+  // Spec 011 / RF-7 y RF-8. La camioneta pierde su ciclo mensual entero porque
+  // sus seis ítems mensuales eran todos de taller; el resto no se mueve.
+  for (const [tipo, vigente] of Object.entries(FORMATOS_VIGENTES)) {
+    const antes = new Map(
+      FORMATOS_ANTERIORES[tipo].secciones
+        .flatMap((s) => s.items)
+        .map((i) => [i.key, i.periodicidad]),
+    );
+    const nuevos = new Set((ITEMS_NUEVOS[tipo] ?? []).map((n) => n.clave));
+    for (const item of vigente.secciones.flatMap((s) => s.items)) {
+      // Los del anexo B no estaban antes; su periodicidad la comprueba su caso.
+      if (nuevos.has(item.key)) continue;
+      assert.equal(item.periodicidad, antes.get(item.key), `${tipo}: ${item.key}`);
+    }
+    // Lo que se anuncia es lo que de verdad hay.
+    const presentes = new Set(vigente.secciones.flatMap((s) => s.items).map((i) => i.periodicidad));
+    assert.deepEqual(vigente.periodicidades, [...presentes]);
+  }
+  assert.ok(!CAMIONETA.periodicidades.includes('mensual'));
+  assert.ok(VOLQUETA.periodicidades.includes('diaria'));
 });
 
 prueba('sin hallazgos, el vehículo queda apto', () => {
@@ -370,7 +573,7 @@ prueba('camioneta y volqueta ya no piden horómetro', () => {
   // Spec 003 / RF-4. Si alguien vuelve a importar los formatos sin aplicar los
   // ajustes, esto es lo que lo va a decir.
   for (const plantilla of [CAMIONETA, VOLQUETA]) {
-    assert.equal(plantilla.version, 2, plantilla.tipoVehiculo);
+    assert.equal(plantilla.version, 3, plantilla.tipoVehiculo);
     assert.equal(plantilla.medidores.horometro, 'oculto', plantilla.tipoVehiculo);
     assert.equal(plantilla.medidores.odometro, 'requerido', plantilla.tipoVehiculo);
     const enHoras = plantilla.secciones
@@ -378,6 +581,52 @@ prueba('camioneta y volqueta ya no piden horómetro', () => {
       .filter((i) => i.tipo === 'numero' && i.unidad === 'h');
     assert.equal(enHoras.length, 0, plantilla.tipoVehiculo);
   }
+});
+
+prueba('las claves que la spec 011 retira existen en el formato anterior', () => {
+  // Spec 011 / RF-6. Se comprueba contra el formato ANTERIOR a propósito: si una
+  // clave estuviera mal escrita, la poda no retiraría nada y el ítem le seguiría
+  // saliendo al operador sin que ningún caso se pusiera rojo.
+  const cuantas: Record<string, number> = {
+    volqueta: 34,
+    camioneta: 20,
+    motoniveladora: 11,
+    retrocargador: 8,
+    retroexcavadora: 9,
+  };
+
+  for (const [tipo, esperadas] of Object.entries(cuantas)) {
+    const retiradas = ITEMS_RETIRADOS[tipo];
+    assert.ok(retiradas, `${tipo}: sin tabla de retirados`);
+    assert.equal(retiradas.length, esperadas, tipo);
+    // Una clave repetida contaría dos veces y taparía una que falta.
+    assert.equal(new Set(retiradas).size, esperadas, `${tipo}: clave repetida`);
+
+    const existentes = clavesDe(FORMATOS_ANTERIORES[tipo]);
+    for (const clave of retiradas) {
+      assert.ok(existentes.has(clave), `${tipo}: no existe ${clave}`);
+    }
+  }
+});
+
+prueba('los ítems nuevos de la spec 011 no chocan con ninguno existente', () => {
+  // Spec 011 / RF-25: una clave no se reutiliza jamás. Hay actas firmadas
+  // apuntando a las viejas.
+  for (const [tipo, nuevos] of Object.entries(ITEMS_NUEVOS)) {
+    const anterior = clavesDe(FORMATOS_ANTERIORES[tipo]);
+    const secciones = new Set(FORMATOS_ANTERIORES[tipo].secciones.map((s) => s.key));
+    for (const item of nuevos) {
+      assert.ok(!anterior.has(item.clave), `${tipo}: ${item.clave} ya existe`);
+      // Va a una sección que existe: si no, el ítem nuevo se perdería en silencio.
+      assert.ok(secciones.has(item.seccion), `${tipo}: sección ${item.seccion} no existe`);
+      assert.ok(item.label.trim().length > 0, `${tipo}: ${item.clave} sin texto`);
+      // Ninguna de las nuevas puede ser una que estemos retirando.
+      assert.ok(!ITEMS_RETIRADOS[tipo].includes(item.clave), `${tipo}: ${item.clave} retirada`);
+    }
+  }
+
+  assert.equal(ITEMS_NUEVOS.volqueta.length, 3);
+  assert.equal(ITEMS_NUEVOS.camioneta.length, 1);
 });
 
 prueba('un formato sin odómetro no pide uno', () => {
@@ -457,7 +706,9 @@ prueba('"marcar todo bien" nunca alcanza a los ítems que inmovilizan', () => {
   }
 });
 
-prueba('la camioneta suma los ítems quincenales y mensuales cuando toca', () => {
+prueba('la camioneta suma los ítems quincenales cuando toca', () => {
+  // Desde la poda de la spec 011 (RF-8) la camioneta ya no tiene ciclo mensual:
+  // sus seis ítems mensuales eran todos de taller y se retiraron.
   const hoy = Date.now();
 
   const soloDiaria = periodicidadesAplicables(hoy, CAMIONETA, {
@@ -465,19 +716,20 @@ prueba('la camioneta suma los ítems quincenales y mensuales cuando toca', () =>
     mensual: hoy - 2 * MS_DIA,
   });
   assert.deepEqual(soloDiaria, ['diaria']);
-  assert.equal(itemsAplicables(CAMIONETA, soloDiaria).length, 35);
+  assert.equal(itemsAplicables(CAMIONETA, soloDiaria).length, 31);
 
   const conQuincenal = periodicidadesAplicables(hoy, CAMIONETA, {
     quincenal: hoy - 16 * MS_DIA,
     mensual: hoy - 2 * MS_DIA,
   });
   assert.deepEqual(conQuincenal, ['diaria', 'quincenal']);
-  assert.equal(itemsAplicables(CAMIONETA, conQuincenal).length, 35 + 16);
+  assert.equal(itemsAplicables(CAMIONETA, conQuincenal).length, 31 + 8);
 
-  // Un equipo que nunca ha tenido revisión periódica las debe todas.
+  // Un equipo que nunca ha tenido revisión periódica las debe todas, y «todas»
+  // ya no incluye la mensual: por mucho tiempo que pase no aparece.
   const primeraVez = periodicidadesAplicables(hoy, CAMIONETA);
-  assert.deepEqual(primeraVez, ['diaria', 'quincenal', 'mensual']);
-  assert.equal(itemsAplicables(CAMIONETA, primeraVez).length, 58);
+  assert.deepEqual(primeraVez, ['diaria', 'quincenal']);
+  assert.equal(itemsAplicables(CAMIONETA, primeraVez).length, 39);
 });
 
 prueba('un formato sin revisión periódica no inventa una', () => {
@@ -489,7 +741,7 @@ prueba('un formato sin revisión periódica no inventa una', () => {
     mensual: hace90Dias,
   });
   assert.deepEqual(p, ['diaria']);
-  assert.equal(itemsAplicables(RETROEXCAVADORA, p).length, 52);
+  assert.equal(itemsAplicables(RETROEXCAVADORA, p).length, 43);
 });
 
 prueba('un medidor no puede retroceder', () => {
@@ -1467,6 +1719,36 @@ prueba('los reintentos se acaban y la fila deja de volver sola a la cola', () =>
   assert.equal(debeRendirse(INTENTOS_MAXIMOS), true);
 });
 
+prueba('el rechazo de una asignación del celular no atasca la cola', () => {
+  // Spec 012 / RF-4 y RF-5. El servidor responde 422 a las autoasignaciones de un
+  // teléfono sin actualizar, y **eso tiene que ser definitivo**: si se tratara
+  // como un fallo pasajero, esa fila se reintentaría ocho veces cortando la tanda
+  // cada vez, y los preoperacionales firmados que van detrás no subirían.
+  assert.equal(fallaDefinitiva(422), true);
+  assert.equal(fallaDefinitiva(400), true);
+  // Lo que sí puede arreglarse esperando no se da por perdido.
+  assert.equal(fallaDefinitiva(409), false);
+  assert.equal(fallaDefinitiva(500), false);
+  assert.equal(fallaDefinitiva(404), false);
+
+  // Y una vez marcada definitiva, no vuelve sola a la cola.
+  const resultado = siguienteIntento(0, 1_000_000, { definitivo: fallaDefinitiva(422) });
+  assert.equal(resultado.estado, 'fallida');
+  assert.equal(resultado.proximoIntentoEn, 0);
+});
+
+prueba('confirmar una asignación ya no es una acción que el panel pueda pedir', () => {
+  // Spec 012 / RF-15 y RF-18. Confirmar existía para aceptar lo que un operador se
+  // había tomado en obra; sin autoasignación no hay nada que aceptar. Cerrar se
+  // queda, que es la otra mitad del trabajo de la administración.
+  //
+  // El caso vive aquí y no en la pantalla porque la pantalla se puede quedar
+  // vieja en una pestaña abierta: lo que de verdad cierra la puerta es que el
+  // contrato del servidor no admita la palabra.
+  assert.equal(asignacionEditada.safeParse({ accion: 'cerrar' }).success, true);
+  assert.equal(asignacionEditada.safeParse({ accion: 'confirmar' }).success, false);
+});
+
 prueba('un error que reintentar no arregla se rinde de una vez', () => {
   // El vehículo ya no existe en el servidor, o el envío no valida. Gastar ocho
   // reintentos en eso solo retrasa que el operador se entere.
@@ -2145,22 +2427,36 @@ prueba('las actividades del parte son las del presupuesto de OCC, cada una con s
   assert.equal(actividadPorItem('excavacion'), undefined);
   assert.equal(etiquetaDeUnidad('inventada'), 'inventada');
 
-  // La descripción completa, con su número delante (RF-65).
+  // La descripción sola, sin el número delante (RF-75, cambio 2026-09-17).
+  assert.equal(
+    etiquetaDeActividad(actividadPorItem('4.1.8')!),
+    actividadPorItem('4.1.8')!.descripcion,
+  );
   assert.ok(
     etiquetaDeActividad(actividadPorItem('4.1.8')!).startsWith(
-      '4.1.8 · Excavación para estructuras varias en material común en seco. Incluye entibado.',
+      'Excavación para estructuras varias en material común en seco. Incluye entibado.',
     ),
   );
   assert.ok(actividadPorItem('8.27')!.descripcion.endsWith('900 mm (36")'));
 
-  // Se encuentra por número o por palabras, sin tildes (RF-65).
+  // Las 31 descripciones son distintas: sin el número, es lo único que separa dos
+  // excavaciones que solo difieren al final de la frase (RF-75).
+  assert.equal(new Set(ACTIVIDADES_DEL_PRESUPUESTO.map((a) => a.descripcion)).size, 31);
+
+  // Se encuentra por palabras y ya no por número, sin tildes (RF-76).
   const opciones = ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
     valor: a.item,
     etiqueta: etiquetaDeActividad(a),
   }));
-  assert.deepEqual(filtrarOpciones(opciones, '4.1.8').map((o) => o.valor), ['4.1.8']);
+  assert.deepEqual(filtrarOpciones(opciones, '4.1.8'), []);
+  assert.deepEqual(filtrarOpciones(opciones, '10.1'), []);
   assert.ok(filtrarOpciones(opciones, 'excavacion').some((o) => o.valor === '4.1.8'));
   assert.deepEqual(filtrarOpciones(opciones, 'acero').map((o) => o.valor), ['10.1']);
+
+  // El ítem sigue siendo la clave de la opción, que es lo que viaja al servidor:
+  // lo que se va es el número de la pantalla, no del registro (decisión del
+  // 2026-09-17).
+  assert.ok(opciones.every((o) => actividadPorItem(o.valor) !== undefined));
 });
 
 prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC', () => {

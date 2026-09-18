@@ -33,6 +33,7 @@ import { eq, inArray } from 'drizzle-orm';
 import { db } from '@/db/local/client';
 import { bitacoras, media, preoperacionales, type EstadoSync } from '@/db/local/schema';
 import { subirImagen } from '@/features/media/subir';
+import { fallaDefinitiva } from '@/shared/rules/reintentos';
 
 import { ErrorDelServidor, pedirConToken, SinConexion } from './cliente-http';
 import { marcarEnviada, marcarFallida, proximoLote } from './outbox';
@@ -41,17 +42,6 @@ export interface ResultadoPush {
   estado: 'vacia' | 'subio' | 'sin_conexion' | 'reactivar';
   enviadas: number;
   fallidas: number;
-}
-
-/**
- * Los códigos que no tiene sentido reintentar.
- *
- * `422` es el que usan los endpoints de ingesta para "esto está mal y va a estar
- * mal siempre". El `400` cubre un envío que no valida. Todo lo demás —un 500, un
- * corte— sí se reintenta: son problemas del momento.
- */
-function esDefinitivo(estado: number): boolean {
-  return estado === 400 || estado === 422;
 }
 
 /**
@@ -122,7 +112,7 @@ export async function subirPendientes(limite = 50): Promise<ResultadoPush> {
         return { estado: 'reactivar', enviadas, fallidas };
       }
 
-      const definitivo = fallo instanceof ErrorDelServidor && esDefinitivo(fallo.estado);
+      const definitivo = fallo instanceof ErrorDelServidor && fallaDefinitiva(fallo.estado);
       const mensaje = fallo instanceof Error ? fallo.message : 'Error desconocido';
 
       await marcarFallida(fila.seq, mensaje, { definitivo });

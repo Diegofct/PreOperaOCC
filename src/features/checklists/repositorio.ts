@@ -19,7 +19,7 @@ import {
 import { drenarEnSegundoPlano } from '@/features/sync/motor';
 import { encolar } from '@/features/sync/outbox';
 import { desfaseDeReloj } from '@/features/sync/reloj';
-import { periodicidadesAplicables } from '@/shared/rules/inspeccion';
+import { borradorCaduco, periodicidadesAplicables } from '@/shared/rules/inspeccion';
 
 import type {
   Periodicidad,
@@ -108,86 +108,6 @@ export async function vehiculoPorId(vehiculoId: string): Promise<VehiculoAsignad
   return filas[0] ?? null;
 }
 
-/** La flota de una obra, para cuando el operador tiene que escoger máquina. */
-export async function flotaDeObra(obraId: string | null): Promise<VehiculoAsignado[]> {
-  const consulta = db
-    .select(COLUMNAS_VEHICULO)
-    .from(vehiculos)
-    .innerJoin(tiposVehiculo, eq(vehiculos.tipoVehiculoId, tiposVehiculo.id))
-    .leftJoin(obras, eq(vehiculos.obraId, obras.id))
-    .where(
-      and(
-        isNull(vehiculos.eliminadoEn),
-        obraId ? eq(vehiculos.obraId, obraId) : undefined,
-      ),
-    )
-    .orderBy(vehiculos.codigoInterno);
-
-  return consulta;
-}
-
-/**
- * El operador escoge una máquina que nadie le asignó.
- *
- * Cierra las autoasignaciones anteriores del propio operador — si no, escoger
- * una máquina distinta cada día las va acumulando y el selector termina con
- * diez — pero **no toca las que puso el supervisor**: esto suma una, nunca
- * revoca las suyas. Queda marcada `autoasignada` para que el dashboard la
- * muestre en amarillo y alguien la confirme.
- */
-export async function autoasignar(usuarioId: string, vehiculoId: string): Promise<void> {
-  const ahora = Date.now();
-
-  const yaVigente = await db
-    .select({ id: asignaciones.id })
-    .from(asignaciones)
-    .where(
-      and(
-        eq(asignaciones.usuarioId, usuarioId),
-        eq(asignaciones.vehiculoId, vehiculoId),
-        isNull(asignaciones.hasta),
-      ),
-    )
-    .limit(1);
-
-  if (yaVigente.length > 0) return;
-
-  await db
-    .update(asignaciones)
-    .set({ hasta: ahora })
-    .where(
-      and(
-        eq(asignaciones.usuarioId, usuarioId),
-        eq(asignaciones.origen, 'autoasignada'),
-        isNull(asignaciones.hasta),
-      ),
-    );
-
-  const [vehiculo] = await db
-    .select({ obraId: vehiculos.obraId })
-    .from(vehiculos)
-    .where(eq(vehiculos.id, vehiculoId))
-    .limit(1);
-
-  const id = uuidv7();
-
-  await db.insert(asignaciones).values({
-    id,
-    vehiculoId,
-    usuarioId,
-    obraId: vehiculo?.obraId ?? null,
-    desde: ahora,
-    hasta: null,
-    origen: 'autoasignada',
-  });
-
-  // A la cola en la misma operación en que se crea. Es lo único que el operador
-  // decide y la administración necesita saber: la máquina se está usando sin que
-  // nadie la hubiera asignado, y el panel la muestra en amarillo hasta que
-  // alguien lo confirme.
-  await encolar('asignacion', id, { id, vehiculoId, desde: ahora });
-}
-
 export async function plantillaDeTipo(
   tipoVehiculoId: string,
 ): Promise<{ plantilla: PlantillaChecklist; hash: string } | null> {
@@ -233,6 +153,12 @@ export interface Borrador {
   odometroKm: number | null;
   horometroH: number | null;
   observaciones: string;
+  /**
+   * Se descartó un borrador anterior porque su formato ya no es el vigente, y
+   * este es uno nuevo (spec 011, RF-27). La pantalla lo dice: si no, el operador
+   * ve su formulario en blanco y cree que la app le perdió el trabajo.
+   */
+  formatoCambio?: boolean;
 }
 
 /**
@@ -262,7 +188,21 @@ export async function abrirBorrador(
     .limit(1);
 
   const existente = existentes[0];
-  if (existente) {
+  // Un borrador empezado con otro formato no se retoma: se descarta y se abre
+  // uno nuevo, porque seguir llenándolo daría un acta que mezcla dos formatos
+  // (spec 011, RF-27 y RF-28). Baja lógica: aquí no se borra nada.
+  const caduco =
+    existente !== undefined &&
+    borradorCaduco(existente.plantillaVersion, encontrada.plantilla.version);
+
+  if (caduco) {
+    await db
+      .update(preoperacionales)
+      .set({ estadoSync: 'descartado' satisfies EstadoSync, actualizadoEn: Date.now() })
+      .where(eq(preoperacionales.id, existente.id));
+  }
+
+  if (existente && !caduco) {
     return {
       id: existente.id,
       vehiculo,
@@ -295,6 +235,7 @@ export async function abrirBorrador(
   });
 
   return {
+    formatoCambio: caduco,
     id,
     vehiculo,
     plantilla: encontrada.plantilla,

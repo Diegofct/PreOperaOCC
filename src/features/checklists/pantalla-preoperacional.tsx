@@ -459,6 +459,18 @@ export default function PantallaPreoperacional() {
             <Text style={estilos.vehiculo}>{borrador.vehiculo.codigoInterno}</Text>
             <Text style={estilos.formato}>{borrador.plantilla.tituloFormato}</Text>
 
+            {/* El formato cambió y el borrador anterior se descartó (spec 011,
+                RF-27). Va antes que nada: si no, el operador ve el formulario en
+                blanco y cree que la app le perdió lo que llevaba escrito. */}
+            {borrador.formatoCambio ? (
+              <View style={estilos.avisoFormato}>
+                <Text style={estilos.avisoFormatoTexto}>
+                  El formato de este equipo cambió. Este preoperacional hay que empezarlo de
+                  nuevo.
+                </Text>
+              </View>
+            ) : null}
+
             {extras.length > 0 ? (
               <View style={estilos.avisoExtra}>
                 <Text style={estilos.avisoExtraTexto}>
@@ -673,6 +685,17 @@ const estilos = StyleSheet.create({
     padding: Spacing.three,
     borderRadius: Radio.md,
     backgroundColor: Estado.infoFondo,
+  },
+  avisoFormato: {
+    padding: Spacing.three,
+    borderRadius: Radio.md,
+    backgroundColor: Estado.atencionFondo,
+  },
+  avisoFormatoTexto: {
+    fontSize: Texto.pie,
+    fontWeight: '600',
+    color: Estado.atencion,
+    lineHeight: 21,
   },
   avisoExtraTexto: { fontSize: Texto.pie, fontWeight: '600', color: Estado.info, lineHeight: 21 },
   medidor: {
