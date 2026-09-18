@@ -1212,9 +1212,11 @@ function SeccionActividades({
     }
   }
 
-  // Los ítems del presupuesto con su número delante, y la salida para lo que no
-  // está (RF-64, RF-65, RF-24). El buscador del selector encuentra por número o
-  // por palabras, porque busca en la etiqueta.
+  // Los ítems del presupuesto con su descripción sola —el número no se muestra
+  // desde el 2026-09-17 (RF-75)— y la salida para lo que no está (RF-64, RF-24).
+  // El buscador del selector encuentra por palabras y ya no por número, porque
+  // busca en la etiqueta (RF-76). El `valor` sigue siendo el ítem: es la clave que
+  // viaja al servidor, no algo que alguien lea.
   const opciones = [
     ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
       valor: a.item,

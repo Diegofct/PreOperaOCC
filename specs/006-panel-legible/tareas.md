@@ -554,3 +554,55 @@ listado al final, no lo pasan y no cambian. Solo lo usa quien tiene algo debajo.
 La lección, que es la que conviene que quede escrita: **en este panel, un `zIndex` solo vale
 entre hermanos**. Cada vez que una lista desplegable se meta detrás de algo, la pregunta no es
 «¿tiene bastante zIndex?», sino «¿cuál es el primer ancestro común, y quién gana ahí?».
+
+## T18 — recorrido en el navegador del 2026-09-17
+
+Hecho con la sesión de gerencia (nueve módulos), sobre el parte del 17 y el del 16, y sobre
+Preoperacionales. **No se guardó nada.** Las medidas de centrado, de índice pegado y de salto
+se tomaron con JavaScript sobre la página, no a ojo.
+
+| RF | Qué se miró | Resultado |
+| --- | --- | --- |
+| 1 | Centro de los nueve enlaces contra el centro de la barra: **desviación 0 px** en 1536 de ancho | verde |
+| 2 | Ocultando cinco enlaces para simular los cuatro del residente: **desviación 0 px** otra vez | verde |
+| 3 | Barra en dos renglones por debajo de 1100 | **pendiente**: la ventana de Chrome está maximizada y no acepta que se la redimensione desde aquí |
+| 4 | Tabulador sobre la barra: el foco llega a cada enlace en orden y **se ve el recuadro** (comprobado en «Obras») | verde |
+| 7 | El índice lista las nueve secciones en el orden del documento | verde |
+| 8 | «Control Cantera 1» y «Actividades 3» frente a «sin registrar» en las vacías | verde |
+| 9 | Texto escrito en Notas **sin guardar**: el índice sigue diciendo «Notas · sin registrar» | verde |
+| 10 | Pulsando «Notas» en el índice, la vista salta de 0 a 1089 px y «Notas y observaciones» queda arriba del marco | verde |
+| 11 | `position: sticky`; desplazando a 600, 1200 y hasta el final, el índice **se queda en top 133 y sigue a la vista** | verde |
+| 12 | «Abierto» junto a la obra y «Cerrar la jornada · sin registrar» en el índice | verde |
+| 13 | Recuadro «Falta cerrar» nombrando lo que falta **antes** de intentar cerrar: «Falta llenar: Maquinaria, Personal, Actividades, Clima, Control Calidad de Obra, Notas y Fotografía del día.» | verde |
+| 14 | Cada entrada lleva «○ / ●» y la palabra «sin registrar»: el color no es la única señal | verde |
+| 16 | El índice como tira por debajo de 1000 | **pendiente**: misma razón que RF-3 |
+| 17 | Tabulador sobre el índice: el foco llega a «Maquinaria» con su recuadro | verde |
+| 18 | Periodo «Último mes»: 19 de agosto — 17 de septiembre, con su registro | verde |
+| 19 | Al abrir sin elegir nada: «Última semana», 11 — 17 de septiembre | verde |
+| 21, 22 | El acta de VOL-01 del **2026-09-03** aparece con columna «LLEGÓ» = **«2026-09-07 · tarde»**, resaltada | verde |
+| 23 | «Hoy hay 3 máquinas sin preoperacional (CAM-405, EXC-01, VOL-01)», con el periodo en «Último mes» | verde |
+| 25 | Búsqueda sin resultados: «0 de 1», botón «Limpiar» y el texto «Hay 1 preoperacional(es) en este periodo, pero ninguno pasa la búsqueda …. Quítelo para verlos todos.» | verde |
+| 30 | Recargando `?periodo=mes&buscar=…`: vuelven el periodo y la búsqueda | verde |
+
+**Es el caso que motivó la spec, y se ve funcionando:** el preoperacional firmado el 3 de
+septiembre que llegó el 7 ya no está escondido (RF-18, RF-20 a RF-22).
+
+`npm run verificar` 193 · `typecheck` y `lint` sin hallazgos.
+
+**Falta para cerrar T18 (2 de 30 RF):** RF-3 y RF-16, los dos de ventana estrecha. La
+extensión no puede redimensionar una ventana maximizada de Chrome; con la ventana restaurada
+se comprueban en un minuto. La spec sigue **Aprobada**, no Cumplida.
+
+**Intentos de cerrar RF-3 y RF-16 desde aquí (2026-09-18), los tres fallidos:** redimensionar
+la ventana (Chrome la ignora mientras está maximizada), abrir una ventana aparte de 1050 px
+(el navegador bloquea las emergentes) y falsear el ancho que lee la app (`window.innerWidth`
+redefinido: la pantalla se rompe, porque React Native Web lo lee de varias formas). Queda
+**pendiente de que alguien estreche la ventana a mano**.
+
+Lo que sí se puede afirmar, **por construcción y no por demo** (`barra-navegacion.tsx`,
+`medidas.ts`): el régimen de dos renglones existe y se activa con
+`width < AnchoMinimoBarraCentrada` (1100) **o** cuando lo medido no cabe; en ese régimen los
+enlaces se mueven en el árbol para quedar debajo de la marca y la cuenta —no con un `order` de
+CSS— y conservan su `justifyContent: 'center'`. El centrado no sale de un `justifyContent`
+sobre la fila entera sino de que los dos lados comparten la misma base de flex, que es lo que
+lo hace independiente del número de módulos (RF-2, ya comprobado midiendo).

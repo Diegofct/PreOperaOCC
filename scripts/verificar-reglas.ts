@@ -2145,22 +2145,36 @@ prueba('las actividades del parte son las del presupuesto de OCC, cada una con s
   assert.equal(actividadPorItem('excavacion'), undefined);
   assert.equal(etiquetaDeUnidad('inventada'), 'inventada');
 
-  // La descripción completa, con su número delante (RF-65).
+  // La descripción sola, sin el número delante (RF-75, cambio 2026-09-17).
+  assert.equal(
+    etiquetaDeActividad(actividadPorItem('4.1.8')!),
+    actividadPorItem('4.1.8')!.descripcion,
+  );
   assert.ok(
     etiquetaDeActividad(actividadPorItem('4.1.8')!).startsWith(
-      '4.1.8 · Excavación para estructuras varias en material común en seco. Incluye entibado.',
+      'Excavación para estructuras varias en material común en seco. Incluye entibado.',
     ),
   );
   assert.ok(actividadPorItem('8.27')!.descripcion.endsWith('900 mm (36")'));
 
-  // Se encuentra por número o por palabras, sin tildes (RF-65).
+  // Las 31 descripciones son distintas: sin el número, es lo único que separa dos
+  // excavaciones que solo difieren al final de la frase (RF-75).
+  assert.equal(new Set(ACTIVIDADES_DEL_PRESUPUESTO.map((a) => a.descripcion)).size, 31);
+
+  // Se encuentra por palabras y ya no por número, sin tildes (RF-76).
   const opciones = ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
     valor: a.item,
     etiqueta: etiquetaDeActividad(a),
   }));
-  assert.deepEqual(filtrarOpciones(opciones, '4.1.8').map((o) => o.valor), ['4.1.8']);
+  assert.deepEqual(filtrarOpciones(opciones, '4.1.8'), []);
+  assert.deepEqual(filtrarOpciones(opciones, '10.1'), []);
   assert.ok(filtrarOpciones(opciones, 'excavacion').some((o) => o.valor === '4.1.8'));
   assert.deepEqual(filtrarOpciones(opciones, 'acero').map((o) => o.valor), ['10.1']);
+
+  // El ítem sigue siendo la clave de la opción, que es lo que viaja al servidor:
+  // lo que se va es el número de la pantalla, no del registro (decisión del
+  // 2026-09-17).
+  assert.ok(opciones.every((o) => actividadPorItem(o.valor) !== undefined));
 });
 
 prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC', () => {

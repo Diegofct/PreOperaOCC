@@ -672,7 +672,7 @@ incluye cerrar un parte.
 Dos tareas. La primera es el cambio entero; la segunda lo valida. T12, la validación de toda
 la spec, sigue yendo al final de todo.
 
-- [ ] T31. La actividad se ofrece y se lee solo con su descripción. (RF-75, RF-76, RF-77)
+- [x] T31. La actividad se ofrece y se lee solo con su descripción. (RF-75, RF-76, RF-77)
       `etiquetaDeActividad` devuelve la descripción sola; el comentario del bloque pasa a
       decir por qué ya no lleva el número, y con él el comentario de las `opciones` de
       `pantalla-partes.tsx`. El `valor` de la opción sigue siendo el ítem y el campo `item`
@@ -681,9 +681,50 @@ la spec, sigue yendo al final de todo.
       `filtrarOpciones(opciones, '4.1.8')` no devuelve nada y «excavacion» y «acero» siguen
       encontrando la suya; los tres comandos en verde.
 
-- [ ] T32. Validación del cambio RF por RF con demo. (RF-75, RF-76, RF-77)
+- [x] T32. Validación del cambio RF por RF con demo. (RF-75, RF-76, RF-77)
       Hecho cuando: en Chrome, con `npm run web` reiniciado, la lista de Actividades se ve
       sin números (RF-75), «acero» encuentra y «10.1» no encuentra nada (RF-76), y las
       actividades ya guardadas del parte del 16 se ven sin número y siguen igual al guardar
       otra vez (RF-77); cada RF con su resultado escrito en las notas; los tres comandos en
       verde.
+
+### Notas de ejecución del cambio del 2026-09-17
+
+- **T31**: `etiquetaDeActividad` devuelve la descripción sola. Fue lo único que hubo que
+  tocar, como preveía el plan: de esa función salen tanto la lista del selector como lo que
+  filtra el buscador, así que RF-75 y RF-76 caen juntos. RF-77 no costó código —la actividad
+  guardada se pinta con `nombre`, que nunca llevó el número—, pero hay que verlo en pantalla:
+  va en T32.
+- **T31**: se corrigieron los dos comentarios que explicaban la decisión contraria (el bloque
+  de la función, que decía «el número va delante porque es por donde busca quien conoce el
+  presupuesto», y el de las `opciones` de `pantalla-partes.tsx`). Los dos dicen ahora que el
+  ítem **sigue siendo la clave** y solo deja de verse.
+- **T31, casos** (el de siempre, invertido): la etiqueta es exactamente la descripción;
+  buscar «4.1.8» y «10.1» no devuelve nada y «excavacion» y «acero» siguen encontrando la
+  suya; las 31 descripciones son distintas entre sí —lo único que separa dos excavaciones sin
+  el número delante—; y el `valor` de cada opción sigue siendo un ítem del catálogo. Se
+  comprobó que fallaba antes de tocar la función.
+- **T31**: 193 verificaciones, `typecheck` y `lint` en verde. Sin base de datos y sin
+  secretos: no hubo migración ni `expo export`.
+
+### T32 — validación del cambio del 2026-09-17
+
+Hecha en Chrome sobre el parte del 16 (abierto), con la sesión de gerencia.
+
+| RF | Cómo se comprobó | Resultado |
+| --- | --- | --- |
+| 75 | La lista de Actividades abre sin números; la actividad guardada se lee «Excavación para estructuras varias en material común en seco. Inc…», sin «4.1.8 ·» delante | verde |
+| 76 | «acero» encuentra «Suministro, transporte y colocación de Acero de refuerzo…»; «10.1» responde **«Ninguna opción coincide con «10.1».»** | verde |
+| 77 | Se guardó la sección Actividades sin tocar nada y se leyó el parte por la API antes y después: las tres filas quedan **idénticas** —mismos ids, `item` 4.1.8 / 10.1 / `null`, mismos nombres, unidades y cantidades (6 m³, 500 kg, 4 m³)— | verde |
+
+**Confirmado de paso**: el `item` sigue guardándose con cada actividad (decisión de Diego del
+2026-09-17). Lo que se fue es de la pantalla, no del registro.
+
+**Cierre:** 193 verificaciones, `typecheck` y `lint` en verde. Sin base de datos y sin
+secretos, así que no hubo migración ni `expo export`. La spec 004 sigue **En curso**: le falta
+T12, la validación de toda la spec, que incluye cerrar un parte.
+
+**Tropiezo de la sesión, no del código:** el servidor de Metro se quedó atascado sirviendo el
+paquete del navegador —respondía por `curl` en 1,5 s y en Chrome las peticiones quedaban
+pendientes para siempre—. Se arregló reiniciando `npm run web`. Conviene descartarlo antes de
+buscar el fallo en el código.
