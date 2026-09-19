@@ -31,18 +31,18 @@ export default function LayoutPanel() {
             contentStyle: { backgroundColor: Colors.light.background },
           }}
         >
-          <Stack.Screen name="index" options={{ title: 'PreOpera OCC · Administración' }} />
-          <Stack.Screen name="obras" options={{ title: 'Obras · PreOpera OCC' }} />
-          <Stack.Screen name="personas" options={{ title: 'Personas · PreOpera OCC' }} />
-          <Stack.Screen name="vehiculos" options={{ title: 'Vehículos · PreOpera OCC' }} />
-          <Stack.Screen name="asignaciones" options={{ title: 'Asignaciones · PreOpera OCC' }} />
-          <Stack.Screen name="bitacoras" options={{ title: 'Bitácoras · PreOpera OCC' }} />
+          <Stack.Screen name="index" options={{ title: 'Control de Obra OCC' }} />
+          <Stack.Screen name="obras" options={{ title: 'Obras · Control de Obra OCC' }} />
+          <Stack.Screen name="personas" options={{ title: 'Personas · Control de Obra OCC' }} />
+          <Stack.Screen name="vehiculos" options={{ title: 'Vehículos · Control de Obra OCC' }} />
+          <Stack.Screen name="asignaciones" options={{ title: 'Asignaciones · Control de Obra OCC' }} />
+          <Stack.Screen name="bitacoras" options={{ title: 'Bitácoras · Control de Obra OCC' }} />
           <Stack.Screen
             name="preoperacionales"
-            options={{ title: 'Preoperacionales · PreOpera OCC' }}
+            options={{ title: 'Preoperacionales · Control de Obra OCC' }}
           />
-          <Stack.Screen name="almacen" options={{ title: 'Almacén · PreOpera OCC' }} />
-          <Stack.Screen name="cantera" options={{ title: 'Control Cantera · PreOpera OCC' }} />
+          <Stack.Screen name="almacen" options={{ title: 'Almacén · Control de Obra OCC' }} />
+          <Stack.Screen name="cantera" options={{ title: 'Control Cantera · Control de Obra OCC' }} />
         </Stack>
       </MarcoSesion>
     </ProveedorSesionPanel>

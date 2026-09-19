@@ -35,12 +35,33 @@ servidor y al final la pantalla.
       Hecho cuando: al elegir «Residente 1» el acceso cambia solo a panel y se puede
       corregir a mano; la tabla muestra cargo y acceso; y la suma de anchos cabe en 1280.
 
+## Cambio del 2026-09-19 — el cargo Gerente (RF-13 a RF-15)
+
+- [x] T9. Añadir «Gerente» al catálogo de cargos, con sus casos.
+      (RF-13, RF-14, RF-15)
+      Hecho cuando: `rolSugerido('gerente')` es `admin`, `operaVehiculos('gerente')` es
+      falso, el conteo de cargos pasa de 17 a 18, y los tres comandos en verde.
+
 - [ ] T8. Validación final: recorrido RF por RF. (Todos)
       Hecho cuando: cada RF tiene su comprobación con resultado y los tres comandos en
-      verde.
+      verde. *Desde el 2026-09-19 incluye RF-13 a RF-15.*
 
 ## Notas de ejecución
 
 - La lista de RF-2 tiene **15 cargos**, no 14: Cadenero 1 y Cadenero 2 son dos.
-- Gerencia se queda con el cargo sin definir hasta que se decida si se añade «Gerente» al
-  catálogo. Es la duda abierta de la spec y RF-5 ya cubre ese estado.
+- ~~Gerencia se queda con el cargo sin definir hasta que se decida si se añade «Gerente» al
+  catálogo.~~ **Resuelto el 2026-09-19**: se añadió (RF-13 a RF-15).
+- **T9**: una línea en el catálogo y tres casos. De 215 a **217 verificaciones**. Los tres
+  comandos en verde.
+- **T9, sin migración en ninguna de las dos bases**, y no por suerte: el `plan.md` decidió
+  guardar el cargo como texto y no como enum de Postgres *«porque un enum aquí obligaría a
+  una migración de tipo por cada cargo nuevo»*. Esta es la primera vez que esa decisión se
+  cobra el favor.
+- **T9, el caso que más valor tiene no es el del gerente**, sino el que comprueba que
+  **ningún otro cargo propone `admin`**. Si mañana alguien le pone acceso de administrador a
+  otro cargo, eso reparte acceso a toda la empresa sin querer; ese caso es la señal.
+- **T9, va primero en la lista** porque es el único cargo de empresa: los demás son de obra.
+- **T9, desplegado en producción el mismo día.** El panel corría la imagen anterior y el
+  cargo no aparecía; se reconstruyó la imagen, se transfirió y se recreó el contenedor. Antes
+  de sobrescribir se etiquetó la imagen vieja como `preoperaocc:anterior` en el VPS, por si
+  hubiera que volver. licitapp respondió 200 antes y después.

@@ -70,7 +70,7 @@ import {
   type CampoDeActividad,
 } from "@/shared/rules/parte";
 
-import { api } from "./cliente-api";
+import { api, mensajeDe } from "./cliente-api";
 import {
   Acciones,
   AccionesFormulario,
@@ -108,7 +108,7 @@ import type {
   PersonaFila,
   VehiculoFila,
 } from "./contratos";
-import { MarcoPantalla, mensajeDe, useListado } from "./marco";
+import { MarcoPantalla, useListado } from "./marco";
 import { SubirFoto } from "./subir-foto";
 import { usePersona } from "./sesion";
 

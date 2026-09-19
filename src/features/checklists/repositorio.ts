@@ -2,7 +2,7 @@
  * Acceso a datos del preoperacional. Todo contra SQLite: ninguna de estas
  * funciones toca la red ni puede fallar por falta de señal.
  */
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, isNull, ne, or } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { db } from '@/db/local/client';
@@ -19,7 +19,14 @@ import {
 import { drenarEnSegundoPlano } from '@/features/sync/motor';
 import { encolar } from '@/features/sync/outbox';
 import { desfaseDeReloj } from '@/features/sync/reloj';
-import { borradorCaduco, periodicidadesAplicables } from '@/shared/rules/inspeccion';
+import {
+  borradorCaduco,
+  estadoDelDia,
+  periodicidadesAplicables,
+  type EstadoDelDia,
+  type FirmaDelDia,
+} from '@/shared/rules/inspeccion';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 
 import type {
   Periodicidad,
@@ -143,8 +150,79 @@ async function ultimasRevisiones(vehiculoId: string) {
   return { quincenal, mensual };
 }
 
+/**
+ * Qué máquinas de este operador ya tienen su preoperacional de hoy.
+ *
+ * Devuelve una entrada por cada vehículo que se pregunte, para que quien la
+ * llame no tenga que distinguir entre "no toca" y "no vino en el mapa".
+ *
+ * ── Por qué 48 horas y no "desde la medianoche" ──
+ *
+ * Quien decide qué cae dentro del día es `estadoDelDia`, con `fechaDeJornada`.
+ * Esta ventana solo está para no leer la tabla entera, así que se toma ancha a
+ * propósito: la jornada dura 24 horas, el corte de Colombia mueve otras cinco y
+ * el reloj de un teléfono puede ir corrido. Calcular aquí el inicio exacto del
+ * día sería repetir la regla en un segundo sitio —y si los dos cálculos
+ * discreparan, el que manda sería el equivocado.
+ *
+ * Sin índice por `usuario_id`, igual que `historialDe`: en el teléfono de un
+ * operador esta tabla tiene cientos de filas y la ventana deja unas pocas.
+ */
+export async function estadoDelDiaDe(
+  usuarioId: string,
+  vehiculoIds: readonly string[],
+): Promise<Map<string, EstadoDelDia>> {
+  const desde = Date.now() - 48 * 60 * 60 * 1000;
+
+  const filas = await db
+    .select({
+      usuarioId: preoperacionales.usuarioId,
+      vehiculoId: preoperacionales.vehiculoId,
+      enviadoEn: preoperacionales.enviadoEn,
+      resultado: preoperacionales.resultado,
+    })
+    .from(preoperacionales)
+    .where(
+      and(
+        eq(preoperacionales.usuarioId, usuarioId),
+        // Solo lo firmado revisa una máquina: un borrador no ha revisado nada.
+        isNotNull(preoperacionales.enviadoEn),
+        gte(preoperacionales.enviadoEn, desde),
+      ),
+    );
+
+  const firmados: FirmaDelDia[] = [];
+  for (const fila of filas) {
+    // `enviadoEn` y `resultado` son nulos mientras el registro es un borrador.
+    // La consulta ya descartó los que no se enviaron; esto es lo que convierte
+    // esa certeza en un tipo sin `as`.
+    if (fila.enviadoEn === null || fila.resultado === null) continue;
+    firmados.push({
+      usuarioId: fila.usuarioId,
+      vehiculoId: fila.vehiculoId,
+      enviadoEn: fila.enviadoEn,
+      resultado: fila.resultado,
+    });
+  }
+
+  const hoy = fechaDeJornada();
+  return new Map(
+    vehiculoIds.map((vehiculoId) => [
+      vehiculoId,
+      estadoDelDia({ usuarioId, vehiculoId, hoy }, firmados),
+    ]),
+  );
+}
+
 export interface Borrador {
   id: string;
+  /**
+   * Quién lo está llenando y desde cuándo. No son adorno: desde la spec 013 la
+   * fila no existe hasta el primer dato, así que el borrador tiene que llevar
+   * encima todo lo que hace falta para insertarla más tarde.
+   */
+  usuarioId: string;
+  iniciadoEn: number;
   vehiculo: VehiculoAsignado;
   plantilla: PlantillaChecklist;
   plantillaHash: string;
@@ -162,17 +240,55 @@ export interface Borrador {
 }
 
 /**
- * Devuelve el borrador del día para ese vehículo, o crea uno nuevo.
+ * Lo que se encuentra al abrir el formulario de una máquina.
+ *
+ * Tres desenlaces, y ninguno es un `null` que haya que interpretar: o hay
+ * formulario que llenar, o esa máquina ya se revisó hoy, o su tipo de equipo
+ * todavía no tiene formato cargado.
+ */
+export type AperturaDelFormulario =
+  | { tipo: 'borrador'; borrador: Borrador }
+  | { tipo: 'ya_hecho'; hechoEn: number; resultado: ResultadoPreoperacional }
+  | { tipo: 'sin_formato' };
+
+/**
+ * Devuelve el borrador del día para ese vehículo, o prepara uno nuevo.
  *
  * Retomar el borrador es lo que hace que Android pueda matar la app a mitad
  * del formulario sin que el operador pierda nada.
+ *
+ * ── Prepara, no inserta (spec 013, RF-13) ──
+ *
+ * Hasta esta spec, entrar a la pantalla insertaba la fila. Entrar a mirar y
+ * salir dejaba un «Sin terminar» en el historial del operador, sobre una máquina
+ * que a lo mejor ya estaba revisada y firmada — trabajo pendiente que no existe
+ * y que él no podía quitar. Ahora el registro nace con el primer dato, en
+ * `registrarSiHaceFalta`.
+ *
+ * El id se sigue generando aquí, y sigue siendo el definitivo: las fotos pueden
+ * colgar de él antes de que la fila exista.
+ *
+ * ── Y dice que no cuando la máquina ya se revisó hoy (RF-8) ──
+ *
+ * Es la red de seguridad: el inicio y la lista de vehículos ya esconden el
+ * botón, pero a esta pantalla se puede llegar por un enlace directo o por un
+ * `router.replace` que se quedó en el historial de navegación. Se comprueba
+ * **antes** de mirar si hay un borrador a medio llenar: si el operador ya firmó
+ * hoy el de esa máquina, terminar un borrador viejo produciría un segundo acta
+ * del mismo día, que es exactamente lo que RF-1 prohíbe. El borrador no se toca
+ * ni se descarta; sigue donde está y reaparece mañana.
  */
 export async function abrirBorrador(
   usuarioId: string,
   vehiculo: VehiculoAsignado,
-): Promise<Borrador | null> {
+): Promise<AperturaDelFormulario> {
   const encontrada = await plantillaDeTipo(vehiculo.tipoVehiculoId);
-  if (!encontrada) return null;
+  if (!encontrada) return { tipo: 'sin_formato' };
+
+  const estado = (await estadoDelDiaDe(usuarioId, [vehiculo.id])).get(vehiculo.id);
+  if (estado && !estado.toca) {
+    return { tipo: 'ya_hecho', hechoEn: estado.hechoEn, resultado: estado.resultado };
+  }
 
   const existentes = await db
     .select()
@@ -204,53 +320,86 @@ export async function abrirBorrador(
 
   if (existente && !caduco) {
     return {
-      id: existente.id,
-      vehiculo,
-      plantilla: encontrada.plantilla,
-      plantillaHash: existente.plantillaHash,
-      periodicidades: existente.periodicidades as Periodicidad[],
-      respuestas: existente.respuestas,
-      odometroKm: existente.odometroKm,
-      horometroH: existente.horometroH,
-      observaciones: existente.observaciones ?? '',
+      tipo: 'borrador',
+      borrador: {
+        id: existente.id,
+        usuarioId,
+        iniciadoEn: existente.iniciadoEn,
+        vehiculo,
+        plantilla: encontrada.plantilla,
+        plantillaHash: existente.plantillaHash,
+        periodicidades: existente.periodicidades as Periodicidad[],
+        respuestas: existente.respuestas,
+        odometroKm: existente.odometroKm,
+        horometroH: existente.horometroH,
+        observaciones: existente.observaciones ?? '',
+      },
     };
   }
 
   const ultimas = await ultimasRevisiones(vehiculo.id);
   const periodicidades = periodicidadesAplicables(Date.now(), encontrada.plantilla, ultimas);
-  const id = uuidv7();
-
-  await db.insert(preoperacionales).values({
-    id,
-    vehiculoId: vehiculo.id,
-    usuarioId,
-    obraId: vehiculo.obraId,
-    plantillaTipoVehiculo: encontrada.plantilla.tipoVehiculo,
-    plantillaVersion: encontrada.plantilla.version,
-    plantillaHash: encontrada.hash,
-    periodicidades,
-    iniciadoEn: Date.now(),
-    respuestas: [],
-    estadoSync: 'borrador',
-  });
 
   return {
-    formatoCambio: caduco,
-    id,
-    vehiculo,
-    plantilla: encontrada.plantilla,
-    plantillaHash: encontrada.hash,
-    periodicidades,
-    respuestas: [],
-    odometroKm: null,
-    horometroH: null,
-    observaciones: '',
+    tipo: 'borrador',
+    borrador: {
+      formatoCambio: caduco,
+      id: uuidv7(),
+      usuarioId,
+      iniciadoEn: Date.now(),
+      vehiculo,
+      plantilla: encontrada.plantilla,
+      plantillaHash: encontrada.hash,
+      periodicidades,
+      respuestas: [],
+      odometroKm: null,
+      horometroH: null,
+      observaciones: '',
+    },
   };
 }
 
-/** Autoguardado. Se llama en cada respuesta; escribir en SQLite es barato. */
+/**
+ * Inserta la fila del preoperacional si todavía no existe.
+ *
+ * **Idempotente a propósito, sin bandera de "ya existe".** Llevar un booleano en
+ * el `Borrador` obligaría a mutarlo o a subirlo al estado de React, y sobre todo
+ * se puede olvidar: una ruta de escritura futura que no lo consultara haría un
+ * `UPDATE` sobre una fila inexistente, y en SQLite eso **no falla** —afecta a
+ * cero filas y el trabajo del operador se pierde en silencio—. Una sentencia de
+ * más en una base local es gratis; un guardado que no guarda es el peor fallo
+ * posible de esta pantalla.
+ *
+ * Por eso también la llama `guardarBorrador` por dentro: así ningún camino que
+ * escriba puede saltársela. La única excepción es la foto, que no pasa por ahí.
+ */
+export async function registrarSiHaceFalta(borrador: Borrador) {
+  await db
+    .insert(preoperacionales)
+    .values({
+      id: borrador.id,
+      vehiculoId: borrador.vehiculo.id,
+      usuarioId: borrador.usuarioId,
+      obraId: borrador.vehiculo.obraId,
+      plantillaTipoVehiculo: borrador.plantilla.tipoVehiculo,
+      plantillaVersion: borrador.plantilla.version,
+      plantillaHash: borrador.plantillaHash,
+      periodicidades: borrador.periodicidades,
+      iniciadoEn: borrador.iniciadoEn,
+      respuestas: [],
+      estadoSync: 'borrador',
+    })
+    .onConflictDoNothing();
+}
+
+/**
+ * Autoguardado. Se llama en cada respuesta; escribir en SQLite es barato.
+ *
+ * Recibe el borrador entero, y no solo su id, porque desde la spec 013 la fila
+ * puede no existir todavía: este es el momento en que nace.
+ */
 export async function guardarBorrador(
-  id: string,
+  borrador: Borrador,
   cambios: {
     respuestas?: RespuestaItem[];
     odometroKm?: number | null;
@@ -258,10 +407,11 @@ export async function guardarBorrador(
     observaciones?: string;
   },
 ) {
+  await registrarSiHaceFalta(borrador);
   await db
     .update(preoperacionales)
     .set({ ...cambios, actualizadoEn: Date.now() })
-    .where(eq(preoperacionales.id, id));
+    .where(eq(preoperacionales.id, borrador.id));
 }
 
 /**
@@ -344,6 +494,24 @@ export async function cerrarPreoperacional(
   }
 }
 
+/**
+ * Los últimos preoperacionales de este operador, para su historial.
+ *
+ * **Deja fuera los borradores que nadie llegó a llenar** (spec 013, RF-17).
+ * Hasta esta spec, abrir el formulario y salir dejaba una fila vacía que el
+ * historial mostraba como «Sin terminar»: trabajo pendiente que no existe,
+ * sobre una máquina que a lo mejor ya estaba revisada y firmada, y que el
+ * operador no tenía forma de quitar.
+ *
+ * Se **esconden, no se borran**: nada se borra en este proyecto, y además esto
+ * es lo único que arregla las filas vacías que ya están en los teléfonos —la
+ * spec deja fuera de alcance repararlas, pero no hay razón para seguir
+ * enseñándolas—.
+ *
+ * El filtro es deliberadamente estrecho: solo cae lo que es **borrador** y
+ * además tiene las respuestas vacías. Un registro ya enviado no lo toca nunca,
+ * pase lo que pase con su contenido.
+ */
 export async function historialDe(usuarioId: string, limite = 50) {
   return db
     .select({
@@ -358,7 +526,17 @@ export async function historialDe(usuarioId: string, limite = 50) {
     })
     .from(preoperacionales)
     .innerJoin(vehiculos, eq(preoperacionales.vehiculoId, vehiculos.id))
-    .where(eq(preoperacionales.usuarioId, usuarioId))
+    .where(
+      and(
+        eq(preoperacionales.usuarioId, usuarioId),
+        // "Ni borrador ni vacío": o ya no es un borrador, o alguien escribió
+        // algo en él. Lo que cae es solo la intersección de las dos cosas.
+        or(
+          ne(preoperacionales.estadoSync, 'borrador' satisfies EstadoSync),
+          ne(preoperacionales.respuestas, []),
+        ),
+      ),
+    )
     .orderBy(desc(preoperacionales.iniciadoEn))
     .limit(limite);
 }

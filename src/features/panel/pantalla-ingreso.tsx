@@ -56,10 +56,10 @@ export default function PantallaIngreso() {
             <View style={estilos.logotipo}>
               <Text style={estilos.logotipoTexto}>OCC</Text>
             </View>
-            <Text style={estilos.nombre}>PreOpera</Text>
+            <Text style={estilos.nombre}>Control de Obra</Text>
           </View>
           <Text style={estilos.subtitulo}>
-            Panel de administración · obras, maquinaria y preoperacionales
+            Obras, maquinaria, personal y el parte diario de cada jornada
           </Text>
         </View>
 

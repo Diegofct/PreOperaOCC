@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { DESTINO_OBRA, filtrarViajes, formatearAbscisa } from '@/shared/rules/cantera';
 import { fechaDeJornada, restarDias } from '@/shared/rules/jornada';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -34,7 +34,7 @@ import {
   type Opcion,
 } from './componentes';
 import type { ViajeFila } from './contratos';
-import { mensajeDe, useListado } from './marco';
+import { useListado } from './marco';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 

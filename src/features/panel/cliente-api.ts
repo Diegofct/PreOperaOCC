@@ -83,6 +83,27 @@ export class ErrorApi extends Error {
   }
 }
 
+/**
+ * El texto que se le puede enseñar a una persona sobre cualquier fallo.
+ *
+ * `ErrorApi` ya trae el mensaje del servidor, que está redactado para leerse.
+ * Un `Error` cualquiera —un fallo del propio navegador— también se muestra: es
+ * más útil que un "algo falló" mientras esto corre en desarrollo.
+ *
+ * ── Por qué vive aquí y no en `marco.tsx`, donde nació ──
+ *
+ * Porque `marco.tsx` tiene componentes que necesitan la sesión, y `sesion.tsx`
+ * necesitaba esta función: el resultado era un ciclo de `require` —Metro lo
+ * avisaba en cada arranque— que puede dejar valores sin inicializar según el
+ * orden en que se evalúen los módulos. Aquí no hay ciclo posible: este archivo
+ * solo importa tipos, y es además donde vive `ErrorApi`, que es de lo que esta
+ * función sabe traducir.
+ */
+export function mensajeDe(fallo: unknown): string {
+  if (fallo instanceof Error) return fallo.message;
+  return 'Algo falló. Vuelve a intentarlo.';
+}
+
 async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   let respuesta: Response;
   try {

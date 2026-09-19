@@ -224,3 +224,33 @@ en verde.
 - **T6**: se tocó `db/servidor/esquema.ts`, así que se corrió `npm run db:generate:servidor` →
   **«No schema changes, nothing to migrate»** y `drizzle/` sin cambios, que es lo esperado al
   cambiar solo un comentario. Los tres comandos en verde.
+
+### T7 — hallazgos de la demo del 2026-09-18 (Diego, en teléfono)
+
+Diego levantó un preoperacional real y lo vio llegar al panel. Tres cosas salieron mal.
+
+- **1. «Cambiar de vehículo» con una sola máquina.** *Corregido.* El botón se pintaba siempre
+  que hubiera vehículo. Con uno solo llevaba a una pantalla con una única tarjeta —la misma
+  que ya estaba arriba— y pulsarla **abría otra vez el formulario del mismo equipo**. Antes de
+  esta spec tenía sentido: esa pantalla ofrecía además la flota de la obra. **Al quitarla en
+  T3, el botón se quedó sin nada que ofrecer y nadie lo notó.** Ahora solo sale con más de una
+  asignación vigente, que es lo que dice 012/RF-6 («el operador con más de un vehículo
+  vigente»). Defecto contra un RF ya acordado, así que se arregla aquí y no pide `/sdd:cambio`.
+
+- **2. Entrar al formulario y salir deja un «Sin terminar» para siempre.** *No corregido: es
+  un cambio de comportamiento y entra por la spec.* `abrirBorrador` **inserta la fila del
+  preoperacional al abrir la pantalla**, con `respuestas: []`, y el historial muestra todas las
+  filas del operador sin filtrar. Así que abrir y salir deja un registro que dice «Sin
+  terminar» sobre una máquina que ya tiene su preoperacional del día hecho. Diego: *«ese
+  preoperacional se hace una sola vez al día»*. **Esa regla no está escrita en ninguna parte
+  del proyecto** —no hay nada en `shared/rules/` que la diga— así que es requisito nuevo, no
+  defecto. Pide `/sdd:cambio`, y hay decisiones reales que tomar: qué pasa si el primero salió
+  NO APTO y la máquina se reparó; si el día es el de `fechaDeJornada`; si un borrador vacío se
+  descarta al salir o directamente no se crea hasta la primera respuesta.
+
+- **3. Un borrador descartado se pintaba «Apto».** *Corregido.* `EtiquetaResultado` no
+  contemplaba `descartado`, el estado que añadió **la spec 011** (T5) para el borrador abierto
+  con un formato viejo. Sin ese caso caía hasta el `return` final: un registro **que nadie
+  llenó** aparecía en el historial del operador diciendo que la máquina pasó la inspección.
+  Lo habría cazado la demo de 011/T7, que sigue pendiente. Ahora dice «Descartado».
+  *Anotarlo también en `specs/011-formatos-mas-cortos/tareas.md`.*

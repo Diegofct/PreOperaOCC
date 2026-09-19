@@ -18,9 +18,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import type { ClaveNueva, CredencialesIngreso, PersonaEnSesionFila } from './contratos';
-import { mensajeDe } from './marco';
 
 export type EstadoSesionPanel = 'comprobando' | 'fuera' | 'debe_cambiar' | 'dentro';
 

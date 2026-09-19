@@ -13,6 +13,7 @@
  * demás rutas mientras `debeCambiar` siga puesto: la defensa real está allá, y
  * esto solo evita enseñar una pantalla que no funcionaría.
  */
+import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
@@ -22,8 +23,36 @@ import PantallaCambiarClave from './pantalla-cambiar-clave';
 import PantallaIngreso from './pantalla-ingreso';
 import { useSesionPanel } from './sesion';
 
+/**
+ * El título de la pestaña mientras no hay sesión.
+ *
+ * El `Stack` de rutas pone el título de la pantalla a la que se va, pero cuando
+ * no hay sesión **ese `Stack` ni siquiera se monta**: el contenido se sustituye
+ * sin navegar, a propósito, para que al entrar se caiga justo donde se iba. El
+ * efecto secundario era que la pestaña anunciaba «Bitácoras · Control de Obra
+ * OCC» mientras se veía el ingreso.
+ *
+ * Se escribe directo sobre `document` y no con una API de rutas porque esto es
+ * exactamente lo que hay por encima de las rutas. La guarda de `undefined` es
+ * por el bundle nativo, donde estas pantallas entran aunque estén inertes.
+ */
+function useTituloDeLaPestana(titulo: string | null) {
+  useEffect(() => {
+    if (titulo === null || typeof document === 'undefined') return;
+    document.title = titulo;
+  }, [titulo]);
+}
+
 export function MarcoSesion({ children }: { children: ReactNode }) {
   const { estado, cambiandoClave, pedirCambioDeClave } = useSesionPanel();
+
+  useTituloDeLaPestana(
+    estado === 'fuera'
+      ? 'Ingresar · Control de Obra OCC'
+      : estado === 'debe_cambiar'
+        ? 'Cambiar contraseña · Control de Obra OCC'
+        : null,
+  );
 
   if (estado === 'comprobando') {
     return (

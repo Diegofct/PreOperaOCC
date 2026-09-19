@@ -1,6 +1,6 @@
 # Spec 002 — Cargos de las personas
 
-> Estado: En curso · Fecha: 2026-09-09
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-19 (el cargo Gerente, RF-13 a RF-15)
 
 ## Contexto y objetivo
 
@@ -62,6 +62,19 @@ El objetivo es separar dos cosas que hoy están pegadas: **qué hace una persona
 - RF-9: EL SISTEMA no dará acceso a ninguna de las dos superficies a las personas cuyo
   cargo no lo contemple, aunque figuren como activas.
 
+### El cargo de la gerencia (H2) · *añadido el 2026-09-19*
+
+Hasta ahora la lista no tenía cargo para quien dirige la empresa, y era el único nivel de
+acceso real sin oficio que lo nombrara: a un gerente había que registrarlo sin cargo, o
+ponerle «Director», que es otra cosa —el director de obra dirige **una** obra—. Quedaba
+raro en el listado de Personas y peor en cualquier documento que imprima el cargo.
+
+- RF-13: EL SISTEMA ofrecerá «Gerente» entre los cargos que se pueden elegir.
+- RF-14: CUANDO la gerencia elija el cargo Gerente, EL SISTEMA propondrá el nivel de acceso
+  de administrador.
+- RF-15: EL SISTEMA no permitirá emitir un código de activación de celular para una persona
+  con cargo Gerente.
+
 ### La obra sabe quién trabajó (H3)
 
 - RF-10: EL SISTEMA hará disponible el cargo de cada persona allí donde haya que elegir
@@ -121,8 +134,15 @@ El objetivo es separar dos cosas que hoy están pegadas: **qué hace una persona
 
 ## Dudas abiertas
 
-- [NECESITA ACLARACIÓN: la lista no incluye un cargo para la gerencia, que sí es un nivel de
-  acceso real. ¿Se añade "Gerente" a la lista, o la gerencia se queda sin cargo de obra?]
+Resuelta el 2026-09-19:
+
+- **Se añade «Gerente» a la lista** (RF-13 a RF-15), con acceso de administrador propuesto y
+  sin celular. Se decidió al registrar al primer gerente real de OCC: dejarlo sin cargo o
+  ponerle «Director» eran las dos únicas salidas, y las dos mienten en cualquier documento
+  que imprima el cargo.
+
+Siguen abiertas:
+
 - [NECESITA ACLARACIÓN: ¿"Auxiliar" y "Auxiliar Ambiental" son dos cargos distintos, o el
   primero es un auxiliar de ingeniería? El nombre a secas se presta a confusión en el
   listado.]

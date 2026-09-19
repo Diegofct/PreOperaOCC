@@ -13,8 +13,15 @@ import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants
 import { useSesion } from '@/features/auth/sesion';
 import { sincronizacionCompleta } from '@/features/sync/motor';
 import { contarPendientes, reencolarFallidas } from '@/features/sync/outbox';
+import type { ResultadoPreoperacional } from '@/features/checklists/types';
+import type { EstadoDelDia } from '@/shared/rules/inspeccion';
 
-import { asignacionesVigentesDe, historialDe, type VehiculoDelOperador } from './repositorio';
+import {
+  asignacionesVigentesDe,
+  estadoDelDiaDe,
+  historialDe,
+  type VehiculoDelOperador,
+} from './repositorio';
 
 type Historial = Awaited<ReturnType<typeof historialDe>>;
 
@@ -25,6 +32,21 @@ const FORMATO_FECHA = new Intl.DateTimeFormat('es-CO', {
   minute: '2-digit',
 });
 
+const HORA_DEL_DIA = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Cómo se nombra cada resultado en esta pantalla.
+ *
+ * Son las mismas palabras que ya usan las insignias del historial, aquí abajo:
+ * el operador no tiene que aprender dos vocabularios para lo mismo. Y va en
+ * palabras porque el color nunca es la única señal.
+ */
+const PALABRA_DEL_RESULTADO: Record<ResultadoPreoperacional, string> = {
+  apto: 'Apto',
+  apto_con_observaciones: 'Con novedades',
+  no_apto: 'NO APTO',
+};
+
 export function InicioOperador() {
   const router = useRouter();
   const { usuario, bloquear } = useSesion();
@@ -33,6 +55,8 @@ export function InicioOperador() {
   const [historial, setHistorial] = useState<Historial>([]);
   const [pendientes, setPendientes] = useState(0);
   const [cargando, setCargando] = useState(true);
+  /** Qué máquinas ya tuvieron su preoperacional de hoy (spec 013). */
+  const [estadosDelDia, setEstadosDelDia] = useState<Map<string, EstadoDelDia>>(new Map());
 
   const cargar = useCallback(async () => {
     if (!usuario) return;
@@ -41,9 +65,17 @@ export function InicioOperador() {
       historialDe(usuario.id, 15),
       contarPendientes(),
     ]);
+    // Después de las asignaciones, porque necesita saber por qué máquinas
+    // preguntar. Se recalcula en cada carga, y por eso el aviso se cae solo al
+    // cambiar el día de trabajo (RF-12): nadie tiene que hacer nada.
+    const estados = await estadoDelDiaDe(
+      usuario.id,
+      vigentes.map((vehiculo) => vehiculo.id),
+    );
     setAsignados(vigentes);
     setHistorial(registros);
     setPendientes(cola);
+    setEstadosDelDia(estados);
     setCargando(false);
   }, [usuario]);
 
@@ -81,6 +113,13 @@ export function InicioOperador() {
 
   const principal = asignados[0] ?? null;
   const hayVarios = asignados.length > 1;
+  /**
+   * Si la máquina principal ya tuvo su preoperacional hoy, no hay botón que
+   * pulsar (spec 013, RF-8). Sin botón no hay forma de equivocarse; el aviso de
+   * la tarjeta dice por qué.
+   */
+  const hechoHoy = principal ? estadosDelDia.get(principal.id) : undefined;
+  const yaLoHizo = hechoHoy !== undefined && !hechoHoy.toca ? hechoHoy : null;
 
   // Sin vehículo vigente no hay preoperacional que empezar (RF-9). El botón ni
   // siquiera se pinta; la guarda está por si alguien lo vuelve a pintar.
@@ -131,6 +170,20 @@ export function InicioOperador() {
               </Text>
             </View>
           ) : null}
+
+          {/* El preoperacional se hace una vez por jornada (spec 013, RF-9 y
+              RF-10). Lleva la hora y el resultado para que el operador
+              reconozca que es el suyo y no tenga que abrir nada. */}
+          {yaLoHizo ? (
+            <View style={estilos.avisoHecho}>
+              <Text style={estilos.avisoHechoTexto}>
+                Ya le hizo el preoperacional hoy, a las{' '}
+                {HORA_DEL_DIA.format(new Date(yaLoHizo.hechoEn))}. Quedó{' '}
+                {PALABRA_DEL_RESULTADO[yaLoHizo.resultado]}.
+              </Text>
+              <Text style={estilos.avisoHechoPie}>Mañana vuelve a aparecer el botón.</Text>
+            </View>
+          ) : null}
         </View>
       ) : (
         <View style={estilos.tarjetaVacia}>
@@ -144,21 +197,31 @@ export function InicioOperador() {
 
       {principal ? (
         <>
-          <Pressable
-            accessibilityRole="button"
-            onPress={empezar}
-            style={({ pressed }) => [estilos.botonPrimario, pressed && estilos.botonPresionado]}
-          >
-            <Text style={estilos.botonPrimarioTexto}>Hacer preoperacional</Text>
-          </Pressable>
+          {yaLoHizo ? null : (
+            <Pressable
+              accessibilityRole="button"
+              onPress={empezar}
+              style={({ pressed }) => [estilos.botonPrimario, pressed && estilos.botonPresionado]}
+            >
+              <Text style={estilos.botonPrimarioTexto}>Hacer preoperacional</Text>
+            </Pressable>
+          )}
 
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/vehiculo')}
-            style={({ pressed }) => [estilos.botonSecundario, pressed && estilos.presionado]}
-          >
-            <Text style={estilos.botonSecundarioTexto}>Cambiar de vehículo</Text>
-          </Pressable>
+          {/* Solo con más de una máquina asignada (012/RF-6). Con una sola, este
+              botón llevaba a una pantalla con una única tarjeta —la misma que ya
+              está aquí arriba— y volver a pulsarla abría otra vez su formulario.
+              Antes de la spec 012 tenía sentido, porque esa pantalla ofrecía
+              además el resto de la flota de la obra; al quitarla en T3 el botón
+              se quedó sin nada que ofrecer. */}
+          {hayVarios ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/vehiculo')}
+              style={({ pressed }) => [estilos.botonSecundario, pressed && estilos.presionado]}
+            >
+              <Text style={estilos.botonSecundarioTexto}>Cambiar de vehículo</Text>
+            </Pressable>
+          ) : null}
         </>
       ) : null}
 
@@ -191,6 +254,12 @@ function EtiquetaResultado({
 }) {
   if (estadoSync === 'borrador') {
     return <Insignia texto="Sin terminar" color={Estado.na} fondo={Estado.naFondo} />;
+  }
+  // La spec 011 añadió `descartado` para el borrador que se quedó con un formato
+  // viejo. Sin este caso caía hasta el final y se pintaba **«Apto»**: un registro
+  // que nadie llenó diciendo que la máquina pasó la inspección.
+  if (estadoSync === 'descartado') {
+    return <Insignia texto="Descartado" color={Estado.na} fondo={Estado.naFondo} />;
   }
   if (resultado === 'no_apto') {
     return <Insignia texto="NO APTO" color={Estado.noConforme} fondo={Estado.noConformeFondo} />;
@@ -247,6 +316,15 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.md,
     backgroundColor: Estado.noConformeFondo,
   },
+  avisoHecho: {
+    marginTop: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: Radio.md,
+    gap: Spacing.one,
+    backgroundColor: Estado.conformeFondo,
+  },
+  avisoHechoTexto: { fontSize: Texto.base, lineHeight: 26, fontWeight: '700', color: Estado.conforme },
+  avisoHechoPie: { fontSize: Texto.pie, color: Estado.conforme },
   avisoNoAptoTexto: { fontSize: Texto.base, fontWeight: '700', color: Estado.noConforme },
   botonPrimario: {
     minHeight: Toque.primario,

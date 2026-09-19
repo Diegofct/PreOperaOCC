@@ -1,0 +1,28 @@
+# Lo que nunca entra en la imagen.
+#
+# La primera línea es la que importa: si el `.env` entra, las credenciales de la
+# base y del almacén de imágenes quedan dentro de un archivo que se guarda, se
+# copia por la red y se puede inspeccionar entero con un comando. La imagen se
+# construye SIN ningún secreto a propósito —el empaquetado no necesita ninguno—
+# y las credenciales entran como variables del contenedor al arrancar.
+.env
+.env.*
+
+# Se instala y se genera dentro de la imagen, no se copia desde aquí.
+node_modules
+dist
+
+# Nada de esto hace falta para empaquetar ni para servir.
+.git
+.gitignore
+.expo
+.vscode
+.claude
+android
+ios
+docs
+specs
+drizzle
+scripts
+*.log
+npm-debug.log*

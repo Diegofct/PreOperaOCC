@@ -18,7 +18,7 @@ import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Colors, Estado, Marca, MaxContentWidthPanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { alcanza } from '@/shared/rules/permisos';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import { Acciones, Aviso, Boton, Campo, Etiqueta, Seccion, Titulo } from './componentes';
 import {
   ETIQUETA_RESULTADO,
@@ -26,7 +26,7 @@ import {
   type PreoperacionalDetalle,
   type RespuestaFila,
 } from './contratos';
-import { mensajeDe, useListado } from './marco';
+import { useListado } from './marco';
 import { usePersona } from './sesion';
 
 const MINUTO_MS = 60_000;

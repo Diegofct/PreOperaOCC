@@ -77,7 +77,6 @@ function Puerta() {
       <Stack.Screen name="index" options={{ title: 'PreOpera OCC' }} />
       <Stack.Screen name="vehiculo" options={{ title: 'Escoger vehículo' }} />
       <Stack.Screen name="preoperacional" options={{ title: 'Preoperacional' }} />
-      <Stack.Screen name="bitacora" options={{ title: 'Bitácora del día' }} />
       <Stack.Screen
         name="resultado"
         options={{ title: 'Resultado', headerBackVisible: false, gestureEnabled: false }}

@@ -47,7 +47,7 @@ import {
   type Cargo,
 } from '@/shared/catalogos/cargos';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -77,7 +77,7 @@ import {
   type PersonaNueva,
   type Rol,
 } from './contratos';
-import { MarcoPantalla, mensajeDe, useListado } from './marco';
+import { MarcoPantalla, useListado } from './marco';
 import { useSesionPanel } from './sesion';
 import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 
