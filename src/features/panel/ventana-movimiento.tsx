@@ -32,7 +32,7 @@ import {
 } from '@/shared/rules/almacen';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
-import { api, ErrorApi } from './cliente-api';
+import { api, ErrorApi, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -43,7 +43,6 @@ import {
   Modal,
 } from './componentes';
 import type { MaterialDeAlmacenFila } from './contratos';
-import { mensajeDe } from './marco';
 
 export function VentanaMovimiento({
   material,

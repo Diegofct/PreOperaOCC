@@ -41,6 +41,14 @@ export interface DefinicionCargo {
 }
 
 export const CARGOS = [
+  /**
+   * Va primero porque es el único cargo de empresa: los demás son de obra.
+   *
+   * Hasta la spec 002/RF-13 no existía, y la gerencia era el único nivel de
+   * acceso real sin un oficio que lo nombrara — había que registrarla sin cargo
+   * o ponerle «Director», que dirige **una** obra y es otra cosa.
+   */
+  { id: 'gerente', nombre: 'Gerente', rolSugerido: 'admin', operaVehiculos: false },
   { id: 'director', nombre: 'Director', rolSugerido: 'supervisor', operaVehiculos: false },
   { id: 'residente_1', nombre: 'Residente 1', rolSugerido: 'supervisor', operaVehiculos: false },
   { id: 'residente_2', nombre: 'Residente 2', rolSugerido: 'supervisor', operaVehiculos: false },

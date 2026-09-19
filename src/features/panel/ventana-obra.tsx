@@ -11,7 +11,7 @@
  */
 import { useState } from 'react';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -23,7 +23,6 @@ import {
   Selector,
 } from './componentes';
 import type { ObraFila, ObraNueva } from './contratos';
-import { mensajeDe } from './marco';
 
 export function VentanaCorregirObra({
   obra,

@@ -32,15 +32,22 @@ import {
   intentosRestantes,
   mensajeDeEspera,
 } from '../src/features/auth/escalera';
-import type { PlantillaChecklist, RespuestaItem } from '../src/features/checklists/types';
+import type {
+  PlantillaChecklist,
+  RespuestaItem,
+  ResultadoPreoperacional,
+} from '../src/features/checklists/types';
 import {
   borradorCaduco,
+  borradorTieneContenido,
+  estadoDelDia,
   evaluarPreoperacional,
   itemsAplicables,
   itemsMarcablesEnBloque,
   periodicidadesAplicables,
   respuestasDeMedidores,
   validarMedidor,
+  type FirmaDelDia,
 } from '../src/shared/rules/inspeccion';
 import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/shared/rules/fusion';
 import {
@@ -364,6 +371,186 @@ prueba('un borrador de otra versión del formato no se puede seguir llenando', (
   // quedó con una plantilla que el catálogo ya no trae, tampoco se sigue: el
   // formulario que se pintaría no sería el del borrador.
   assert.equal(borradorCaduco(4, 3), true);
+});
+
+/* ------------------------------------------------------------------------ */
+/* Un preoperacional al día (spec 013)                                       */
+/* ------------------------------------------------------------------------ */
+
+const OPERADOR = 'operador-1';
+const OTRO_OPERADOR = 'operador-2';
+const MAQUINA = 'vehiculo-1';
+const OTRA_MAQUINA = 'vehiculo-2';
+
+/** A quién y a qué máquina se le pregunta, en la jornada de hoy. */
+const HOY = { usuarioId: OPERADOR, vehiculoId: MAQUINA, hoy: fechaDeJornada() };
+
+/**
+ * Un instante a esa hora de Colombia dentro de la jornada indicada.
+ *
+ * Se construye desde `fechaDeJornada` y con el desfase escrito (`-05:00`), no
+ * desde el reloj de quien corre la prueba: si no, esto pasaría o fallaría según
+ * el huso de la máquina donde se ejecuta.
+ */
+function enJornada(dia: string, hora: number): number {
+  return Date.parse(`${dia}T${String(hora).padStart(2, '0')}:00:00-05:00`);
+}
+
+function firmado(
+  hora: number,
+  resultado: ResultadoPreoperacional = 'apto',
+  quien: { usuarioId?: string; vehiculoId?: string; dia?: string } = {},
+): FirmaDelDia {
+  return {
+    usuarioId: quien.usuarioId ?? OPERADOR,
+    vehiculoId: quien.vehiculoId ?? MAQUINA,
+    enviadoEn: enJornada(quien.dia ?? fechaDeJornada(), hora),
+    resultado,
+  };
+}
+
+prueba('una máquina ya revisada hoy no vuelve a pedir preoperacional', () => {
+  // Spec 013 / RF-1 y RF-3. «Con novedades» cuenta como hecha igual que APTO:
+  // solo el NO APTO —que sí para la máquina— abre la puerta a repetir.
+  assert.equal(estadoDelDia(HOY, []).toca, true);
+  assert.equal(estadoDelDia(HOY, [firmado(7)]).toca, false);
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'apto_con_observaciones')]).toca, false);
+});
+
+prueba('una máquina que quedó NO APTO se puede volver a revisar el mismo día', () => {
+  // Spec 013 / RF-2 y RF-6. Ese segundo preoperacional es la constancia de que
+  // la máquina se reparó y volvió a servir.
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'no_apto')]).toca, true);
+  // Y no hay tope: mientras siga saliendo NO APTO, se sigue pudiendo repetir.
+  assert.equal(
+    estadoDelDia(HOY, [firmado(7, 'no_apto'), firmado(9, 'no_apto'), firmado(11, 'no_apto')]).toca,
+    true,
+  );
+});
+
+prueba('manda el último preoperacional del día, no el peor', () => {
+  // Spec 013 / RF-2. NO APTO a las 7 y APTO a las 9: la máquina se reparó y ya
+  // está revisada, así que no toca otro.
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'no_apto'), firmado(9, 'apto')]).toca, false);
+  // Al revés sí toca: volvió a quedar parada después de estar buena.
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'apto'), firmado(9, 'no_apto')]).toca, true);
+  // El orden en que llegan las filas no importa: manda `enviadoEn`.
+  assert.equal(estadoDelDia(HOY, [firmado(9, 'apto'), firmado(7, 'no_apto')]).toca, false);
+});
+
+prueba('la cuenta es por operador y por máquina, no solo por máquina', () => {
+  // Spec 013 / RF-4 y RF-5. Cada quien responde por la máquina que va a manejar,
+  // y es además lo único que funciona sin señal: un teléfono no puede saber lo
+  // que hizo otro.
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'apto', { usuarioId: OTRO_OPERADOR })]).toca, true);
+  assert.equal(estadoDelDia(HOY, [firmado(7, 'apto', { vehiculoId: OTRA_MAQUINA })]).toca, true);
+  // Con las dos cosas mezcladas, solo cuenta la fila que es de este par.
+  assert.equal(
+    estadoDelDia(HOY, [
+      firmado(7, 'apto', { usuarioId: OTRO_OPERADOR }),
+      firmado(8, 'apto', { vehiculoId: OTRA_MAQUINA }),
+      firmado(9, 'apto'),
+    ]).toca,
+    false,
+  );
+});
+
+prueba('el día de trabajo se parte a medianoche, con la fecha del parte diario', () => {
+  // Spec 013 / RF-7. Lo firmado ayer a las 23:00 no revisa la máquina de hoy.
+  const ayer = restarDias(fechaDeJornada(), 1);
+  assert.equal(estadoDelDia(HOY, [firmado(23, 'apto', { dia: ayer })]).toca, true);
+  // Y a las 00:30 de hoy sí cuenta como hoy: el corte es el mismo que el del
+  // parte de obra, no una ventana de 24 horas hacia atrás.
+  assert.equal(estadoDelDia(HOY, [firmado(0, 'apto')]).toca, false);
+});
+
+prueba('cuando ya está hecho, la regla dice a qué hora y cómo salió', () => {
+  // Spec 013 / RF-10. Es lo que la tarjeta del operador tiene que mostrar.
+  const estado = estadoDelDia(HOY, [firmado(7, 'apto_con_observaciones')]);
+  assert.equal(estado.toca, false);
+  if (estado.toca) throw new Error('debería estar hecho');
+  assert.equal(estado.resultado, 'apto_con_observaciones');
+  assert.equal(estado.hechoEn, enJornada(fechaDeJornada(), 7));
+});
+
+prueba('la regla del día no adelanta ni atrasa las revisiones periódicas', () => {
+  // Spec 013 / RF-21. La quincenal se cuenta desde la última vez que se hizo en
+  // esa máquina, y esta regla no entra en esa cuenta: `periodicidadesAplicables`
+  // ni siquiera la recibe. Que el preoperacional de hoy ya esté hecho no acerca
+  // ni aleja la quincenal vencida.
+  // La camioneta, que es el formato vigente que conserva la quincenal: las
+  // cinco máquinas amarillas y la volqueta se quedaron solo con la diaria.
+  const CAMIONETA = FORMATOS_VIGENTES.camioneta;
+  const ultimaQuincenal = Date.now() - 20 * MS_DIA;
+  assert.equal(estadoDelDia(HOY, [firmado(7)]).toca, false);
+  assert.ok(
+    periodicidadesAplicables(Date.now(), CAMIONETA, { quincenal: ultimaQuincenal }).includes(
+      'quincenal',
+    ),
+  );
+  assert.ok(
+    periodicidadesAplicables(Date.now() + MS_DIA, CAMIONETA, {
+      quincenal: ultimaQuincenal,
+    }).includes('quincenal'),
+  );
+});
+
+/** Un formulario recién abierto: la pantalla no ha escrito nada todavía. */
+const FORMULARIO_EN_BLANCO = {
+  respuestas: [] as RespuestaItem[],
+  odometroKm: null,
+  horometroH: null,
+  observaciones: '',
+  fotos: 0,
+};
+
+const UNA_RESPUESTA: RespuestaItem = {
+  itemKey: 'frenos__los_frenos_responden_bien',
+  seccionKey: 'frenos',
+  label: 'Los frenos responden bien',
+  sistema: 'Frenos',
+  tipo: 'conformidad',
+  inmoviliza: true,
+  valor: 'conforme',
+  respondidoEn: Date.now(),
+};
+
+prueba('abrir el formulario y salir sin tocar nada no es trabajo que guardar', () => {
+  // Spec 013 / RF-13 y RF-15. Hoy basta con abrir la pantalla para que quede un
+  // «Sin terminar» en el historial, sobre una máquina que puede estar revisada.
+  assert.equal(borradorTieneContenido(FORMULARIO_EN_BLANCO), false);
+});
+
+prueba('el primer dato que el operador escribe ya es trabajo que guardar', () => {
+  // Spec 013 / RF-14. Cualquiera de los cuatro cuenta: no hay un campo
+  // privilegiado que sea el que "empieza" el preoperacional.
+  assert.equal(
+    borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, respuestas: [UNA_RESPUESTA] }),
+    true,
+  );
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, horometroH: 1420 }), true);
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, odometroKm: 98_300 }), true);
+  assert.equal(
+    borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, observaciones: 'Falta el gato' }),
+    true,
+  );
+  // La foto cuenta como dato: si registrara solo con la primera respuesta, una
+  // foto tomada antes quedaría colgando de una fila que no existe.
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, fotos: 1 }), true);
+});
+
+prueba('unos espacios en las observaciones no son trabajo que guardar', () => {
+  // Spec 013 / RF-14, con el mismo criterio que el parte de obra usa para sus
+  // notas (006/RF-9): lo que se ve en blanco está en blanco.
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, observaciones: '   ' }), false);
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, observaciones: '\n ' }), false);
+});
+
+prueba('un cero en el medidor sí es una lectura, y se guarda', () => {
+  // Spec 013 / RF-14. Un horómetro en 0 es una máquina nueva, no un campo
+  // vacío: la diferencia la marca `null`, no la falsedad del número.
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, horometroH: 0 }), true);
+  assert.equal(borradorTieneContenido({ ...FORMULARIO_EN_BLANCO, odometroKm: 0 }), true);
 });
 
 prueba('una máquina amarilla con el cinturón malo queda NO APTO', () => {
@@ -2729,11 +2916,30 @@ prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
   }
 });
 
-prueba('están los diecisiete cargos, con slug y rótulo únicos', () => {
-  // Quince de la spec 002 más Almacenista y Encargado de Planta (008/RF-14).
-  assert.equal(CARGOS.length, 17);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 17);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 17);
+prueba('están los dieciocho cargos, con slug y rótulo únicos', () => {
+  // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
+  // más Gerente (002/RF-13, añadido el 2026-09-19).
+  assert.equal(CARGOS.length, 18);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 18);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 18);
+});
+
+prueba('el gerente propone acceso de administrador y no lleva celular', () => {
+  // Spec 002 / RF-13, RF-14 y RF-15. Hasta este cambio, la gerencia era el
+  // único nivel de acceso real sin un cargo que lo nombrara: había que dejarla
+  // sin cargo o ponerle «Director», que dirige UNA obra y es otra cosa.
+  assert.equal(nombreDeCargo('gerente'), 'Gerente');
+  assert.equal(rolSugerido('gerente'), 'admin');
+  // Sin máquina, sin código de activación (RF-15, que es RF-8 aplicado aquí).
+  assert.equal(operaVehiculos('gerente'), false);
+});
+
+prueba('el gerente es el único cargo que propone administrador', () => {
+  // Si mañana otro cargo propusiera `admin`, sería un acceso a toda la empresa
+  // repartido sin querer. Que este caso falle es la señal de que alguien lo
+  // hizo sin pensarlo.
+  const alaGerencia = CARGOS.filter((c) => c.rolSugerido === 'admin').map((c) => c.id);
+  assert.deepEqual(alaGerencia, ['gerente']);
 });
 
 prueba('almacenista y encargado de planta proponen su propio acceso', () => {

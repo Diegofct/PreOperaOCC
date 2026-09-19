@@ -32,7 +32,7 @@ import {
   type TipoMovimiento,
 } from '@/shared/rules/almacen';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -49,7 +49,7 @@ import {
   type Columna,
 } from './componentes';
 import type { MaterialDeAlmacenFila, MovimientoDeAlmacenFila } from './contratos';
-import { mensajeDe, useListado } from './marco';
+import { useListado } from './marco';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 

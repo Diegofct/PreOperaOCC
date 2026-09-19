@@ -151,6 +151,12 @@ en verde.
   cree que la app le perdió lo que llevaba escrito.
 - **T5**: `npm run db:generate` responde **«No schema changes, nothing to migrate»**, que es lo
   que preveía el plan: `EstadoSync` es un tipo de TypeScript sobre una columna de texto.
+- **T5, defecto encontrado el 2026-09-18 y corregido** (durante la demo de la spec 012): el
+  estado `descartado` que añadió esta tarea **no estaba contemplado en `EtiquetaResultado`**,
+  la insignia del historial del operador. Caía hasta el `return` final y se pintaba **«Apto»**:
+  un borrador que nadie llenó, abandonado porque el formato cambió, aparecía diciendo que la
+  máquina pasó la inspección. Ahora dice «Descartado». Queda como recordatorio de para qué es
+  T7: la regla pura estaba en verde y la pantalla mentía.
 - **T5, lo que falta comprobar a mano**: que en el teléfono el borrador viejo abra uno nuevo
   con el aviso. Va en T7, con el resto de la demo; desde aquí solo se puede comprobar la regla.
 - **T6**: `npm run db:sembrar:servidor` insertó las cinco versiones nuevas. En Neon quedan

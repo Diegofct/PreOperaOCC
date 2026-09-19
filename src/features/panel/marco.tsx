@@ -22,7 +22,7 @@ import {
 
 import { avisoDeModuloAjeno, sinObraAsignada, type Modulo } from '@/shared/rules/permisos';
 
-import { ErrorApi } from './cliente-api';
+import { ErrorApi, mensajeDe } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
 import { usePersona } from './sesion';
 
@@ -113,18 +113,6 @@ export function useListado<T>(cargar: () => Promise<T[]>): Listado<T> {
   const errorDe = useCallback((campo: string) => camposConError[campo], [camposConError]);
 
   return { datos, cargando, error, recargar, ejecutar, setError, errorDe };
-}
-
-/**
- * El texto que se le puede enseñar a una persona sobre cualquier fallo.
- *
- * `ErrorApi` ya trae el mensaje del servidor, que está redactado para leerse.
- * Un `Error` cualquiera —un fallo del propio navegador— también se muestra: es
- * más útil que un "algo falló" mientras esto corre en desarrollo.
- */
-export function mensajeDe(fallo: unknown): string {
-  if (fallo instanceof Error) return fallo.message;
-  return 'Algo falló. Vuelve a intentarlo.';
 }
 
 /**

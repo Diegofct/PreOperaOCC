@@ -1,0 +1,61 @@
+# Cómo se arranca el panel, aquí y en el VPS.
+#
+# ── Dónde están los secretos ──
+#
+# En un archivo `.env` **junto a este archivo**, en la máquina donde se arranca.
+# Compose lo lee para sustituir las variables de abajo y se las pasa al
+# contenedor al arrancarlo. Nunca entra en la imagen: `.dockerignore` lo deja
+# fuera del contexto de construcción, que es una cosa distinta y aparte.
+#
+# En el VPS ese `.env` tiene las credenciales de **producción**, y en la máquina
+# de desarrollo las de desarrollo. El mismo archivo de compose sirve para las
+# dos, y lo que cambia es el entorno, no lo que se despliega.
+#
+# ── Por qué `:?` detrás de cada variable ──
+#
+# Hace que compose **se niegue a arrancar** si falta alguna, con el mensaje que
+# está escrito. Sin eso, un contenedor puede levantar a medias y fallar más
+# tarde, en la primera petición que necesite lo que falta — y ese fallo aparece
+# lejos de su causa. Mejor no arrancar.
+
+services:
+  panel:
+    build: .
+    image: preoperaocc:ultima
+    container_name: preoperaocc-panel
+
+    # Levantarse solo después de un reinicio del servidor (RF-4). `unless-stopped`
+    # y no `always` a propósito: si alguien lo para a mano para diagnosticar algo,
+    # un reinicio no se lo devuelve encendido a la espalda.
+    restart: unless-stopped
+
+    # **Solo en el bucle local.** Publicado en todas las interfaces, el panel
+    # quedaría accesible por `http://IP:puerto` saltándose el cifrado y el proxy,
+    # que es justo lo que prohíbe RF-2. La única puerta es el proxy del VPS.
+    ports:
+      - '127.0.0.1:${PUERTO_PANEL:-3000}:3000'
+
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?falta la cadena de conexión de la base}
+      SECRETO_TOKENS: ${SECRETO_TOKENS:?falta el secreto que firma los tokens de los celulares}
+      R2_CUENTA_ID: ${R2_CUENTA_ID:?falta la cuenta del almacén de imágenes}
+      R2_BUCKET: ${R2_BUCKET:?falta el bucket del almacén de imágenes}
+      R2_LLAVE_ID: ${R2_LLAVE_ID:?falta la llave del almacén de imágenes}
+      R2_LLAVE_SECRETA: ${R2_LLAVE_SECRETA:?falta el secreto del almacén de imágenes}
+
+    # Informativo: `docker ps` dice si está sano. No reinicia nada por sí solo,
+    # pero es la forma rápida de contestar «¿volvió bien?» después de un
+    # reinicio del VPS, sin abrir el navegador.
+    #
+    # Se consulta con el propio Node porque la imagen no trae `curl` ni `wget`:
+    # es `node:22-slim` con lo justo.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/panel').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

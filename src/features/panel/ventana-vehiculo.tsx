@@ -17,7 +17,7 @@
  */
 import { useState } from 'react';
 
-import { api, ErrorApi } from './cliente-api';
+import { api, ErrorApi, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -36,7 +36,6 @@ import {
   type VehiculoFila,
   type VehiculoNuevo,
 } from './contratos';
-import { mensajeDe } from './marco';
 
 export function VentanaCorregirVehiculo({
   vehiculo,

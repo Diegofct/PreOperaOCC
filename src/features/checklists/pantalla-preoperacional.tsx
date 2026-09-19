@@ -24,12 +24,19 @@ import {
   abrirBorrador,
   cerrarPreoperacional,
   guardarBorrador,
+  registrarSiHaceFalta,
   vehiculoPorId,
   type Borrador,
 } from '@/features/checklists/repositorio';
-import type { Conformidad, ItemChecklist, RespuestaItem } from '@/features/checklists/types';
+import type {
+  Conformidad,
+  ItemChecklist,
+  RespuestaItem,
+  ResultadoPreoperacional,
+} from '@/features/checklists/types';
 import { guardarFirma, guardarFoto, mediaDe } from '@/features/media/repositorio';
 import {
+  borradorTieneContenido,
   evaluarPreoperacional,
   itemsMarcablesEnBloque,
   respuestasDeMedidores,
@@ -51,6 +58,15 @@ type Captura =
 /** Qué medidor está capturando el teclado grande. */
 type MedidorEnCaptura = 'horometro' | 'odometro' | null;
 
+const HORA_DEL_DIA = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+/** En palabras, porque el color nunca es la única señal. */
+const TEXTO_DEL_RESULTADO: Record<ResultadoPreoperacional, string> = {
+  apto: 'APTA',
+  apto_con_observaciones: 'APTA, con novedades',
+  no_apto: 'NO APTA',
+};
+
 export default function PantallaPreoperacional() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -71,6 +87,15 @@ export default function PantallaPreoperacional() {
    * que algo falta.
    */
   const [sinFormato, setSinFormato] = useState(false);
+  /**
+   * Esta máquina ya tuvo su preoperacional hoy (spec 013, RF-8). Se llega aquí
+   * por un enlace directo o por una pantalla que quedó atrás en el historial de
+   * navegación: el inicio y la lista de vehículos ya no ofrecen el botón.
+   */
+  const [yaHecho, setYaHecho] = useState<{
+    hechoEn: number;
+    resultado: ResultadoPreoperacional;
+  } | null>(null);
   const [enviando, setEnviando] = useState(false);
 
   /** ids de `media` por ítem del checklist. */
@@ -92,16 +117,22 @@ export default function PantallaPreoperacional() {
       if (!vehiculo) return;
       const abierto = await abrirBorrador(usuario.id, vehiculo);
       if (cancelado) return;
-      if (!abierto) {
+      if (abierto.tipo === 'sin_formato') {
         setSinFormato(true);
         setCargando(false);
         return;
       }
+      if (abierto.tipo === 'ya_hecho') {
+        setYaHecho({ hechoEn: abierto.hechoEn, resultado: abierto.resultado });
+        setCargando(false);
+        return;
+      }
 
-      setBorrador(abierto);
+      const { borrador: abiertoBorrador } = abierto;
+      setBorrador(abiertoBorrador);
       setRespuestas(
         Object.fromEntries(
-          abierto.respuestas.map((r) => [
+          abiertoBorrador.respuestas.map((r) => [
             r.itemKey,
             {
               valor: typeof r.valor === 'string' ? (r.valor as Conformidad) : null,
@@ -111,12 +142,14 @@ export default function PantallaPreoperacional() {
           ]),
         ),
       );
-      setHorometro(abierto.horometroH != null ? String(abierto.horometroH) : '');
-      setOdometro(abierto.odometroKm != null ? String(abierto.odometroKm) : '');
-      setObservaciones(abierto.observaciones);
+      setHorometro(
+        abiertoBorrador.horometroH != null ? String(abiertoBorrador.horometroH) : '',
+      );
+      setOdometro(abiertoBorrador.odometroKm != null ? String(abiertoBorrador.odometroKm) : '');
+      setObservaciones(abiertoBorrador.observaciones);
 
       // Las evidencias ya capturadas en una sesión anterior del mismo borrador.
-      const evidencias = await mediaDe('preoperacional', abierto.id);
+      const evidencias = await mediaDe('preoperacional', abiertoBorrador.id);
       const porItem: Record<string, string[]> = {};
       for (const evidencia of evidencias) {
         if (evidencia.proposito === 'foto_horometro') setFotoHorometro(evidencia.id);
@@ -198,19 +231,48 @@ export default function PantallaPreoperacional() {
     ];
   }, [borrador, fotosPorItem, horometro, odometro, respuestas, secciones, todosLosItems]);
 
-  /** Autoguardado: nunca se pierde trabajo, aunque Android mate la app. */
+  /** Cuántas evidencias lleva capturadas este borrador. Una foto es un dato. */
+  const fotos = useMemo(
+    () => Object.values(fotosPorItem).reduce((total, ids) => total + ids.length, 0) + (fotoHorometro ? 1 : 0),
+    [fotoHorometro, fotosPorItem],
+  );
+
+  /**
+   * Autoguardado: nunca se pierde trabajo, aunque Android mate la app.
+   *
+   * **Mientras no haya nada escrito no se guarda nada** (spec 013, RF-13 y
+   * RF-15). Este efecto dispara también al montar la pantalla, así que antes
+   * bastaba con abrir el formulario y salir para dejar un «Sin terminar» en el
+   * historial sobre una máquina que a lo mejor ya estaba revisada.
+   */
   const programarGuardado = useCallback(() => {
     if (!borrador || cerrado.current) return;
     if (guardadoPendiente.current) clearTimeout(guardadoPendiente.current);
     guardadoPendiente.current = setTimeout(() => {
-      void guardarBorrador(borrador.id, {
-        respuestas: construirRespuestas(),
-        horometroH: horometro ? Number(horometro) : null,
-        odometroKm: odometro ? Number(odometro) : null,
+      const respuestasDelFormulario = construirRespuestas();
+      const odometroKm = odometro ? Number(odometro) : null;
+      const horometroH = horometro ? Number(horometro) : null;
+
+      if (
+        !borradorTieneContenido({
+          respuestas: respuestasDelFormulario,
+          odometroKm,
+          horometroH,
+          observaciones,
+          fotos,
+        })
+      ) {
+        return;
+      }
+
+      void guardarBorrador(borrador, {
+        respuestas: respuestasDelFormulario,
+        horometroH,
+        odometroKm,
         observaciones,
       });
     }, 400);
-  }, [borrador, construirRespuestas, horometro, odometro, observaciones]);
+  }, [borrador, construirRespuestas, fotos, horometro, odometro, observaciones]);
 
   useEffect(() => {
     programarGuardado();
@@ -269,6 +331,12 @@ export default function PantallaPreoperacional() {
     if (!borrador || !captura) return;
     const destino = captura;
     setCaptura(null);
+
+    // La foto es el único dato que no pasa por `guardarBorrador`, así que aquí
+    // se registra a mano. Sin esto, una foto tomada como primera acción del
+    // formulario quedaría colgando de una fila que no existe: `media.dueno_id`
+    // es texto suelto, sin llave foránea, y nada la detendría (spec 013, RF-14).
+    await registrarSiHaceFalta(borrador);
 
     if (destino.tipo === 'horometro') {
       const id = await guardarFoto(uri, {
@@ -421,6 +489,26 @@ export default function PantallaPreoperacional() {
     } finally {
       setEnviando(false);
     }
+  }
+
+  if (yaHecho) {
+    return (
+      <View style={estilos.centro}>
+        <Text style={estilos.sinFormatoTitulo}>Esta máquina ya se revisó hoy</Text>
+        <Text style={estilos.sinFormatoTexto}>
+          Usted le hizo el preoperacional a las {HORA_DEL_DIA.format(new Date(yaHecho.hechoEn))} y
+          quedó {TEXTO_DEL_RESULTADO[yaHecho.resultado]}. El preoperacional se hace una vez al
+          día: mañana vuelve a aparecer.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={({ pressed }) => [estilos.botonVolver, pressed && estilos.botonVolverPresionado]}
+        >
+          <Text style={estilos.botonVolverTexto}>Volver</Text>
+        </Pressable>
+      </View>
+    );
   }
 
   if (sinFormato) {
@@ -676,6 +764,20 @@ const estilos = StyleSheet.create({
   sinFormatoTexto: {
     fontSize: Texto.base,
     color: Colors.light.textSecondary,
+    textAlign: 'center',
+  },
+  botonVolver: {
+    minHeight: Toque.minimo,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.five,
+    borderRadius: Radio.md,
+    backgroundColor: Marca.primario,
+  },
+  botonVolverPresionado: { opacity: 0.85 },
+  botonVolverTexto: {
+    fontSize: Texto.base,
+    fontWeight: '800',
+    color: Colors.light.background,
     textAlign: 'center',
   },
   encabezado: { padding: Spacing.three, gap: Spacing.three },

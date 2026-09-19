@@ -115,7 +115,7 @@ export function BarraNavegacion() {
               accessibilityLabel="Obras Civiles Colombianas"
             />
             <View style={estilos.separadorMarca} />
-            <Text style={estilos.nombre}>PreOpera</Text>
+            <Text style={estilos.nombre}>Control de Obra</Text>
           </View>
         </View>
 

@@ -17,7 +17,7 @@
  */
 import { useCallback, useState } from 'react';
 
-import { api, ErrorApi } from './cliente-api';
+import { api, ErrorApi, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -41,7 +41,7 @@ import {
   type SitioDeCanteraFila,
   type TipoSitio,
 } from './contratos';
-import { mensajeDe, useListado } from './marco';
+import { useListado } from './marco';
 
 const OPCIONES_DE_TIPO = TIPOS_SITIO.map((t) => ({ valor: t, etiqueta: ETIQUETA_TIPO_SITIO[t] }));
 

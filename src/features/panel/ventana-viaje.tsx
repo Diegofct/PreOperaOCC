@@ -32,7 +32,7 @@ import {
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
 
-import { api, ErrorApi } from './cliente-api';
+import { api, ErrorApi, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -44,7 +44,6 @@ import {
   Selector,
 } from './componentes';
 import { ETIQUETA_TIPO_SITIO, type OpcionesDeCantera, type ViajeRegistrado } from './contratos';
-import { mensajeDe } from './marco';
 
 /** La hora de ahora en la obra, `HH:MM`. */
 function horaDeAhora(): string {

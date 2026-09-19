@@ -15,6 +15,8 @@ import type {
   ResultadoPreoperacional,
 } from '@/features/checklists/types';
 
+import { fechaDeJornada } from './jornada';
+
 const DIAS_QUINCENAL = 15;
 const DIAS_MENSUAL = 30;
 const MS_POR_DIA = 86_400_000;
@@ -65,6 +67,107 @@ export function periodicidadesAplicables(
     aplican.push('mensual');
   }
   return aplican;
+}
+
+/**
+ * Un preoperacional **ya firmado**, visto por la regla del día.
+ *
+ * Solo lo firmado cuenta: un borrador a medio llenar no ha revisado nada, y por
+ * eso `enviadoEn` no es opcional aquí. Lo que el servidor haya recibido o no da
+ * igual — la regla mira lo que el operador firmó en este teléfono, que es la
+ * única información que siempre está disponible sin señal.
+ */
+export interface FirmaDelDia {
+  usuarioId: string;
+  vehiculoId: string;
+  /** Cuándo se firmó, en milisegundos. */
+  enviadoEn: number;
+  resultado: ResultadoPreoperacional;
+}
+
+export type EstadoDelDia =
+  | { toca: true }
+  | { toca: false; hechoEn: number; resultado: ResultadoPreoperacional };
+
+/**
+ * ¿Le toca preoperacional hoy a esta máquina, con este operador?
+ *
+ * El preoperacional es la revisión de antes de arrancar, una por jornada. El
+ * sistema nunca lo había dicho: se podía levantar el mismo formato de la misma
+ * volqueta cuatro veces el mismo día y cada una quedaba como un registro aparte
+ * (spec 013).
+ *
+ * ── Por qué por operador y máquina, y no solo por máquina ──
+ *
+ * Porque cada quien responde por la máquina que va a manejar, y porque es lo
+ * único que funciona sin señal: un teléfono no puede saber lo que hizo otro. Que
+ * dos operadores revisen hoy la misma máquina está permitido a propósito
+ * (RF-5).
+ *
+ * ── Por qué manda el último y no el peor ──
+ *
+ * Una máquina que salió NO APTO a las 7, se reparó y salió APTO a las 9 ya está
+ * revisada. Al revés —APTO primero y NO APTO después— sí vuelve a tocar, porque
+ * la máquina volvió a quedar parada. Y mientras siga saliendo NO APTO se puede
+ * repetir sin tope: ese segundo preoperacional es justamente la constancia de
+ * que la máquina volvió a servir.
+ *
+ * Todo lo que no es `no_apto` cuenta como hecho, sin caso especial. Escrito así,
+ * un resultado que se añadiera mañana bloquearía por omisión, que es el lado
+ * seguro: el error caro es dejar repetir de más, no de menos.
+ */
+export function estadoDelDia(
+  quien: { usuarioId: string; vehiculoId: string; hoy: string },
+  firmados: readonly FirmaDelDia[],
+): EstadoDelDia {
+  let ultimo: FirmaDelDia | null = null;
+
+  for (const firma of firmados) {
+    if (firma.usuarioId !== quien.usuarioId) continue;
+    if (firma.vehiculoId !== quien.vehiculoId) continue;
+    // El día de trabajo es el del parte diario, no una ventana de 24 horas.
+    if (fechaDeJornada(firma.enviadoEn) !== quien.hoy) continue;
+    if (ultimo === null || firma.enviadoEn > ultimo.enviadoEn) ultimo = firma;
+  }
+
+  if (ultimo === null) return { toca: true };
+  if (ultimo.resultado === 'no_apto') return { toca: true };
+  return { toca: false, hechoEn: ultimo.enviadoEn, resultado: ultimo.resultado };
+}
+
+/**
+ * ¿Hay algo escrito en este formulario, o sigue en blanco?
+ *
+ * Es la frontera de cuándo nace el registro (spec 013, RF-13 a RF-15). Hasta
+ * esta spec la fila del preoperacional se insertaba **al abrir la pantalla**, así
+ * que un operador que entraba a mirar y salía dejaba un «Sin terminar» en su
+ * historial sobre una máquina que a lo mejor ya estaba revisada y firmada: un
+ * trabajo pendiente que no existe y que él no tenía forma de quitar.
+ *
+ * Los cuatro campos cuentan por igual y ninguno es el que "empieza" el
+ * preoperacional. Las fotos cuentan porque una foto **es** un dato que el
+ * operador capturó: si el registro naciera solo con la primera respuesta, una
+ * foto tomada antes quedaría colgando de una fila que no existe —`media.dueno_id`
+ * es texto suelto, sin llave foránea, así que nada la detendría—.
+ *
+ * Las observaciones se miran con `trim`: lo que se ve en blanco está en blanco.
+ * Es el mismo criterio con el que el parte de obra decide si sus notas están
+ * vacías (006/RF-9).
+ */
+export function borradorTieneContenido(borrador: {
+  respuestas: readonly RespuestaItem[];
+  odometroKm: number | null;
+  horometroH: number | null;
+  observaciones: string;
+  /** Cuántas evidencias se han capturado ya para este borrador. */
+  fotos: number;
+}): boolean {
+  if (borrador.respuestas.length > 0) return true;
+  // `null` es "no lo escribió"; un cero es una lectura de verdad, y una máquina
+  // nueva marca cero. Por eso se compara contra null y no por falsedad.
+  if (borrador.odometroKm !== null || borrador.horometroH !== null) return true;
+  if (borrador.observaciones.trim() !== '') return true;
+  return borrador.fotos > 0;
 }
 
 /** Los ítems que hay que mostrar hoy, ya filtrados por periodicidad. */

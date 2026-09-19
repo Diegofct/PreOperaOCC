@@ -16,7 +16,7 @@ import { useState } from 'react';
 import { nombreDeUnidad, UNIDADES_ALMACEN, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { rechazoDeCambioDeUnidad } from '@/shared/rules/almacen';
 
-import { api, ErrorApi } from './cliente-api';
+import { api, ErrorApi, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -28,7 +28,6 @@ import {
   Selector,
 } from './componentes';
 import type { MaterialDeAlmacenFila, MaterialEditado } from './contratos';
-import { mensajeDe } from './marco';
 
 export const OPCIONES_DE_UNIDAD = UNIDADES_ALMACEN.map((u) => ({
   valor: u.id,

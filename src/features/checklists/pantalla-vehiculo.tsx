@@ -27,15 +27,20 @@ import { Colors, Estado, Marca, Radio, Spacing, Texto, Toque } from '@/constants
 import { useUsuario } from '@/features/auth/sesion';
 import {
   asignacionesVigentesDe,
+  estadoDelDiaDe,
   type VehiculoAsignado,
   type VehiculoDelOperador,
 } from '@/features/checklists/repositorio';
+import type { EstadoDelDia } from '@/shared/rules/inspeccion';
+
+const HORA_DEL_DIA = new Intl.DateTimeFormat('es-CO', { hour: '2-digit', minute: '2-digit' });
 
 export default function PantallaVehiculo() {
   const router = useRouter();
   const usuario = useUsuario();
 
   const [asignados, setAsignados] = useState<VehiculoDelOperador[]>([]);
+  const [estadosDelDia, setEstadosDelDia] = useState<Map<string, EstadoDelDia>>(new Map());
   const [cargando, setCargando] = useState(true);
   const [escogiendo, setEscogiendo] = useState<string | null>(null);
 
@@ -46,7 +51,16 @@ export default function PantallaVehiculo() {
       const vigentes = await asignacionesVigentesDe(usuario.id);
       if (cancelado) return;
 
+      // Cuáles de esas ya se revisaron hoy (spec 013, RF-8 y RF-11): esas no
+      // ofrecen nada que pulsar, y las demás siguen ofreciendo el suyo.
+      const estados = await estadoDelDiaDe(
+        usuario.id,
+        vigentes.map((vehiculo) => vehiculo.id),
+      );
+      if (cancelado) return;
+
       setAsignados(vigentes);
+      setEstadosDelDia(estados);
       setCargando(false);
     })();
     return () => {
@@ -74,15 +88,19 @@ export default function PantallaVehiculo() {
       {asignados.length > 0 ? (
         <>
           <Text style={estilos.tituloSeccion}>Sus vehículos asignados</Text>
-          {asignados.map((vehiculo) => (
-            <TarjetaVehiculo
-              key={vehiculo.id}
-              vehiculo={vehiculo}
-              autoasignado={vehiculo.origen === 'autoasignada'}
-              ocupado={escogiendo === vehiculo.id}
-              onPress={() => escoger(vehiculo)}
-            />
-          ))}
+          {asignados.map((vehiculo) => {
+            const estado = estadosDelDia.get(vehiculo.id);
+            return (
+              <TarjetaVehiculo
+                key={vehiculo.id}
+                vehiculo={vehiculo}
+                autoasignado={vehiculo.origen === 'autoasignada'}
+                hechoEn={estado && !estado.toca ? estado.hechoEn : null}
+                ocupado={escogiendo === vehiculo.id}
+                onPress={() => escoger(vehiculo)}
+              />
+            );
+          })}
         </>
       ) : (
         <View style={estilos.avisoSinAsignacion}>
@@ -97,24 +115,34 @@ export default function PantallaVehiculo() {
   );
 }
 
+/**
+ * Una máquina de la lista.
+ *
+ * Si ya tuvo su preoperacional hoy **deja de ser pulsable** (spec 013, RF-8):
+ * no es un botón deshabilitado, es que no hay botón. Se pinta como una ficha
+ * con su aviso, y las demás siguen ofreciendo el suyo (RF-11).
+ *
+ * No repite el resultado —solo la hora—: para saber si quedó apta o con
+ * novedades está el historial del inicio, con sus insignias. Aquí la pregunta
+ * es otra, «¿a cuál le falta?», y la lista se lee más rápido sin esa palabra.
+ */
 function TarjetaVehiculo({
   vehiculo,
   autoasignado = false,
+  hechoEn,
   ocupado,
   onPress,
 }: {
   vehiculo: VehiculoAsignado;
   autoasignado?: boolean;
+  hechoEn: number | null;
   ocupado: boolean;
   onPress: () => void;
 }) {
   const noApto = vehiculo.estado === 'no_apto';
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [estilos.tarjeta, pressed && estilos.presionada]}
-    >
+
+  const contenido = (
+    <>
       <View style={estilos.tarjetaTexto}>
         <View style={estilos.tarjetaEncabezado}>
           <Text style={estilos.codigo}>{vehiculo.codigoInterno}</Text>
@@ -129,8 +157,28 @@ function TarjetaVehiculo({
         </Text>
         {vehiculo.placa ? <Text style={estilos.detalle}>Placa {vehiculo.placa}</Text> : null}
         {noApto ? <Text style={estilos.noApto}>Marcado NO APTO por un hallazgo anterior</Text> : null}
+        {hechoEn !== null ? (
+          <Text style={estilos.hecha}>
+            Ya revisada hoy, a las {HORA_DEL_DIA.format(new Date(hechoEn))}
+          </Text>
+        ) : null}
       </View>
-      {ocupado ? <ActivityIndicator color={Marca.primario} /> : <Text style={estilos.flecha}>›</Text>}
+      {ocupado ? <ActivityIndicator color={Marca.primario} /> : null}
+      {hechoEn === null && !ocupado ? <Text style={estilos.flecha}>›</Text> : null}
+    </>
+  );
+
+  if (hechoEn !== null) {
+    return <View style={[estilos.tarjeta, estilos.tarjetaHecha]}>{contenido}</View>;
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [estilos.tarjeta, pressed && estilos.presionada]}
+    >
+      {contenido}
     </Pressable>
   );
 }
@@ -168,6 +216,13 @@ const estilos = StyleSheet.create({
     backgroundColor: Colors.light.backgroundElement,
   },
   presionada: { backgroundColor: Colors.light.backgroundSelected },
+  tarjetaHecha: { backgroundColor: Estado.conformeFondo },
+  hecha: {
+    fontSize: Texto.pie,
+    fontWeight: '700',
+    color: Estado.conforme,
+    marginTop: Spacing.one,
+  },
   tarjetaTexto: { flex: 1, gap: Spacing.half },
   tarjetaEncabezado: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   codigo: { fontSize: Texto.titulo, fontWeight: '800', color: Colors.light.text },
