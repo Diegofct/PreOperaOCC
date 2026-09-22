@@ -7,6 +7,7 @@ import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
+import { horarioEfectivo, type HorarioDeObra } from '@/shared/rules/horas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /**
@@ -15,6 +16,12 @@ import { fechaDeJornada } from '@/shared/rules/jornada';
  * El `GET` responde por día y no por rango: el parte se llena y se lee un día a
  * la vez, y la pantalla se organiza alrededor de una fecha. La gerencia ve el de
  * todas las obras de ese día; el residente, el de la suya.
+ *
+ * Cada parte sale con **el horario con que se calculan sus horas** (spec 016), ya
+ * decidido aquí con `horarioEfectivo`: el que se guardó al cerrarlo, la jornada
+ * anterior si se cerró antes de la spec, o el vigente de su obra si sigue
+ * abierto. Lo decide el servidor y no la pantalla para que el panel y el Inicio
+ * no puedan discrepar sobre las horas extra de un mismo parte.
  */
 
 const COLUMNAS = {
@@ -32,7 +39,23 @@ const COLUMNAS = {
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,
+  horario: partesDeObra.horario,
+  obraNombre: obras.nombre,
+  horarioDeLaObra: obras.horario,
+  usuarioNombre: usuarios.nombreCompleto,
 };
+
+/** Cambia el horario guardado (o su ausencia) y el de la obra por el efectivo. */
+function conHorarioEfectivo<
+  F extends {
+    horario: HorarioDeObra | null;
+    horarioDeLaObra: HorarioDeObra;
+    cerradoEn: Date | null;
+    anuladoEn: Date | null;
+  },
+>({ horarioDeLaObra, ...fila }: F) {
+  return { ...fila, horario: horarioEfectivo(fila, horarioDeLaObra) };
+}
 
 export async function GET(peticion: Request) {
   return responder(async () => {
@@ -46,14 +69,14 @@ export async function GET(peticion: Request) {
     const fecha = pedida ? fechaDeJornadaZod.parse(pedida) : fechaDeJornada();
 
     const filas = await baseServidor()
-      .select({ ...COLUMNAS, obraNombre: obras.nombre, usuarioNombre: usuarios.nombreCompleto })
+      .select(COLUMNAS)
       .from(partesDeObra)
       .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
       .leftJoin(usuarios, eq(usuarios.id, partesDeObra.usuarioId))
       .where(and(eq(partesDeObra.fecha, fecha), filtroDeObra(sesion, partesDeObra.obraId)))
       .orderBy(asc(obras.nombre));
 
-    return ok({ fecha, partes: filas });
+    return ok({ fecha, partes: filas.map(conHorarioEfectivo) });
   });
 }
 
@@ -103,7 +126,7 @@ export async function POST(peticion: Request) {
       });
 
     const [fila] = await baseServidor()
-      .select({ ...COLUMNAS, obraNombre: obras.nombre, usuarioNombre: usuarios.nombreCompleto })
+      .select(COLUMNAS)
       .from(partesDeObra)
       .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
       .leftJoin(usuarios, eq(usuarios.id, partesDeObra.usuarioId))
@@ -116,6 +139,8 @@ export async function POST(peticion: Request) {
       )
       .limit(1);
 
-    return fila ? ok(fila, fila.id === id ? 201 : 200) : errorDePeticion('No se pudo abrir el parte.', 500);
+    return fila
+      ? ok(conHorarioEfectivo(fila), fila.id === id ? 201 : 200)
+      : errorDePeticion('No se pudo abrir el parte.', 500);
   });
 }

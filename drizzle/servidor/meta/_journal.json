@@ -85,6 +85,27 @@
       "when": 1789568394607,
       "tag": "0011_third_vivisector",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790026946727,
+      "tag": "0012_common_karma",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790090505789,
+      "tag": "0013_petite_iron_fist",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790104108292,
+      "tag": "0014_redundant_trauma",
+      "breakpoints": true
     }
   ]
 }

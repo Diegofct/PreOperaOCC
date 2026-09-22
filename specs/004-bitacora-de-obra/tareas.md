@@ -728,3 +728,240 @@ T12, la validación de toda la spec, que incluye cerrar un parte.
 paquete del navegador —respondía por `curl` en 1,5 s y en Chrome las peticiones quedaban
 pendientes para siempre—. Se arregló reiniciando `npm run web`. Conviene descartarlo antes de
 buscar el fallo en el código.
+
+---
+
+## Cambio del 2026-09-22 (RF-78 a RF-89)
+
+Ocho tareas: primero las reglas y el contrato de cada mitad con sus casos, después la
+pantalla, y al final la validación del cambio. T12, la validación de toda la spec, sigue
+yendo al final de todo. Sin migración: los datos nuevos del ensayo van dentro del `jsonb`.
+
+**Actividades**
+
+- [x] T33. El número de ítem vuelve a la etiqueta, y la actividad sin elegir se rechaza.
+      (RF-78, RF-79, RF-81, RF-83)
+      `etiquetaDeActividad` devuelve `«4.1.8 · Descripción»` y su comentario se reescribe;
+      `faltasDeActividad` gana el caso de `clave` vacía («Elija la actividad.»), y el contrato
+      `actividadDelParte` admite `clave` vacía para que el rechazo lo dé esa regla. Los casos
+      de la T31 en `scripts/verificar-reglas.ts` se invierten y se añaden los nuevos.
+      Hecho cuando: en el guion, la etiqueta de la 4.1.8 empieza por «4.1.8 · »,
+      `filtrarOpciones` con «4.1.8» y con «10.1» encuentra la suya, «excavacion» sigue
+      encontrando la 4.1.8, «4.1.9» devuelve la 4.1.9 y la 4.1.96, `faltasDeActividad` con
+      clave vacía da «Elija la actividad.» y `actividadDelParte` con `clave: ''` falla con ese
+      mensaje; los tres comandos en verde.
+
+- [x] T34. Actividades en pantalla: «Otra actividad» primero y fila nueva sin elegir.
+      (RF-78, RF-80, RF-81, RF-82, RF-83)
+      Las opciones de `pantalla-partes.tsx` ponen «Otra actividad» antes de las 31;
+      «Añadir actividad» nace con `clave: ''`; tras pulsar Guardar, una fila sin elegir marca
+      «Elija la actividad.» bajo el selector y no se envía. Se actualiza el comentario de las
+      `opciones`.
+      Hecho cuando: en Chrome, en un parte abierto de PRUEBA-016, la lista empieza por «Otra
+      actividad» y enseña «4.1.8 · …»; «Añadir actividad» sale con el selector vacío; Guardar
+      así marca «Elija la actividad.» sin enviar nada (comprobado con un espía de `fetch`);
+      **no se guarda ninguna actividad**; los tres comandos en verde.
+
+**Ensayos**
+
+- [x] T35. Tipos y regla del ensayo: `faltasDelEnsayo`. (RF-84, RF-85, RF-86, RF-87, RF-88)
+      `EnsayoDelParte` gana `horaInicio?`, `horaFin?`, `responsable?` y
+      `ubicacion?: { pr, metros } | { lugar }`, y se añade `esEnsayoAnterior`. En
+      `src/shared/rules/parte.ts`, `faltasDelEnsayo` devuelve cada falta con su campo y su
+      mensaje (horas, fin no posterior al inicio, responsable, ubicación, PR y metros con
+      `validarAbscisa`, lugar, y la observación de RF-72). Sus casos en el guion.
+      Hecho cuando: en el guion, un ensayo completo con PR y metros y otro con lugar no tienen
+      faltas; sin inicio, sin fin, con fin igual y con fin anterior al inicio, sin
+      responsable, con responsable de solo espacios, sin ubicación, con PR sin metros, con
+      lugar vacío y sin observación dan cada uno su falta en su campo; `esEnsayoAnterior` es
+      verdadero para `{ id, ensayo, nombre, observacion }`; los tres comandos en verde.
+
+- [x] T36. Construcción y contrato del ensayo. (RF-84, RF-86, RF-87, RF-88, RF-89)
+      `EnsayoPedido` con los campos nuevos; `construirEnsayo(pedido, guardado?)` guarda los
+      cuatro datos (responsable y lugar recortados) o, si `guardado` es un ensayo anterior con
+      el mismo id y el pedido no trae datos nuevos, lo construye como antes. `ensayoDelParte`
+      valida la forma: horas `HH:MM`, responsable ≤ 120, PR y metros de las listas, lugar ≤
+      160. `EnsayoDelParteFila` con los campos opcionales. Casos en el guion.
+      Hecho cuando: en el guion, un ensayo nuevo completo sale con sus cuatro datos
+      recortados; uno nuevo sin responsable da `null`; uno con el id de un ensayo anterior y
+      sin datos nuevos sale con su ensayo y su observación y sin los campos nuevos; ninguna
+      ubicación construida tiene PR y lugar a la vez; `ensayoDelParte` rechaza la hora «7.30»
+      y los metros 30; los tres comandos en verde.
+
+- [x] T37. Ruta de guardado: el ensayo con lo guardado y sus faltas. (RF-85, RF-88, RF-89)
+      En `PATCH /api/panel/partes/:id`, cada ensayo se construye con el guardado de su id;
+      si tiene faltas, 400 con todos los mensajes de `faltasDelEnsayo`, uno por renglón.
+      Hecho cuando: tras reiniciar `npm run web`, desde la página y con la sesión de
+      gerencia, un `PATCH` al parte abierto de PRUEBA-016 con un ensayo sin responsable ni
+      ubicación responde 400 con esas dos faltas y **no escribe nada** (el `GET` sigue igual);
+      los tres comandos en verde.
+
+- [x] T38. Ensayo en pantalla: horas, responsable y ubicación. (RF-84, RF-86, RF-87, RF-88)
+      En `SeccionLaboratorio`, cada ensayo nuevo lleva «Inicio» y «Fin» con `SelectorDeHora`,
+      «Responsable», «Ubicación» («PR y metros» u «Otro lugar», arranca en PR) y, según lo
+      elegido, PR y metros de las listas de cantera o «Lugar». Tras Guardar, cada falta se
+      marca bajo su campo con `faltasDelEnsayo` y no se envía nada.
+      Hecho cuando: en Chrome, en el parte abierto de PRUEBA-016, un ensayo nuevo muestra los
+      campos; Guardar vacío marca cada falta; fin antes del inicio se marca; uno con PR 5 +
+      050 y otro con «Otro lugar» se guardan y siguen ahí al recargar; los tres comandos en
+      verde.
+
+- [x] T39. Ensayos anteriores y tabla de solo lectura. (RF-89, RF-84, RF-86, RF-87)
+      Un ensayo anterior se ve en edición con su ensayo y su observación, sin los campos
+      nuevos, y se guarda sin ellos. La tabla de solo lectura pasa a Ensayo, Cuándo y dónde
+      (horas y abscisa o lugar), Responsable y Observación, sumando 720 como hoy; un ensayo
+      anterior deja «—» en lo que no tiene.
+      Hecho cuando: en Chrome, con el `GET` interceptado en la página para quitarle los
+      campos nuevos a un ensayo (y escrituras bloqueadas), ese ensayo se ve sin los campos
+      nuevos y sin error; en el parte anulado del 2026-09-22 de PRUEBA-016, con el `GET`
+      interceptado para añadirle un ensayo completo y uno anterior, la tabla muestra las
+      cuatro columnas sin desplazarse y con «—» en el anterior; los tres comandos en verde.
+
+- [x] T40. Validación del cambio RF por RF con demo. (RF-78 a RF-89)
+      Hecho cuando: cada RF-78 a RF-89 tiene su comprobación con resultado en las notas; con
+      `npm run web` reiniciado, en Chrome, se ve la lista con números y «Otra actividad»
+      primero, se busca por número, se guarda un ensayo completo con PR y metros y otro con
+      lugar, y se comprueba que un parte con ensayos anteriores se sigue guardando; los tres
+      comandos en verde.
+
+### Notas de ejecución del cambio del 2026-09-22
+
+- **T33 (2026-09-22).** Primero las pruebas, que fallaron como se esperaba
+  (`[['clave', 'Falta la actividad.']]` contra el mensaje nuevo). `etiquetaDeActividad` vuelve
+  a `«4.1.8 · Descripción»` con el comentario reescrito (cuenta las dos vueltas: se quitó el
+  2026-09-17 y volvió el 2026-09-22). `faltasDeActividad` recibe `elegida?` —opcional y
+  verdadero por omisión, para que la regla siga sin importar el catálogo y lo guardado no
+  cambie— y, sin elegir, devuelve solo «Elija la actividad.» bajo `clave`. El contrato admite
+  `clave` vacía y pasa `elegida`; se comprobó que el rechazo llega con ese texto también a
+  través de la unión con `actividadConservada` de `parteEditado`. En el guion: los casos de la
+  T31 invertidos («4.1.8» y «10.1» encuentran la suya, «4.1.9» trae la 4.1.9 y la 4.1.96). 241
+  verificaciones (los casos entraron en pruebas existentes). La pantalla todavía no pasa
+  `elegida` ni nace en blanco: es la T34, y también reescribe el comentario de las `opciones`
+  (`pantalla-partes.tsx:1268`), que sigue hablando de RF-75.
+- **T34 (2026-09-22).** Opciones con «Otra actividad» primero; «Añadir actividad» nace con
+  `clave: ''`; el selector pasa `fila.clave || null`, con `vacio="Elija la actividad"`,
+  `obligatorio` y la falta de `clave`; `faltasDe` pasa `elegida`. Comentario de las `opciones`
+  reescrito. Demo en Chrome **en el parte abierto de Consorcio Antioquia del 2026-09-21, no en
+  PRUEBA-016**: ese día ya había un parte abierto y la pantalla no deja a gerencia abrir el de
+  otra obra (el hallazgo anotado en el plan de la tanda). Como la tarea no guarda nada, se usó
+  ese parte con las escrituras bloqueadas en la página. Resultado: la fila nueva sale con
+  «Elija la actividad»; Guardar marca «Elija la actividad.» bajo el selector y el aviso de la
+  sección, sin intentar ningún envío; la lista empieza por «Otra actividad» y sigue «2.8 · …»;
+  «10.1» encuentra «10.1 · Suministro… Acero de refuerzo…», y al elegirla el error se va y la
+  unidad dice «kg». Se recargó sin guardar.
+- Fuera de la tarea: el hallazgo de las dos obras el mismo día sigue sin decidir con Diego. Para
+  las demos que sí guardan (T38) hará falta un día en que no haya parte de otra obra, o abrir
+  primero el de PRUEBA-016.
+- **T35 (2026-09-22).** Primero la prueba, que falló porque la función no existía. En
+  `shared/rules/parte.ts`: `MENSAJES_DE_ENSAYO`, `CampoDeEnsayo`, `UbicacionPorValidar`,
+  `EnsayoEvaluable` (forma mínima, sin importar de `features/`) y `faltasDelEnsayo`, que
+  devuelve las faltas en el orden del formulario: inicio, fin (o «posterior a la de inicio»),
+  responsable, ubicación (o PR, metros o lugar) y observación (RF-72). Los rangos del PR y los
+  metros los dice `validarAbscisa` de cantera; solo se cambian sus dos textos de falta, que
+  dicen «de llegada». En `bitacoras/tipos.ts`: los cuatro campos opcionales de
+  `EnsayoDelParte`, `UbicacionDelEnsayo` y `esEnsayoAnterior` (sin `horaInicio`). Una prueba
+  nueva, 242 verificaciones.
+- **T36 (2026-09-22).** Primero las pruebas: fallaron porque el contrato no conocía
+  `horaInicio`. `construirEnsayo(pedido, guardado?)`: un ensayo nuevo exige
+  `faltasDelEnsayo` vacío y guarda los cuatro datos, con responsable y lugar recortados y solo
+  la forma de ubicación elegida; si `guardado` es un ensayo **anterior** con el mismo id y el
+  pedido no trae datos nuevos, se construye como antes (la observación se sigue exigiendo). Un
+  id de un ensayo que ya tenía datos no abre esa salida. Contrato: `horaDelEnsayo` («HH:MM» o
+  nada), `ubicacionDelEnsayo` como unión de dos objetos **estrictos** (PR y metros de las listas
+  de cantera, o `lugar` ≤ 160; con PR y lugar a la vez se rechaza), `responsable` ≤ 120.
+  `EnsayoDelParteFila` con los campos opcionales. Las pruebas que construían ensayos solo con
+  ensayo y observación pasan ahora `DATOS_DEL_ENSAYO`: desde este cambio eso es un ensayo nuevo
+  incompleto. 243 verificaciones.
+- **Hueco hasta T37, conocido:** la ruta todavía llama a `construirEnsayo` sin lo guardado
+  (vía `conservarHeredadas`), así que en local un ensayo anterior no se podría volver a guardar,
+  y la pantalla (hasta T38) manda ensayos sin los datos nuevos, que ahora se rechazan. Nada de
+  esto está desplegado; T37 y T38 lo cierran.
+- **T37 (2026-09-22).** Primero la prueba de `rechazoDelEnsayo`, que falló porque no existía.
+  Para no volver a escribir en la ruta qué le falta a un ensayo, `construirEnsayo` se apoya
+  ahora en `rechazoDelEnsayo(pedido, guardado?)` (lista vacía = se puede construir) y
+  `vuelveComoAnterior`; la prueba comprueba que las dos dicen lo mismo. La ruta arma un mapa de
+  los ensayos guardados por id (`esEnsayo`) y construye cada uno con el suyo; si alguno no se
+  construye, responde 400 con todos los rechazos, «Ensayo N: …» uno por renglón. 244
+  verificaciones. Demo en Chrome: el servidor tomó el cambio **sin reiniciar**. Un `PATCH` al
+  parte abierto de **Consorcio Antioquia del 2026-09-21** (PRUEBA-016 no tiene ninguno
+  abierto; un `PATCH` rechazado no escribe) con un ensayo sin responsable ni ubicación
+  respondió 400 «Ensayo 1: Escriba quién es el responsable del ensayo.» y «Ensayo 1: Diga dónde
+  se hizo el ensayo: PR y metros, u otro lugar.»; el `GET` del parte, idéntico antes y después
+  (laboratorio vacío). El caso del ensayo anterior que vuelve sin datos nuevos no se pudo ver
+  con datos reales (no hay ensayos guardados): lo cubren las pruebas de T36 y T37.
+- Con T37 queda cerrada la mitad del hueco anotado en T36: la ruta ya pasa lo guardado. La
+  pantalla sigue mandando ensayos sin los datos nuevos hasta T38.
+- **T38 (2026-09-22).** `FilaControlDeCalidad` con horas, responsable, `tipoUbicacion`, PR,
+  metros y lugar; `ENSAYO_EN_BLANCO` (ubicación en «PR y metros», todo lo demás vacío);
+  `ubicacionDe` para la regla y, al enviar, la forma exacta del contrato. Las faltas salen de
+  `faltasDelEnsayo`, la primera de cada campo bajo el suyo. PR y metros con las mismas listas y
+  etiquetas que la ventana de viaje. Demo en Chrome: **el parte se abrió con `POST
+  /api/panel/partes` desde la página** —la pantalla no ofrece abrir otro parte de PRUEBA-016 el
+  2026-09-22 porque ya está el anulado (el mismo hallazgo de las dos obras)—; queda abierto el
+  parte `01a0c99c-159a…` de PRUEBA-016 del 2026-09-22 y su `POST` trajo ya el horario efectivo
+  (06:00–14:00). En él: un ensayo nuevo muestra los campos; Guardar vacío marcó cada falta sin
+  enviar nada; fin 09:00 con inicio 10:00 marcó «La hora de fin tiene que ser posterior a la de
+  inicio.»; se guardaron **Espesor 10:00–11:00, PR 5 + 050** y **Granulometría 07:00–08:00,
+  «Planta de trituración»**, con responsable «Laboratorio Geotecnia (prueba 004)», y al recargar
+  siguen en el `GET` y en pantalla. El envío llevó una sola forma de ubicación por ensayo.
+- Detalles vistos en la demo, fuera de la tarea: (1) un ensayo añadido **después** de un intento
+  de guardar sale ya con todas sus faltas en rojo, porque `intentoGuardar` sigue en verdadero
+  hasta que se guarda; es el comportamiento que la sección ya tenía desde el 2026-09-16. (2) Al
+  escribir «30» en el buscador de minutos del fin quedó «00»; no se repitió en las otras horas y
+  no se investigó. (3) Un ensayo anterior todavía se pintaría con los campos nuevos vacíos y se
+  le exigirían: es T39.
+- **T39 (2026-09-22).** `FilaControlDeCalidad.anterior` (sin `horaInicio` en lo que llega, el
+  mismo criterio que el servidor). Un ensayo anterior se edita con su ensayo y su observación,
+  con un aviso «Registrado antes de que se pidieran las horas, el responsable y el lugar: se
+  conserva así.» y sin los campos nuevos; `faltasDe` solo le mira la observación y viaja como
+  `{ id, ensayo, observacion }`. Tabla de solo lectura: Ensayo o material 200, Cuándo y dónde
+  180 («10:00 a 11:30 · PR 5 + 050»), Responsable 140, Observación o cantidad 200 (720, como
+  antes); «—» donde un anterior o un material no tienen. El estilo `avisoDePersona` (016) pasa a
+  `avisoEnRenglon`, porque ahora lo usan Personal y este aviso.
+  **Cambio sobre el plan, visto en la demo:** con una sola línea por celda se cortaban el
+  responsable y el lugar («Laboratorio Geotecn…»), y la observación, que antes tenía 480 de
+  ancho, se cortaría más que antes. Se les dio `lineas` (3 a cuándo y dónde y al responsable, 6
+  a la observación): es evidencia, y cortada no dice quién ni dónde.
+  Demo en Chrome, con el `GET` interceptado en la página y las escrituras bloqueadas: (1) en el
+  parte abierto de PRUEBA-016, a Espesor se le quitaron los campos nuevos: se vio como anterior,
+  con el aviso y sin los campos; Guardar no marcó faltas y el cuerpo que se intentó mandar llevó
+  Espesor solo con `id`, `ensayo` y `observacion` y Granulometría con sus cuatro datos. (2) El
+  parte anulado del día con tres ensayos simulados (dos completos, uno anterior): la tabla
+  muestra las cuatro columnas sin desplazarse, con los textos enteros en dos renglones y «—» en
+  el anterior. Se recargó al terminar.
+- Que el **servidor** acepte de verdad el ensayo anterior no se pudo ver: no hay ensayos
+  anteriores en la base (lo cubren las pruebas de T36 y T37).
+
+### Validación del cambio del 2026-09-22 (T40)
+
+Comandos: `npm run verificar` → 244 verificaciones correctas; `npm run typecheck` y
+`npm run lint` sin errores (salida 0). El servidor de desarrollo tomó los cambios de la ruta
+sin reiniciar (comprobado en T37: respondía con los textos nuevos). Todo en Chrome, como
+gerencia.
+
+| RF | Qué lo cubre | Resultado |
+| --- | --- | --- |
+| RF-78 | `verificar-reglas.ts:3112` (etiqueta «4.1.8 · …») + Chrome (T34: lista con números; T40: la actividad 4.1.8 guardada el 16 se ve «4.1.8 · Excavación…»). En un parte cerrado o anulado se pinta con el mismo selector, sin editar | verde |
+| RF-79 | `verificar-reglas.ts:3112` («4.1.8», «10.1», «4.1.9» → 4.1.9 y 4.1.96, «excavacion») + Chrome (T34: «10.1» encuentra la suya) | verde |
+| RF-80 | Chrome (T34): la lista empieza por «Otra actividad» | verde |
+| RF-81 | Chrome (T40): las tres actividades del parte de Consorcio del 2026-09-16, guardadas antes del cambio, se ven con su número (4.1.8, 10.1) y «otra» con su texto. No hay actividades anteriores al presupuesto en la base; RF-71 no cambió de código | verde |
+| RF-82 | Chrome (T34): «Añadir actividad» sale con «Elija la actividad» | verde |
+| RF-83 | `verificar-reglas.ts:2949` y `:1508` + Chrome: en pantalla marca «Elija la actividad.» sin enviar (T34); el servidor responde 400 «Elija la actividad.» sin escribir (T40) | verde |
+| RF-84 | `verificar-reglas.ts:2983`, `:1681` + Chrome (T38): Inicio y Fin con los desplegables; guardados 10:00–11:00 y 07:00–08:00 | verde |
+| RF-85 | `verificar-reglas.ts:2983` + Chrome: en pantalla (T38) y en el servidor, 400 «Ensayo 1: La hora de fin tiene que ser posterior a la de inicio.» sin escribir (T40) | verde |
+| RF-86 | `verificar-reglas.ts:2983`, `:1681` + Chrome (T38): responsable escrito, guardado y visible al recargar | verde |
+| RF-87 | `verificar-reglas.ts:2983`, `:1681` + Chrome (T38): uno con PR 5 + 050 y otro con «Planta de trituración»; una sola forma por ensayo en el envío y en lo guardado | verde |
+| RF-88 | `verificar-reglas.ts:2983`, `:1731` + Chrome: cada falta bajo su campo (T38); el servidor responde todas, «Ensayo N: …» (T37) | verde |
+| RF-89 | `verificar-reglas.ts:1681`, `:1731` + Chrome **con datos reales** (T40): los dos ensayos del parte de Consorcio del 2026-09-16, guardados antes del cambio, se ven con el aviso y sin los campos nuevos; guardar la sección respondió 200 y lo guardado quedó **idéntico**. Tabla de solo lectura con «—» (T39, simulado) | verde |
+
+**Datos que quedan de las demos:** el parte abierto de PRUEBA-016 del 2026-09-22 con dos
+ensayos de prueba (T38). El parte de Consorcio del 2026-09-16 se volvió a guardar en T40 sin
+ningún cambio en su contenido.
+
+**Alcance.** Nada fuera del cambio, salvo lo dicho en T39 (varias líneas por celda en la tabla
+de solo lectura, para no cortar el responsable y el lugar). Lo que el cambio dejó fuera sigue
+fuera: no se cruza el parte con el presupuesto, el responsable no se elige de la lista de
+personas y no se completan los ensayos anteriores.
+
+**Veredicto del cambio: cumplido (RF-78 a RF-89).** La spec 004 sigue **En curso**: falta T12,
+la validación de toda la spec, que exige cerrar un parte completo.

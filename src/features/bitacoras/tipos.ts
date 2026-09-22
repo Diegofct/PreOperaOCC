@@ -117,6 +117,11 @@ export interface PersonaDelParte {
   /** "HH:MM". */
   entrada: string | null;
   salida: string | null;
+  /**
+   * Lo que explica sus horas ese día (spec 016, RF-26). Opcional: no impide
+   * cerrar. Ausente en los partes anteriores, que se leen como sin observaciones.
+   */
+  observaciones?: string;
 }
 
 /** Una actividad ejecutada, con sus dimensiones. */
@@ -185,6 +190,29 @@ export interface EnsayoDelParte {
   nombre: string;
   /** Obligatoria: «Sin observaciones» si no hay nada que anotar. */
   observacion: string;
+  /**
+   * Cuándo, quién y dónde (cambio del 2026-09-22, RF-84 a RF-87). Obligatorios en
+   * todo ensayo nuevo, pero **opcionales en el tipo**: los ensayos guardados antes
+   * no los traen, y se conservan así (RF-89).
+   */
+  horaInicio?: string;
+  horaFin?: string;
+  responsable?: string;
+  ubicacion?: UbicacionDelEnsayo;
+}
+
+/** En la vía, a la altura de un PR, u otro lugar escrito (RF-87). Nunca las dos. */
+export type UbicacionDelEnsayo = { pr: number; metros: number } | { lugar: string };
+
+/**
+ * Un ensayo guardado antes del 2026-09-22: todo ensayo nuevo lleva sus horas.
+ *
+ * Por la forma y no por la fecha del parte: un parte de antes del cambio puede
+ * seguir abierto y recibir ensayos nuevos, que sí piden los datos. Es el mismo
+ * criterio que `esActividadHeredada` y `esMaterialHeredado`.
+ */
+export function esEnsayoAnterior(ensayo: EnsayoDelParte): boolean {
+  return !('horaInicio' in ensayo);
 }
 
 /**

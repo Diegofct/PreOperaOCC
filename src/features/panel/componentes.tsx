@@ -46,9 +46,16 @@ import {
 } from '@/constants/theme';
 
 import { colocarLista, type ColocacionDeLista } from '@/shared/rules/flotante';
+import {
+  HORAS_DEL_DIA,
+  minutosOfrecidos,
+  partirHora,
+  unirHora,
+} from '@/shared/rules/horas';
 import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
 
 import { CapaFlotante } from './capa-flotante';
+import type { Orden } from './ordenar';
 
 /* ------------------------------------------------------------------------ */
 /* Texto y avisos                                                          */
@@ -94,23 +101,37 @@ export function Confirmacion({
   confirmar,
   onConfirmar,
   onCancelar,
+  titulo = 'Confirmar',
 }: {
   aviso: string;
   confirmar: string;
   onConfirmar: () => void;
   onCancelar: () => void;
+  titulo?: string;
 }) {
+  /*
+   * En una ventana y no en línea (spec 015, RF-1 a RF-6). Pintada donde la
+   * pantalla la declaraba, salía arriba del todo, lejos del botón pulsado, y con
+   * la tabla al fondo se pasaba por alto: parecía que «Dar de baja» no hacía
+   * nada. La ventana tapa la página con el telón oscuro, no deja tocar lo de
+   * detrás, y Esc, el clic fuera y «Cerrar» equivalen a «Cancelar».
+   *
+   * Quien la usa sigue cerrándola **antes** de ejecutar la acción: así un error
+   * sale en la pantalla, a la vista, y no detrás del telón (RF-7).
+   */
   return (
-    <View style={estilos.confirmacion}>
-      <Text style={estilos.confirmacionSimbolo}>!</Text>
-      <View style={estilos.confirmacionCuerpo}>
-        <Text style={estilos.confirmacionTexto}>{aviso}</Text>
-        <View style={estilos.grupoAcciones}>
-          <Boton titulo={confirmar} tono="peligro" onPress={onConfirmar} />
-          <Boton titulo="Cancelar" tono="secundario" onPress={onCancelar} />
+    <Modal titulo={titulo} onCerrar={onCancelar}>
+      <View style={estilos.confirmacion}>
+        <Text style={estilos.confirmacionSimbolo}>!</Text>
+        <View style={estilos.confirmacionCuerpo}>
+          <Text style={estilos.confirmacionTexto}>{aviso}</Text>
+          <View style={estilos.grupoAcciones}>
+            <Boton titulo={confirmar} tono="peligro" onPress={onConfirmar} />
+            <Boton titulo="Cancelar" tono="secundario" onPress={onCancelar} />
+          </View>
         </View>
       </View>
-    </View>
+    </Modal>
   );
 }
 
@@ -709,6 +730,86 @@ function OpcionDeLista({
 }
 
 /* ------------------------------------------------------------------------ */
+/* Hora                                                                      */
+/* ------------------------------------------------------------------------ */
+
+const OPCIONES_DE_HORA: Opcion[] = HORAS_DEL_DIA.map((h) => ({ valor: h, etiqueta: h }));
+
+/** Lo justo para «hh ▼» y «mm ▼»: dos cifras no piden más. */
+const ANCHO_HORA = 96;
+const ANCHO_MINUTO = 88;
+
+/**
+ * Una hora del día en dos desplegables: la hora y los minutos (spec 016, RF-30).
+ *
+ * Reemplaza al campo de texto «HH:MM», donde se escribía «7.30», «730» o «7:3» y
+ * el error solo aparecía al guardar. Los minutos van de cuarto en cuarto; si la
+ * hora guardada no cae en la rejilla —un «07:10» de antes—, ese minuto se sigue
+ * ofreciendo y se ve tal cual (RF-33).
+ *
+ * Mientras falte una de las dos partes, hacia fuera la hora es `''`: completar el
+ * minuto con «00» sería un valor puesto de antemano (004/RF-44). Lo elegido a
+ * medias vive aquí dentro para que no se pierda al volver a pintar.
+ *
+ * Hecho con dos `Selector` y no con `<input type="time">`: ese acepta cualquier
+ * minuto, se ve distinto en cada navegador y no sigue los tokens del panel.
+ */
+export function SelectorDeHora({
+  etiqueta,
+  valor,
+  onChange,
+  error,
+  obligatorio,
+}: {
+  etiqueta: string;
+  /** «HH:MM», o `''` sin elegir. */
+  valor: string;
+  onChange: (hora: string) => void;
+  error?: string;
+  obligatorio?: boolean;
+}) {
+  const [partes, setPartes] = useState(() => partirHora(valor));
+  const [valorVisto, setValorVisto] = useState(valor);
+
+  // Si la hora cambia desde fuera (se recargó el parte, se quitó una fila), se
+  // vuelve a partir. Se hace al pintar y no con un efecto, para no pintar una vez
+  // la hora vieja. Lo elegido a medias no se pisa: hacia fuera sigue siendo `''`.
+  if (valor !== valorVisto) {
+    setValorVisto(valor);
+    if (valor !== unirHora(partes.hora, partes.minuto)) setPartes(partirHora(valor));
+  }
+
+  function elegir(nuevas: { hora: string | null; minuto: string | null }) {
+    setPartes(nuevas);
+    onChange(unirHora(nuevas.hora, nuevas.minuto));
+  }
+
+  return (
+    <View style={estilos.hora}>
+      <Selector
+        etiqueta={etiqueta}
+        obligatorio={obligatorio}
+        valor={partes.hora}
+        opciones={OPCIONES_DE_HORA}
+        onChange={(hora) => elegir({ ...partes, hora })}
+        vacio="hh"
+        error={error}
+        ancho={ANCHO_HORA}
+      />
+      <Text style={estilos.horaSeparador}>:</Text>
+      <Selector
+        etiqueta="min"
+        valor={partes.minuto}
+        opciones={minutosOfrecidos(valor).map((m) => ({ valor: m, etiqueta: m }))}
+        onChange={(minuto) => elegir({ ...partes, minuto })}
+        vacio="mm"
+        ancho={ANCHO_MINUTO}
+      />
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
 /* Tabla                                                                     */
 /* ------------------------------------------------------------------------ */
 
@@ -717,6 +818,13 @@ export interface Columna<T> {
   titulo: string;
   ancho: number;
   pintar: (fila: T) => ReactNode;
+  /**
+   * El texto por el que se ordena esta columna (spec 015). Sin él, la columna no
+   * se ordena. Es lo que se **ve** en la celda —el cargo por su nombre, no por su
+   * identificador—: ordenar por algo que la pantalla no enseña deja un orden que
+   * nadie entiende.
+   */
+  ordenar?: (fila: T) => string | null | undefined;
 }
 
 export function Tabla<T extends { id: string }>({
@@ -724,6 +832,8 @@ export function Tabla<T extends { id: string }>({
   filas,
   vacio,
   variante = 'tarjeta',
+  orden,
+  alOrdenar,
 }: {
   columnas: Columna<T>[];
   filas: T[];
@@ -738,6 +848,13 @@ export function Tabla<T extends { id: string }>({
    * usan no cambian ni un píxel.
    */
   variante?: 'tarjeta' | 'desnuda';
+  /**
+   * Por qué columna está ordenada la tabla, y qué hacer al pulsar un título
+   * (spec 015). Sin `alOrdenar` los títulos son texto y la tabla se pinta como
+   * siempre: solo ordenan las pantallas que lo piden.
+   */
+  orden?: Orden;
+  alOrdenar?: (clave: string) => void;
 }) {
   if (filas.length === 0) {
     return (
@@ -764,11 +881,21 @@ export function Tabla<T extends { id: string }>({
     >
       <View style={estilos.tablaCuerpo}>
         <View style={estilos.tablaCabecera}>
-          {columnas.map((columna) => (
-            <Text key={columna.clave} style={[estilos.tablaTitulo, { width: columna.ancho }]}>
-              {columna.titulo}
-            </Text>
-          ))}
+          {columnas.map((columna) =>
+            alOrdenar && columna.ordenar ? (
+              <TituloOrdenable
+                key={columna.clave}
+                titulo={columna.titulo}
+                ancho={columna.ancho}
+                sentido={orden?.clave === columna.clave ? orden.sentido : null}
+                onPress={() => alOrdenar(columna.clave)}
+              />
+            ) : (
+              <Text key={columna.clave} style={[estilos.tablaTitulo, { width: columna.ancho }]}>
+                {columna.titulo}
+              </Text>
+            ),
+          )}
         </View>
         {filas.map((fila, indice) => (
           <Fila key={fila.id} alterna={indice % 2 === 1}>
@@ -781,6 +908,54 @@ export function Tabla<T extends { id: string }>({
         ))}
       </View>
     </ScrollView>
+  );
+}
+
+/**
+ * El título de una columna que se puede ordenar (spec 015, RF-9 a RF-11).
+ *
+ * La flecha va en el texto y no solo en un cambio de color: el color nunca es la
+ * única señal. ▲ es de la A a la Z y ▼ de la Z a la A; la columna por la que no se
+ * está ordenando no lleva flecha, y se reconoce como pulsable por el cursor y el
+ * realce al pasar por encima.
+ */
+function TituloOrdenable({
+  titulo,
+  ancho,
+  sentido,
+  onPress,
+}: {
+  titulo: string;
+  ancho: number;
+  sentido: 'asc' | 'desc' | null;
+  onPress: () => void;
+}) {
+  const flecha = sentido === 'asc' ? ' ▲' : sentido === 'desc' ? ' ▼' : '';
+  const explicacion =
+    sentido === 'asc'
+      ? 'ordenada de la A a la Z; pulse para invertir'
+      : sentido === 'desc'
+        ? 'ordenada de la Z a la A; pulse para invertir'
+        : 'pulse para ordenar';
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${titulo}, ${explicacion}`}
+      style={{ width: ancho }}
+    >
+      {({ hovered }) => (
+        <Text
+          style={[
+            estilos.tablaTitulo,
+            (sentido !== null || hovered) && estilos.tablaTituloActivo,
+          ]}
+        >
+          {titulo}
+          {flecha}
+        </Text>
+      )}
+    </Pressable>
   );
 }
 
@@ -1383,6 +1558,15 @@ const estilos = StyleSheet.create({
   enfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
   campoEntradaMal: { borderColor: Estado.noConforme },
   campoError: { fontSize: TextoPanel.apoyo, color: Estado.noConforme, fontWeight: '600' },
+  /** Los dos desplegables de una hora, alineados por abajo con el separador. */
+  hora: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.one },
+  horaSeparador: {
+    // A la altura de los botones: debajo de la etiqueta, centrado en la caja.
+    marginTop: Spacing.four + Spacing.one,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '700',
+    color: Colors.light.textSecondary,
+  },
   campoAyuda: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
 
   selectorBoton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -1443,6 +1627,8 @@ const estilos = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.light.textSecondary,
   },
+  /** La columna por la que se ordena, o la que está bajo el cursor. */
+  tablaTituloActivo: { color: Colors.light.text },
   tablaFila: {
     flexDirection: 'row',
     alignItems: 'center',

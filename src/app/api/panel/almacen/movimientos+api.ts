@@ -72,7 +72,13 @@ export async function POST(peticion: Request) {
     // RF-10: la fecha posterior a hoy se mira aquí, con el día de la obra, y con
     // la misma regla que usa el formulario.
     const faltas = validarMovimiento(
-      { tipo: datos.tipo, fecha: datos.fecha, cantidad: datos.cantidad, paraQue },
+      {
+        tipo: datos.tipo,
+        fecha: datos.fecha,
+        cantidad: datos.cantidad,
+        paraQue,
+        responsable: datos.responsable,
+      },
       fechaDeJornada(),
     );
     if (faltas.length > 0) {
@@ -114,6 +120,8 @@ export async function POST(peticion: Request) {
             cantidad: datos.cantidad,
             paraQue,
             observacion: datos.tipo === 'ingreso' ? datos.observacion : null,
+            // RF-40 y RF-41: quién entregó o recibió, del otro lado del mostrador.
+            responsable: datos.responsable,
             // RF-27 y RF-30: quien responde por el movimiento es quien tiene la sesión.
             registradoPor: sesion.id,
           }),

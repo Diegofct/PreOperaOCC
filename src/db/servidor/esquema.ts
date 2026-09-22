@@ -59,6 +59,7 @@ import type {
 } from '../../features/bitacoras/tipos';
 import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
 import type { Cargo } from '../../shared/catalogos/cargos';
+import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
 import { ROLES } from '../../shared/rules/permisos';
 import type {
   PlantillaChecklist,
@@ -146,6 +147,25 @@ export const obras = pgTable(
     nombre: text('nombre').notNull(),
     municipio: text('municipio'),
     activa: boolean('activa').notNull().default(true),
+    /**
+     * El horario acordado en la obra (spec 016): contra él se cuentan las horas
+     * extra de su gente. Not null con el propuesto por defecto, y no nulo con el
+     * propuesto «en el código»: cada lectura tendría que acordarse del respaldo, y
+     * la que se olvide calcula con otro horario sin que se note. El default es
+     * además lo que les dio horario a las obras que ya existían (RF-9).
+     */
+    horario: jsonb('horario').$type<HorarioDeObra>().notNull().default(HORARIO_PROPUESTO),
+    /**
+     * Qué módulos lleva esta obra (spec 017): hay obras sin almacén propio y obras
+     * que no mueven material de cantera, y para ellas esos dos módulos son ruido.
+     *
+     * Not null con default `true`, y ese default **es** RF-2: deja encendidas las
+     * obras que ya existían sin tocar ninguna fila. Apagar no borra nada —lo
+     * registrado sigue en su tabla y vuelve a verse al encender (RF-14, RF-15)—:
+     * esto solo decide quién ve el módulo y dónde se puede registrar.
+     */
+    almacenActivo: boolean('almacen_activo').notNull().default(true),
+    canteraActivo: boolean('cantera_activo').notNull().default(true),
     eliminadoEn: eliminadoEn(),
     creadoEn: creadoEn(),
     actualizadoEn: actualizadoEn(),
@@ -535,6 +555,15 @@ export const partesDeObra = pgTable(
      * afirmarían que no hubo viajes un día que nadie contó.
      */
     cantera: jsonb('cantera').$type<ViajeDelParte[]>(),
+    /**
+     * El horario de la obra con que se calcularon las horas del personal, fijado
+     * al cerrar o anular el parte (spec 016, RF-23 y RF-24). Nulo y sin default por
+     * lo mismo que `cantera`: `null` es «todavía abierto» —manda el horario vigente
+     * de la obra— o «cerrado antes de esta spec» —manda `HORARIO_ANTERIOR`—, y
+     * `cerrado_en` distingue los dos. Un parte cerrado es evidencia: sus horas no
+     * pueden cambiar porque después se corrija el horario de la obra.
+     */
+    horario: jsonb('horario').$type<HorarioDeObra>(),
     notas: text('notas'),
     /**
      * Un domingo o un paro por lluvia: el día se cierra sin máquinas ni
@@ -682,6 +711,16 @@ export const almacenMovimientos = pgTable(
     paraQue: text('para_que'),
     /** Nota libre de un ingreso (RF-8). */
     observacion: text('observacion'),
+    /**
+     * Quién entregó lo que ingresa o quién recibió lo que sale, escrito a mano
+     * (cambio del 2026-09-22, RF-40 y RF-41). El rótulo cambia con el tipo; el dato es
+     * el mismo: la persona del otro lado del mostrador, que no siempre tiene cuenta.
+     *
+     * **Nula a propósito**: los movimientos anteriores no lo tienen y no se inventa
+     * (RF-44). Que sea obligatorio en los nuevos lo exigen la regla y el contrato; un
+     * `NOT NULL` obligaría a escribir en la evidencia un nombre que nadie dijo.
+     */
+    responsable: text('responsable'),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),

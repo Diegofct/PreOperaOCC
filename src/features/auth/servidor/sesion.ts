@@ -20,9 +20,9 @@ import { and, eq, gt, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { sesionesWeb, usuarios } from '@/db/servidor/esquema';
+import { obras, sesionesWeb, usuarios } from '@/db/servidor/esquema';
 
-import type { Rol } from '@/shared/rules/permisos';
+import { TODOS_LOS_MODULOS, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
 
 import { hashDeToken, tokenAleatorio } from './cripto';
 
@@ -40,6 +40,15 @@ export interface PersonaEnSesion {
   nombreCompleto: string;
   rol: Rol;
   obraId: string | null;
+  /**
+   * Los módulos que lleva su obra (spec 017). Viajan con la sesión y no se
+   * consultan en cada ruta: la lectura de la sesión ya va a la base en cada
+   * petición y los trae en el mismo `join`. Repartir esa consulta por veinte rutas
+   * es la forma de que un día falte en una.
+   *
+   * Los dos encendidos para quien no tiene obra (la gerencia).
+   */
+  modulosDeObra: ModulosDeObra;
   debeCambiarClave: boolean;
 }
 
@@ -110,11 +119,15 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
       nombreCompleto: usuarios.nombreCompleto,
       rol: usuarios.rol,
       obraId: usuarios.obraId,
+      almacenActivo: obras.almacenActivo,
+      canteraActivo: obras.canteraActivo,
       activo: usuarios.activo,
       eliminadoEn: usuarios.eliminadoEn,
     })
     .from(sesionesWeb)
     .innerJoin(usuarios, eq(usuarios.id, sesionesWeb.usuarioId))
+    // `left`: la gerencia no está adscrita a ninguna obra.
+    .leftJoin(obras, eq(obras.id, usuarios.obraId))
     .where(
       and(
         eq(sesionesWeb.hashCookie, await hashDeToken(token)),
@@ -141,6 +154,9 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
     nombreCompleto: fila.nombreCompleto,
     rol: fila.rol,
     obraId: fila.obraId,
+    modulosDeObra: fila.obraId
+      ? { almacen: fila.almacenActivo ?? true, cantera: fila.canteraActivo ?? true }
+      : TODOS_LOS_MODULOS,
     // Lo rellena `guardia.ts`, que es quien consulta la credencial.
     debeCambiarClave: false,
   };

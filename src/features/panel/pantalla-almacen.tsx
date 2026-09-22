@@ -28,6 +28,12 @@
  * Se señala con la etiqueta «Sin stock», con texto además del color (RF-19). Es
  * justo el material que hay que pedir, y desaparecer de la tabla sería lo último
  * que conviene.
+ *
+ * ── Descargar en Excel (cambio del 2026-09-22) ──
+ *
+ * Lo ve todo el que ve el almacén (RF-45). La gerencia descarga la obra que tenga
+ * en el filtro, o todas si no eligió ninguna: lo mismo que está mirando. Qué dice
+ * el archivo lo decide el servidor; aquí solo se pide y se guarda.
  */
 import { useCallback, useState } from 'react';
 
@@ -36,7 +42,7 @@ import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/mater
 import { formatearCantidad, rechazoDeBaja, type TipoMovimiento } from '@/shared/rules/almacen';
 import { alcanza } from '@/shared/rules/permisos';
 
-import { api } from './cliente-api';
+import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -79,6 +85,24 @@ const OPCIONES_DE_MATERIAL = [
   ...MATERIALES_DE_OCC.map((m) => ({ valor: m, etiqueta: m })),
 ];
 
+/**
+ * Guarda un archivo en el equipo de quien lo pidió, con un enlace temporal.
+ *
+ * El panel es de navegador, y así es como un navegador guarda lo que ya tiene en
+ * memoria. El enlace se libera un momento después y no en el acto: revocarlo en el
+ * mismo instante cancela la descarga en algunos navegadores.
+ */
+function guardarArchivo(contenido: Blob, nombre: string) {
+  const url = URL.createObjectURL(contenido);
+  const enlace = document.createElement('a');
+  enlace.href = url;
+  enlace.download = nombre;
+  document.body.appendChild(enlace);
+  enlace.click();
+  enlace.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export default function PantallaAlmacen() {
   const { rol } = usePersona();
   const puedeRegistrar = alcanza(rol, 'almacen', 'escribir');
@@ -91,6 +115,9 @@ export default function PantallaAlmacen() {
   const obras = useListado<ObraFila>(
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
+  // Solo las que llevan almacén: en las demás no hay dónde registrar ni qué ver
+  // (spec 017, RF-10).
+  const obrasConAlmacen = obras.datos.filter((o) => o.almacenActivo);
 
   /**
    * Lo elegido en la lista de OCC: un nombre, o «Otro» (RF-32, RF-33). `nombre`
@@ -133,6 +160,21 @@ export default function PantallaAlmacen() {
   }
   const [porDarDeBaja, setPorDarDeBaja] = useState<MaterialDeAlmacenFila | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
+  const [descargando, setDescargando] = useState(false);
+
+  async function descargarExcel() {
+    setHecho(null);
+    setDescargando(true);
+    try {
+      const { contenido, nombre } = await api.almacen.descargar(esGerencia ? obraFiltro : null);
+      guardarArchivo(contenido, nombre);
+    } catch (fallo) {
+      // Arriba de la página, como los demás fallos del almacén.
+      materiales.setError(mensajeDe(fallo));
+    } finally {
+      setDescargando(false);
+    }
+  }
 
   async function registrar() {
     if (!unidad || nombreRegistrado === '') return;
@@ -288,7 +330,7 @@ export default function PantallaAlmacen() {
                 etiqueta="Obra"
                 obligatorio
                 valor={obraId}
-                opciones={obras.datos.map((o) => ({
+                opciones={obrasConAlmacen.map((o) => ({
                   valor: o.id,
                   etiqueta: o.nombre,
                   detalle: o.codigo,
@@ -367,13 +409,21 @@ export default function PantallaAlmacen() {
             <Selector
               etiqueta="Obra"
               valor={obraFiltro}
-              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
+              opciones={obrasConAlmacen.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
               onChange={setObraFiltro}
               permiteVacio
               vacio="Todas las obras"
               ancho={200}
             />
           ) : null}
+          <AccionesFormulario>
+            <Boton
+              titulo={descargando ? 'Preparando el archivo…' : 'Descargar en Excel'}
+              tono="secundario"
+              onPress={descargarExcel}
+              deshabilitado={descargando}
+            />
+          </AccionesFormulario>
         </BarraDeListado>
 
         <Tabla

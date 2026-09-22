@@ -53,6 +53,10 @@ import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/share
 import {
   alcanza,
   avisoDeModuloAjeno,
+  avisoDeModuloApagado,
+  moduloApagado,
+  motivoParaNoDarRolEnObra,
+  ROLES,
   moduloDeEntrada,
   MODULOS,
   motivoDeRechazo,
@@ -61,6 +65,7 @@ import {
   modulosVisibles,
   puedeCambiarRol,
   type Rol,
+  TODOS_LOS_MODULOS,
 } from '../src/shared/rules/permisos';
 import {
   CARGOS,
@@ -93,11 +98,25 @@ import {
 } from '../src/shared/rules/festivos';
 import {
   cubrenLaJornada,
+  describirHorarioDelDia,
   desglosarJornada,
+  HORARIO_ANTERIOR,
+  HORARIO_PROPUESTO,
+  horarioEfectivo,
+  HORAS_DEL_DIA,
+  MAXIMO_MINUTOS_SEMANALES,
+  mensajeDeHorarioDeObra,
   minutosCubiertos,
   minutosDeHora,
+  minutosOfrecidos,
+  minutosSemanales,
+  partirHora,
+  unirHora,
+  tramosDelDia,
   validarFranjas,
   validarHorario,
+  validarHorarioDeObra,
+  type HorarioDeObra,
 } from '../src/shared/rules/horas';
 import {
   ENSAYOS_DE_CALIDAD,
@@ -152,7 +171,9 @@ import {
   bloqueosDelCierre,
   faltaObservacionDelEnsayo,
   faltasDeActividad,
+  faltasDelEnsayo,
   MENSAJES_DE_ACTIVIDAD,
+  MENSAJES_DE_ENSAYO,
   mensajeDeDiaSinTrabajo,
   mensajeDelRechazoDeCierre,
   resolverDiaSinTrabajo,
@@ -169,6 +190,7 @@ import {
   filtrarMovimientos,
   formatearCantidad,
   historialConSaldo,
+  MENSAJES_DE_MOVIMIENTO,
   rechazoDeAnulacion,
   rechazoDeBaja,
   rechazoDeCambioDeUnidad,
@@ -193,12 +215,15 @@ import {
   conservarHeredadas,
   construirActividadDelParte,
   construirEnsayo,
+  rechazoDelEnsayo,
   construirMaquina,
+  construirPersona,
   esActividadHeredada,
   esMaterialHeredado,
 } from '../src/features/bitacoras/parte';
 import {
   esEnsayo,
+  esEnsayoAnterior,
   type ActividadDelParte,
   type FilaDeControlDeCalidad,
 } from '../src/features/bitacoras/tipos';
@@ -211,11 +236,21 @@ import {
   materialEditado,
   materialNuevo,
   movimientoNuevo,
+  obraEditada,
+  obraNueva,
   parteEditado,
+  personaDelParte,
+  personaEditada,
   sitioEditado,
   sitioNuevo,
   viajeNuevo,
 } from '../src/features/panel/contratos';
+import {
+  leerOrdenGuardado,
+  ordenarFilas,
+  ordenTrasPulsar,
+  type Orden,
+} from '../src/features/panel/ordenar';
 
 import camioneta from '../src/features/checklists/plantillas/camioneta.v3.json';
 import retroexcavadora from '../src/features/checklists/plantillas/retroexcavadora.v2.json';
@@ -226,6 +261,14 @@ import retrocargadorAnterior from '../src/features/checklists/plantillas/retroca
 import retroexcavadoraAnterior from '../src/features/checklists/plantillas/retroexcavadora.v1.json';
 import volquetaAnterior from '../src/features/checklists/plantillas/volqueta.v2.json';
 import { ITEMS_NUEVOS, ITEMS_RETIRADOS } from '../src/features/checklists/plantillas/ajustes';
+import {
+  ENCABEZADOS_EXISTENCIAS,
+  ENCABEZADOS_MOVIMIENTOS,
+  hojasDelAlmacen,
+  nombreDelArchivo,
+  type MaterialParaExportar,
+  type MovimientoParaExportar,
+} from '../src/features/almacen-obra/exportar';
 
 const VOLQUETA = volqueta as PlantillaChecklist;
 const CAMIONETA = camioneta as PlantillaChecklist;
@@ -1418,6 +1461,14 @@ prueba('el rechazo del cierre nombra todo lo que falta, no solo lo primero', () 
   assert.equal(mensajeDelRechazoDeCierre(muchos).split('\n').length, 21);
 });
 
+/** Cuándo, quién y dónde de un ensayo completo (cambio 2026-09-22). */
+const DATOS_DEL_ENSAYO = {
+  horaInicio: '08:00',
+  horaFin: '09:30',
+  responsable: 'Laboratorio Geotecnia S.A.S.',
+  ubicacion: { pr: 5, metros: 50 } as { pr: number; metros: number } | { lugar: string } | null,
+};
+
 /* ── Guardar el parte (spec 004, T16) ── */
 
 prueba('guardar una sección no borra las notas del día', () => {
@@ -1469,6 +1520,18 @@ prueba('el contrato del parte pide unidad a «otra» y observación a cada ensay
   const delPresupuesto = actividadDelParte.parse({ ...actividad, clave: '4.1.8' });
   assert.equal(delPresupuesto.cantidad, null);
   assert.equal(actividadDelParte.safeParse({ ...actividad, clave: '10.1', cantidad: -3 }).success, false);
+  // Sin elegir (RF-83): el rechazo lo da la regla, con su texto y bajo `clave`, y es
+  // el mismo que responde el servidor a través de la unión con la conservada.
+  assert.deepEqual(
+    camposCon(actividadDelParte.safeParse({ ...actividad, clave: '' })),
+    [['clave', MENSAJES_DE_ACTIVIDAD.sinElegir]],
+  );
+  const sinElegir = parteEditado.safeParse({ actividades: [{ ...actividad, clave: '  ' }] });
+  assert.equal(sinElegir.success, false);
+  assert.ok(
+    JSON.stringify(sinElegir.error?.issues).includes(MENSAJES_DE_ACTIVIDAD.sinElegir),
+    'el guardado del parte dice «Elija la actividad.»',
+  );
 
   // Un ensayo sin observación: bajo `observacion`, con el texto de la regla.
   assert.deepEqual(
@@ -1479,6 +1542,25 @@ prueba('el contrato del parte pide unidad a «otra» y observación a cada ensay
   assert.deepEqual(camposCon(ensayoDelParte.safeParse({ observacion: 'x' })).map(([c]) => c), ['ensayo']);
   // Solo el id: una fila heredada que se conserva.
   assert.equal(ensayoDelParte.safeParse({ id: 'mat-1' }).success, true);
+  // La forma de los datos nuevos (cambio 2026-09-22): hora HH:MM, PR y metros de
+  // las listas de cantera, responsable y lugar con tope. Que falten lo decide el
+  // servidor con lo guardado, no el contrato (RF-89).
+  const completo = { ensayo: 'espesor', observacion: 'x', ...DATOS_DEL_ENSAYO };
+  assert.equal(ensayoDelParte.safeParse(completo).success, true);
+  assert.equal(ensayoDelParte.safeParse({ ensayo: 'espesor', observacion: 'x' }).success, true);
+  assert.deepEqual(
+    camposCon(ensayoDelParte.safeParse({ ...completo, horaInicio: '7.30' })).map(([c]) => c),
+    ['horaInicio'],
+  );
+  assert.equal(ensayoDelParte.safeParse({ ...completo, ubicacion: { pr: 5, metros: 30 } }).success, false);
+  assert.equal(ensayoDelParte.safeParse({ ...completo, ubicacion: { pr: 26, metros: 0 } }).success, false);
+  assert.equal(ensayoDelParte.safeParse({ ...completo, ubicacion: { lugar: 'Planta' } }).success, true);
+  assert.equal(
+    ensayoDelParte.safeParse({ ...completo, ubicacion: { pr: 5, metros: 0, lugar: 'Planta' } }).success,
+    false,
+  );
+  assert.equal(ensayoDelParte.safeParse({ ...completo, responsable: 'x'.repeat(121) }).success, false);
+  assert.equal(ensayoDelParte.safeParse({ ...completo, ubicacion: { lugar: 'x'.repeat(161) } }).success, false);
 
   // En el parte: el mismo ensayo dos veces y un material heredado por su id.
   const parte = parteEditado.parse({
@@ -1594,20 +1676,99 @@ prueba('una actividad del presupuesto se guarda con lo que dice el catálogo', (
 });
 
 prueba('un ensayo se guarda con su nombre y su observación, y puede repetirse', () => {
-  // Spec 004, RF-61, RF-72 y RF-73.
-  const densidad = construirEnsayo({ ensayo: 'densidad_en_campo', observacion: '  98 %, PR 5 + 300 ' })!;
+  // Spec 004, RF-61, RF-72 y RF-73. Desde el 2026-09-22 todo ensayo nuevo lleva
+  // además sus horas, su responsable y su ubicación (RF-84 a RF-87).
+  const densidad = construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'densidad_en_campo', observacion: '  98 %, PR 5 + 300 ' })!;
   assert.equal(densidad.ensayo, 'densidad_en_campo');
   assert.equal(densidad.nombre, 'Densidad en campo');
   assert.equal(densidad.observacion, '98 %, PR 5 + 300');
   assert.ok(esEnsayo(densidad));
   assert.ok(densidad.id.length > 0);
   // Dos del mismo ensayo: dos filas distintas.
-  const otraDensidad = construirEnsayo({ ensayo: 'densidad_en_campo', observacion: 'Sin observaciones' })!;
+  const otraDensidad = construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'densidad_en_campo', observacion: 'Sin observaciones' })!;
   assert.notEqual(otraDensidad.id, densidad.id);
   // Un ensayo que no es de la lista, o sin observación, no se construye.
-  assert.equal(construirEnsayo({ ensayo: 'cemento', observacion: 'x' }), null);
-  assert.equal(construirEnsayo({ ensayo: 'espesor', observacion: '  ' }), null);
+  assert.equal(construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'cemento', observacion: 'x' }), null);
+  assert.equal(construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: '  ' }), null);
   assert.equal(construirEnsayo({ id: 'mat-1' }), null);
+});
+
+prueba('un ensayo nuevo guarda cuándo, quién y dónde; uno anterior se conserva sin ellos', () => {
+  // Spec 004, RF-84 a RF-89 (cambio 2026-09-22).
+  const conPr = construirEnsayo({
+    ensayo: 'densidad_en_campo',
+    observacion: '98 %',
+    horaInicio: '08:00',
+    horaFin: '09:30',
+    responsable: '  Laboratorio Geotecnia S.A.S. ',
+    ubicacion: { pr: 5, metros: 50 },
+  })!;
+  assert.deepEqual(
+    [conPr.horaInicio, conPr.horaFin, conPr.responsable, conPr.ubicacion],
+    ['08:00', '09:30', 'Laboratorio Geotecnia S.A.S.', { pr: 5, metros: 50 }],
+  );
+  assert.equal(esEnsayoAnterior(conPr), false);
+
+  const enPlanta = construirEnsayo({
+    ...DATOS_DEL_ENSAYO,
+    ensayo: 'granulometria',
+    observacion: 'x',
+    ubicacion: { lugar: '  Planta de trituración ' },
+  })!;
+  assert.deepEqual(enPlanta.ubicacion, { lugar: 'Planta de trituración' });
+
+  // Nunca las dos formas a la vez.
+  for (const ensayo of [conPr, enPlanta]) {
+    const u = ensayo.ubicacion!;
+    assert.ok(!('lugar' in u && 'pr' in u), JSON.stringify(u));
+  }
+
+  // Uno nuevo sin responsable, con el fin antes del inicio o sin ubicación no se
+  // construye (RF-85, RF-88).
+  assert.equal(construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x', responsable: '' }), null);
+  assert.equal(construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x', horaFin: '07:00' }), null);
+  assert.equal(construirEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x', ubicacion: null }), null);
+  // Ni aunque reclame el id de un ensayo guardado que ya tenía sus datos.
+  assert.equal(construirEnsayo({ id: conPr.id, ensayo: 'espesor', observacion: 'x' }, conPr), null);
+
+  // Uno guardado antes del cambio que vuelve sin los datos nuevos: se guarda como
+  // antes, con su observación corregida si la cambiaron (RF-89).
+  const anterior = { id: 'ens-viejo', ensayo: 'espesor', nombre: 'Espesor', observacion: 'Sin observaciones' };
+  const reGuardado = construirEnsayo({ id: 'ens-viejo', ensayo: 'espesor', observacion: ' 12 cm ' }, anterior)!;
+  assert.deepEqual(reGuardado, { id: 'ens-viejo', ensayo: 'espesor', nombre: 'Espesor', observacion: '12 cm' });
+  assert.equal(esEnsayoAnterior(reGuardado), true);
+  // Sin lo guardado, el mismo pedido es un ensayo nuevo incompleto.
+  assert.equal(construirEnsayo({ id: 'ens-viejo', ensayo: 'espesor', observacion: '12 cm' }), null);
+  // La observación se le sigue exigiendo al anterior (RF-72).
+  assert.equal(construirEnsayo({ id: 'ens-viejo', ensayo: 'espesor', observacion: ' ' }, anterior), null);
+});
+
+prueba('el rechazo de un ensayo dice todo lo que le falta, y solo eso', () => {
+  // Spec 004, RF-88 y RF-89 (cambio 2026-09-22): lo que responde el guardado.
+  const anterior = { id: 'ens-viejo', ensayo: 'espesor', nombre: 'Espesor', observacion: 'Sin observaciones' };
+
+  assert.deepEqual(rechazoDelEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x' }), []);
+  assert.deepEqual(rechazoDelEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'cemento', observacion: 'x' }), [
+    'Ese ensayo no está en la lista.',
+  ]);
+  // Uno nuevo sin responsable ni ubicación: las dos faltas, en el orden del formulario.
+  assert.deepEqual(
+    rechazoDelEnsayo({ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x', responsable: '', ubicacion: null }),
+    [MENSAJES_DE_ENSAYO.sinResponsable, MENSAJES_DE_ENSAYO.sinUbicacion],
+  );
+  // Un anterior que vuelve sin datos nuevos: nada que decir, o solo su observación.
+  assert.deepEqual(rechazoDelEnsayo({ id: 'ens-viejo', ensayo: 'espesor', observacion: 'x' }, anterior), []);
+  assert.deepEqual(rechazoDelEnsayo({ id: 'ens-viejo', ensayo: 'espesor', observacion: '' }, anterior), [
+    faltaObservacionDelEnsayo('')!,
+  ]);
+  // Y cuando la regla no rechaza, se construye: las dos dicen lo mismo.
+  for (const [pedido, guardado] of [
+    [{ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x' }, undefined],
+    [{ id: 'ens-viejo', ensayo: 'espesor', observacion: 'x' }, anterior],
+    [{ ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'x', responsable: '' }, undefined],
+  ] as const) {
+    assert.equal(rechazoDelEnsayo(pedido, guardado).length === 0, construirEnsayo(pedido, guardado) !== null);
+  }
 });
 
 prueba('las filas guardadas antes de los catálogos de OCC se conservan tal cual', () => {
@@ -1668,10 +1829,10 @@ prueba('las filas guardadas antes de los catálogos de OCC se conservan tal cual
   assert.equal(esMaterialHeredado(materialViejo), true);
   assert.equal(esEnsayo(materialViejo), false);
   const control = conservarHeredadas(
-    [{ id: 'mat-1', ensayo: 'espesor', observacion: 'Intento de cambiarlo' }, { ensayo: 'espesor', observacion: 'Sin observaciones' }, { id: 'mat-ajeno' }],
+    [{ id: 'mat-1', ensayo: 'espesor', observacion: 'Intento de cambiarlo' }, { ...DATOS_DEL_ENSAYO, ensayo: 'espesor', observacion: 'Sin observaciones' }, { id: 'mat-ajeno' }],
     [materialViejo],
     esMaterialHeredado,
-    construirEnsayo,
+    (pedida) => construirEnsayo(pedida),
   );
   assert.deepEqual(control[0], materialViejo);
   assert.ok(control[1] && esEnsayo(control[1]));
@@ -2181,6 +2342,84 @@ prueba('cada rol entra por su módulo', () => {
   assert.equal(moduloDeEntrada('operador'), null);
 });
 
+prueba('un módulo apagado en la obra lo está solo para Almacén y Control Cantera', () => {
+  // Spec 017 / RF-7 a RF-9 (cambio 2026-09-22). Solo esos dos se apagan por obra;
+  // los demás no dependen de la obra y nunca están apagados.
+  const conTodo = TODOS_LOS_MODULOS;
+  const sinAlmacen = { almacen: false, cantera: true };
+  const sinCantera = { almacen: true, cantera: false };
+
+  assert.equal(moduloApagado('almacen', sinAlmacen), true);
+  assert.equal(moduloApagado('almacen', conTodo), false);
+  assert.equal(moduloApagado('cantera', sinCantera), true);
+  assert.equal(moduloApagado('cantera', conTodo), false);
+  assert.equal(moduloApagado('almacen', sinCantera), false);
+  for (const modulo of MODULOS.filter((m) => m !== 'almacen' && m !== 'cantera')) {
+    assert.equal(
+      moduloApagado(modulo, { almacen: false, cantera: false }),
+      false,
+      `${modulo} no se apaga por obra`,
+    );
+  }
+
+  // El aviso nombra el módulo y dice a quién pedírselo (RF-8).
+  assert.equal(
+    avisoDeModuloApagado('almacen'),
+    'Su obra no lleva el módulo Almacén. Si debería llevarlo, pídaselo a quien lleve la administración.',
+  );
+  assert.match(avisoDeModuloApagado('cantera'), /Control Cantera/);
+});
+
+prueba('el menú de cada quien depende de su cargo y de los módulos de su obra', () => {
+  // Spec 017 / RF-7. El cargo abre el módulo; la obra tiene que llevarlo.
+  const sinAlmacen = { almacen: false, cantera: true };
+  const sinCantera = { almacen: true, cantera: false };
+  const sinNada = { almacen: false, cantera: false };
+
+  assert.deepEqual(modulosVisibles('almacenista', TODOS_LOS_MODULOS), ['almacen']);
+  assert.deepEqual(modulosVisibles('almacenista', sinAlmacen), []);
+  assert.deepEqual(modulosVisibles('encargado_planta', TODOS_LOS_MODULOS), ['cantera']);
+  assert.deepEqual(modulosVisibles('encargado_planta', sinCantera), []);
+
+  // El residente pierde lo que su obra no lleva y conserva lo suyo.
+  const residente = modulosVisibles('supervisor', sinNada);
+  assert.ok(residente.includes('bitacoras'), residente.join(','));
+  assert.ok(!residente.includes('almacen') && !residente.includes('cantera'));
+
+  // La gerencia lleva todas las obras: ve los nueve módulos siempre (RF-10 es lo
+  // que a ella le esconde las obras apagadas, no el módulo).
+  assert.equal(modulosVisibles('admin', sinNada).length, MODULOS.length);
+  // Sin decir nada de la obra, como antes de la spec 017.
+  assert.deepEqual(modulosVisibles('almacenista'), ['almacen']);
+});
+
+prueba('no se da el acceso de un módulo que la obra no lleva', () => {
+  // Spec 017 / RF-11. El cargo existe, pero esa obra no lleva ese módulo.
+  const sinAlmacen = { almacen: false, cantera: true };
+  const sinCantera = { almacen: true, cantera: false };
+
+  assert.equal(
+    motivoParaNoDarRolEnObra('almacenista', sinAlmacen),
+    'Esa obra no lleva el módulo Almacén.',
+  );
+  assert.equal(
+    motivoParaNoDarRolEnObra('encargado_planta', sinCantera),
+    'Esa obra no lleva el módulo Control Cantera.',
+  );
+  // Con el módulo encendido, ninguno estorba.
+  assert.equal(motivoParaNoDarRolEnObra('almacenista', TODOS_LOS_MODULOS), null);
+  assert.equal(motivoParaNoDarRolEnObra('encargado_planta', TODOS_LOS_MODULOS), null);
+  assert.equal(motivoParaNoDarRolEnObra('almacenista', sinCantera), null);
+  // Los demás roles no dependen de estos módulos.
+  for (const rol of ROLES.filter((r) => r !== 'almacenista' && r !== 'encargado_planta')) {
+    assert.equal(
+      motivoParaNoDarRolEnObra(rol, { almacen: false, cantera: false }),
+      null,
+      `${rol} no depende de los módulos de la obra`,
+    );
+  }
+});
+
 prueba('el aviso de módulo ajeno dice dónde está el trabajo de cada quien', () => {
   // Spec 008 / RF-7: a un almacenista no se le dice que Bitácoras «es de la gerencia».
   assert.equal(
@@ -2208,6 +2447,8 @@ function sesionDe(rol: Rol, obraId: string | null): PersonaEnSesion {
     nombreCompleto: 'Persona de prueba',
     rol,
     obraId,
+    // Los dos módulos encendidos salvo que la prueba diga otra cosa (spec 017).
+    modulosDeObra: TODOS_LOS_MODULOS,
     debeCambiarClave: false,
   };
 }
@@ -2343,7 +2584,7 @@ prueba('domingos y festivos se tratan igual', () => {
 });
 
 prueba('la jornada completa son ocho horas y ninguna extra', () => {
-  const d = desglosarJornada('2026-09-09', '07:30', '17:00');
+  const d = desglosarJornada('2026-09-09', '07:30', '17:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.trabajados, 480);
   assert.equal(d.ordinarios, 480);
@@ -2355,14 +2596,14 @@ prueba('la jornada completa son ocho horas y ninguna extra', () => {
 prueba('el almuerzo no se cuenta como trabajado', () => {
   // Quien entra a las 13:30 no almorzó dentro de su jornada: sus tres horas y
   // media son tres horas y media, no cinco.
-  const d = desglosarJornada('2026-09-09', '13:30', '17:00');
+  const d = desglosarJornada('2026-09-09', '13:30', '17:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.trabajados, 210);
   assert.equal(d.extra, 0);
 });
 
 prueba('lo que pasa de la jornada es hora extra', () => {
-  const d = desglosarJornada('2026-09-09', '07:30', '19:00');
+  const d = desglosarJornada('2026-09-09', '07:30', '19:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.trabajados, 600); // 11 h y media menos hora y media de almuerzo
   assert.equal(d.ordinarios, 480);
@@ -2373,13 +2614,13 @@ prueba('lo que pasa de la jornada es hora extra', () => {
 prueba('el recargo nocturno empieza a las siete de la noche', () => {
   // Ley 2466 de 2025: antes empezaba a las nueve. Si alguien vuelve a poner las
   // 21:00, esto es lo que lo va a decir.
-  const d = desglosarJornada('2026-09-09', '13:30', '21:00');
+  const d = desglosarJornada('2026-09-09', '13:30', '21:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.nocturnos, 120);
 });
 
 prueba('una jornada que cruza la medianoche se cuenta entera', () => {
-  const d = desglosarJornada('2026-09-09', '20:00', '02:00');
+  const d = desglosarJornada('2026-09-09', '20:00', '02:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.trabajados, 360);
   assert.equal(d.nocturnos, 360, 'de 20:00 a 02:00 todo es nocturno');
@@ -2387,7 +2628,7 @@ prueba('una jornada que cruza la medianoche se cuenta entera', () => {
 });
 
 prueba('trabajar en domingo queda marcado', () => {
-  const d = desglosarJornada('2026-04-05', '07:30', '17:00');
+  const d = desglosarJornada('2026-04-05', '07:30', '17:00', HORARIO_ANTERIOR);
   assert.ok(d);
   assert.equal(d.dominicalOFestivo, true);
 });
@@ -2397,7 +2638,7 @@ prueba('un horario imposible se rechaza y no se desglosa', () => {
   assert.equal(validarHorario('07:30', null), 'falta_salida');
   assert.equal(validarHorario('07:30', '07:30'), 'salida_antes');
   assert.equal(validarHorario('07:30', '01:00'), 'jornada_imposible');
-  assert.equal(desglosarJornada('2026-09-09', '07:30', '07:30'), null);
+  assert.equal(desglosarJornada('2026-09-09', '07:30', '07:30', HORARIO_ANTERIOR), null);
   assert.equal(minutosDeHora('25:00'), null);
 });
 
@@ -2444,6 +2685,299 @@ prueba('los tramos de clima pueden cubrir la jornada completa', () => {
       { desde: '13:30', hasta: '17:00' },
     ]),
     false,
+  );
+});
+
+/* ── El horario de la obra (spec 016) ── */
+
+/** La obra del ejemplo de OCC: 8 a 12 y 2 a 6 entre semana, y el sábado por la mañana. */
+const OBRA_DE_EJEMPLO: HorarioDeObra = {
+  semana: [
+    { desde: '08:00', hasta: '12:00' },
+    { desde: '14:00', hasta: '18:00' },
+  ],
+  sabado: [{ desde: '08:00', hasta: '12:00' }],
+};
+
+prueba('el horario propuesto suma 44,5 horas a la semana y el del ejemplo 44', () => {
+  // Spec 016 / RF-3 y RF-35. Las dos pasan del máximo legal de 42 h, y por eso las
+  // obras recién migradas salen con el aviso hasta que gerencia las corrija.
+  // Propuesto: 8 h × 5 entre semana más 4,5 h el sábado (7:30 a 12:00).
+  assert.equal(minutosSemanales(HORARIO_PROPUESTO), 44 * 60 + 30);
+  assert.equal(minutosSemanales(OBRA_DE_EJEMPLO), 44 * 60);
+  assert.ok(minutosSemanales(HORARIO_PROPUESTO) > MAXIMO_MINUTOS_SEMANALES);
+  // Sin sábado son 40 h, dentro de la ley.
+  const sinSabado = { ...OBRA_DE_EJEMPLO, sabado: [] };
+  assert.equal(minutosSemanales(sinSabado), 40 * 60);
+  assert.ok(minutosSemanales(sinSabado) <= MAXIMO_MINUTOS_SEMANALES);
+  // El anterior es el de siempre: 8 h también el sábado.
+  assert.equal(minutosSemanales(HORARIO_ANTERIOR), 48 * 60);
+});
+
+prueba('un horario de obra mal escrito se rechaza diciendo qué día y qué tramo', () => {
+  // Spec 016 / RF-1, RF-2, RF-6 y RF-7.
+  assert.equal(validarHorarioDeObra(OBRA_DE_EJEMPLO), null);
+  assert.equal(validarHorarioDeObra({ ...OBRA_DE_EJEMPLO, sabado: [] }), null, 'sin sábado vale');
+
+  const invertido = validarHorarioDeObra({
+    ...OBRA_DE_EJEMPLO,
+    semana: [{ desde: '12:00', hasta: '08:00' }],
+  });
+  assert.deepEqual(invertido, { dia: 'semana', tramo: 0, tipo: 'invertido' });
+  assert.equal(
+    mensajeDeHorarioDeObra(invertido!),
+    'El tramo 1 de lunes a viernes termina antes de empezar.',
+  );
+
+  // Durar cero es tan imposible como terminar antes (RF-6).
+  assert.deepEqual(
+    validarHorarioDeObra({ ...OBRA_DE_EJEMPLO, sabado: [{ desde: '08:00', hasta: '08:00' }] }),
+    { dia: 'sabado', tramo: 0, tipo: 'invertido' },
+  );
+
+  const pisados = validarHorarioDeObra({
+    ...OBRA_DE_EJEMPLO,
+    semana: [
+      { desde: '08:00', hasta: '13:00' },
+      { desde: '12:00', hasta: '17:00' },
+    ],
+  });
+  assert.deepEqual(pisados, { dia: 'semana', tramo: 1, tipo: 'se_pisan' });
+  assert.equal(
+    mensajeDeHorarioDeObra(pisados!),
+    'Los dos tramos de lunes a viernes se pisan: el segundo empieza antes de que termine el primero.',
+  );
+
+  // Lunes a viernes siempre tiene al menos un tramo; el sábado puede no tener.
+  assert.deepEqual(validarHorarioDeObra({ semana: [], sabado: [] }), {
+    dia: 'semana',
+    tramo: null,
+    tipo: 'sin_tramos',
+  });
+  assert.deepEqual(
+    validarHorarioDeObra({
+      ...OBRA_DE_EJEMPLO,
+      sabado: [
+        { desde: '06:00', hasta: '08:00' },
+        { desde: '08:00', hasta: '10:00' },
+        { desde: '10:00', hasta: '12:00' },
+      ],
+    }),
+    { dia: 'sabado', tramo: null, tipo: 'demasiados' },
+  );
+  assert.deepEqual(
+    validarHorarioDeObra({ ...OBRA_DE_EJEMPLO, semana: [{ desde: '8', hasta: '12:00' }] }),
+    { dia: 'semana', tramo: 0, tipo: 'hora' },
+  );
+  // En el panel, una hora sin elegir llega en blanco: el mensaje dice que falta.
+  const sinElegir = validarHorarioDeObra({ ...OBRA_DE_EJEMPLO, sabado: [{ desde: '08:00', hasta: '' }] });
+  assert.equal(mensajeDeHorarioDeObra(sinElegir!), 'Al tramo 1 de sábado le falta elegir una hora.');
+});
+
+prueba('cada día toma sus tramos: sábado el suyo, domingo y festivo los de semana', () => {
+  // Spec 016 / RF-11, RF-12 y RF-13.
+  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-22'), OBRA_DE_EJEMPLO.semana); // martes
+  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-26'), OBRA_DE_EJEMPLO.sabado); // sábado
+  assert.deepEqual(tramosDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2026-09-26'), []);
+  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-27'), OBRA_DE_EJEMPLO.semana); // domingo
+  // El 1 de mayo de 2027 es sábado y festivo: manda el festivo.
+  assert.equal(diaDeLaSemana('2027-05-01'), 6);
+  assert.deepEqual(tramosDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2027-05-01'), OBRA_DE_EJEMPLO.semana);
+});
+
+prueba('con la jornada anterior las cifras de siempre no cambian', () => {
+  // Spec 016 / RF-25. Los casos de arriba ya pasan por `HORARIO_ANTERIOR`: esto
+  // añade lo que antes no se separaba. De 7:30 a 19:00 las dos horas extra son
+  // las últimas (17:00 a 19:00), y las dos son diurnas.
+  const d = desglosarJornada('2026-09-09', '07:30', '19:00', HORARIO_ANTERIOR);
+  assert.ok(d);
+  assert.deepEqual([d.extraDiurna, d.extraNocturna, d.masDeDosExtra], [120, 0, false]);
+  // El sábado seguía siendo de ocho horas: un parte cerrado de un sábado no cambia.
+  const sabado = desglosarJornada('2026-09-12', '07:30', '17:00', HORARIO_ANTERIOR);
+  assert.deepEqual([sabado?.ordinarios, sabado?.extra], [480, 0]);
+});
+
+prueba('las extra son lo que pasa de lo programado, y se separan en diurnas y nocturnas', () => {
+  // Spec 016 / RF-14 a RF-17 y RF-36. Martes, obra de 8 a 12 y de 2 a 6: de 7:00
+  // a 20:00 son 13 h de presencia menos las 2 de descanso. Las 3 extra son las
+  // últimas: de 5 a 7 de la tarde, diurnas; de 7 a 8, nocturna.
+  const d = desglosarJornada('2026-09-22', '07:00', '20:00', OBRA_DE_EJEMPLO);
+  assert.ok(d);
+  assert.equal(d.trabajados, 11 * 60);
+  assert.equal(d.ordinarios, 8 * 60);
+  assert.equal(d.extra, 3 * 60);
+  assert.equal(d.extraDiurna, 2 * 60);
+  assert.equal(d.extraNocturna, 60);
+  assert.equal(d.nocturnos, 60);
+  assert.equal(d.nocturnosOrdinarios, 0);
+  assert.equal(d.masDeDosExtra, true);
+  // Justo dos horas extra no avisan: el aviso es por pasar de dos.
+  assert.equal(desglosarJornada('2026-09-22', '07:00', '19:00', OBRA_DE_EJEMPLO)?.masDeDosExtra, false);
+});
+
+prueba('las extra son las últimas horas del día, aunque se haya llegado de noche', () => {
+  // Spec 016 / RF-18 y RF-41. De 4:00 a 15:00 la extra es la de 2 a 3 de la tarde,
+  // diurna; las dos de la madrugada son nocturnas pero ordinarias.
+  const d = desglosarJornada('2026-09-22', '04:00', '15:00', OBRA_DE_EJEMPLO);
+  assert.ok(d);
+  assert.equal(d.trabajados, 9 * 60);
+  assert.equal(d.extra, 60);
+  assert.equal(d.extraDiurna, 60);
+  assert.equal(d.extraNocturna, 0);
+  assert.equal(d.nocturnosOrdinarios, 2 * 60);
+});
+
+prueba('un sábado en que la obra no trabaja, todo lo trabajado es extra', () => {
+  // Spec 016 / RF-12.
+  const d = desglosarJornada('2026-09-26', '08:00', '12:00', { ...OBRA_DE_EJEMPLO, sabado: [] });
+  assert.ok(d);
+  assert.deepEqual([d.trabajados, d.ordinarios, d.extraDiurna], [240, 0, 240]);
+  // Con sábado de 8 a 12, esas mismas cuatro horas son ordinarias.
+  assert.equal(desglosarJornada('2026-09-26', '08:00', '12:00', OBRA_DE_EJEMPLO)?.extra, 0);
+});
+
+prueba('el domingo se mide contra la jornada de lunes a viernes, con su marca', () => {
+  // Spec 016 / RF-13 y RF-19.
+  const d = desglosarJornada('2026-09-27', '07:00', '17:00', OBRA_DE_EJEMPLO);
+  assert.ok(d);
+  assert.deepEqual([d.trabajados, d.ordinarios, d.extra], [480, 480, 0]);
+  assert.equal(d.dominicalOFestivo, true);
+});
+
+prueba('el descanso solo se descuenta a quien estuvo presente en él', () => {
+  // Spec 016 / RF-8 y RF-14. Quien entra a las 2 no almorzó dentro de su jornada.
+  assert.equal(desglosarJornada('2026-09-22', '14:00', '18:00', OBRA_DE_EJEMPLO)?.trabajados, 240);
+  // Con un solo tramo no hay descanso que descontar; y las 6:00 ya no son de noche.
+  const unTramo: HorarioDeObra = { semana: [{ desde: '06:00', hasta: '14:00' }], sabado: [] };
+  const d = desglosarJornada('2026-09-22', '06:00', '14:00', unTramo);
+  assert.deepEqual([d?.trabajados, d?.extra, d?.nocturnos], [480, 0, 0]);
+});
+
+prueba('una noche que no pasa de lo programado es ordinaria y nocturna', () => {
+  // Spec 016 / RF-16, RF-18 y RF-40: la regla es por cantidad. De 8 de la noche a
+  // 2 de la madrugada son 6 h, menos que las 8 programadas del martes.
+  const d = desglosarJornada('2026-09-22', '20:00', '02:00', OBRA_DE_EJEMPLO);
+  assert.ok(d);
+  assert.deepEqual([d.trabajados, d.ordinarios, d.extra], [360, 360, 0]);
+  assert.deepEqual([d.nocturnos, d.nocturnosOrdinarios], [360, 360]);
+});
+
+prueba('cada parte usa su horario: el guardado, el de siempre o el de la obra', () => {
+  // Spec 016 / RF-22, RF-24 y RF-25.
+  const cerrado = new Date('2026-09-20T22:00:00Z');
+  const sinSabado = { ...OBRA_DE_EJEMPLO, sabado: [] };
+  // Cerrado con el horario guardado: manda ese, aunque la obra haya cambiado.
+  assert.deepEqual(
+    horarioEfectivo({ horario: OBRA_DE_EJEMPLO, cerradoEn: cerrado, anuladoEn: null }, sinSabado),
+    OBRA_DE_EJEMPLO,
+  );
+  // Cerrado antes de la spec 016, sin horario guardado: la jornada de siempre.
+  assert.deepEqual(
+    horarioEfectivo({ horario: null, cerradoEn: cerrado, anuladoEn: null }, OBRA_DE_EJEMPLO),
+    HORARIO_ANTERIOR,
+  );
+  // Anulado sin cerrar y sin horario: solo pasa con los anulados antes de la spec,
+  // porque desde ella anular también congela. La jornada de siempre.
+  assert.deepEqual(
+    horarioEfectivo({ horario: null, cerradoEn: null, anuladoEn: cerrado }, OBRA_DE_EJEMPLO),
+    HORARIO_ANTERIOR,
+  );
+  // Abierto: el horario vigente de la obra.
+  assert.deepEqual(
+    horarioEfectivo({ horario: null, cerradoEn: null, anuladoEn: null }, OBRA_DE_EJEMPLO),
+    OBRA_DE_EJEMPLO,
+  );
+});
+
+prueba('una hora se elige en dos partes y solo vale con las dos', () => {
+  // Spec 016 / RF-30, RF-33 y RF-34.
+  assert.equal(HORAS_DEL_DIA.length, 24);
+  assert.deepEqual([HORAS_DEL_DIA[0], HORAS_DEL_DIA[23]], ['00', '23']);
+  assert.deepEqual(partirHora('07:30'), { hora: '07', minuto: '30' });
+  assert.deepEqual(partirHora('7:30'), { hora: '07', minuto: '30' }, 'una hora vieja sin cero delante');
+  assert.deepEqual(partirHora(''), { hora: null, minuto: null }, 'en blanco, como una fila nueva');
+  assert.deepEqual(partirHora('lo que sea'), { hora: null, minuto: null });
+  assert.equal(unirHora('07', '30'), '07:30');
+  // A medio elegir no hay hora: poner «:00» solo sería un valor de antemano.
+  assert.equal(unirHora('07', null), '');
+  assert.equal(unirHora(null, '30'), '');
+  assert.deepEqual(minutosOfrecidos(''), ['00', '15', '30', '45']);
+  assert.deepEqual(minutosOfrecidos('07:30'), ['00', '15', '30', '45']);
+  // Una hora guardada fuera de la rejilla se sigue ofreciendo, en su sitio.
+  assert.deepEqual(minutosOfrecidos('07:10'), ['00', '10', '15', '30', '45']);
+});
+
+prueba('registrar una obra sin horario le pone el propuesto; corregirla sin horario no lo toca', () => {
+  // Spec 016 / RF-3 y RF-4. La segunda mitad es la trampa de «ausente y vacío no son
+  // lo mismo»: con `obraNueva.partial()` el default del horario se colaba en cada
+  // corrección y corregir solo el nombre reponía el horario propuesto.
+  const nueva = obraNueva.parse({ codigo: 'OBR-9', nombre: 'Prueba' });
+  assert.deepEqual(nueva.horario, HORARIO_PROPUESTO);
+  assert.deepEqual(obraEditada.parse({ nombre: 'Otro nombre' }), { nombre: 'Otro nombre' });
+  assert.equal('horario' in obraEditada.parse({ nombre: 'Otro nombre' }), false);
+  assert.deepEqual(obraEditada.parse({ horario: OBRA_DE_EJEMPLO }).horario, OBRA_DE_EJEMPLO);
+});
+
+prueba('un horario de obra inválido se rechaza con el mensaje de la regla', () => {
+  // Spec 016 / RF-6 y RF-7: el contrato no inventa su propio texto.
+  const pisados = {
+    semana: [
+      { desde: '08:00', hasta: '13:00' },
+      { desde: '12:00', hasta: '17:00' },
+    ],
+    sabado: [],
+  };
+  assert.equal(
+    obraEditada.safeParse({ horario: pisados }).error?.issues[0]?.message,
+    'Los dos tramos de lunes a viernes se pisan: el segundo empieza antes de que termine el primero.',
+  );
+  assert.equal(
+    obraNueva.safeParse({ codigo: 'X', nombre: 'Y', horario: { semana: [], sabado: [] } }).error
+      ?.issues[0]?.message,
+    'El horario de lunes a viernes necesita al menos un tramo.',
+  );
+});
+
+prueba('las observaciones de una persona del parte son opcionales', () => {
+  // Spec 016 / RF-26, RF-27 y RF-29.
+  const base = { usuarioId: 'u1', entrada: '07:00', salida: '17:00' };
+  assert.equal(personaDelParte.parse(base).observaciones, '');
+  assert.equal(
+    personaDelParte.parse({ ...base, observaciones: '  Llegó tarde por el bus.  ' }).observaciones,
+    'Llegó tarde por el bus.',
+  );
+  assert.equal(personaDelParte.safeParse({ ...base, observaciones: 'x'.repeat(1001) }).success, false);
+});
+
+prueba('el parte guarda las observaciones de cada persona', () => {
+  // Spec 016 / RF-26. `construirPersona` es lo que escribe el servidor.
+  const persona = construirPersona(
+    { usuarioId: 'u1', entrada: '07:00', salida: '17:00', observaciones: 'Salió a cita médica.' },
+    'Pedro Cartagena',
+    'operador',
+  );
+  assert.equal(persona.observaciones, 'Salió a cita médica.');
+  assert.equal(
+    construirPersona({ usuarioId: 'u1', entrada: '07:00', salida: '17:00' }, 'Pedro', null)
+      .observaciones,
+    '',
+  );
+});
+
+prueba('el parte dice el horario de la obra para ese día', () => {
+  // Spec 016 / RF-10.
+  assert.equal(
+    describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-22'),
+    'De 08:00 a 12:00 y de 14:00 a 18:00.',
+  );
+  assert.equal(describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-26'), 'De 08:00 a 12:00.');
+  assert.equal(
+    describirHorarioDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2026-09-26'),
+    'Los sábados no se trabaja en esta obra.',
+  );
+  assert.equal(
+    describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-27'),
+    'Domingo o festivo: se toma la jornada de lunes a viernes, de 08:00 a 12:00 y de 14:00 a 18:00.',
   );
 });
 
@@ -2522,6 +3056,12 @@ prueba('a «Otra actividad» se le exige cuál fue y su unidad', () => {
   assert.deepEqual(faltasDeActividad({ otra: true, texto: 'Limpieza de derrumbe', unidad: 'm3' }), []);
   // Una actividad del presupuesto trae nombre y unidad del catálogo: no le falta nada.
   assert.deepEqual(faltasDeActividad({ otra: false, texto: null, unidad: null }), []);
+  // Sin elegir cuál es (RF-83, cambio 2026-09-22): solo eso, bajo el selector; lo
+  // demás no se puede saber hasta elegir.
+  assert.deepEqual(faltasDeActividad({ elegida: false, otra: false, texto: null, unidad: null }), [
+    { campo: 'clave', mensaje: MENSAJES_DE_ACTIVIDAD.sinElegir },
+  ]);
+  assert.equal(MENSAJES_DE_ACTIVIDAD.sinElegir, 'Elija la actividad.');
 });
 
 prueba('un ensayo sin observación se rechaza y «Sin observaciones» vale', () => {
@@ -2533,6 +3073,80 @@ prueba('un ensayo sin observación se rechaza y «Sin observaciones» vale', () 
   assert.equal(faltaObservacionDelEnsayo(null), falta);
   assert.equal(faltaObservacionDelEnsayo('Sin observaciones'), null);
   assert.equal(faltaObservacionDelEnsayo('Densidad 98 %, lote PR 5'), null);
+});
+
+prueba('a un ensayo se le exigen sus horas, su responsable y dónde se hizo', () => {
+  // Spec 004, RF-84 a RF-88 (cambio 2026-09-22). Cada falta bajo su campo.
+  const completo = {
+    observacion: 'Sin observaciones',
+    horaInicio: '08:00',
+    horaFin: '09:30',
+    responsable: 'Laboratorio Geotecnia S.A.S.',
+    ubicacion: { pr: 5, metros: 50 },
+  };
+  const campos = (ensayo: Parameters<typeof faltasDelEnsayo>[0]) =>
+    faltasDelEnsayo(ensayo).map((f) => f.campo);
+
+  assert.deepEqual(faltasDelEnsayo(completo), []);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, ubicacion: { lugar: 'Planta de trituración' } }), []);
+
+  // Cada dato que falta, con su texto.
+  assert.deepEqual(faltasDelEnsayo({ ...completo, horaInicio: '' }), [
+    { campo: 'horaInicio', mensaje: MENSAJES_DE_ENSAYO.sinInicio },
+  ]);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, horaFin: null }), [
+    { campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.sinFin },
+  ]);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, responsable: '' }), [
+    { campo: 'responsable', mensaje: MENSAJES_DE_ENSAYO.sinResponsable },
+  ]);
+  assert.deepEqual(campos({ ...completo, responsable: '   ' }), ['responsable']);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, ubicacion: null }), [
+    { campo: 'ubicacion', mensaje: MENSAJES_DE_ENSAYO.sinUbicacion },
+  ]);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, ubicacion: { pr: 5, metros: null } }), [
+    { campo: 'metros', mensaje: MENSAJES_DE_ENSAYO.sinMetros },
+  ]);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, ubicacion: { pr: null, metros: null } }), [
+    { campo: 'pr', mensaje: MENSAJES_DE_ENSAYO.sinPr },
+    { campo: 'metros', mensaje: MENSAJES_DE_ENSAYO.sinMetros },
+  ]);
+  assert.deepEqual(faltasDelEnsayo({ ...completo, ubicacion: { lugar: '  ' } }), [
+    { campo: 'lugar', mensaje: MENSAJES_DE_ENSAYO.sinLugar },
+  ]);
+  // Fuera de las listas de cantera: el mismo texto que en el viaje (RF-87).
+  assert.deepEqual(campos({ ...completo, ubicacion: { pr: 30, metros: 30 } }), ['pr', 'metros']);
+  // Sin la observación, la de siempre (RF-72).
+  assert.deepEqual(faltasDelEnsayo({ ...completo, observacion: '' }), [
+    { campo: 'observacion', mensaje: faltaObservacionDelEnsayo('')! },
+  ]);
+
+  // El fin tiene que ser posterior al inicio (RF-85): ni igual ni antes.
+  assert.deepEqual(faltasDelEnsayo({ ...completo, horaFin: '08:00' }), [
+    { campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.finNoPosterior },
+  ]);
+  assert.deepEqual(campos({ ...completo, horaInicio: '10:00', horaFin: '09:30' }), ['horaFin']);
+  // Una hora mal escrita no es una hora.
+  assert.deepEqual(campos({ ...completo, horaInicio: '7.30' }), ['horaInicio']);
+
+  // Todo vacío: todas a la vez, en el orden del formulario.
+  assert.deepEqual(campos({ observacion: '', horaInicio: '', horaFin: '', responsable: '', ubicacion: null }), [
+    'horaInicio',
+    'horaFin',
+    'responsable',
+    'ubicacion',
+    'observacion',
+  ]);
+
+  // Un ensayo guardado antes del cambio se reconoce por no tener horas (RF-89).
+  assert.equal(
+    esEnsayoAnterior({ id: 'e-1', ensayo: 'espesor', nombre: 'Espesor', observacion: 'Sin observaciones' }),
+    true,
+  );
+  assert.equal(
+    esEnsayoAnterior({ id: 'e-2', ensayo: 'espesor', nombre: 'Espesor', ...completo }),
+    false,
+  );
 });
 
 prueba('sin ancho, el área es la que se escribió', () => {
@@ -2614,29 +3228,32 @@ prueba('las actividades del parte son las del presupuesto de OCC, cada una con s
   assert.equal(actividadPorItem('excavacion'), undefined);
   assert.equal(etiquetaDeUnidad('inventada'), 'inventada');
 
-  // La descripción sola, sin el número delante (RF-75, cambio 2026-09-17).
+  // El número de ítem delante de la descripción completa (RF-78, cambio 2026-09-22;
+  // revierte RF-75).
   assert.equal(
     etiquetaDeActividad(actividadPorItem('4.1.8')!),
-    actividadPorItem('4.1.8')!.descripcion,
+    `4.1.8 · ${actividadPorItem('4.1.8')!.descripcion}`,
   );
   assert.ok(
     etiquetaDeActividad(actividadPorItem('4.1.8')!).startsWith(
-      'Excavación para estructuras varias en material común en seco. Incluye entibado.',
+      '4.1.8 · Excavación para estructuras varias en material común en seco. Incluye entibado.',
     ),
   );
   assert.ok(actividadPorItem('8.27')!.descripcion.endsWith('900 mm (36")'));
 
-  // Las 31 descripciones son distintas: sin el número, es lo único que separa dos
-  // excavaciones que solo difieren al final de la frase (RF-75).
+  // Las 31 descripciones son distintas: dos excavaciones que solo difieren al final
+  // de la frase se distinguen también sin mirar el número.
   assert.equal(new Set(ACTIVIDADES_DEL_PRESUPUESTO.map((a) => a.descripcion)).size, 31);
 
-  // Se encuentra por palabras y ya no por número, sin tildes (RF-76).
+  // Se encuentra por número o por palabras, sin tildes (RF-79, cambio 2026-09-22).
   const opciones = ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
     valor: a.item,
     etiqueta: etiquetaDeActividad(a),
   }));
-  assert.deepEqual(filtrarOpciones(opciones, '4.1.8'), []);
-  assert.deepEqual(filtrarOpciones(opciones, '10.1'), []);
+  assert.deepEqual(filtrarOpciones(opciones, '4.1.8').map((o) => o.valor), ['4.1.8']);
+  assert.deepEqual(filtrarOpciones(opciones, '10.1').map((o) => o.valor), ['10.1']);
+  // «4.1.9» también trae la 4.1.96, que empieza igual (caso límite del cambio).
+  assert.deepEqual(filtrarOpciones(opciones, '4.1.9').map((o) => o.valor), ['4.1.9', '4.1.96']);
   assert.ok(filtrarOpciones(opciones, 'excavacion').some((o) => o.valor === '4.1.8'));
   assert.deepEqual(filtrarOpciones(opciones, 'acero').map((o) => o.valor), ['10.1']);
 
@@ -3068,34 +3685,61 @@ prueba('una cantidad se muestra en su unidad, igual en cualquier entorno', () =>
 });
 
 prueba('un movimiento sin cantidad válida, con fecha futura o salida sin destino se rechaza', () => {
-  // Spec 009 / RF-9, RF-10 y RF-13: cada falta en su campo, todas a la vez.
+  // Spec 009 / RF-9, RF-10 y RF-13: cada falta en su campo, todas a la vez. Desde el
+  // 2026-09-22 todo movimiento lleva además quién entregó o recibió (RF-40, RF-41).
   const hoy = '2026-09-15';
+  const r = 'Juan Pérez';
   const campos = (m: Parameters<typeof validarMovimiento>[0]) =>
     validarMovimiento(m, hoy).map((f) => f.campo);
 
-  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: 0 }), ['cantidad']);
-  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: -500 }), ['cantidad']);
-  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: null }), ['cantidad']);
-  assert.deepEqual(campos({ tipo: 'ingreso', fecha: '2026-09-16', cantidad: 100 }), ['fecha']);
-  assert.deepEqual(campos({ tipo: 'salida', fecha: hoy, cantidad: 3000, paraQue: '   ' }), ['paraQue']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: 0, responsable: r }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: -500, responsable: r }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: hoy, cantidad: null, responsable: r }), ['cantidad']);
+  assert.deepEqual(campos({ tipo: 'ingreso', fecha: '2026-09-16', cantidad: 100, responsable: r }), ['fecha']);
+  assert.deepEqual(campos({ tipo: 'salida', fecha: hoy, cantidad: 3000, paraQue: '   ', responsable: r }), ['paraQue']);
   assert.deepEqual(campos({ tipo: 'salida', fecha: '2026-09-16', cantidad: 0 }), [
     'cantidad',
     'fecha',
     'paraQue',
+    'responsable',
   ]);
   assert.equal(
-    validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 0 }, hoy)[0]?.mensaje,
+    validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 0, responsable: r }, hoy)[0]?.mensaje,
     'La cantidad tiene que ser mayor que cero.',
   );
+});
+
+prueba('un ingreso dice quién lo entregó y una salida quién la recibió', () => {
+  // Spec 009 / RF-40 a RF-42 (cambio 2026-09-22). El texto cambia con el tipo, bajo el
+  // mismo campo; unos espacios no son un nombre.
+  const hoy = '2026-09-15';
+  const ingreso = { tipo: 'ingreso' as const, fecha: hoy, cantidad: 100 };
+  const salida = { tipo: 'salida' as const, fecha: hoy, cantidad: 100, paraQue: 'Cuneta PR 3' };
+
+  for (const responsable of [undefined, null, '', '   ']) {
+    assert.deepEqual(validarMovimiento({ ...ingreso, responsable }, hoy), [
+      { campo: 'responsable', mensaje: MENSAJES_DE_MOVIMIENTO.sinEntregadoPor },
+    ]);
+    assert.deepEqual(validarMovimiento({ ...salida, responsable }, hoy), [
+      { campo: 'responsable', mensaje: MENSAJES_DE_MOVIMIENTO.sinRecibidoPor },
+    ]);
+  }
+  assert.equal(MENSAJES_DE_MOVIMIENTO.sinEntregadoPor, 'Escriba quién entregó el material.');
+  assert.equal(MENSAJES_DE_MOVIMIENTO.sinRecibidoPor, 'Escriba quién recibió el material.');
+  assert.deepEqual(validarMovimiento({ ...ingreso, responsable: 'Ferretería El Tornillo' }, hoy), []);
+  assert.deepEqual(validarMovimiento({ ...salida, responsable: 'Juan Pérez' }, hoy), []);
 });
 
 prueba('un ingreso de hoy sin observación y una salida con destino se aceptan', () => {
   // La observación del ingreso es opcional (RF-8); un día pasado vale (RF-10).
   const hoy = '2026-09-15';
-  assert.deepEqual(validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 10000 }, hoy), []);
+  assert.deepEqual(
+    validarMovimiento({ tipo: 'ingreso', fecha: hoy, cantidad: 10000, responsable: 'Proveedor' }, hoy),
+    [],
+  );
   assert.deepEqual(
     validarMovimiento(
-      { tipo: 'salida', fecha: '2026-09-01', cantidad: 3000, paraQue: 'Cuneta PR 3' },
+      { tipo: 'salida', fecha: '2026-09-01', cantidad: 3000, paraQue: 'Cuneta PR 3', responsable: 'Juan Pérez' },
       hoy,
     ),
     [],
@@ -3202,7 +3846,7 @@ function faltaDelContrato(
 
 prueba('el contrato de una salida exige para qué, con el mismo texto que la regla', () => {
   // Spec 009 / RF-11 y RF-13. Una petición hecha por fuera no se salta la falta.
-  const salida = { tipo: 'salida', materialId: 'mat-1', fecha: '2026-09-15', cantidad: '30' };
+  const salida = { tipo: 'salida', materialId: 'mat-1', fecha: '2026-09-15', cantidad: '30', responsable: 'Juan Pérez' };
   assert.equal(
     faltaDelContrato(movimientoNuevo, salida, 'paraQue'),
     'Escriba para qué se usará lo que sale.',
@@ -3219,7 +3863,7 @@ prueba('el contrato de una salida exige para qué, con el mismo texto que la reg
 
 prueba('el contrato convierte la cantidad escrita y rechaza la que no sirve', () => {
   // Spec 009 / RF-8 y RF-9, con la misma lectura que `aCentesimas`.
-  const ingreso = { tipo: 'ingreso', materialId: 'mat-1', fecha: '2026-09-15' };
+  const ingreso = { tipo: 'ingreso', materialId: 'mat-1', fecha: '2026-09-15', responsable: 'Proveedor' };
   const parsed = movimientoNuevo.parse({ ...ingreso, cantidad: '2,5' });
   assert.equal(parsed.cantidad, 250);
   assert.equal(parsed.tipo === 'ingreso' ? parsed.observacion : 'no', null);
@@ -3228,6 +3872,126 @@ prueba('el contrato convierte la cantidad escrita y rechaza la que no sirve', ()
   assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: 10 }, 'cantidad'), undefined);
   assert.equal(faltaDelContrato(movimientoNuevo, { ...ingreso, cantidad: '5', fecha: '15/09/2026' }, 'fecha'), 'La fecha va en formato AAAA-MM-DD.');
   assert.equal(movimientoNuevo.safeParse({ ...ingreso, tipo: 'traslado', cantidad: '5' }).success, false);
+});
+
+prueba('el contrato exige quién entregó o recibió, con el texto de la regla', () => {
+  // Spec 009 / RF-40 a RF-42 (cambio 2026-09-22). Una petición hecha por fuera no se
+  // salta la falta.
+  const ingreso = { tipo: 'ingreso', materialId: 'mat-1', fecha: '2026-09-15', cantidad: '5' };
+  const salida = { tipo: 'salida', materialId: 'mat-1', fecha: '2026-09-15', cantidad: '5', paraQue: 'Cuneta' };
+  assert.equal(faltaDelContrato(movimientoNuevo, ingreso, 'responsable'), MENSAJES_DE_MOVIMIENTO.sinEntregadoPor);
+  assert.equal(
+    faltaDelContrato(movimientoNuevo, { ...ingreso, responsable: '  ' }, 'responsable'),
+    MENSAJES_DE_MOVIMIENTO.sinEntregadoPor,
+  );
+  assert.equal(faltaDelContrato(movimientoNuevo, salida, 'responsable'), MENSAJES_DE_MOVIMIENTO.sinRecibidoPor);
+  // Se guarda recortado; 120 caracteres caben y 121 no.
+  const con = movimientoNuevo.parse({ ...salida, responsable: '  Juan Pérez ' });
+  assert.equal(con.responsable, 'Juan Pérez');
+  assert.equal(movimientoNuevo.safeParse({ ...ingreso, responsable: 'x'.repeat(120) }).success, true);
+  assert.equal(movimientoNuevo.safeParse({ ...ingreso, responsable: 'x'.repeat(121) }).success, false);
+});
+
+prueba('el Excel del almacén trae los movimientos y las existencias como se ven en pantalla', () => {
+  // Spec 009 / RF-46 a RF-50 (cambio 2026-09-22).
+  const materiales: MaterialParaExportar[] = [
+    { id: 'cem', obraNombre: 'Consorcio Antioquia', nombre: 'Cemento', unidad: 'bulto' },
+  ];
+  const base = {
+    obraNombre: 'Consorcio Antioquia',
+    paraQue: null,
+    observacion: null,
+    registradoPorNombre: 'Almacenista Uno',
+    anuladoEn: null,
+    anuladoPorNombre: null,
+    motivoAnulacion: null,
+  };
+  const movimientos: MovimientoParaExportar[] = [
+    // Un ingreso de antes del cambio: sin nombre.
+    { ...base, id: 'm1', materialId: 'cem', materialNombre: 'Cemento', unidad: 'bulto', tipo: 'ingreso', fecha: '2026-09-10', cantidad: 10000, responsable: null, registradoEn: new Date('2026-09-10T13:00:00Z') },
+    // Una salida de 2,5 con quién la recibió.
+    { ...base, id: 'm2', materialId: 'cem', materialNombre: 'Cemento', unidad: 'bulto', tipo: 'salida', fecha: '2026-09-11', cantidad: 250, paraQue: 'Cuneta PR 3', responsable: 'Juan Pérez', registradoEn: new Date('2026-09-11T01:30:00Z') },
+    // Un ingreso anulado: se marca y no cuenta.
+    { ...base, id: 'm3', materialId: 'cem', materialNombre: 'Cemento', unidad: 'bulto', tipo: 'ingreso', fecha: '2026-09-12', cantidad: 5000, responsable: 'Proveedor', registradoEn: new Date('2026-09-12T14:00:00Z'), anuladoEn: new Date('2026-09-12T15:00:00Z'), anuladoPorNombre: 'Gerencia', motivoAnulacion: 'Se registró dos veces' },
+    // De un material ya dado de baja: sale en Movimientos, no en Existencias.
+    { ...base, id: 'm4', materialId: 'viejo', materialNombre: 'Arena vieja', unidad: 'metro_cubico', tipo: 'ingreso', fecha: '2026-09-01', cantidad: 300, responsable: null, registradoEn: new Date('2026-09-01T13:00:00Z') },
+  ];
+
+  const hojas = hojasDelAlmacen(movimientos, materiales);
+
+  // Movimientos: los cuatro, con los encabezados de siempre, en orden de registro.
+  assert.deepEqual(hojas.movimientos.encabezados, ENCABEZADOS_MOVIMIENTOS);
+  assert.equal(hojas.movimientos.filas.length, 4);
+  const columna = (nombre: string) => ENCABEZADOS_MOVIMIENTOS.indexOf(nombre);
+  const [f4, f1, f2, f3] = hojas.movimientos.filas;
+  assert.equal(f4[columna('Material')], 'Arena vieja');
+
+  // La fecha es un día (un Date), la cantidad un número (2,5 y no «2,5»), RF-49.
+  assert.ok(f2[columna('Fecha')] instanceof Date);
+  assert.equal((f2[columna('Fecha')] as Date).toISOString(), '2026-09-11T00:00:00.000Z');
+  assert.equal(f2[columna('Cantidad')], 2.5);
+  assert.equal(typeof f1[columna('Cantidad')], 'number');
+  assert.equal(f1[columna('Cantidad')], 100);
+
+  // Tipo, unidad, nombre y para qué, como se leen.
+  assert.equal(f2[columna('Tipo')], 'Salida');
+  assert.equal(f1[columna('Tipo')], 'Ingreso');
+  assert.equal(f2[columna('Unidad')], 'Bulto');
+  assert.equal(f2[columna('Entregó / recibió')], 'Juan Pérez');
+  assert.equal(f1[columna('Entregó / recibió')], '—', 'un movimiento anterior sale sin nombre (RF-44)');
+  assert.equal(f2[columna('Para qué / observación')], 'Cuneta PR 3');
+  assert.equal(f2[columna('Registró')], 'Almacenista Uno');
+  // La hora de registro, en la de la obra: 01:30 UTC del 11 son las 8:30 p. m. del 10.
+  assert.equal((f2[columna('Registrado el')] as Date).toISOString(), '2026-09-10T20:30:00.000Z');
+
+  // El anulado, marcado con quién, cuándo y por qué (RF-47); los vigentes, sin eso.
+  assert.equal(f3[columna('Estado')], 'Anulado');
+  assert.equal(f3[columna('Anuló')], 'Gerencia');
+  assert.ok(f3[columna('Anulado el')] instanceof Date);
+  assert.equal(f3[columna('Motivo de la anulación')], 'Se registró dos veces');
+  assert.equal(f2[columna('Estado')], 'Vigente');
+  assert.equal(f2[columna('Anuló')], null);
+
+  // Existencias: solo el material vigente, con la regla de la pantalla (RF-48): 100
+  // ingresados, 2,5 salidos, el anulado no cuenta.
+  assert.deepEqual(hojas.existencias.encabezados, ENCABEZADOS_EXISTENCIAS);
+  assert.deepEqual(hojas.existencias.filas, [['Consorcio Antioquia', 'Cemento', 'Bulto', 100, 2.5, 97.5]]);
+
+  // Sin movimientos ni materiales: las hojas salen, vacías (caso límite).
+  const vacias = hojasDelAlmacen([], []);
+  assert.deepEqual([vacias.movimientos.filas.length, vacias.existencias.filas.length], [0, 0]);
+
+  // El nombre del archivo (RF-50).
+  assert.equal(nombreDelArchivo('OBR-001', '2026-09-22'), 'almacen-OBR-001-2026-09-22.xlsx');
+  assert.equal(nombreDelArchivo(null, '2026-09-22'), 'almacen-todas-las-obras-2026-09-22.xlsx');
+  // Un código con espacios o signos no rompe el nombre.
+  assert.equal(nombreDelArchivo('OBR 1/2', '2026-09-22'), 'almacen-OBR-1-2-2026-09-22.xlsx');
+});
+
+prueba('corregir una persona no le cambia lo que no se mandó', () => {
+  // Defecto encontrado el 2026-09-22 (spec 017, T7): `personaEditada` se armaba con
+  // `personaNueva.partial()`, y los defaults de `rol` («operador») y `activo` (true)
+  // se aplican igual cuando el campo no viene. Corregirle el nombre a un residente lo
+  // dejaba como operador y lo reactivaba. Es el mismo caso que `obraEditada` (016/T5),
+  // y la regla de siempre: en un PATCH, ausente y vacío no son lo mismo.
+  const soloNombre = personaEditada.parse({ nombreCompleto: 'Nombre corregido' });
+  assert.deepEqual(soloNombre, { nombreCompleto: 'Nombre corregido' });
+  assert.equal('rol' in soloNombre, false, 'no inventa el rol');
+  assert.equal('activo' in soloNombre, false, 'no reactiva a nadie');
+  assert.equal('obraId' in soloNombre, false, 'no la saca de su obra');
+
+  // Lo que sí se manda, se respeta, con las mismas validaciones del alta.
+  const cambiado = personaEditada.parse({ rol: 'almacenista', activo: false, usuario: 'Prueba.017' });
+  assert.deepEqual(cambiado, { rol: 'almacenista', activo: false, usuario: 'prueba.017' });
+  assert.equal(personaEditada.safeParse({ rol: 'jefe' }).success, false);
+  assert.equal(personaEditada.safeParse({ usuario: 'con espacio' }).success, false);
+  assert.equal(personaEditada.safeParse({ nombreCompleto: '' }).success, false);
+
+  // Vaciar sí se puede, diciéndolo: `null` borra el documento y saca de la obra.
+  assert.deepEqual(personaEditada.parse({ documento: null, obraId: null }), {
+    documento: null,
+    obraId: null,
+  });
 });
 
 prueba('un material se registra con una unidad de la lista y nada más', () => {
@@ -3499,6 +4263,112 @@ prueba('sitios y materiales de cantera se registran con nombre, y el sitio con s
   // Corregir solo el nombre no manda el tipo: ausente es «no se toca».
   assert.deepEqual(sitioEditado.parse({ nombre: 'La Esperanza 2' }), { nombre: 'La Esperanza 2' });
   assert.deepEqual(materialDeCanteraEditado.parse({}), {});
+});
+
+/* ── Ordenar la tabla de Personas (spec 015) ── */
+
+console.log('\nOrdenar tablas del panel\n');
+
+interface FilaDeOrden {
+  nombre: string;
+  cargo: string | null;
+  documento: string | null;
+}
+
+const FILAS_DE_ORDEN: FilaDeOrden[] = [
+  { nombre: 'Carlos Peña', cargo: 'Operador', documento: '10' },
+  { nombre: 'Ana Ruiz', cargo: null, documento: '9' },
+  { nombre: 'álvaro Díaz', cargo: 'Topógrafo', documento: null },
+  { nombre: 'Beatriz Gómez', cargo: 'operador', documento: '100' },
+  { nombre: 'Álvarez Soto', cargo: 'Almacenista', documento: '' },
+];
+
+const nombresDe = (filas: FilaDeOrden[]) => filas.map((f) => f.nombre);
+const porNombre = (f: FilaDeOrden) => f.nombre;
+
+prueba('ordenar no distingue tildes ni mayúsculas', () => {
+  // Spec 015 / RF-12. «álvaro» en minúscula y con tilde va junto a «Álvarez», no al final.
+  assert.deepEqual(nombresDe(ordenarFilas(FILAS_DE_ORDEN, porNombre, 'asc', porNombre)), [
+    'Álvarez Soto',
+    'álvaro Díaz',
+    'Ana Ruiz',
+    'Beatriz Gómez',
+    'Carlos Peña',
+  ]);
+});
+
+prueba('las filas sin dato quedan al final en los dos sentidos', () => {
+  // Spec 015 / RF-13. Sin cargo (null) y sin documento ('') son lo mismo: vacío.
+  const porCargo = (f: FilaDeOrden) => f.cargo;
+  assert.deepEqual(nombresDe(ordenarFilas(FILAS_DE_ORDEN, porCargo, 'asc', porNombre)).at(-1), 'Ana Ruiz');
+  assert.deepEqual(nombresDe(ordenarFilas(FILAS_DE_ORDEN, porCargo, 'desc', porNombre)).at(-1), 'Ana Ruiz');
+  // Los dos sin documento van detrás de todos los que lo tienen, en cualquier sentido,
+  // y entre ellos por nombre.
+  const porDocumento = (f: FilaDeOrden) => f.documento;
+  for (const sentido of ['asc', 'desc'] as const) {
+    const ultimos = nombresDe(ordenarFilas(FILAS_DE_ORDEN, porDocumento, sentido, porNombre));
+    assert.deepEqual(ultimos.slice(-2), ['Álvarez Soto', 'álvaro Díaz']);
+  }
+});
+
+prueba('un empate se resuelve por nombre, de la A a la Z, en los dos sentidos', () => {
+  // Spec 015, casos límite: dos «operador» (uno en mayúscula) quedan juntos y por nombre.
+  const porCargo = (f: FilaDeOrden) => f.cargo;
+  const asc = nombresDe(ordenarFilas(FILAS_DE_ORDEN, porCargo, 'asc', porNombre));
+  assert.deepEqual(asc, ['Álvarez Soto', 'Beatriz Gómez', 'Carlos Peña', 'álvaro Díaz', 'Ana Ruiz']);
+  const desc = nombresDe(ordenarFilas(FILAS_DE_ORDEN, porCargo, 'desc', porNombre));
+  assert.deepEqual(desc, ['álvaro Díaz', 'Beatriz Gómez', 'Carlos Peña', 'Álvarez Soto', 'Ana Ruiz']);
+});
+
+prueba('los documentos se ordenan como números, no como texto', () => {
+  // «9» antes de «10» y «10» antes de «100»: ordenar texto pondría «10», «100», «9».
+  const porDocumento = (f: FilaDeOrden) => f.documento;
+  assert.deepEqual(
+    ordenarFilas(FILAS_DE_ORDEN, porDocumento, 'asc', porNombre)
+      .map((f) => f.documento)
+      .slice(0, 3),
+    ['9', '10', '100'],
+  );
+});
+
+prueba('pulsar una columna ordena A→Z, y pulsarla otra vez invierte', () => {
+  // Spec 015 / RF-9 y RF-10.
+  const inicial: Orden = { clave: 'nombre', sentido: 'asc' };
+  assert.deepEqual(ordenTrasPulsar(inicial, 'cargo'), { clave: 'cargo', sentido: 'asc' });
+  assert.deepEqual(ordenTrasPulsar(inicial, 'nombre'), { clave: 'nombre', sentido: 'desc' });
+  assert.deepEqual(ordenTrasPulsar({ clave: 'cargo', sentido: 'desc' }, 'cargo'), {
+    clave: 'cargo',
+    sentido: 'asc',
+  });
+  // Cambiar de columna estando en Z→A vuelve a empezar por A→Z.
+  assert.deepEqual(ordenTrasPulsar({ clave: 'cargo', sentido: 'desc' }, 'obra'), {
+    clave: 'obra',
+    sentido: 'asc',
+  });
+});
+
+prueba('un orden guardado ilegible o de una columna que ya no existe vuelve al de siempre', () => {
+  // Spec 015 / RF-16 y RF-17. Lo guardado en el navegador puede venir de otra
+  // versión del panel o estar roto; nunca debe dejar la tabla sin orden.
+  const porDefecto: Orden = { clave: 'nombre', sentido: 'asc' };
+  const claves = ['nombre', 'cargo', 'obra'];
+  assert.deepEqual(leerOrdenGuardado('{"clave":"cargo","sentido":"desc"}', claves, porDefecto), {
+    clave: 'cargo',
+    sentido: 'desc',
+  });
+  assert.deepEqual(leerOrdenGuardado(null, claves, porDefecto), porDefecto);
+  assert.deepEqual(leerOrdenGuardado('no es json', claves, porDefecto), porDefecto);
+  assert.deepEqual(leerOrdenGuardado('{"clave":"sueldo","sentido":"asc"}', claves, porDefecto), porDefecto);
+  assert.deepEqual(leerOrdenGuardado('{"clave":"cargo","sentido":"al revés"}', claves, porDefecto), porDefecto);
+  assert.deepEqual(leerOrdenGuardado('["cargo","asc"]', claves, porDefecto), porDefecto);
+  assert.deepEqual(leerOrdenGuardado('null', claves, porDefecto), porDefecto);
+});
+
+prueba('ordenar no cambia la lista que recibe', () => {
+  // La lista viene del estado de la pantalla; ordenarla en su sitio la corrompería.
+  const copia = FILAS_DE_ORDEN.map((f) => f.nombre);
+  ordenarFilas(FILAS_DE_ORDEN, porNombre, 'desc', porNombre);
+  assert.deepEqual(nombresDe(FILAS_DE_ORDEN), copia);
 });
 
 /* ------------------------------------------------------------------------ */

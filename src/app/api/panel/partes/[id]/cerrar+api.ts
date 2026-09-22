@@ -3,6 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
+import { horarioDeLaObraDelParte } from '@/features/bitacoras/servidor/horario';
 import { viajesParaFijarAlCerrar } from '@/features/cantera/servidor/parte';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
@@ -79,9 +80,16 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     // cierra (spec 010, RF-29 y RF-37): lista vacía si no hubo. Leerlos antes y
     // escribirlos aquí dejaría fuera un viaje registrado entre medias. No bloquean
     // el cierre (RF-36): `bloqueosDelCierre` no los mira.
+    //
+    // El horario de la obra se fija igual y por lo mismo (spec 016, RF-23): desde
+    // aquí las horas del parte se leen con él aunque la gerencia lo corrija después.
     const [fila] = await db
       .update(partesDeObra)
-      .set({ cerradoEn: new Date(), cantera: viajesParaFijarAlCerrar() })
+      .set({
+        cerradoEn: new Date(),
+        cantera: viajesParaFijarAlCerrar(),
+        horario: horarioDeLaObraDelParte(),
+      })
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
       .returning({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn });
 

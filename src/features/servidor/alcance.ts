@@ -17,6 +17,8 @@
 import { eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 
+import { obras } from '@/db/servidor/esquema';
+
 import type { PersonaEnSesion } from './guardia';
 
 /** Puede ver y tocar todas las obras. */
@@ -45,6 +47,22 @@ export function filtroDeObra(persona: PersonaEnSesion, columna: PgColumn): SQL |
   if (veTodasLasObras(persona)) return undefined;
   if (!persona.obraId) return sql`false`;
   return or(eq(columna, persona.obraId), isNull(columna));
+}
+
+/**
+ * La condición que deja fuera las obras que no llevan ese módulo (spec 017, RF-10).
+ *
+ * Es lo que la gerencia deja de ver: lleva todas las obras, así que no se le apaga
+ * el módulo entero, se le ocultan las obras apagadas dentro de él. A quien tiene
+ * obra ya lo frena la guardia (RF-9), y esta condición no le cambia nada.
+ *
+ * Un `exists` y no una condición sobre un `join`: así vale igual en una consulta que
+ * ya junta `obras` y en una que no, y ninguna tiene que cambiar su forma para poder
+ * filtrar.
+ */
+export function filtroDeModulo(modulo: 'almacen' | 'cantera', columnaObra: PgColumn): SQL {
+  const bandera = modulo === 'almacen' ? obras.almacenActivo : obras.canteraActivo;
+  return sql`exists (select 1 from ${obras} where ${obras.id} = ${columnaObra} and ${bandera})`;
 }
 
 /**

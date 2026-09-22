@@ -68,24 +68,27 @@ export function actividadPorItem(item: string): ActividadDelPresupuesto | undefi
 }
 
 /**
- * La descripción entera, sin el número de ítem (RF-75).
+ * «4.1.8 · Excavación para estructuras varias…»: el número de ítem y la descripción
+ * entera (RF-78).
  *
- * Hasta el 2026-09-17 iba «4.1.8 · Excavación para estructuras varias…», porque el
- * número es por donde busca quien conoce el presupuesto. OCC pidió quitarlo: en el
- * parte la actividad se reconoce por lo que dice, y el número era ruido delante de
- * cada renglón. Con él se va también la búsqueda por número (RF-76), porque el
- * buscador del selector filtra sobre esta etiqueta.
+ * ── Por qué el número va delante (cambio del 2026-09-22) ──
  *
- * **El ítem no desaparece, solo deja de verse**: sigue siendo la clave de la opción
- * y se guarda con la actividad (`construirActividadDelParte`). Es lo único que
- * permitiría cruzar un parte con el presupuesto más adelante.
+ * Así nació, porque el número es por donde busca quien conoce el presupuesto. El
+ * 2026-09-17 se quitó (RF-75: se leía como ruido), y el 2026-09-22 OCC pidió que
+ * volviera: es como la obra habla del presupuesto. El buscador del selector filtra
+ * sobre esta etiqueta, así que con el número vuelve también la búsqueda por número
+ * (RF-79), sin tocar el buscador.
+ *
+ * El ítem siempre fue la clave de la opción y se guarda con la actividad
+ * (`construirActividadDelParte`): lo que cambió dos veces es lo que se ve, nunca lo
+ * que se guarda.
  *
  * La descripción va completa porque dos excavaciones se distinguen al final de la
- * frase («con entibado» / «sin entibado»), y sin el número delante eso es lo único
- * que las separa. Las 31 son distintas entre sí, y el guion lo comprueba.
+ * frase («con entibado» / «sin entibado»). Las 31 son distintas entre sí, y el guion
+ * lo comprueba.
  */
 export function etiquetaDeActividad(actividad: ActividadDelPresupuesto): string {
-  return actividad.descripcion;
+  return `${actividad.item} · ${actividad.descripcion}`;
 }
 
 /**

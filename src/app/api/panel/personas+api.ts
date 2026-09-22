@@ -1,13 +1,14 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { obras, usuarios } from '@/db/servidor/esquema';
+import { dispositivos, obras, usuarios } from '@/db/servidor/esquema';
 import { personaNueva } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
-import { motivoParaNoDarRol } from '@/shared/rules/permisos';
+import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
+import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
 
 /**
  * Las personas: operadores y personal administrativo. `GET` y `POST`.
@@ -39,6 +40,17 @@ export async function GET(peticion: Request) {
         obraId: usuarios.obraId,
         obraNombre: obras.nombre,
         activo: usuarios.activo,
+        /**
+         * Si tiene algún celular activado (spec 015, RF-18). La ventana de baja lo
+         * avisa antes de confirmar: darla de baja desactiva ese celular, y lo que
+         * no haya subido desde él ya no llega. Una subconsulta y no un `join`: una
+         * persona con dos teléfonos saldría dos veces en la lista.
+         */
+        celularActivo: sql<boolean>`exists (
+          select 1 from ${dispositivos}
+          where ${dispositivos.usuarioId} = ${usuarios.id}
+            and ${dispositivos.revocadoEn} is null
+        )`.mapWith(Boolean),
       })
       .from(usuarios)
       // `left` y no `inner`: el personal de gerencia no está adscrito a ninguna
@@ -74,6 +86,17 @@ export async function POST(peticion: Request) {
         return errorDePeticion('Solo puede registrar personas en su propia obra.', 403);
       }
       datos.obraId ??= sesion.obraId;
+    }
+
+    // Y la obra tiene que llevar el módulo de ese acceso (spec 017, RF-11): un
+    // almacenista en una obra sin almacén queda con una cuenta que solo sabe decirle
+    // que no tiene dónde trabajar.
+    const sinModulo = motivoParaNoDarRolEnObra(
+      datos.rol,
+      await modulosDeLaObra(datos.obraId ?? null),
+    );
+    if (sinModulo) {
+      return Response.json({ error: sinModulo, campos: { rol: sinModulo } }, { status: 400 });
     }
 
     const [creada] = await baseServidor()

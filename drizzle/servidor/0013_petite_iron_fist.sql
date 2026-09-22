@@ -1,0 +1,1 @@
+ALTER TABLE "almacen_movimientos" ADD COLUMN "responsable" text;

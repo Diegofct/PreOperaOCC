@@ -20,7 +20,14 @@ import { eq } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { credencialesWeb } from '@/db/servidor/esquema';
 import { personaDeLaPeticion, type PersonaEnSesion } from '@/features/auth/servidor/sesion';
-import { alcanza, motivoDeRechazo, type Accion, type Modulo } from '@/shared/rules/permisos';
+import {
+  alcanza,
+  avisoDeModuloApagado,
+  moduloApagado,
+  motivoDeRechazo,
+  type Accion,
+  type Modulo,
+} from '@/shared/rules/permisos';
 
 import { errorDePeticion } from './respuestas';
 
@@ -97,5 +104,15 @@ export async function requerirPermiso(
     // Qué no se puede y quién sí, leído de la misma tabla que decide (008/RF-13).
     return errorDePeticion(motivoDeRechazo(modulo, accion), 403);
   }
+
+  // El cargo no basta: la obra tiene que llevar el módulo (spec 017, RF-9). Va aquí
+  // y no en cada ruta de almacén y cantera por la misma razón por la que existe esta
+  // guardia: una ruta que se olvide de comprobarlo no se nota hasta que alguien entra
+  // por fuera del panel. La gerencia no se filtra —no está adscrita a una obra—; lo
+  // que a ella se le ocultan son las obras apagadas dentro del módulo (RF-10).
+  if (sesion.obraId && moduloApagado(modulo, sesion.modulosDeObra)) {
+    return errorDePeticion(avisoDeModuloApagado(modulo), 403);
+  }
+
   return sesion;
 }

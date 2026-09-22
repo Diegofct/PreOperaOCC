@@ -45,6 +45,8 @@ export default function PantallaCantera() {
   const obras = useListado<ObraFila>(
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
+  // Solo las que llevan control de cantera (spec 017, RF-10).
+  const obrasConCantera = obras.datos.filter((o) => o.canteraActivo);
   const [obraElegida, setObraElegida] = useState<string | null>(null);
 
   /**
@@ -77,7 +79,7 @@ export default function PantallaCantera() {
               etiqueta="Obra"
               obligatorio
               valor={obraElegida}
-              opciones={obras.datos.map((o) => ({
+              opciones={obrasConCantera.map((o) => ({
                 valor: o.id,
                 etiqueta: o.nombre,
                 detalle: o.codigo,

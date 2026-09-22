@@ -25,7 +25,7 @@ import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { almacenMateriales, almacenMovimientos, obras } from '@/db/servidor/esquema';
 import type { MaterialDeAlmacenFila } from '@/features/panel/contratos';
-import { alcanzaLaObra } from '@/features/servidor/alcance';
+import { alcanzaLaObra, filtroDeModulo } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import {
   aCentesimas,
@@ -56,7 +56,14 @@ export async function leerMateriales(condicion: SQL | undefined): Promise<Materi
     .select(COLUMNAS_MATERIAL)
     .from(almacenMateriales)
     .leftJoin(obras, eq(obras.id, almacenMateriales.obraId))
-    .where(and(isNull(almacenMateriales.eliminadoEn), condicion))
+    // Las obras que no llevan almacén no salen (spec 017, RF-10).
+    .where(
+      and(
+        isNull(almacenMateriales.eliminadoEn),
+        filtroDeModulo('almacen', almacenMateriales.obraId),
+        condicion,
+      ),
+    )
     .orderBy(asc(almacenMateriales.nombreNormalizado));
 }
 

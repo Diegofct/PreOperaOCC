@@ -8,6 +8,7 @@
     "@noble/hashes": "^2.3.0",
     "@shopify/flash-list": "2.0.2",
     "drizzle-orm": "^0.45.2",
+    "exceljs": "^4.4.0",
     "expo": "~57.0.18",
     "expo-application": "~57.0.2",
     "expo-camera": "~57.0.4",
@@ -53,7 +54,6 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.2",
-    "exceljs": "^4.4.0",
     "tsx": "^4.23.12",
     "typescript": "~6.0.3"
   },

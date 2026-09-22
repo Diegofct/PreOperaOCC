@@ -14,14 +14,15 @@
  */
 import { uuidv7 } from 'uuidv7';
 
-import type {
-  ActividadDelParte,
-  EnsayoDelParte,
-  FilaDeControlDeCalidad,
-  FranjaDeClima,
-  MaquinaDelParte,
-  MaterialDelParte,
-  PersonaDelParte,
+import {
+  esEnsayoAnterior,
+  type ActividadDelParte,
+  type EnsayoDelParte,
+  type FilaDeControlDeCalidad,
+  type FranjaDeClima,
+  type MaquinaDelParte,
+  type MaterialDelParte,
+  type PersonaDelParte,
 } from './tipos';
 import { ENSAYOS_DE_CALIDAD, nombreDeClima } from '@/shared/catalogos/bitacora';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
@@ -32,7 +33,12 @@ import {
   IDS_UNIDAD_DE_ACTIVIDAD,
 } from '@/shared/catalogos/presupuesto';
 import { calcularDimensiones, resolverCantidad } from '@/shared/rules/dimensiones';
-import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
+import {
+  faltaObservacionDelEnsayo,
+  faltasDeActividad,
+  faltasDelEnsayo,
+  type UbicacionPorValidar,
+} from '@/shared/rules/parte';
 import type { ClaseDeMedidor } from '@/shared/rules/jornada';
 
 /** Lo que el navegador puede decir de una máquina. */
@@ -65,6 +71,7 @@ export interface PersonaPedida {
   usuarioId: string;
   entrada: string;
   salida: string;
+  observaciones?: string;
 }
 
 export function construirPersona(
@@ -81,6 +88,7 @@ export function construirPersona(
     cargo: cargo ? nombreDeCargo(cargo) : null,
     entrada: pedida.entrada,
     salida: pedida.salida,
+    observaciones: pedida.observaciones?.trim() ?? '',
   };
 }
 
@@ -184,24 +192,97 @@ export interface EnsayoPedido {
   id?: string | null;
   ensayo?: string | null;
   observacion?: string | null;
+  /** Cuándo, quién y dónde (cambio del 2026-09-22, RF-84 a RF-87). */
+  horaInicio?: string | null;
+  horaFin?: string | null;
+  responsable?: string | null;
+  ubicacion?: UbicacionPorValidar | null;
 }
 
 /**
- * El ensayo que se guarda, o `null` si no es de la lista o no trae observación
- * (spec 004, RF-61, RF-72). El nombre lo pone el catálogo.
+ * El ensayo que se guarda, o `null` si no es de la lista o le falta algo (spec
+ * 004, RF-61, RF-72 y, desde el 2026-09-22, RF-84 a RF-89). El nombre lo pone el
+ * catálogo.
  *
  * El mismo ensayo puede venir varias veces (RF-73): cada fila es su propia muestra.
+ *
+ * ── `guardado`: el ensayo anterior se conserva sin los datos nuevos ──
+ *
+ * Un ensayo guardado antes del cambio no tiene horas, responsable ni ubicación, y la
+ * sección se guarda entera: sin esta salida, guardar Control Calidad de Obra en un
+ * parte que ya tenía ensayos sería imposible (RF-89). Si el que llega trae el id de
+ * un ensayo **anterior** de ese parte y no trae datos nuevos, se construye como
+ * antes, con su ensayo y su observación. Completarlo queda fuera de alcance; si
+ * alguien lo intenta con datos a medias, se le exigen todos.
+ *
+ * Quien llama pasa el guardado con ese id: esta función no lee la base. Un id que no
+ * es de un ensayo anterior no abre la salida, así que inventarlo no sirve para
+ * guardar un ensayo nuevo sin sus datos.
  */
-export function construirEnsayo(pedido: EnsayoPedido): EnsayoDelParte | null {
-  const ensayo = ENSAYOS_DE_CALIDAD.find((e) => e.id === pedido.ensayo);
-  if (!ensayo) return null;
-  if (faltaObservacionDelEnsayo(pedido.observacion)) return null;
-  return {
+export function construirEnsayo(
+  pedido: EnsayoPedido,
+  guardado?: EnsayoDelParte,
+): EnsayoDelParte | null {
+  if (rechazoDelEnsayo(pedido, guardado).length > 0) return null;
+  const ensayo = ENSAYOS_DE_CALIDAD.find((e) => e.id === pedido.ensayo)!;
+
+  const base = {
     id: pedido.id ?? uuidv7(),
     ensayo: ensayo.id,
     nombre: ensayo.nombre,
     observacion: pedido.observacion!.trim(),
   };
+  if (vuelveComoAnterior(pedido, guardado)) return base;
+
+  const ubicacion = pedido.ubicacion!;
+  return {
+    ...base,
+    horaInicio: pedido.horaInicio!,
+    horaFin: pedido.horaFin!,
+    responsable: pedido.responsable!.trim(),
+    // Se copia solo la forma elegida: un PR que viniera junto al lugar no se guarda.
+    ubicacion:
+      'lugar' in ubicacion
+        ? { lugar: ubicacion.lugar!.trim() }
+        : { pr: ubicacion.pr!, metros: ubicacion.metros! },
+  };
+}
+
+/**
+ * ¿Es un ensayo guardado antes del 2026-09-22 que vuelve sin datos nuevos? Entonces
+ * se guarda como antes (RF-89). Ver `construirEnsayo`.
+ */
+function vuelveComoAnterior(pedido: EnsayoPedido, guardado?: EnsayoDelParte): boolean {
+  const traeDatosNuevos =
+    Boolean(pedido.horaInicio) ||
+    Boolean(pedido.horaFin) ||
+    Boolean(pedido.responsable?.trim()) ||
+    Boolean(pedido.ubicacion);
+  return (
+    guardado !== undefined &&
+    guardado.id === pedido.id &&
+    esEnsayoAnterior(guardado) &&
+    !traeDatosNuevos
+  );
+}
+
+/**
+ * Por qué no se puede guardar un ensayo, ya redactado: lista vacía si se puede.
+ *
+ * Es lo que decide `construirEnsayo` y lo que responde el guardado del parte, escrito
+ * una sola vez: si la ruta volviera a calcularlo, un día diría que falta algo que la
+ * construcción no pide. A un ensayo anterior que vuelve sin datos nuevos solo se le
+ * mira la observación; a los demás, todo lo de `faltasDelEnsayo` (RF-88, RF-89).
+ */
+export function rechazoDelEnsayo(pedido: EnsayoPedido, guardado?: EnsayoDelParte): string[] {
+  if (!ENSAYOS_DE_CALIDAD.some((e) => e.id === pedido.ensayo)) {
+    return ['Ese ensayo no está en la lista.'];
+  }
+  if (vuelveComoAnterior(pedido, guardado)) {
+    const falta = faltaObservacionDelEnsayo(pedido.observacion);
+    return falta ? [falta] : [];
+  }
+  return faltasDelEnsayo(pedido).map((falta) => falta.mensaje);
 }
 
 /** Una actividad guardada antes del 2026-09-16: toda actividad nueva lleva `unidad`. */

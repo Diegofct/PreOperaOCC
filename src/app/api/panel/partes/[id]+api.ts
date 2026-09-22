@@ -5,6 +5,7 @@ import { partesDeObra, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/
 import {
   construirActividadDelParte,
   construirEnsayo,
+  rechazoDelEnsayo,
   construirFranja,
   construirMaquina,
   construirPersona,
@@ -13,6 +14,7 @@ import {
   esMaterialHeredado,
 } from '@/features/bitacoras/parte';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
+import { esEnsayo } from '@/features/bitacoras/tipos';
 import { parteEditado } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import {
@@ -223,15 +225,30 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
 
     if (cambios.laboratorio) {
       // Un material heredado que llega con su id se queda como estaba (RF-63); lo
-      // demás es un ensayo que se construye (RF-61, RF-72).
+      // demás es un ensayo que se construye (RF-61, RF-72) **con el guardado de su
+      // id**: es lo único que dice si es un ensayo anterior al 2026-09-22, al que no
+      // se le exigen horas, responsable ni ubicación (RF-89).
+      const ensayosGuardados = new Map(
+        guardado!.laboratorio.filter(esEnsayo).map((ensayo) => [ensayo.id, ensayo]),
+      );
+      const guardadoDe = (pedido: { id?: string | null }) =>
+        pedido.id ? ensayosGuardados.get(pedido.id) : undefined;
+
       const filas = conservarHeredadas(
         cambios.laboratorio,
         guardado!.laboratorio,
         esMaterialHeredado,
-        construirEnsayo,
+        (pedido) => construirEnsayo(pedido, guardadoDe(pedido)),
       );
       if (filas.some((f) => f === null)) {
-        return errorDePeticion('Ese ensayo no está en la lista.', 400);
+        // Todo lo que falta de una vez, uno por renglón, como el cierre (RF-88): con
+        // varios ensayos, cada renglón dice de cuál es.
+        const renglones = cambios.laboratorio.flatMap((pedido, indice) =>
+          filas[indice] === null
+            ? rechazoDelEnsayo(pedido, guardadoDe(pedido)).map((m) => `Ensayo ${indice + 1}: ${m}`)
+            : [],
+        );
+        return errorDePeticion(renglones.join('\n') || 'Ese ensayo no está en la lista.', 400);
       }
       set.laboratorio = filas;
     }

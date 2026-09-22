@@ -11,7 +11,7 @@ import {
 import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
-import { desglosarJornada } from '@/shared/rules/horas';
+import { desglosarJornada, horarioEfectivo } from '@/shared/rules/horas';
 import {
   avanceDeMedidor,
   fechaDeJornada,
@@ -60,8 +60,12 @@ export async function GET(peticion: Request) {
         maquinaria: partesDeObra.maquinaria,
         personal: partesDeObra.personal,
         cerradoEn: partesDeObra.cerradoEn,
+        anuladoEn: partesDeObra.anuladoEn,
+        horario: partesDeObra.horario,
+        horarioDeLaObra: obras.horario,
       })
       .from(partesDeObra)
+      .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
       .where(
         and(
           gte(partesDeObra.fecha, desdeFecha),
@@ -84,8 +88,12 @@ export async function GET(peticion: Request) {
         else horasMaquina += avance;
       }
 
+      // Las extras se cuentan con el horario de cada parte, el mismo que usa el
+      // parte en pantalla (spec 016): con uno fijo, el Inicio y el parte darían
+      // cifras distintas para las mismas personas.
+      const horario = horarioEfectivo(parte, parte.horarioDeLaObra);
       for (const persona of parte.personal) {
-        const desglose = desglosarJornada(parte.fecha, persona.entrada, persona.salida);
+        const desglose = desglosarJornada(parte.fecha, persona.entrada, persona.salida, horario);
         if (!desglose) continue;
         minutosPersonal += desglose.trabajados;
         minutosExtra += desglose.extra;

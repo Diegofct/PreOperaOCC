@@ -66,6 +66,21 @@ export const MODULOS = [
 export type Modulo = (typeof MODULOS)[number];
 
 /**
+ * Qué módulos lleva la obra de una persona (spec 017, RF-1).
+ *
+ * Los dos que se pueden apagar por obra. Quien no está adscrito a ninguna —la
+ * gerencia— los tiene los dos encendidos: lleva todas las obras, y lo que se le
+ * oculta son las obras apagadas dentro de cada módulo, no el módulo (RF-10).
+ */
+export interface ModulosDeObra {
+  almacen: boolean;
+  cantera: boolean;
+}
+
+/** La obra que lo lleva todo: lo de quien no tiene obra, y el punto de partida. */
+export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true };
+
+/**
  * `ver` es entrar al módulo. `listar` es que su listado responda.
  *
  * Son distintas a propósito, y es la distinción que sostiene todo esto: el
@@ -171,9 +186,22 @@ export function alcanza(rol: Rol, modulo: Modulo, accion: Accion): boolean {
   return TABLA[modulo][rol].includes(accion);
 }
 
-/** Los módulos a los que este rol puede entrar, en orden de menú. */
-export function modulosVisibles(rol: Rol): Modulo[] {
-  return MODULOS.filter((modulo) => alcanza(rol, modulo, 'ver'));
+/**
+ * Los módulos a los que este rol puede entrar, en orden de menú.
+ *
+ * `modulos` son los de su obra (spec 017, RF-7): el cargo abre la puerta y la obra
+ * tiene que llevar el módulo. Sin decir nada se asumen los dos encendidos, que es lo
+ * que valía antes de la 017.
+ *
+ * **La gerencia no se filtra**: lleva todas las obras, así que el módulo le sirve
+ * aunque alguna no lo lleve; lo que a ella se le ocultan son las obras apagadas
+ * dentro del módulo (RF-10).
+ */
+export function modulosVisibles(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MODULOS): Modulo[] {
+  const deUnaObra = rol !== 'admin';
+  return MODULOS.filter(
+    (modulo) => alcanza(rol, modulo, 'ver') && !(deUnaObra && moduloApagado(modulo, modulos)),
+  );
 }
 
 /**
@@ -302,6 +330,47 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
  * sería mentira —Bitácoras no es de la gerencia— y además no le dice nada útil;
  * se le dice que no es de su cargo y dónde está su trabajo.
  */
+/**
+ * ¿Este módulo está apagado en esa obra? (spec 017, RF-7 a RF-9.)
+ *
+ * Solo Almacén y Control Cantera se apagan por obra; los demás no dependen de la
+ * obra, así que nunca están apagados, diga lo que diga lo que llegue.
+ */
+export function moduloApagado(modulo: Modulo, modulos: ModulosDeObra): boolean {
+  if (modulo === 'almacen') return !modulos.almacen;
+  if (modulo === 'cantera') return !modulos.cantera;
+  return false;
+}
+
+/**
+ * Por qué no se le puede dar ese acceso en esa obra, o `null` (spec 017, RF-11).
+ *
+ * El almacenista y el encargado de planta existen **para** su módulo: darle ese
+ * acceso a alguien en una obra que no lo lleva es dejarlo con una cuenta que solo
+ * sabe decirle que su obra no tiene dónde trabajar. Los demás roles no dependen de
+ * estos interruptores.
+ */
+export function motivoParaNoDarRolEnObra(rol: Rol, modulos: ModulosDeObra): string | null {
+  const modulo: Modulo | null =
+    rol === 'almacenista' ? 'almacen' : rol === 'encargado_planta' ? 'cantera' : null;
+  if (!modulo || !moduloApagado(modulo, modulos)) return null;
+  return `Esa obra no lleva el módulo ${NOMBRE_DE_MODULO[modulo]}.`;
+}
+
+/**
+ * Lo que ve quien entra a un módulo que su obra no lleva (RF-8).
+ *
+ * Distinto del aviso de módulo ajeno: aquí el cargo sí le da acceso, y lo que falta
+ * es que su obra lo lleve. Decirle «este módulo no es de su cargo» sería mentirle, y
+ * dejarlo con una pantalla vacía, peor.
+ */
+export function avisoDeModuloApagado(modulo: Modulo): string {
+  return (
+    `Su obra no lleva el módulo ${NOMBRE_DE_MODULO[modulo]}. Si debería llevarlo, ` +
+    'pídaselo a quien lleve la administración.'
+  );
+}
+
 export function avisoDeModuloAjeno(rol: Rol, modulo: Modulo): string | null {
   if (alcanza(rol, modulo, 'ver')) return null;
 

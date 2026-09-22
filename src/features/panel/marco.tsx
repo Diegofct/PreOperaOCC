@@ -20,7 +20,13 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
-import { avisoDeModuloAjeno, sinObraAsignada, type Modulo } from '@/shared/rules/permisos';
+import {
+  avisoDeModuloAjeno,
+  avisoDeModuloApagado,
+  moduloApagado,
+  sinObraAsignada,
+  type Modulo,
+} from '@/shared/rules/permisos';
 
 import { ErrorApi, mensajeDe } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
@@ -161,6 +167,12 @@ export function MarcoPantalla({
   const persona = usePersona();
   const avisoAjeno = modulo && persona ? avisoDeModuloAjeno(persona.rol, modulo) : null;
   const sinObra = Boolean(exigeObra && persona && sinObraAsignada(persona.rol, persona.obraId));
+  // Su cargo le abre el módulo, pero su obra no lo lleva (spec 017, RF-8). Va
+  // después del aviso de cargo: si tampoco es de su cargo, eso es lo que hay que
+  // decirle.
+  const apagado = Boolean(
+    modulo && persona && persona.obraId && moduloApagado(modulo, persona.modulosDeObra),
+  );
 
   return (
     <ScrollView
@@ -178,6 +190,8 @@ export function MarcoPantalla({
           // El texto sale de la tabla de permisos: al residente se le dice que es de
           // la gerencia, y a un almacenista, dónde está su trabajo (008/RF-7).
           <Aviso tono="info">{avisoAjeno}</Aviso>
+        ) : apagado && modulo ? (
+          <Aviso tono="info">{avisoDeModuloApagado(modulo)}</Aviso>
         ) : sinObra ? (
           <Aviso tono="info">
             Su cuenta no tiene obra asignada, así que aquí no hay nada que mostrarle. Pídale a la
