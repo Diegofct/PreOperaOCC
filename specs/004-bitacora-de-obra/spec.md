@@ -1,6 +1,6 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60), 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74) y 2026-09-17 (la actividad sin número de ítem, RF-75 a RF-77)
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60), 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74), 2026-09-17 (la actividad sin número de ítem, RF-75 a RF-77) y 2026-09-22 (vuelve el número de ítem; hora, responsable y ubicación de cada ensayo, RF-78 a RF-89)
 
 ## Contexto y objetivo
 
@@ -164,6 +164,7 @@ tanda: no añade campos, cambia de qué habla el documento.
   descripción, y permitirá encontrarla escribiendo el número o palabras de la descripción.
   > **Reemplazado por RF-75 y RF-76 el 2026-09-17.** El número de ítem no se muestra ni se
   > busca: la actividad se reconoce por su descripción.
+  > **Vuelve en RF-78 y RF-79 el 2026-09-22.**
 - RF-66: CUANDO se elija una actividad de la lista, EL SISTEMA mostrará junto a ella su
   unidad de medida.
 - RF-67: EL SISTEMA permitirá registrar, para cada actividad, la cantidad —cuánto se hizo
@@ -183,13 +184,35 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 #### La actividad se lee por su descripción (cambio 2026-09-17)
 
-- RF-75: EL SISTEMA mostrará cada actividad únicamente con su descripción, sin el número de
-  ítem, tanto al elegirla de la lista como en la actividad ya registrada y en el parte.
-  *(cambio 2026-09-17, reemplaza RF-65)*
-- RF-76: EL SISTEMA permitirá encontrar una actividad escribiendo palabras de su
-  descripción, y no por su número de ítem. *(cambio 2026-09-17, reemplaza RF-65)*
-- RF-77: EL SISTEMA conservará las actividades registradas antes de este cambio tal como se
-  guardaron, y las mostrará también sin el número de ítem. *(cambio 2026-09-17)*
+> **Retirados el 2026-09-22 (RF-75 a RF-77).** OCC pidió que vuelva el número de ítem: es como
+> la obra habla del presupuesto. Los reemplazan RF-78, RF-79 y RF-81.
+
+- ~~RF-75: EL SISTEMA mostrará cada actividad únicamente con su descripción, sin el número de
+  ítem, tanto al elegirla de la lista como en la actividad ya registrada y en el parte.~~
+  *(cambio 2026-09-17; retirado el 2026-09-22, reemplazado por RF-78)*
+- ~~RF-76: EL SISTEMA permitirá encontrar una actividad escribiendo palabras de su
+  descripción, y no por su número de ítem.~~ *(cambio 2026-09-17; retirado el 2026-09-22,
+  reemplazado por RF-79)*
+- ~~RF-77: EL SISTEMA conservará las actividades registradas antes de este cambio tal como se
+  guardaron, y las mostrará también sin el número de ítem.~~ *(cambio 2026-09-17; retirado el
+  2026-09-22, reemplazado por RF-81)*
+
+#### Vuelve el número de ítem (cambio 2026-09-22)
+
+- RF-78: EL SISTEMA mostrará cada actividad del presupuesto con su número de ítem delante de
+  la descripción («4.1.8 · Excavación para estructuras…»), al elegirla de la lista, en la
+  actividad ya registrada y en el parte cerrado o anulado. *(cambio 2026-09-22)*
+- RF-79: EL SISTEMA permitirá encontrar una actividad escribiendo su número de ítem o
+  palabras de su descripción. *(cambio 2026-09-22)*
+- RF-80: EL SISTEMA ofrecerá «Otra actividad» como primera opción de la lista, antes de los
+  ítems del presupuesto. *(cambio 2026-09-22)*
+- RF-81: EL SISTEMA mostrará con su número de ítem también las actividades del presupuesto
+  registradas antes de este cambio, y las anteriores al presupuesto (RF-71) con el nombre que
+  tenían al guardarse, sin alterar ningún parte existente. *(cambio 2026-09-22)*
+- RF-82: CUANDO se añada una actividad, EL SISTEMA la dejará sin actividad elegida, en vez
+  de proponer una de antemano. *(cambio 2026-09-22)*
+- RF-83: SI se guarda una actividad sin haber elegido cuál es, ENTONCES EL SISTEMA la
+  rechazará diciendo que falta elegirla. *(cambio 2026-09-22)*
 
 ### Clima (H4)
 
@@ -233,6 +256,23 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-32: EL SISTEMA permitirá adjuntar una fotografía del día a la bitácora.
 - RF-33: EL SISTEMA mostrará las fotografías de la bitácora solo a quien tenga acceso a esa
   obra, sin exponerlas públicamente.
+
+#### Cuándo, quién y dónde de cada ensayo (cambio 2026-09-22)
+
+- RF-84: EL SISTEMA pedirá, para cada ensayo, su hora de inicio y su hora de fin, elegidas con
+  los desplegables de hora del panel (016/RF-30). *(cambio 2026-09-22)*
+- RF-85: SI la hora de fin de un ensayo es igual o anterior a su hora de inicio, ENTONCES EL
+  SISTEMA lo rechazará. *(cambio 2026-09-22)*
+- RF-86: EL SISTEMA pedirá, para cada ensayo, el nombre del responsable, escrito a mano.
+  *(cambio 2026-09-22)*
+- RF-87: EL SISTEMA pedirá la ubicación de cada ensayo como el PR y los metros donde se hizo,
+  elegidos de las mismas listas que el viaje de cantera (010/RF-12, RF-13), o, si no aplica
+  un PR, como un lugar escrito a mano. *(cambio 2026-09-22)*
+- RF-88: SI se registra un ensayo sin hora de inicio, sin hora de fin, sin responsable o sin
+  ubicación, ENTONCES EL SISTEMA lo rechazará diciendo qué le falta. *(cambio 2026-09-22)*
+- RF-89: EL SISTEMA conservará y mostrará tal como se guardaron los ensayos registrados antes
+  de este cambio, sin exigirles hora, responsable ni ubicación, y sin impedir por eso guardar
+  ni cerrar el parte que los tiene. *(cambio 2026-09-22)*
 
 ### Consulta (H5)
 
@@ -279,6 +319,13 @@ y **Sincronización**: sin impacto.
 Cambio 2026-09-17: **Panel web** (la actividad se muestra y se busca solo por su
 descripción). **API**, **Datos**, **Reglas**, **Móvil** y **Sincronización**: sin impacto —
 no cambia lo que se guarda, solo lo que se lee en pantalla.
+
+Cambio 2026-09-22: **Panel web** (el número de ítem vuelve a la lista, a la fila y al parte;
+«Otra actividad» primero; la actividad nueva arranca sin elegir; cada ensayo con horas en
+desplegables, responsable y PR + metros o lugar); **API** (guardar esos datos del ensayo y
+rechazar la actividad sin elegir); **Datos** (horas, responsable y ubicación en cada ensayo,
+conviviendo con los ensayos ya guardados sin ellos); **Reglas** (qué le falta a un ensayo, con
+sus casos en el guion). **Móvil** y **Sincronización**: sin impacto.
 
 ## Requisitos no funcionales
 
@@ -331,6 +378,18 @@ no cambia lo que se guarda, solo lo que se lee en pantalla.
   descripción completa, que se muestra entera (RF-75).
 - *(cambio 2026-09-17)* Quien conoce el presupuesto y **escribe «4.1.8» en el buscador**: no
   encuentra nada; busca por palabras de la descripción (RF-76).
+  **Deja de valer el 2026-09-22:** «4.1.8» la encuentra (RF-79).
+- *(cambio 2026-09-22)* Escribir **«4.1.9»** encuentra la 4.1.9 y también la 4.1.96, porque
+  empieza igual. Las dos se distinguen a simple vista por su descripción, que va al lado.
+- *(cambio 2026-09-22)* Se pulsa «Añadir actividad» y se guarda **sin elegir nada**: se rechaza
+  diciendo que falta elegir la actividad (RF-83). Nada se guarda a medias.
+- *(cambio 2026-09-22)* Un ensayo **en la vía, a la altura de un PR**: se eligen el PR y los
+  metros. Uno **en la planta o en el laboratorio**: se escribe el lugar (RF-87).
+- *(cambio 2026-09-22)* Un ensayo que **pasa la medianoche**: no se admite (RF-85); se
+  registra en dos filas, una por día.
+- *(cambio 2026-09-22)* Un parte **abierto** que ya tiene ensayos guardados sin horas ni
+  responsable: se siguen viendo y guardando así, y el parte se cierra igual (RF-89); los que
+  se añadan desde ahora los piden.
 
 ## Fuera de alcance
 
@@ -359,6 +418,11 @@ no cambia lo que se guarda, solo lo que se lee en pantalla.
   norma, lote) o decidir si cumple lo exigido: la observación es texto.
 - *(cambio 2026-09-17)* Cruzar el parte con el presupuesto por número de ítem: el número
   deja de verse y de buscarse (RF-75, RF-76).
+  **Sigue fuera el 2026-09-22**, aunque el número vuelva a verse (RF-78): verlo no es cruzarlo.
+- *(cambio 2026-09-22)* Elegir el responsable de un ensayo de la lista de personas del
+  sistema: se escribe a mano (RF-86).
+- *(cambio 2026-09-22)* Completar las horas, el responsable o la ubicación de los ensayos ya
+  guardados (RF-89).
 
 ## Criterios de finalización
 
@@ -368,7 +432,8 @@ no cambia lo que se guarda, solo lo que se lee en pantalla.
 - Las migraciones existen en las dos bases y las bitácoras anteriores siguen consultándose.
 - Demo manual: llenar el parte de un día completo con dos máquinas, tres personas, dos
   actividades con fotografía, tres franjas de clima, un ensayo de control de calidad con su
-  observación *(cambio 2026-09-16; antes «un elemento de laboratorio»)*, una nota y
+  observación *(cambio 2026-09-16; antes «un elemento de laboratorio»)* —con sus horas,
+  su responsable y su PR y metros *(cambio 2026-09-22)*—, una nota y
   la foto del día; cerrarlo; comprobar que el medidor de las máquinas avanzó; anularlo con
   motivo y abrir otro para el mismo día.
 
@@ -429,6 +494,14 @@ Resueltas el 2026-09-17 (Diego, petición de gerencia):
   en el parte (RF-75). Tampoco se busca por él (RF-76). Las 31 descripciones del presupuesto
   son distintas entre sí, así que ninguna queda sin forma de reconocerse.
 
+Resueltas el 2026-09-22 (Diego, requerimientos 3 y 7 de OCC):
+
+- **Vuelve el número de ítem**, en la lista, en la fila y en el parte, y se busca por él
+  (RF-78, RF-79). Revierte el cambio del 2026-09-17.
+- **«Otra actividad» va primero** (RF-80), y la actividad nueva **arranca sin elegir** (RF-82).
+- **Cada ensayo lleva hora de inicio y de fin, responsable escrito, y PR + metros o lugar**
+  (RF-84 a RF-88). Obligatorios en los nuevos; los guardados siguen valiendo (RF-89).
+
 Siguen abiertas: ninguna.
 
 ## Anexo A — Ensayos de Control Calidad de Obra *(2026-09-16)*
@@ -462,6 +535,7 @@ usa la descripción completa del presupuesto.
 
 > **Desde el 2026-09-17** el número de ítem se queda en esta tabla y en el documento de OCC:
 > sirve para saber de dónde sale cada actividad, pero no se muestra en el panel (RF-75).
+> **Desde el 2026-09-22 vuelve a mostrarse** delante de la descripción (RF-78).
 
 | Ítem | Actividad | Unidad |
 | --- | --- | --- |

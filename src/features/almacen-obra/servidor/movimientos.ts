@@ -37,6 +37,7 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       cantidad: almacenMovimientos.cantidad,
       paraQue: almacenMovimientos.paraQue,
       observacion: almacenMovimientos.observacion,
+      responsable: almacenMovimientos.responsable,
       creadoEn: almacenMovimientos.creadoEn,
       // El nombre sale aunque la persona esté de baja: un movimiento antiguo sigue
       // diciendo quién lo hizo (caso límite de la spec).
@@ -60,6 +61,8 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       cantidad: cantidadDeLaBase(f.cantidad),
       paraQue: f.paraQue,
       observacion: f.observacion,
+      // `null` en los anteriores al 2026-09-22: se muestran sin él (RF-44).
+      responsable: f.responsable,
       registradoEn: f.creadoEn.toISOString(),
       registradoPorNombre: f.registradoPorNombre,
       anulado: f.anuladoEn !== null,
@@ -105,6 +108,8 @@ export interface MovimientoPorInsertar {
   cantidad: number;
   paraQue: string | null;
   observacion: string | null;
+  /** Quién entregó o recibió, ya validado por la regla (RF-40 a RF-42). */
+  responsable: string;
   registradoPor: string;
 }
 
@@ -128,9 +133,11 @@ export function sentenciaDeMovimiento(m: MovimientoPorInsertar) {
 
   return sql`
     insert into almacen_movimientos
-      (id, obra_id, material_id, tipo, fecha, cantidad, para_que, observacion, registrado_por)
+      (id, obra_id, material_id, tipo, fecha, cantidad, para_que, observacion, responsable,
+       registrado_por)
     select ${m.id}, material.obra_id, material.id, ${m.tipo}::tipo_movimiento_almacen,
-           ${m.fecha}::date, ${cantidad}::numeric, ${m.paraQue}, ${m.observacion}, ${m.registradoPor}
+           ${m.fecha}::date, ${cantidad}::numeric, ${m.paraQue}, ${m.observacion},
+           ${m.responsable}, ${m.registradoPor}
     from almacen_materiales as material
     where material.id = ${m.materialId}
       and material.eliminado_en is null

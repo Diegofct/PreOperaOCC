@@ -145,9 +145,19 @@ export function HistorialAlmacen({
       ),
     },
     {
+      // Quién entregó lo que ingresó o quién recibió lo que salió (cambio del
+      // 2026-09-22, RF-43). «—» en los movimientos anteriores, que no lo tienen (RF-44).
+      clave: 'responsable',
+      titulo: 'Entregó / recibió',
+      ancho: 150,
+      pintar: (m) => <Celda lineas={3}>{m.responsable ?? '—'}</Celda>,
+    },
+    {
+      // 180 y no 330 desde que entró la columna de arriba: la tabla ya llenaba el
+      // ancho, y pasarse esconde la última columna, que es la de anular.
       clave: 'detalle',
       titulo: 'Para qué / observación',
-      ancho: 330,
+      ancho: 180,
       pintar: (m) => (
         <>
           <Celda lineas={3}>{(m.tipo === 'salida' ? m.paraQue : m.observacion) ?? '—'}</Celda>

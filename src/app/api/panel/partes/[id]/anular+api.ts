@@ -2,6 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { partesDeObra } from '@/db/servidor/esquema';
+import { horarioAlAnular } from '@/features/bitacoras/servidor/horario';
 import { anulacion } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
@@ -41,9 +42,17 @@ export async function POST(peticion: Request, { id }: { id: string }) {
 
     const { motivo } = await cuerpoJson(peticion, anulacion);
 
+    // Un parte anulado sigue a la vista, y sus horas no pueden moverse porque se
+    // corrija después el horario de la obra (spec 016, RF-24): si se anula abierto,
+    // se le congela el horario en la misma sentencia.
     const [anulado] = await baseServidor()
       .update(partesDeObra)
-      .set({ anuladoEn: new Date(), anuladoPor: sesion.id, motivoAnulacion: motivo })
+      .set({
+        anuladoEn: new Date(),
+        anuladoPor: sesion.id,
+        motivoAnulacion: motivo,
+        horario: horarioAlAnular(),
+      })
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.anuladoEn)))
       .returning({ id: partesDeObra.id, anuladoEn: partesDeObra.anuladoEn });
 

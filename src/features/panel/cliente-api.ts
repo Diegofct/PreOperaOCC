@@ -7,7 +7,9 @@
  * y otras un "algo falló" genérico, según quién escribió la pantalla.
  *
  * El servidor siempre responde JSON, incluso al fallar (ver
- * `@/features/servidor/respuestas`), así que aquí se puede dar por hecho.
+ * `@/features/servidor/respuestas`), así que aquí se puede dar por hecho. La única
+ * excepción es una descarga (`descargar`): si sale bien es un archivo, y si falla,
+ * el mismo JSON de error de siempre.
  *
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
@@ -129,6 +131,32 @@ async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   }
 
   return cuerpo as T;
+}
+
+/**
+ * Un archivo que el panel pide para guardarlo (spec 009, RF-45): el contenido y el
+ * nombre con que lo manda el servidor.
+ *
+ * Con `fetch` y no con un enlace directo a la ruta: así un permiso negado o un fallo
+ * del servidor se dicen en el panel con su mensaje, como cualquier otro, en vez de
+ * guardarse como un archivo roto.
+ */
+async function descargar(ruta: string): Promise<{ contenido: Blob; nombre: string }> {
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(ruta);
+  } catch {
+    throw new ErrorApi('No se pudo contactar al servidor. ¿Está corriendo `npm run web`?', 0);
+  }
+
+  if (!respuesta.ok) {
+    const detalle = (await respuesta.json().catch(() => null)) as { error?: string } | null;
+    throw new ErrorApi(detalle?.error ?? `El servidor respondió ${respuesta.status}.`, respuesta.status);
+  }
+
+  const disposicion = respuesta.headers.get('Content-Disposition') ?? '';
+  const nombre = /filename="([^"]+)"/.exec(disposicion)?.[1] ?? 'descarga.xlsx';
+  return { contenido: await respuesta.blob(), nombre };
 }
 
 const enviar = <T>(ruta: string, metodo: string, datos?: unknown) =>
@@ -301,6 +329,12 @@ export const api = {
    * (RF-23, RF-24).
    */
   almacen: {
+    /**
+     * El almacén en Excel (spec 009, RF-45 a RF-50). `obraId` solo lo tiene en cuenta
+     * el servidor para la gerencia; sin él, la gerencia descarga todas las obras.
+     */
+    descargar: (obraId?: string | null) =>
+      descargar(`/api/panel/almacen/exportar${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`),
     materiales: {
       /** `obraId` solo lo tiene en cuenta el servidor para la gerencia. */
       listar: (obraId?: string | null) =>

@@ -9,6 +9,8 @@
  */
 import { useCallback, useState } from 'react';
 
+import { HORARIO_PROPUESTO, type HorarioDeObra } from '@/shared/rules/horas';
+
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -24,7 +26,9 @@ import {
   Tabla,
   type Columna,
 } from './componentes';
+import { EditorDeHorario, horarioValido } from './editor-horario';
 import { MarcoPantalla, useListado } from './marco';
+import { ModulosDeLaObra } from './modulos-de-obra';
 import { VentanaCorregirObra } from './ventana-obra';
 import type { ObraFila } from './contratos';
 
@@ -34,6 +38,12 @@ export default function PantallaObras() {
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
   const [municipio, setMunicipio] = useState('');
+  // Arranca con el propuesto (spec 016, RF-3): la gerencia lo ajusta, no lo escribe
+  // desde cero.
+  const [horario, setHorario] = useState<HorarioDeObra>(HORARIO_PROPUESTO);
+  // Los dos módulos, como las obras que ya existían (spec 017, RF-2, RF-3).
+  const [almacenActivo, setAlmacenActivo] = useState(true);
+  const [canteraActivo, setCanteraActivo] = useState(true);
 
   const [editando, setEditando] = useState<ObraFila | null>(null);
   const [porDarDeBaja, setPorDarDeBaja] = useState<ObraFila | null>(null);
@@ -41,13 +51,24 @@ export default function PantallaObras() {
 
   async function crear() {
     const creada = await listado.ejecutar(() =>
-      api.obras.crear({ codigo, nombre, municipio, activa: true }),
+      api.obras.crear({
+        codigo,
+        nombre,
+        municipio,
+        activa: true,
+        horario,
+        almacenActivo,
+        canteraActivo,
+      }),
     );
     if (creada) {
       setHecho(nombre + ' quedó registrada.');
       setCodigo('');
       setNombre('');
       setMunicipio('');
+      setHorario(HORARIO_PROPUESTO);
+      setAlmacenActivo(true);
+      setCanteraActivo(true);
     }
   }
 
@@ -116,8 +137,21 @@ export default function PantallaObras() {
             ancho={320}
           />
           <Campo etiqueta="Municipio" valor={municipio} onChange={setMunicipio} ancho={220} />
+          <EditorDeHorario valor={horario} onChange={setHorario} />
+          <ModulosDeLaObra
+            almacen={almacenActivo}
+            cantera={canteraActivo}
+            onCambiar={(cuales) => {
+              setAlmacenActivo(cuales.almacen);
+              setCanteraActivo(cuales.cantera);
+            }}
+          />
           <AccionesFormulario>
-            <Boton titulo="Registrar obra" onPress={crear} deshabilitado={!codigo || !nombre} />
+            <Boton
+              titulo="Registrar obra"
+              onPress={crear}
+              deshabilitado={!codigo || !nombre || !horarioValido(horario)}
+            />
           </AccionesFormulario>
         </Formulario>
       </Seccion>

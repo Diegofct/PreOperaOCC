@@ -18,7 +18,9 @@
  * persona registró algo mientras tanto; entonces el servidor rechaza con el stock
  * real y el mensaje se lee bajo la cantidad.
  *
- * Quién registra no se pide: es quien tiene la sesión (RF-30).
+ * Quién registra no se pide: es quien tiene la sesión (RF-30). Lo que sí se pide,
+ * desde el 2026-09-22, es la persona del otro lado del mostrador: quién entregó lo
+ * que ingresa o quién recibió lo que sale, escrito a mano (RF-40 a RF-42).
  */
 import { useState } from 'react';
 
@@ -62,13 +64,17 @@ export function VentanaMovimiento({
   const [cantidad, setCantidad] = useState('');
   const [paraQue, setParaQue] = useState('');
   const [observacion, setObservacion] = useState('');
+  const [responsable, setResponsable] = useState('');
   const [intentado, setIntentado] = useState(false);
   const [guardando, setGuardando] = useState(false);
   /** Lo que el servidor diga de un campo, bajo ese campo (spec 007, RF-18). */
   const [delServidor, setDelServidor] = useState<Record<string, string>>({});
 
   const centesimas = cantidad.trim() === '' ? null : aCentesimas(cantidad);
-  const faltas = validarMovimiento({ tipo, fecha, cantidad: centesimas, paraQue }, hoy);
+  const faltas = validarMovimiento(
+    { tipo, fecha, cantidad: centesimas, paraQue, responsable },
+    hoy,
+  );
   const faltaDe = (campo: string) =>
     delServidor[campo] ?? (intentado ? faltas.find((f) => f.campo === campo)?.mensaje : undefined);
 
@@ -91,8 +97,8 @@ export function VentanaMovimiento({
     try {
       await api.almacen.movimientos.registrar(
         esSalida
-          ? { tipo: 'salida', materialId: material.id, fecha, cantidad, paraQue }
-          : { tipo: 'ingreso', materialId: material.id, fecha, cantidad, observacion },
+          ? { tipo: 'salida', materialId: material.id, fecha, cantidad, paraQue, responsable }
+          : { tipo: 'ingreso', materialId: material.id, fecha, cantidad, observacion, responsable },
       );
       const cuanto = formatearCantidad(centesimas ?? 0, material.unidad);
       onGuardado(
@@ -101,10 +107,12 @@ export function VentanaMovimiento({
           : `Ingreso de ${cuanto} de ${material.nombre} registrado.`,
       );
     } catch (fallo) {
-      // Stock que ya no alcanza, fecha o «para qué»: se quedan en la ventana, bajo
-      // su campo. Lo demás sube al aviso de la página.
+      // Stock que ya no alcanza, fecha, «para qué» o quién: se quedan en la ventana,
+      // bajo su campo. Lo demás sube al aviso de la página.
       const campos = fallo instanceof ErrorApi ? fallo.campos : undefined;
-      if (campos && (campos.cantidad || campos.fecha || campos.paraQue)) setDelServidor(campos);
+      if (campos && (campos.cantidad || campos.fecha || campos.paraQue || campos.responsable)) {
+        setDelServidor(campos);
+      }
       else onFallo(mensajeDe(fallo));
     } finally {
       setGuardando(false);
@@ -159,6 +167,15 @@ export function VentanaMovimiento({
             multilinea
           />
         )}
+        <Campo
+          etiqueta={esSalida ? 'Recibido por' : 'Entregado por'}
+          obligatorio
+          valor={responsable}
+          onChange={setResponsable}
+          ayuda={esSalida ? 'Quién se llevó el material.' : 'Quién trajo el material.'}
+          error={faltaDe('responsable')}
+          ancho={300}
+        />
         <AccionesFormulario>
           <Acciones>
             <Boton

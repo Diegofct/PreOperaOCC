@@ -457,3 +457,237 @@ la gerencia.
 **Cierre:** `npx expo export --platform web` sin error, `grep DATABASE_URL dist/client` vacío,
 `dist` borrado. 193 verificaciones, `typecheck` y `lint` en verde. **La spec 009 vuelve a
 Cumplida.**
+
+---
+
+## Cambio del 2026-09-22 (RF-40 a RF-50)
+
+Nueve tareas. La primera prueba el riesgo mayor —que `exceljs` corra en el servidor de Expo— antes
+de escribir nada que dependa de ello. Después, el nombre en el orden de siempre (datos, regla,
+servidor, pantalla) y la descarga (contenido puro, libro, botón). T26 valida el cambio entero.
+
+**La librería, primero**
+
+- [x] T18. `exceljs` en el servidor: dependencia, archivo único y ruta mínima. (RF-45)
+      `exceljs` pasa a `dependencies` y `npm install` actualiza el `package-lock.json`.
+      `src/features/almacen-obra/servidor/excel.ts` arma un libro con las hojas «Movimientos» y
+      «Existencias» **solo con sus encabezados**, y `src/app/api/panel/almacen/exportar+api.ts`
+      lo entrega con la guardia `almacen/listar` y su `Content-Disposition`.
+      Hecho cuando: desde la página, con la sesión de gerencia, `GET
+      /api/panel/almacen/exportar` responde 200 con el tipo de `.xlsx` y un cuerpo que empieza
+      por «PK»; ese cuerpo, guardado en la carpeta temporal y leído con `exceljs` desde un guion,
+      tiene las dos hojas con sus encabezados; `npx expo export --platform web` termina sin error
+      y `grep -r "exceljs\|DATABASE_URL" dist/client` sale vacío (`dist` borrado); los tres
+      comandos en verde. **Si `exceljs` no empaqueta o no corre, se para y se vuelve a Diego.**
+
+**Quién entrega y quién recibe**
+
+- [x] T19. Columna `responsable` en los movimientos, con su migración. (RF-40, RF-41, RF-44)
+      `almacen_movimientos.responsable text` **nulo** en `esquema.ts`, con el comentario de por
+      qué es nulo. `npm run db:generate:servidor` genera la `0013`.
+      Hecho cuando: la migración está en `drizzle/servidor/` y solo añade esa columna; se aplica
+      en Neon **con el permiso de Diego** y un `GET` del historial de un material sigue
+      respondiendo; los tres comandos en verde.
+
+- [x] T20. El nombre obligatorio en la regla y el contrato, con sus casos. (RF-40, RF-41, RF-42)
+      `validarMovimiento` y `MENSAJES_DE_MOVIMIENTO` (`sinEntregadoPor`, `sinRecibidoPor`);
+      `movimientoNuevo` con `responsable` obligatorio (≤ 120) en las dos ramas;
+      `MovimientoDeAlmacenFila.responsable`.
+      Hecho cuando: en el guion, un ingreso y una salida sin nombre, o con solo espacios, dan la
+      falta bajo `responsable` con el texto de su tipo; con nombre no; el contrato rechaza los
+      dos sin nombre y acepta 120 caracteres pero no 121; los tres comandos en verde.
+
+- [x] T21. El servidor guarda y devuelve el nombre. (RF-40 a RF-44)
+      `MovimientoPorInsertar.responsable`, `sentenciaDeMovimiento`, `historialDelMaterial` y la
+      ruta `POST /api/panel/almacen/movimientos`.
+      Hecho cuando: desde la página, un `POST` de un ingreso sin `responsable` responde 400 con
+      `campos.responsable` y **no escribe nada** (el historial sigue igual); el `GET` del
+      historial trae `responsable: null` en los movimientos anteriores; los tres comandos en
+      verde.
+
+- [x] T22. El nombre en pantalla: la ventana y el historial. (RF-40 a RF-44)
+      «Entregado por» o «Recibido por» en `ventana-movimiento.tsx`, obligatorio y con la falta de
+      la regla; columna «Entregó / recibió» en `historial-almacen.tsx` («—» en los anteriores) y
+      «Para qué / observación» a 180 con varios renglones, para que la suma no pase de hoy.
+      Hecho cuando: en Chrome, en el almacén de PRUEBA-016, un ingreso sin nombre marca la falta
+      sin enviar; con «Entregado por» se registra, y una salida con «Recibido por» también; el
+      historial los muestra, con la columna de anular visible sin desplazar; un movimiento
+      anterior (de Consorcio Antioquia) sale con «—»; los tres comandos en verde.
+
+**Descargar en Excel**
+
+- [x] T23. El contenido de las hojas, puro, con sus casos. (RF-46, RF-47, RF-48, RF-49, RF-50)
+      `src/features/almacen-obra/exportar.ts`: `hojasDelAlmacen(movimientos, materiales)` y
+      `nombreDelArchivo(codigo, hoy)`, sin I/O ni `exceljs`.
+      Hecho cuando: en el guion, con un material vigente y uno de baja, un ingreso, una salida de
+      2,5 y un ingreso anulado: Movimientos trae las tres filas (la del material de baja
+      incluida), la cantidad 2.5 es un número, el anterior dice «—» en el nombre y el anulado
+      dice «Anulado» con quién, cuándo y motivo; Existencias trae solo el vigente, con los
+      totales de `totalesDelMaterial` sin el anulado; la fecha es un `Date`; los dos nombres de
+      archivo salen como dice RF-50; los tres comandos en verde.
+
+- [x] T24. El libro completo desde la ruta. (RF-45 a RF-50)
+      `excel.ts` lee los movimientos del alcance (materiales de baja incluidos) y los materiales
+      vigentes, los pasa por `hojasDelAlmacen` y escribe el libro con formato de fecha y de dos
+      decimales; la ruta aplica el alcance (el almacenista y el residente, su obra; la gerencia,
+      `obraId` o todas) y el nombre del archivo.
+      Hecho cuando: el archivo de PRUEBA-016 y el de todas las obras, pedidos desde la página y
+      leídos con `exceljs` desde un guion, traen los movimientos y existencias que se ven en
+      pantalla, con el anulado de Consorcio marcado, cantidades numéricas y el nombre de archivo
+      de RF-50; los tres comandos en verde.
+
+- [x] T25. El botón «Descargar en Excel». (RF-45, RF-50)
+      `api.almacen.descargar(obraId)` en `cliente-api.ts` y el botón en `pantalla-almacen.tsx`,
+      que guarda el `Blob` con un enlace temporal; la gerencia descarga la obra del filtro o
+      todas; un fallo se dice en la pantalla como cualquier otro.
+      Hecho cuando: en Chrome, al pulsar el botón se crea el enlace de descarga con el nombre de
+      RF-50 (comprobado interceptando `URL.createObjectURL` y el `download` del enlace, **sin
+      guardar archivos en el equipo** salvo que Diego lo autorice); con el `GET` interceptado para
+      responder 500, sale el error en la pantalla; los tres comandos en verde.
+
+- [x] T26. Validación del cambio RF por RF con demo. (RF-40 a RF-50)
+      Hecho cuando: cada RF-40 a RF-50 tiene su comprobación con resultado en las notas;
+      `npx expo export --platform web` limpio y `grep -r "exceljs\|DATABASE_URL" dist/client`
+      vacío; los tres comandos en verde; y la spec vuelve a **Cumplida**.
+
+### Notas de ejecución del cambio del 2026-09-22
+- **T18 (2026-09-22).** `exceljs` pasó a `dependencies`; `npm install` solo quitó del
+  `package-lock.json` las marcas `"dev": true` de ella y de sus dependencias (103 líneas menos,
+  ninguna versión nueva). `servidor/excel.ts` (el único que importa `exceljs`) arma el libro con
+  «Movimientos» y «Existencias», encabezados en negrita e inmovilizados; `writeBuffer` se
+  devuelve tal cual como `ArrayBuffer` (TypeScript 6 no acepta un `Uint8Array` genérico como
+  cuerpo de `Response`). La ruta `exportar+api.ts` con la guardia `almacen/listar` y el archivo
+  como adjunto; por ahora se llama `almacen-<fecha>.xlsx` (el código de la obra entra en T24).
+  **Comprobado:** (1) servidor de desarrollo, desde la página con la sesión de gerencia: 200,
+  tipo `.xlsx`, adjunto «almacen-2026-09-22.xlsx», 7 469 bytes que empiezan por «PK», hojas
+  «Movimientos | Existencias» con sus 14 y 6 encabezados. **Cambio sobre lo escrito:** el
+  archivo se leyó dentro de la página (recorriendo el zip y descomprimiendo con
+  `DecompressionStream`) y no con `exceljs` desde un guion, porque la herramienta del navegador
+  bloquea sacar el archivo en base64 y cualquier salida con `filename="…"`; comprueba lo mismo.
+  (2) `npx expo export --platform web` sin error (55 rutas); `grep` de `exceljs`,
+  `DATABASE_URL`, `SECRETO_TOKENS` y `R2_LLAVE_SECRETA` en `dist/client`, vacío; la ruta
+  empaquetada en `dist/server` lleva `Workbook`. (3) Esa ruta empaquetada **carga en Node puro**
+  y sin sesión responde 401 (el riesgo del VPS). `dist` borrado. 244 verificaciones.
+- **T19 (2026-09-22).** `almacen_movimientos.responsable text` nula, con el comentario de por
+  qué. `db:generate:servidor` generó `drizzle/servidor/0013_petite_iron_fist.sql`, que solo dice
+  `ALTER TABLE "almacen_movimientos" ADD COLUMN "responsable" text;`. **Aplicada en Neon con el
+  permiso de Diego** (`db:migrar:servidor`: «Listo.»). Después, el historial de «Prueba Cemento
+  T8» (Consorcio Antioquia) responde 200 con sus 6 movimientos, 1 anulado. 244 verificaciones.
+- **T20 (2026-09-22).** Primero las pruebas: la nueva falló porque la regla no pedía el nombre.
+  `validarMovimiento` añade la falta bajo `responsable`, la última, con `sinEntregadoPor`
+  («Escriba quién entregó el material.») o `sinRecibidoPor` («Escriba quién recibió el
+  material.»); solo espacios cuenta como vacío. `movimientoNuevo` lo exige en las dos ramas con
+  esos textos, recortado y ≤ 120. Los casos que ya había construían movimientos sin nombre y se
+  les puso uno: desde este cambio eso es un movimiento incompleto. Dos pruebas nuevas, 246
+  verificaciones. **Dos cambios sobre las tareas, para que quedara en verde por sí sola:** (1)
+  `MovimientoDeAlmacenFila.responsable` pasa a T21, que es la que lee la columna (con él aquí,
+  `historialDelMaterial` no compilaba). (2) El campo «Entregado por» / «Recibido por» de
+  `ventana-movimiento.tsx` se adelantó desde T22: al exigir el contrato el nombre, la ventana
+  dejaba de compilar, y mandar un nombre vacío de relleno era peor. Un fallo del servidor en ese
+  campo se queda bajo él, como los demás. T22 queda con el historial y la demo en pantalla.
+- **Hueco hasta T21, conocido:** la ruta `POST` todavía llama a `validarMovimiento` sin el
+  nombre, así que en local cualquier movimiento se rechaza con «Escriba quién…». No hay nada
+  desplegado; T21 lo cierra.
+- **T21 (2026-09-22).** `MovimientoPorInsertar.responsable` y la sentencia lo inserta;
+  `historialDelMaterial` lo lee; `MovimientoDeAlmacenFila.responsable: string | null` (el que
+  se pasó desde T20); la ruta `POST` pasa el nombre a la regla y a la sentencia. Comprobado desde
+  la página, sobre «Prueba Cemento T8» (Consorcio Antioquia): un ingreso sin `responsable` y
+  otro con solo espacios responden 400 «Escriba quién entregó el material.» con
+  `campos.responsable`; el historial, idéntico antes y después (6 movimientos), trae
+  `responsable: null` en todos, que son anteriores. El servidor tomó el cambio sin reiniciar.
+  Con esto se cierra el hueco de T20: registrar vuelve a funcionar (se ve en T22). 246
+  verificaciones.
+- **T22 (2026-09-22).** Columna «Entregó / recibió» (150, tres renglones, «—» si no hay) después
+  de «Registró»; «Para qué / observación» de 330 a 180, con la suma de antes. El campo de la
+  ventana ya venía de T20. Demo en Chrome: **se registró en PRUEBA-016 el material «Prueba
+  Cemento 009 (responsable)», en bultos**, por `POST` desde la página (el formulario de alta no es
+  lo que se prueba aquí). En su ventana de ingreso, «Registrar ingreso» sin nombre marcó «Escriba
+  quién entregó el material.» sin enviar nada; con «Ferretería El Tornillo (prueba 009)» se
+  registraron 50 bultos, y una salida de 20,5 «Cuneta PR 5 (prueba 009)» con «Recibido por» Pedro
+  Cartagena (stock 29,5). El historial muestra la columna con los dos nombres y el botón
+  «Anular» a la vista sin desplazar. En «Prueba Cemento T8» (Consorcio Antioquia) los seis
+  movimientos anteriores salen con «—» y siguen con «Anular»; el anulado muestra su motivo entero
+  en cuatro renglones de la columna más estrecha. La página tardó en cargar tras tantos cambios
+  (el servidor volvía a empaquetar); no fue un fallo.
+- **T23 (2026-09-22).** Primero la prueba, que falló porque el módulo no existía.
+  `src/features/almacen-obra/exportar.ts`, puro: `hojasDelAlmacen(movimientos, materiales)` y
+  `nombreDelArchivo(codigo, hoy)`, con `ENCABEZADOS_MOVIMIENTOS` (14) y `ENCABEZADOS_EXISTENCIAS`
+  (6). Movimientos por obra y en orden de registro; cantidad en número (centésimas / 100); fecha
+  del movimiento como `Date` a medianoche UTC; registro y anulación corridos a la hora de la
+  obra; «—» en el nombre de los anteriores; «Vigente» / «Anulado» con quién, cuándo y motivo solo
+  en los anulados. Existencias de los materiales vigentes con `totalesDelMaterial` (el anulado
+  no cuenta). El nombre del archivo cambia a guion lo que no sea letra, número o guion. La prueba
+  cubre un movimiento anterior, una salida de 2,5, un ingreso anulado y un material de baja, las
+  hojas vacías y los nombres de archivo. 247 verificaciones.
+- Duplicado temporal: los encabezados que T18 dejó escritos en `servidor/excel.ts` viven ahora
+  también aquí; T24 hace que `excel.ts` escriba lo que devuelve `hojasDelAlmacen` y los quita.
+- **T24 (2026-09-22).** `servidor/excel.ts` lee los movimientos del alcance **con los de
+  materiales dados de baja** (join sin filtrar `eliminado_en`, con obra, quien registró y quien
+  anuló) y los materiales vigentes (`leerMateriales`), los pasa por `hojasDelAlmacen` y escribe
+  el libro: columnas por encabezado con ancho y formato (`yyyy-mm-dd`, `yyyy-mm-dd hh:mm`,
+  `#,##0.00`), encabezado en negrita e inmovilizado. Se quitaron los encabezados duplicados de
+  T18. `libroDelAlmacen(sesion, obraPedida)` aplica el alcance (la gerencia, la pedida o todas;
+  los demás, la suya) y busca el código de la obra para el nombre. La ruta solo lee el `obraId`.
+  **Comprobado** en la página (el libro se leyó recorriendo el zip, como en T18): PRUEBA-016 →
+  «almacen-PRUEBA-016-2026-09-22.xlsx», 2 movimientos con sus nombres, 20,5 como número, fecha
+  como serial de Excel (46287 = 2026-09-22) y hora de registro 10:33 (la de la obra);
+  existencias 50 / 20,5 / 29,5. Todas → «almacen-todas-las-obras-2026-09-22.xlsx», 8 movimientos
+  de las dos obras, el anulado de «Prueba Cemento T8» con «Anulado», quién, cuándo y su motivo, y
+  las 5 existencias **idénticas** a las de `GET /api/panel/almacen/materiales`. `expo export`
+  sin error y sin `exceljs` ni secretos en `dist/client`. 247 verificaciones.
+- Visto en la demo, fuera de la tarea: el servidor de desarrollo iba **lento en todas las
+  rutas** (`/api/auth/yo` 10 s, el listado de materiales 8 s, la descarga ~30 s), no solo en la
+  nueva. Parece la conexión con Neon o el servidor cargado tras muchos cambios; conviene mirarlo
+  si sigue así después de reiniciar `npm run web`.
+- **T25 (2026-09-22).** `descargar(ruta)` en `cliente-api.ts`: `fetch`, y si falla, el mismo
+  `ErrorApi` con el mensaje del servidor; si sale bien, el `Blob` y el nombre del
+  `Content-Disposition`. `api.almacen.descargar(obraId?)`. En `pantalla-almacen.tsx`, botón
+  «Descargar en Excel» (secundario, en la barra del listado, para todos los que ven el almacén),
+  que dice «Preparando el archivo…» mientras espera; la gerencia descarga la obra del filtro o
+  todas; `guardarArchivo` guarda con un enlace temporal y lo libera un segundo después. Un fallo
+  va al aviso de arriba de la página. Demo en Chrome, **sin guardar archivos en el equipo**
+  (`URL.createObjectURL` y el `click` del enlace interceptados): sin filtro →
+  «almacen-todas-las-obras-2026-09-22.xlsx», 8 699 bytes, tipo `.xlsx`; con PRUEBA-016 en el
+  filtro → «almacen-PRUEBA-016-2026-09-22.xlsx»; con la ruta respondiendo 500 (interceptada) →
+  el mensaje del servidor en rojo arriba de la página y ninguna descarga. El servidor seguía
+  lento (unos 20 s por descarga), y el botón lo dejó ver. 247 verificaciones.
+
+### Validación del cambio del 2026-09-22 (T26)
+
+Comandos: `npm run verificar` → 247 verificaciones correctas; `npm run typecheck` y
+`npm run lint` sin errores (salida 0); `npx expo export --platform web` sin error y la búsqueda
+de `exceljs`, `DATABASE_URL`, `SECRETO_TOKENS` y `R2_LLAVE_SECRETA` en `dist/client`, vacía
+(`dist` borrado). Todo en Chrome, como gerencia.
+
+| RF | Qué lo cubre | Resultado |
+| --- | --- | --- |
+| RF-40 | `verificar-reglas.ts:3626` y `:3791` + Chrome (T22): «Entregado por» en el ingreso, guardado «Ferretería El Tornillo (prueba 009)» | verde |
+| RF-41 | `verificar-reglas.ts:3626` y `:3791` + Chrome (T22): «Recibido por» en la salida, guardado «Pedro Cartagena» | verde |
+| RF-42 | `verificar-reglas.ts:3601`, `:3626`, `:3791` (vacío, nulo y solo espacios) + Chrome: en la ventana sin enviar (T22) y en el servidor, 400 bajo `responsable` sin escribir (T21) | verde |
+| RF-43 | Chrome (T22): columna «Entregó / recibió» en el historial, con el botón de anular a la vista | verde |
+| RF-44 | Chrome (T21, T22): los 6 movimientos anteriores de «Prueba Cemento T8» traen `responsable: null`, salen con «—» y siguen con «Anular»; `verificar-reglas.ts:3809` («—» en el archivo) | verde |
+| RF-45 | Chrome (T25): el botón, y la gerencia descarga todas sin filtro y PRUEBA-016 con él; la ruta con la guardia `almacen/listar`. El alcance del almacenista y el residente (su obra, sin importar el `obraId`) es el mismo `filtroDeObra` del listado de materiales: **por lectura de código**, no hay contraseña de esas cuentas para probarlo | verde (en parte, lectura de código) |
+| RF-46 | `verificar-reglas.ts:3809` + T24: hoja Movimientos con los 14 datos, los de un material de baja incluidos; 8 movimientos de las dos obras en el archivo de todas | verde |
+| RF-47 | `verificar-reglas.ts:3809` + T24: el anulado de «Prueba Cemento T8» con «Anulado», quién, cuándo y motivo; no cuenta en existencias | verde |
+| RF-48 | `verificar-reglas.ts:3809` + T24: las 5 existencias del archivo, **idénticas** a las de la pantalla | verde |
+| RF-49 | `verificar-reglas.ts:3809` + T24: 20,5 como número, fechas como serial de Excel con formato de fecha, hora de registro en la de la obra | verde |
+| RF-50 | `verificar-reglas.ts:3809` + T24 y T25: «almacen-PRUEBA-016-2026-09-22.xlsx» y «almacen-todas-las-obras-2026-09-22.xlsx» | verde |
+
+**Datos que quedan de las demos:** en PRUEBA-016, el material «Prueba Cemento 009 (responsable)»
+con un ingreso de 50 y una salida de 20,5 (stock 29,5). Migración `0013` aplicada en Neon.
+
+**Alcance.** Nada fuera del cambio. Dos ajustes de reparto entre tareas, sin cambio de
+comportamiento: el campo de la ventana se hizo en T20 y el tipo de la fila en T21. Lo que el
+cambio dejó fuera sigue fuera: no se elige a la persona de una lista, no se completan los
+movimientos anteriores, el archivo no se filtra por periodo ni por tipo, y no se carga nada desde
+Excel.
+
+**Constitución.** Sin cambios en el móvil; todo salió de la spec; la regla del nombre está en
+`shared/rules/almacen.ts` y la usan pantalla y servidor; las existencias salen de la misma
+`totalesDelMaterial`; nada se borra; puerta de calidad en verde; sin fugas en el bundle; todo en
+español; `exceljs` pasó a dependencia con la aprobación de Diego (principio 8).
+
+**Veredicto: cumplido (RF-40 a RF-50).** La spec 009 vuelve a **Cumplida**.
+
+- Pendiente de mirar, fuera del cambio: el servidor de desarrollo iba lento en todas las rutas
+  durante T24 y T25 (10–30 s por petición).

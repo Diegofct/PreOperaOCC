@@ -51,11 +51,15 @@ export interface ListadoFiltrado<T> {
  * @param filas  el listado completo, tal como llegó del servidor
  * @param textoDe  de qué campos de cada fila se puede buscar
  * @param pasaFiltros  los filtros propios de la pantalla, si tiene alguno
+ * @param ordenar  el orden elegido en la tabla, si se puede ordenar (spec 015).
+ *   Tiene que venir de `useCallback`: cambia de identidad solo cuando cambia el
+ *   orden, y eso es lo que decide si se vuelve a ordenar.
  */
 export function useListadoFiltrado<T>(
   filas: T[],
   textoDe: (fila: T) => (string | null | undefined)[],
   pasaFiltros: (fila: T) => boolean = () => true,
+  ordenar?: (filas: T[]) => T[],
 ): ListadoFiltrado<T> {
   // La búsqueda vive en la dirección: recargar no la pierde y el enlace se puede
   // pasar. El ayudante es el mismo que usa el periodo de los preoperacionales.
@@ -77,6 +81,16 @@ export function useListadoFiltrado<T>(
   }, [filas, busqueda, pasaFiltros]);
 
   /**
+   * Se ordena la lista **entera** ya filtrada, y solo después se recorta la
+   * página (spec 015, RF-15). Ordenar la página sola dejaría la 2 empezando otra
+   * vez por la A, y el orden no serviría para encontrar a nadie.
+   */
+  const ordenadas = useMemo(
+    () => (ordenar ? ordenar(coincidentes) : coincidentes),
+    [coincidentes, ordenar],
+  );
+
+  /**
    * La página se corrige al vuelo en vez de con un efecto.
    *
    * Si alguien está en la página 4 y escribe una búsqueda que deja tres
@@ -84,11 +98,11 @@ export function useListadoFiltrado<T>(
    * no hay nada. Se calcula al pintar y no se guarda, que es lo que evita el
    * parpadeo de un efecto que corrige después de haber pintado mal.
    */
-  const paginas = Math.max(1, Math.ceil(coincidentes.length / POR_PAGINA));
+  const paginas = Math.max(1, Math.ceil(ordenadas.length / POR_PAGINA));
   const pagina = Math.min(paginaActual, paginas);
 
   const desde = (pagina - 1) * POR_PAGINA;
-  const recorte = coincidentes.slice(desde, desde + POR_PAGINA);
+  const recorte = ordenadas.slice(desde, desde + POR_PAGINA);
 
   return {
     pagina: recorte,

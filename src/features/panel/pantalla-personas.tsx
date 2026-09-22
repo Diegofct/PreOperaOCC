@@ -41,6 +41,7 @@ import { useCallback, useState } from 'react';
 
 import {
   CARGOS,
+  cargoPorId,
   nombreDeCargo,
   operaVehiculos,
   rolSugerido,
@@ -78,8 +79,48 @@ import {
   type Rol,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { ordenarFilas, type Orden } from './ordenar';
 import { useSesionPanel } from './sesion';
 import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { useOrdenRecordado } from './usar-orden-recordado';
+
+/**
+ * Qué acceso tiene de verdad una persona, no el nombre interno del rol.
+ *
+ * A un topógrafo el sistema le dice «operador» por dentro, pero no entra a
+ * ninguna parte, y verlo escrito evita repartir códigos por error. Vive fuera de
+ * la columna porque la tabla se ordena por este mismo texto (spec 015): ordenar
+ * por el rol interno dejaría un orden que la pantalla no explica.
+ */
+function etiquetaDeAcceso(p: PersonaFila): { texto: string; tono: 'bueno' | 'neutro' } {
+  if (p.rol === 'admin') return { texto: 'Gerencia', tono: 'bueno' };
+  // Todo el que no es operador entra al panel: residente, almacenista y
+  // encargado de planta (spec 008). Preguntar solo por el residente dejaba a
+  // un almacenista como «Sin acceso» mientras sí lo tenía.
+  if (p.rol !== 'operador') return { texto: 'Panel', tono: 'bueno' };
+  return operaVehiculos(p.cargo)
+    ? { texto: 'Celular', tono: 'neutro' }
+    : { texto: 'Sin acceso', tono: 'neutro' };
+}
+
+/**
+ * Por qué texto se ordena cada columna (spec 015, RF-8). Es lo que se ve en la
+ * celda: el cargo por su nombre y el acceso por su etiqueta.
+ */
+const ORDEN_DE_COLUMNA: Record<string, (p: PersonaFila) => string | null> = {
+  usuario: (p) => p.usuario,
+  nombre: (p) => p.nombreCompleto,
+  documento: (p) => p.documento,
+  // «Sin definir» se ve en la celda, pero cuenta como vacío: va al final (RF-13).
+  cargo: (p) => cargoPorId(p.cargo)?.nombre ?? null,
+  acceso: (p) => etiquetaDeAcceso(p).texto,
+  obra: (p) => p.obraNombre,
+};
+
+const COLUMNAS_ORDENABLES = Object.keys(ORDEN_DE_COLUMNA);
+
+/** Sin orden elegido, por nombre como siempre (RF-17). */
+const ORDEN_INICIAL: Orden = { clave: 'nombre', sentido: 'asc' };
 
 export default function PantallaPersonas() {
   const { persona: yo, pedirCambioDeClave } = useSesionPanel();
@@ -159,6 +200,12 @@ export default function PantallaPersonas() {
   const [obraFiltro, setObraFiltro] = useState<string | null>(null);
   const [accesoFiltro, setAccesoFiltro] = useState<string | null>(null);
 
+  const { orden, pulsar: ordenarPor } = useOrdenRecordado(
+    'personas',
+    COLUMNAS_ORDENABLES,
+    ORDEN_INICIAL,
+  );
+
   const filtrado = useListadoFiltrado(
     personas.datos,
     (p) => [p.nombreCompleto, p.usuario, p.documento, nombreDeCargo(p.cargo), p.obraNombre],
@@ -167,6 +214,16 @@ export default function PantallaPersonas() {
         (obraFiltro === null || p.obraId === obraFiltro) &&
         (accesoFiltro === null || p.rol === accesoFiltro),
       [obraFiltro, accesoFiltro],
+    ),
+    useCallback(
+      (filas: PersonaFila[]) =>
+        ordenarFilas(
+          filas,
+          ORDEN_DE_COLUMNA[orden.clave] ?? ORDEN_DE_COLUMNA.nombre,
+          orden.sentido,
+          (p) => p.nombreCompleto,
+        ),
+      [orden],
     ),
   );
 
@@ -198,50 +255,50 @@ export default function PantallaPersonas() {
   }
 
   const columnas: Columna<PersonaFila>[] = [
-    { clave: 'usuario', titulo: 'Usuario', ancho: 130, pintar: (p) => <Celda>{p.usuario}</Celda> },
+    {
+      clave: 'usuario',
+      titulo: 'Usuario',
+      ancho: 130,
+      pintar: (p) => <Celda>{p.usuario}</Celda>,
+      ordenar: ORDEN_DE_COLUMNA.usuario,
+    },
     {
       clave: 'nombre',
       titulo: 'Nombre completo',
       ancho: 210,
       pintar: (p) => <Celda>{p.nombreCompleto}</Celda>,
+      ordenar: ORDEN_DE_COLUMNA.nombre,
     },
     {
       clave: 'documento',
       titulo: 'Documento',
       ancho: 110,
       pintar: (p) => <Celda>{p.documento ?? '—'}</Celda>,
+      ordenar: ORDEN_DE_COLUMNA.documento,
     },
     {
       clave: 'cargo',
       titulo: 'Cargo',
       ancho: 160,
       pintar: (p) => <Celda>{nombreDeCargo(p.cargo)}</Celda>,
+      ordenar: ORDEN_DE_COLUMNA.cargo,
     },
     {
-      // Qué acceso tiene de verdad, no el nombre interno del rol: a un
-      // topógrafo el sistema le dice «operador» por dentro, pero no entra a
-      // ninguna parte, y verlo escrito evita repartir códigos por error.
       clave: 'acceso',
       titulo: 'Acceso',
       ancho: 110,
       pintar: (p) => {
-        if (p.rol === 'admin') return <Etiqueta tono="bueno">Gerencia</Etiqueta>;
-        // Todo el que no es operador entra al panel: residente, almacenista y
-        // encargado de planta (spec 008). Preguntar solo por el residente dejaba a
-        // un almacenista como «Sin acceso» mientras sí lo tenía.
-        if (p.rol !== 'operador') return <Etiqueta tono="bueno">Panel</Etiqueta>;
-        return operaVehiculos(p.cargo) ? (
-          <Etiqueta tono="neutro">Celular</Etiqueta>
-        ) : (
-          <Etiqueta tono="neutro">Sin acceso</Etiqueta>
-        );
+        const { texto, tono } = etiquetaDeAcceso(p);
+        return <Etiqueta tono={tono}>{texto}</Etiqueta>;
       },
+      ordenar: ORDEN_DE_COLUMNA.acceso,
     },
     {
       clave: 'obra',
       titulo: 'Obra',
       ancho: 180,
       pintar: (p) => <Celda>{p.obraNombre ?? '—'}</Celda>,
+      ordenar: ORDEN_DE_COLUMNA.obra,
     },
     {
       clave: 'acciones',
@@ -388,7 +445,16 @@ export default function PantallaPersonas() {
 
       {porDarDeBaja ? (
         <Confirmacion
-          aviso={`Se va a dar de baja a ${porDarDeBaja.nombreCompleto}. Deja de aparecer en los listados y de poder entrar, pero no se borra: los preoperacionales y las bitácoras que firmó siguen apuntándole.`}
+          aviso={
+            `Se va a dar de baja a ${porDarDeBaja.nombreCompleto}. Deja de aparecer en los listados y de poder entrar, pero no se borra: los preoperacionales y las bitácoras que firmó siguen apuntándole.` +
+            // Spec 015, RF-18: la baja desactiva su celular en el mismo paso, y
+            // lo que tenga sin subir se queda en el teléfono y ya no llega.
+            // Dicho antes de confirmar, que es cuando todavía se puede esperar
+            // a que sincronice.
+            (porDarDeBaja.celularActivo
+              ? ' Tiene un celular activado: ese celular deja de servirle en este momento, y lo que no haya subido desde él ya no llegará.'
+              : '')
+          }
           confirmar="Dar de baja"
           onConfirmar={async () => {
             const quien = porDarDeBaja.nombreCompleto;
@@ -446,6 +512,8 @@ export default function PantallaPersonas() {
         <Tabla
           columnas={columnas}
           filas={filtrado.pagina}
+          orden={orden}
+          alOrdenar={ordenarPor}
           vacio={
             personas.datos.length === 0
               ? 'Aquí va quién trabaja en OCC, con su cargo y su nivel de acceso. Los operadores entran al celular con un PIN; el personal del panel, con contraseña. Registre a la primera persona en el formulario de arriba.'

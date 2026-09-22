@@ -293,3 +293,129 @@ de anular**; verlo como gerencia; comprobar que los materiales de antes siguen c
 - **Nombres del INVIAS que no son los de OCC en obra** («Cemento Asfaltico 60-70» donde el
   almacén dice «cemento»). Para eso está «Otro», y por eso la lista no es cerrada.
 - **El Excel cambia de forma.** El script se detiene sin escribir, como el del presupuesto.
+
+
+## Cambio del 2026-09-22 — quién entrega y quién recibe; descargar el almacén en Excel (RF-40 a RF-50)
+
+Dos mitades. **El nombre** es un campo más en cada movimiento, con su migración, su regla y su
+columna. **La descarga** es una ruta nueva que arma un `.xlsx` con `exceljs` y un botón que lo
+guarda; el contenido de las hojas lo decide una función pura, para poder probarlo sin abrir
+Excel.
+
+### Módulos y archivos
+
+| Archivo | Qué cambia | RF |
+| --- | --- | --- |
+| `src/db/servidor/esquema.ts` | `almacen_movimientos.responsable` text **nulo** (los movimientos anteriores no lo tienen). Migración con `db:generate:servidor`; se aplica en Neon **con permiso de Diego**. | RF-40, RF-41, RF-44 |
+| `src/shared/rules/almacen.ts` | `MovimientoPorValidar.responsable`; `validarMovimiento` añade la falta bajo el campo `responsable` con el texto según el tipo: `sinEntregadoPor` («Escriba quién entregó el material.») y `sinRecibidoPor` («Escriba quién recibió el material.»). Solo espacios cuenta como vacío. | RF-40 a RF-42 |
+| `src/features/panel/contratos.ts` | `movimientoNuevo`: `responsable` obligatorio en las dos ramas (≤ 120), con los mensajes de la regla. `MovimientoDeAlmacenFila.responsable: string \| null`. | RF-40 a RF-42, RF-44 |
+| `src/features/almacen-obra/servidor/movimientos.ts` | `MovimientoPorInsertar.responsable` y `sentenciaDeMovimiento` lo inserta; `historialDelMaterial` lo lee. | RF-40, RF-41, RF-43 |
+| `src/app/api/panel/almacen/movimientos+api.ts` | Pasa `responsable` a la regla y a la sentencia. | RF-42 |
+| `src/features/panel/ventana-movimiento.tsx` | `Campo` «Entregado por» (ingreso) o «Recibido por» (salida), obligatorio, con la falta de la regla. Cambiar el tipo conserva lo escrito: es la misma persona si se equivocó de tipo. | RF-40 a RF-42 |
+| `src/features/panel/historial-almacen.tsx` | Columna «Entregó / recibió»; «—» en los anteriores. Para caber (ver Riesgos) «Para qué / observación» baja de 330 a 180 y pasa a varios renglones. | RF-43, RF-44 |
+| `src/features/almacen-obra/exportar.ts` | **Nuevo, puro.** `hojasDelAlmacen(movimientos, materiales)` devuelve las filas de las dos hojas ya decididas: encabezados, orden, textos («Ingreso», «Salida», «Anulado» / «Vigente»), cantidades en número (centésimas / 100), fechas como `Date`, y las existencias con `totalesDelMaterial` (la misma regla de la pantalla). `nombreDelArchivo(codigo \| null, hoy)`. Sin I/O ni `exceljs`: es lo que se prueba en el guion. | RF-46 a RF-50 |
+| `src/features/almacen-obra/servidor/excel.ts` | **Nuevo, solo servidor.** Lee los movimientos (materiales de baja incluidos) y los materiales vigentes del alcance, los pasa por `hojasDelAlmacen` y escribe el libro con `exceljs` (encabezado en negrita, anchos, formato de fecha y de dos decimales). **Es el único archivo que importa `exceljs`**, igual que `almacen.ts` es el único que sabe de R2. | RF-45 a RF-49 |
+| `src/app/api/panel/almacen/exportar+api.ts` | **Nuevo.** `GET ?obraId=`: guardia `almacen/listar`, alcance como el listado de materiales (el almacenista y el residente, su obra; la gerencia, la pedida o todas), y responde el archivo con su `Content-Disposition`. | RF-45, RF-50 |
+| `src/features/panel/cliente-api.ts` | `api.almacen.descargar(obraId)`: pide la ruta, y si responde bien devuelve el `Blob` y el nombre del archivo; si no, el mismo `ErrorApi` de siempre. | RF-45 |
+| `src/features/panel/pantalla-almacen.tsx` | Botón «Descargar en Excel», para todos los que ven el almacén; la gerencia descarga la obra del filtro o todas. Guarda el archivo con un enlace temporal (`URL.createObjectURL`). | RF-45, RF-50 |
+| `package.json` | `exceljs` pasa de `devDependencies` a `dependencies` (aprobado por Diego). `npm install` para que el `package-lock.json` deje de marcarla como de desarrollo. | — |
+| `scripts/verificar-reglas.ts` | Casos del nombre obligatorio y de las hojas (ver Verificación). | RF-42, RF-46 a RF-50 |
+
+**Lo que se reutiliza:** `totalesDelMaterial` y `cantidadDeLaBase` (el stock de la hoja es el
+de la pantalla), `filtroDeObra` y `veTodasLasObras` (el alcance de la descarga es el del
+listado), `DESFASE_COLOMBIA_MS` (la hora de registro en la de la obra), `ErrorApi` y
+`mensajeDe` (los errores de la descarga se dicen como los demás).
+
+### Modelo de datos
+
+- **Servidor:** una columna, `almacen_movimientos.responsable text null`. Nula a propósito:
+  los movimientos anteriores no la tienen y no se inventa (RF-44). Que sea obligatoria en los
+  nuevos lo exige la regla y el contrato, no la base: un `NOT NULL` obligaría a rellenar los
+  viejos. Migración `0013` con `npm run db:generate:servidor`; `db:migrar:servidor` **solo
+  con visto bueno de Diego**, porque es la base de producción.
+- **Móvil:** nada. El almacén no baja al celular.
+
+### Decisiones técnicas
+
+- **Una columna `responsable` y no dos (`entregado_por`, `recibido_por`).** *Descartado:* dos
+  columnas. Un movimiento es ingreso **o** salida, así que una de las dos estaría siempre
+  vacía y cada lector tendría que saber cuál mirar. El rótulo cambia con el tipo; el dato es
+  el mismo: la persona del otro lado del mostrador.
+- **Nula en la base, obligatoria en la regla.** *Descartado:* `NOT NULL` con un valor por
+  defecto para los viejos («Sin registrar»). Sería escribir en la evidencia un dato que nadie
+  dijo; y la spec pide mostrarlos sin nombre (RF-44).
+- **El contenido de las hojas en una función pura, aparte de `exceljs`.** *Descartado:* armar
+  las filas dentro de la ruta al escribir el libro. Así no se podría probar en el guion qué
+  dice cada fila sin leer un `.xlsx`, y la regla del stock quedaría repetida.
+- **`exceljs` en un solo archivo del servidor.** *Descartado:* importarla en la ruta. Si mañana
+  hay que cambiar de librería —o el VPS se niega a correrla— se reescribe un archivo, como con
+  R2. Y se comprueba que no entra al bundle del cliente.
+- **La descarga con `fetch` + `Blob` + enlace temporal.** *Descartado:* un enlace directo
+  `<a href="/api/panel/almacen/exportar">`. Con el enlace, un 403 o un 500 se descargaría como
+  un archivo roto o abriría una página de error; con `fetch`, el error se dice en el panel
+  como cualquier otro. La cookie viaja igual (mismo origen).
+- **Sin filtros de periodo ni de tipo** (decisión de la spec, RF-45 y Fuera de alcance): la
+  ruta no los lee.
+- **Fechas como fecha, no como texto** (RF-49): la fecha del movimiento es un día (`Date` a
+  medianoche, formato `aaaa-mm-dd`); la de registro y la de anulación, la hora de la obra.
+  Excel no guarda zona horaria, así que se escribe ya corrida a Colombia; si se escribiera en
+  UTC, un movimiento de las 8 p. m. aparecería al día siguiente.
+
+### Impacto en la sincronización
+
+Ninguno: el almacén no viaja al celular.
+
+### Contrato de API
+
+- `POST /api/panel/almacen/movimientos` — igual que hoy, más `responsable` (texto ≤ 120,
+  obligatorio en ingreso y salida). Sin él o con solo espacios → **400** con
+  `campos.responsable` y el texto de la regla según el tipo.
+- `GET /api/panel/almacen/movimientos?materialId=` — cada movimiento trae `responsable`
+  (`null` en los anteriores).
+- `GET /api/panel/almacen/exportar?obraId=` — **nuevo**. Guardia `requerirPermiso(peticion,
+  'almacen', 'listar')`. Alcance: el almacenista y el residente, su obra (el parámetro no
+  cuenta); la gerencia, la obra pedida o todas. **200** con el libro,
+  `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` y
+  `Content-Disposition: attachment; filename="almacen-OBR-001-2026-09-22.xlsx"`. **403** sin
+  permiso. Sin movimientos, 200 con las hojas vacías. Solo lecturas: Neon por HTTP no afecta.
+
+### Estrategia de verificación
+
+En `scripts/verificar-reglas.ts`:
+
+- **Nombre obligatorio:** ingreso sin `responsable`, con solo espacios, y salida sin él → la
+  falta bajo `responsable` con su texto de tipo; con él → sin esa falta. El contrato rechaza
+  los dos y acepta 120 caracteres pero no 121.
+- **Hojas:** con dos materiales (uno de baja con un movimiento), un ingreso, una salida con
+  decimales y un ingreso anulado: Movimientos trae las tres filas (la de baja incluida) con su
+  obra, tipo, cantidad en número (2.5, no «2,5»), responsable («—» en uno anterior) y el
+  anulado marcado con quién, cuándo y motivo; Existencias trae solo el vigente, con los totales
+  de `totalesDelMaterial` (el anulado no cuenta); la fecha del movimiento es un `Date`.
+- **Nombre del archivo:** con código, «almacen-OBR-001-2026-09-22.xlsx»; sin él,
+  «almacen-todas-las-obras-2026-09-22.xlsx».
+
+Comprobación técnica temprana (primera tarea de la descarga): que `exceljs` corre en la ruta del
+servidor de desarrollo **y** en el `expo export`, y que no aparece en `dist/client`.
+
+Demo en Chrome, sobre PRUEBA-016 (almacén de prueba): ingreso sin «Entregado por» → rechazo;
+con él y una salida con «Recibido por» → se ven en el historial; un movimiento anterior se ve
+con «—»; descargar el Excel y abrirlo (con `exceljs` desde un guion, o a mano): dos hojas, el
+anulado marcado, existencias iguales a la pantalla, cantidades numéricas.
+
+### Riesgos
+
+- **Que `exceljs` no empaquete en la salida `server` de Expo, o no corra en el VPS.** Usa
+  módulos de Node (`stream`, `zlib`). Se prueba lo primero, con una ruta mínima, antes de
+  escribir nada más; si falla, se para y se vuelve a Diego. Revertir es quitar la ruta: el
+  resto del cambio no depende de ella.
+- **Que `exceljs` se cuele en el bundle del cliente** (pesado y con código de servidor). Solo la
+  importa `excel.ts`, que solo importa la ruta; se comprueba con el `grep` sobre `dist/client`.
+- **La tabla del historial ya casi llena el ancho:** hoy suma 1105 (+ separaciones = 1233 de
+  1280). Una columna más de 150 la pasaría y ocultaría la última, que es la del botón de
+  anular. Se compensa con «Para qué / observación» de 330 a 180 y varios renglones: la suma
+  queda igual. Se mira en Chrome.
+- **Migración en producción.** Añadir una columna nula no toca las filas ni bloquea la tabla en
+  la práctica. Se aplica con permiso; si hubiera que revertir, la columna se puede dejar (nadie
+  la exige en la base).
+- **Un almacén grande.** El libro se arma en memoria. Hoy son decenas de movimientos; aun con
+  decenas de miles cabe de sobra. Si algún día no, se pasa a escribirlo por partes.

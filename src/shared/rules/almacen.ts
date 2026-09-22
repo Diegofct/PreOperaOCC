@@ -82,11 +82,16 @@ export interface MovimientoPorValidar {
   cantidad: number | null;
   /** Para qué se usará lo que sale. Solo cuenta en las salidas. */
   paraQue?: string | null;
+  /**
+   * Quién entregó lo que ingresa o quién recibió lo que sale, escrito a mano
+   * (cambio del 2026-09-22, RF-40 y RF-41).
+   */
+  responsable?: string | null;
 }
 
 /** Una falta, con el campo del formulario donde se pinta. */
 export interface FaltaDeMovimiento {
-  campo: 'cantidad' | 'fecha' | 'paraQue';
+  campo: 'cantidad' | 'fecha' | 'paraQue' | 'responsable';
   mensaje: string;
 }
 
@@ -103,6 +108,8 @@ export const MENSAJES_DE_MOVIMIENTO = {
   fechaMalEscrita: 'La fecha va en formato AAAA-MM-DD.',
   fechaFutura: 'La fecha no puede ser posterior a hoy.',
   sinParaQue: 'Escriba para qué se usará lo que sale.',
+  sinEntregadoPor: 'Escriba quién entregó el material.',
+  sinRecibidoPor: 'Escriba quién recibió el material.',
 } as const;
 
 /**
@@ -144,6 +151,20 @@ export function validarMovimiento(
     // RF-13. Es lo único que dice a dónde fue el material: sin esto, una salida
     // es solo un número que baja.
     faltas.push({ campo: 'paraQue', mensaje: MENSAJES_DE_MOVIMIENTO.sinParaQue });
+  }
+
+  if ((movimiento.responsable ?? '').trim().length === 0) {
+    // RF-40 a RF-42 (cambio del 2026-09-22). Es la persona del otro lado del
+    // mostrador: sin ella, un ingreso no dice de dónde vino ni una salida a quién
+    // se le entregó. Los movimientos anteriores no lo tienen, pero esta regla solo
+    // corre al registrar uno nuevo (RF-44).
+    faltas.push({
+      campo: 'responsable',
+      mensaje:
+        movimiento.tipo === 'ingreso'
+          ? MENSAJES_DE_MOVIMIENTO.sinEntregadoPor
+          : MENSAJES_DE_MOVIMIENTO.sinRecibidoPor,
+    });
   }
 
   return faltas;

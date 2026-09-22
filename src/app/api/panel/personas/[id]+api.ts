@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 
-import { baseServidor } from '@/db/servidor/cliente';
+import { baseServidor, baseServidorSerializable } from '@/db/servidor/cliente';
 import { dispositivos, usuarios } from '@/db/servidor/esquema';
 import { personaEditada } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
@@ -13,7 +13,8 @@ import {
   ok,
   responder,
 } from '@/features/servidor/respuestas';
-import { motivoParaNoDarRol } from '@/shared/rules/permisos';
+import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
+import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
 
 /** Editar y dar de baja una persona. `PATCH` y `DELETE /api/panel/personas/:id`. */
 
@@ -70,6 +71,26 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const motivo = cambios.rol ? motivoParaNoDarRol(sesion.rol, cambios.rol) : null;
     if (motivo) return errorDePeticion(motivo, 403);
 
+    // Y con qué módulos queda su obra (spec 017, RF-11). Se mira el rol y la obra
+    // **como quedarían**: cambiar de obra a un almacenista también puede dejarlo en
+    // una que no lleva almacén.
+    if (cambios.rol || cambios.obraId !== undefined) {
+      const [actual] = await baseServidor()
+        .select({ rol: usuarios.rol, obraId: usuarios.obraId })
+        .from(usuarios)
+        .where(eq(usuarios.id, id))
+        .limit(1);
+      if (!actual) return noEncontrado('esa persona');
+
+      const sinModulo = motivoParaNoDarRolEnObra(
+        cambios.rol ?? actual.rol,
+        await modulosDeLaObra(cambios.obraId === undefined ? actual.obraId : cambios.obraId),
+      );
+      if (sinModulo) {
+        return Response.json({ error: sinModulo, campos: { rol: sinModulo } }, { status: 400 });
+      }
+    }
+
     const [fila] = await baseServidor()
       .update(usuarios)
       .set(cambios)
@@ -81,15 +102,31 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
 }
 
 /**
- * Baja de una persona: `activo = false` **y** lápida.
+ * Baja de una persona: `activo = false` **y** lápida, y sus celulares revocados.
  *
- * Las dos, y no una: `activo` es lo que el celular ya sabe leer —la réplica
- * local no tiene columna de lápida— y `eliminado_en` es lo que libera el nombre
- * de usuario para que se pueda reutilizar. El índice único de `usuarios.usuario`
- * es parcial justamente por esto.
+ * `activo` y `eliminado_en`, las dos y no una: `activo` es lo que el celular ya
+ * sabe leer —la réplica local no tiene columna de lápida— y `eliminado_en` es lo
+ * que libera el nombre de usuario para que se pueda reutilizar. El índice único
+ * de `usuarios.usuario` es parcial justamente por esto.
  *
  * Nunca se borra la fila: hay preoperacionales y bitácoras firmados apuntándole,
  * y un registro cuyo autor desapareció deja de ser evidencia de nada.
+ *
+ * ── Los celulares se revocan en el mismo paso (spec 015, RF-19 a RF-21) ──
+ *
+ * Hasta la spec 015 esta ruta respondía 409 a quien tuviera un celular activado
+ * y pedía «desactivarlo» primero, pero el panel no tenía con qué: a un operador
+ * con teléfono no se le podía dar de baja. La razón del 409 sigue siendo cierta:
+ * la lápida libera el nombre de usuario, y un teléfono que conservara su acceso
+ * quedaría con una identidad que se le puede dar a otra persona. Revocar todos
+ * sus dispositivos en la misma operación cierra esa puerta igual: la guardia del
+ * móvil y el refresco de token rechazan un dispositivo revocado.
+ *
+ * Van en un solo `batch`, que Neon ejecuta como una transacción: o la persona
+ * queda de baja y sin celulares, o queda como estaba (RF-21). Dos peticiones
+ * separadas podían dejarla sin teléfono pero todavía activa. Lo que ese celular
+ * tuviera sin subir se queda en él —la cola no borra— y ya no llega: la ventana
+ * de confirmación lo avisa (RF-18).
  */
 export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
@@ -105,35 +142,24 @@ export async function DELETE(peticion: Request, { id }: { id: string }) {
       return errorDePeticion('No puede darse de baja a usted mismo.', 400);
     }
 
-    /**
-     * Un operador con equipo activo **no se borra**: se desactiva.
-     *
-     * La lápida libera su nombre de usuario, y el celular resuelve el desbloqueo
-     * contra su propia réplica. Si el nombre se reasignara a otra persona, ese
-     * teléfono quedaría con una identidad que ya no le corresponde. Desactivarlo
-     * corta el acceso igual —la guardia del móvil lo rechaza en la siguiente
-     * petición— sin dejar esa puerta abierta.
-     */
-    const [equipo] = await baseServidor()
-      .select({ id: dispositivos.id })
-      .from(dispositivos)
-      .where(and(eq(dispositivos.usuarioId, id), isNull(dispositivos.revocadoEn)))
-      .limit(1);
+    const ahora = new Date();
+    const base = baseServidorSerializable();
+    const [dada] = await base.batch([
+      base
+        .update(usuarios)
+        .set({ activo: false, eliminadoEn: ahora })
+        .where(and(eq(usuarios.id, id), isNull(usuarios.eliminadoEn)))
+        .returning(COLUMNAS),
+      // Todos, no el primero: quien cambió de teléfono sin desactivar el viejo
+      // tiene dos. Si la persona ya estaba de baja (otra gerencia se adelantó),
+      // esto no revoca nada que debiera seguir vivo.
+      base
+        .update(dispositivos)
+        .set({ revocadoEn: ahora })
+        .where(and(eq(dispositivos.usuarioId, id), isNull(dispositivos.revocadoEn))),
+    ]);
 
-    if (equipo) {
-      return errorDePeticion(
-        'Esa persona tiene un celular activado. Desactívela en vez de darla de baja, o revoque ' +
-          'primero su equipo.',
-        409,
-      );
-    }
-
-    const [fila] = await baseServidor()
-      .update(usuarios)
-      .set({ activo: false, eliminadoEn: new Date() })
-      .where(and(eq(usuarios.id, id), isNull(usuarios.eliminadoEn)))
-      .returning(COLUMNAS);
-
+    const [fila] = dada;
     return fila ? ok(fila) : noEncontrado('esa persona');
   });
 }

@@ -16,6 +16,7 @@ import { and, desc, eq, gte, isNull, lte, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import { baseServidor } from '@/db/servidor/cliente';
+import { filtroDeModulo } from '@/features/servidor/alcance';
 import {
   canteraMateriales,
   canteraSitios,
@@ -82,7 +83,8 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
     .leftJoin(destino, eq(destino.id, canteraViajes.destinoId))
     .leftJoin(registrador, eq(registrador.id, canteraViajes.registradoPor))
     .leftJoin(anulador, eq(anulador.id, canteraViajes.anuladoPor))
-    .where(condicion)
+    // Igual que los catálogos: una obra sin control de cantera no sale (RF-10).
+    .where(and(filtroDeModulo('cantera', canteraViajes.obraId), condicion))
     .orderBy(desc(canteraViajes.fecha), desc(canteraViajes.hora), desc(canteraViajes.creadoEn));
 
   return filas.map(({ creadoEn, anuladoEn, ...fila }) => ({

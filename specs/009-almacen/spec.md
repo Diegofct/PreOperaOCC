@@ -2,7 +2,8 @@
 
 > Estado: Cumplida · Fecha: 2026-09-14 · Aprobada: 2026-09-15 · Cumplida: 2026-09-16 ·
 > Cambio: 2026-09-17 (anular solo la gerencia y lista de materiales de OCC, RF-32 a RF-39),
-> cumplido el 2026-09-17
+> cumplido el 2026-09-17 · Cambio: 2026-09-22 (quién entrega y quién recibe; descargar el
+> almacén en Excel, RF-40 a RF-50), cumplido el 2026-09-22
 
 ## Contexto y objetivo
 
@@ -35,6 +36,8 @@ borra: se anula con motivo, igual que el resto de la evidencia del sistema.
   para saber qué pedir antes de que falte.
 - H5: Como gerencia quiero corregir un movimiento equivocado sin borrar lo registrado, para
   que el inventario siga siendo creíble. *(Era del almacenista hasta el 2026-09-17: RF-38.)*
+- H6: Como gerencia o residente quiero descargar el almacén en una hoja de Excel, para
+  revisarlo, sumarlo y compartirlo sin copiarlo a mano. *(cambio 2026-09-22)*
 
 ## Requisitos funcionales (criterios de aceptación en EARS)
 
@@ -87,11 +90,15 @@ borra: se anula con motivo, igual que el resto de la evidencia del sistema.
   > **Corregido el 2026-09-15**: ya no pide quién la recibe.
 - RF-12: *Retirado el 2026-09-15.* Pedía quién recibe la salida; OCC decidió que solo queda
   anotado el almacenista (RF-30).
+  > **Vuelve escrito a mano el 2026-09-22** (RF-41): ya no se elige de las personas de la
+  > obra, porque quien se lleva el material no siempre tiene cuenta en el sistema.
 - RF-13: SI una salida no indica para qué se usará, ENTONCES EL SISTEMA la rechazará.
 - RF-14: *Retirado el 2026-09-15.* Ofrecía elegir a quien recibe entre las personas de la
   obra; ver RF-12.
 - RF-30: EL SISTEMA registrará como responsable de cada salida al almacenista que la
   registra. *(2026-09-15)*
+  > **Precisado por RF-41 el 2026-09-22.** El almacenista sigue quedando anotado como quien
+  > registra (RF-27); además se escribe quién recibió el material.
 - RF-15: SI la cantidad de una salida supera el stock del material, ENTONCES EL SISTEMA la
   rechazará indicando el stock disponible.
 - RF-16: SI dos salidas del mismo material se registran a la vez y juntas superan el stock,
@@ -125,6 +132,40 @@ borra: se anula con motivo, igual que el resto de la evidencia del sistema.
 - RF-39: EL SISTEMA no ofrecerá la opción de anular a quien no es gerencia, y SI llega una
   anulación de quien no lo es, ENTONCES la rechazará. *(cambio 2026-09-17)*
 
+### Quién entrega y quién recibe (cambio 2026-09-22)
+
+- RF-40: EL SISTEMA pedirá, en cada ingreso, el nombre de quien entregó el material,
+  escrito a mano, bajo el rótulo «Entregado por». *(cambio 2026-09-22)*
+- RF-41: EL SISTEMA pedirá, en cada salida, el nombre de quien recibió el material, escrito a
+  mano, bajo el rótulo «Recibido por». *(cambio 2026-09-22)*
+- RF-42: SI un ingreso o una salida se registra sin ese nombre, ENTONCES EL SISTEMA lo
+  rechazará diciendo que falta. *(cambio 2026-09-22)*
+- RF-43: EL SISTEMA mostrará ese nombre en el historial de movimientos de cada material.
+  *(cambio 2026-09-22)*
+- RF-44: EL SISTEMA mostrará sin ese nombre, y sin error, los movimientos registrados antes
+  de este cambio, y seguirá permitiendo anularlos. *(cambio 2026-09-22)*
+
+### Descargar el almacén en Excel (H6, cambio 2026-09-22)
+
+- RF-45: EL SISTEMA permitirá descargar el almacén como un archivo de Excel (.xlsx) a quien
+  pueda consultarlo: el almacenista y el residente, el de su obra; la gerencia, el de la obra
+  que tenga elegida en el filtro o el de todas las obras si no ha elegido ninguna.
+  *(cambio 2026-09-22)*
+- RF-46: EL SISTEMA incluirá en el archivo una hoja **Movimientos** con todos los movimientos
+  de lo descargado, vigentes y anulados, cada uno con su obra, fecha, tipo, material, unidad,
+  cantidad, quién entregó o recibió (RF-40, RF-41), para qué o su observación, quién lo
+  registró y cuándo. *(cambio 2026-09-22)*
+- RF-47: EL SISTEMA marcará en la hoja Movimientos cada movimiento anulado, con quién lo anuló,
+  cuándo y su motivo, y no lo contará en las existencias. *(cambio 2026-09-22)*
+- RF-48: EL SISTEMA incluirá en el archivo una hoja **Existencias** con cada material vigente
+  de lo descargado, su obra, su unidad, su total ingresado, su total salido y su stock,
+  calculados igual que en pantalla (RF-17, RF-18). *(cambio 2026-09-22)*
+- RF-49: EL SISTEMA escribirá las cantidades como números, para que se puedan sumar en Excel,
+  y las fechas como fechas. *(cambio 2026-09-22)*
+- RF-50: EL SISTEMA nombrará el archivo con el almacén que contiene y la fecha del día en que
+  se descargó («almacen-OBR-001-2026-09-22.xlsx», o «almacen-todas-las-obras-…» para la
+  gerencia sin obra elegida). *(cambio 2026-09-22)*
+
 ### Quién puede (spec 008)
 
 - RF-28: EL SISTEMA permitirá registrar materiales, movimientos y anulaciones únicamente al
@@ -149,6 +190,12 @@ salida «Otro»; el botón de anular solo lo ve la gerencia); **API** (rechazar 
 quien no es gerencia); **Reglas** (quién puede anular, con su caso); **Datos**: la lista de
 materiales entra como catálogo del código, no como tabla de la base —el material registrado
 se sigue guardando con su nombre—. **Móvil** y **Sincronización**: sin impacto.
+
+Cambio 2026-09-22: **Panel web** («Entregado por» en el ingreso, «Recibido por» en la salida,
+esa columna en el historial y el botón de descargar en Excel); **API** (guardar y exigir ese
+nombre; una ruta nueva que entrega el archivo, con la misma guardia y el mismo filtro por
+obra que la consulta); **Datos** (el nombre en cada movimiento, vacío en los anteriores);
+**Reglas** (el nombre obligatorio, con su caso). **Móvil** y **Sincronización**: sin impacto.
 
 ## Requisitos no funcionales
 
@@ -180,17 +227,30 @@ se sigue guardando con su nombre—. **Móvil** y **Sincronización**: sin impac
   código o unidad distintos: sale una sola vez (RF-35).
 - *(cambio 2026-09-17)* Un **almacenista que se equivoca al teclear un ingreso**: ya no puede
   anularlo; se lo pide a gerencia (RF-38).
+- *(cambio 2026-09-22)* Un **nombre de solo espacios** en «Entregado por» o «Recibido por»: es
+  como no escribirlo, y se rechaza (RF-42).
+- *(cambio 2026-09-22)* Un **movimiento anterior al cambio**: en el historial y en el archivo sale
+  sin nombre, y se puede anular igual (RF-44).
+- *(cambio 2026-09-22)* Un **almacén sin movimientos**: el archivo sale con sus dos hojas y sus
+  encabezados, sin filas; no se niega la descarga.
+- *(cambio 2026-09-22)* Un **material dado de baja** con movimientos: sus movimientos salen en la
+  hoja Movimientos; en Existencias no, porque no está vigente y su stock es cero (RF-6).
+- *(cambio 2026-09-22)* Una cantidad con **decimales** (2,5 m): en el archivo es el número 2,5,
+  no el texto «2,5» (RF-49).
+- *(cambio 2026-09-22)* La **gerencia sin obra elegida**: descarga todas las obras en un solo
+  archivo, y la columna «Obra» dice de cuál es cada fila (RF-45, RF-46).
 
 ## Fuera de alcance
 
 - Precios, costos y valor del inventario.
 - Proveedor, número de remisión o de factura en los ingresos.
-- Anotar quién se llevó el material en una salida: queda a cargo del almacenista (RF-30).
+- ~~Anotar quién se llevó el material en una salida: queda a cargo del almacenista (RF-30).~~
+  **Entra el 2026-09-22**, escrito a mano (RF-41).
 - Alertas de stock mínimo o pedidos automáticos.
 - Traslados de material entre almacenes de obras distintas.
 - Amarrar una salida a una actividad de la bitácora.
 - Llevar el almacén desde el celular.
-- Informes, exportación a hoja de cálculo o PDF.
+- Informes y PDF. *(Desde el 2026-09-22 la descarga en Excel sí entra: RF-45 a RF-50.)*
 - Inventario físico (conteo) y ajustes por diferencia.
 - *(cambio 2026-09-17)* La hoja **EQUIPOS** del documento de OCC: se retomará cuando se
   decida para qué sirve.
@@ -200,6 +260,12 @@ se sigue guardando con su nombre—. **Móvil** y **Sincronización**: sin impac
   unidad la elige el almacenista (RF-34) y los precios siguen fuera de alcance.
 - *(cambio 2026-09-17)* Pedirle a gerencia la anulación desde el panel (aviso, solicitud o
   bandeja): el almacenista se lo pide por fuera del sistema.
+- *(cambio 2026-09-22)* Elegir a quien entrega o recibe de la lista de personas del sistema: se
+  escribe a mano (RF-40, RF-41).
+- *(cambio 2026-09-22)* Completar el nombre de los movimientos anteriores al cambio (RF-44).
+- *(cambio 2026-09-22)* Descargar solo un periodo o un tipo de movimiento: el archivo trae todo
+  lo de la obra (o de las obras); se filtra en Excel.
+- *(cambio 2026-09-22)* Cargar movimientos desde un Excel, o descargar en otro formato.
 
 ## Criterios de finalización
 
@@ -221,6 +287,15 @@ Del cambio del 2026-09-17:
   «Otro»; abrir el historial de uno con movimientos y **no ver el botón de anular**; entrar
   como gerencia y verlo; que los materiales registrados antes sigan ahí con su unidad.
 
+Del cambio del 2026-09-22:
+
+- El nombre obligatorio (RF-42) y el contenido de las dos hojas (RF-46 a RF-48) como casos en el
+  guion de verificación.
+- Demo manual: registrar un ingreso sin «Entregado por» y ver el rechazo; registrarlo con él y
+  una salida con «Recibido por», y verlos en el historial; ver un movimiento anterior sin
+  nombre; descargar el Excel y abrirlo: dos hojas, un anulado marcado con su motivo, las
+  existencias iguales a la pantalla y las cantidades sumables.
+
 ## Dudas abiertas
 
 Resueltas el 2026-09-15:
@@ -241,6 +316,12 @@ Resueltas el 2026-09-17 (Diego, petición de gerencia):
   sigue eligiendo el almacenista de la lista cerrada de RF-31, porque OCC compra el cemento
   por bultos y el documento lo trae en kilogramos (RF-34).
 - **Equipos**: la otra hoja del documento no entra en esta tanda.
+
+Resueltas el 2026-09-22 (Diego, requerimiento 5 de OCC):
+
+- **Nombre escrito y obligatorio** en cada ingreso y cada salida (RF-40 a RF-42).
+- **Excel (.xlsx)** con dos hojas: movimientos, con los anulados marcados, y existencias por
+  material (RF-45 a RF-48).
 
 Ninguna abierta.
 

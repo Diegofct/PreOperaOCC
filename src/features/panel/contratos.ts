@@ -27,6 +27,8 @@ import {
 import {
   faltasDelDestino,
   MENSAJES_DE_VIAJE,
+  OPCIONES_DE_METROS,
+  OPCIONES_DE_PR,
   type CanteraDelParte,
 } from '@/shared/rules/cantera';
 import {
@@ -36,7 +38,14 @@ import {
 } from '@/shared/catalogos/presupuesto';
 import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
 import type { ViajeDelParte } from '@/features/bitacoras/tipos';
-import { ETIQUETA_ROL, ROLES, type Rol } from '@/shared/rules/permisos';
+import {
+  HORARIO_PROPUESTO,
+  minutosDeHora,
+  mensajeDeHorarioDeObra,
+  validarHorarioDeObra,
+  type HorarioDeObra,
+} from '@/shared/rules/horas';
+import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -105,14 +114,51 @@ const textoParcial = (max: number) =>
 /* Obras                                                                     */
 /* ------------------------------------------------------------------------ */
 
-export const obraNueva = z.object({
+const tramo = z.object({ desde: z.string().trim(), hasta: z.string().trim() });
+
+/**
+ * El horario de la obra (spec 016). La forma la da zod; si el horario tiene
+ * sentido lo decide `validarHorarioDeObra`, la misma regla que usa la pantalla,
+ * y su mensaje es el que se devuelve: el contrato no escribe su propio texto.
+ */
+export const horarioDeObra = z
+  .object({ semana: z.array(tramo), sabado: z.array(tramo) })
+  .superRefine((horario, contexto) => {
+    const error = validarHorarioDeObra(horario);
+    if (error) contexto.addIssue({ code: 'custom', message: mensajeDeHorarioDeObra(error), path: [error.dia] });
+  });
+
+const camposDeObra = {
   codigo: textoObligatorio(32, 'el código'),
   nombre: textoObligatorio(160, 'el nombre'),
   municipio: textoOpcional(120),
-  activa: z.boolean().default(true),
+  activa: z.boolean(),
+  horario: horarioDeObra,
+  /**
+   * Qué módulos lleva la obra (spec 017, RF-1). Apagar uno no borra nada: lo
+   * registrado se conserva y vuelve al encender (RF-14, RF-15).
+   */
+  almacenActivo: z.boolean(),
+  canteraActivo: z.boolean(),
+};
+
+export const obraNueva = z.object({
+  ...camposDeObra,
+  activa: camposDeObra.activa.default(true),
+  // Registrar sin horario pone el propuesto (RF-3): la pantalla siempre lo manda,
+  // pero una llamada directa no deja una obra sin contra qué contar las extras.
+  horario: camposDeObra.horario.default(HORARIO_PROPUESTO),
+  // Una obra nace con los dos módulos, como las que ya existían (RF-2, RF-3).
+  almacenActivo: camposDeObra.almacenActivo.default(true),
+  canteraActivo: camposDeObra.canteraActivo.default(true),
 });
 
-export const obraEditada = obraNueva.partial();
+/**
+ * Escrita a mano y no `obraNueva.partial()`: con los defaults dentro, corregir
+ * solo el nombre reponía `activa` y el horario propuesto encima de los reales.
+ * Ausente es «no se toca» (ver `AGENTS.md`).
+ */
+export const obraEditada = z.object(camposDeObra).partial();
 
 export type ObraNueva = z.input<typeof obraNueva>;
 
@@ -122,6 +168,9 @@ export interface ObraFila {
   nombre: string;
   municipio: string | null;
   activa: boolean;
+  horario: HorarioDeObra;
+  almacenActivo: boolean;
+  canteraActivo: boolean;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -164,7 +213,29 @@ export const personaNueva = z.object({
   activo: z.boolean().default(true),
 });
 
-export const personaEditada = personaNueva.partial();
+/**
+ * Corregir una persona: **ausente es «no se toca»**.
+ *
+ * Escrita a mano y no `personaNueva.partial()`, igual que `obraEditada` y por el
+ * mismo defecto (encontrado el 2026-09-22): con los defaults dentro, un `PATCH` que
+ * solo mandaba el nombre reponía `rol: 'operador'` y `activo: true` encima de los
+ * reales. Corregirle el nombre a un residente le quitaba el acceso, y reactivaba a
+ * quien estuviera de baja.
+ *
+ * Los campos de texto usan los ayudantes parciales: `null` vacía, ausente no toca.
+ */
+export const personaEditada = z.object({
+  usuario: personaNueva.shape.usuario.optional(),
+  nombreCompleto: personaNueva.shape.nombreCompleto.optional(),
+  documento: textoParcial(32),
+  rol: z.enum(ROLES, { error: 'Ese nivel de acceso no existe.' }).optional(),
+  cargo: z
+    .enum(IDS_CARGO as [Cargo, ...Cargo[]], { error: 'Ese cargo no existe.' })
+    .nullable()
+    .optional(),
+  obraId: idParcial,
+  activo: z.boolean().optional(),
+});
 
 export type PersonaNueva = z.input<typeof personaNueva>;
 
@@ -178,6 +249,8 @@ export interface PersonaFila {
   obraId: string | null;
   obraNombre: string | null;
   activo: boolean;
+  /** Tiene al menos un celular activado. Darla de baja lo desactiva (spec 015). */
+  celularActivo: boolean;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -318,6 +391,8 @@ export interface PersonaEnSesionFila {
   nombreCompleto: string;
   rol: Rol;
   obraId: string | null;
+  /** Los módulos que lleva su obra (spec 017); los dos, si no tiene obra. */
+  modulosDeObra: ModulosDeObra;
   debeCambiarClave: boolean;
 }
 
@@ -641,6 +716,8 @@ export const personaDelParte = z.object({
   usuarioId: textoObligatorio(64, 'la persona'),
   entrada: horaDelDia,
   salida: horaDelDia,
+  /** Lo que explica sus horas: llegó tarde, salió a cita médica (spec 016, RF-26). Opcional. */
+  observaciones: textoOpcional(1000).transform((v) => v ?? ''),
 });
 
 export const actividadDelParte = z.object({
@@ -658,7 +735,12 @@ export const actividadDelParte = z.object({
    * puerta para meter lo que sea en el parte.
    */
   id: z.string().trim().min(1).max(64).nullable().optional(),
-  clave: textoObligatorio(60, 'la actividad'),
+  /**
+   * El ítem del presupuesto, u «otra». Admite vacío para que el rechazo lo dé la
+   * regla, con el mismo «Elija la actividad.» que la pantalla (RF-83), y no el
+   * «Falta la actividad.» genérico de `textoObligatorio`.
+   */
+  clave: z.string().trim().max(60),
   /** Solo cuando la actividad es «otra»: qué fue. */
   texto: textoOpcional(120),
   descripcion: textoOpcional(400).transform((v) => v ?? ''),
@@ -684,6 +766,7 @@ export const actividadDelParte = z.object({
   // La misma regla que la pantalla, para que el error diga lo mismo y bajo el
   // mismo campo en los dos sitios.
   const faltas = faltasDeActividad({
+    elegida: actividad.clave !== '',
     otra: actividad.clave === CLAVE_OTRA_ACTIVIDAD,
     texto: actividad.texto,
     unidad: actividad.unidad,
@@ -717,11 +800,48 @@ export const franjaDeClima = z.object({
  * conserva tal cual (RF-63). Lo que decide si ese id es de verdad una fila
  * heredada de ese parte es el servidor, no el contrato.
  */
+/** Una hora de un ensayo: «HH:MM», o nada. Que falte lo decide el servidor (RF-89). */
+const horaDelEnsayo = z
+  .string()
+  .trim()
+  .refine((v) => v === '' || minutosDeHora(v) !== null, 'La hora va como HH:MM.')
+  .nullish();
+
+/**
+ * Dónde se hizo el ensayo (RF-87): el PR y los metros de las listas de cantera, o
+ * un lugar escrito. Estrictas las dos: una ubicación con PR **y** lugar no es
+ * ninguna de las dos formas y se rechaza, en vez de guardar una y perder la otra.
+ */
+const ubicacionDelEnsayo = z.union([
+  z
+    .object({
+      pr: z.number().refine((v) => OPCIONES_DE_PR.includes(v), MENSAJES_DE_VIAJE.prFueraDeRango),
+      metros: z
+        .number()
+        .refine((v) => OPCIONES_DE_METROS.includes(v), MENSAJES_DE_VIAJE.metrosFueraDeRango),
+    })
+    .strict(),
+  z.object({ lugar: z.string().trim().max(160) }).strict(),
+]);
+
+/**
+ * Una fila de Control Calidad de Obra.
+ *
+ * Desde el 2026-09-22 lleva sus horas, su responsable y su ubicación. Aquí se
+ * valida **su forma**; **si faltan** lo decide el servidor al construirla
+ * (`construirEnsayo`), porque solo él sabe si el id es de un ensayo guardado antes
+ * del cambio, al que no se le exigen (RF-89). La pantalla aplica la misma regla,
+ * `faltasDelEnsayo`, antes de mandar.
+ */
 export const ensayoDelParte = z
   .object({
     id: z.string().trim().min(1).max(64).nullable().optional(),
     ensayo: z.string().trim().min(1).max(60).nullable().optional(),
     observacion: z.string().max(2000).nullable().optional(),
+    horaInicio: horaDelEnsayo,
+    horaFin: horaDelEnsayo,
+    responsable: z.string().trim().max(120).nullish(),
+    ubicacion: ubicacionDelEnsayo.nullish(),
   })
   .superRefine((fila, contexto) => {
     if (!fila.ensayo) {
@@ -771,6 +891,8 @@ export interface PersonaDelParteFila {
   cargo: string | null;
   entrada: string | null;
   salida: string | null;
+  /** Ausente en los partes anteriores a la spec 016 (RF-29). */
+  observaciones?: string;
 }
 
 export interface ActividadDelParteFila {
@@ -812,6 +934,11 @@ export interface EnsayoDelParteFila {
   ensayo: string;
   nombre: string;
   observacion: string;
+  /** Ausentes en los ensayos guardados antes del 2026-09-22 (RF-89). */
+  horaInicio?: string;
+  horaFin?: string;
+  responsable?: string;
+  ubicacion?: { pr: number; metros: number } | { lugar: string };
 }
 
 /**
@@ -837,6 +964,11 @@ export interface ParteFila {
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;
+  /**
+   * El horario con que se calculan sus horas, ya decidido por el servidor con
+   * `horarioEfectivo`: el guardado, el de siempre o el vigente de la obra (spec 016).
+   */
+  horario: HorarioDeObra;
 }
 
 /** Lo que devuelve la consulta de un día: el parte y con qué llenarlo. */
@@ -943,6 +1075,18 @@ const fechaDeMovimiento = z
   .string({ error: MENSAJES_DE_MOVIMIENTO.fechaMalEscrita })
   .regex(/^\d{4}-\d{2}-\d{2}$/, MENSAJES_DE_MOVIMIENTO.fechaMalEscrita);
 
+/**
+ * Quién entregó o quién recibió (cambio del 2026-09-22, RF-40 a RF-42): obligatorio,
+ * con el texto de la regla según el tipo, para que el formulario y el servidor lo
+ * digan igual.
+ */
+const responsableDelMovimiento = (mensaje: string) =>
+  z
+    .string({ error: mensaje })
+    .trim()
+    .min(1, mensaje)
+    .max(120, 'El nombre es demasiado largo.');
+
 const materialDelMovimiento = z
   .string({ error: 'Elija el material.' })
   .trim()
@@ -970,6 +1114,7 @@ export const movimientoNuevo = z.discriminatedUnion(
       fecha: fechaDeMovimiento,
       cantidad: cantidadDeMovimiento,
       observacion: textoOpcional(300),
+      responsable: responsableDelMovimiento(MENSAJES_DE_MOVIMIENTO.sinEntregadoPor),
     }),
     z.object({
       tipo: z.literal('salida'),
@@ -981,6 +1126,7 @@ export const movimientoNuevo = z.discriminatedUnion(
         .trim()
         .min(1, MENSAJES_DE_MOVIMIENTO.sinParaQue)
         .max(300, 'El «para qué» es demasiado largo.'),
+      responsable: responsableDelMovimiento(MENSAJES_DE_MOVIMIENTO.sinRecibidoPor),
     }),
   ],
   { error: 'El movimiento tiene que ser un ingreso o una salida.' },
@@ -1011,6 +1157,11 @@ export interface MovimientoDeAlmacenFila {
   cantidad: number;
   paraQue: string | null;
   observacion: string | null;
+  /**
+   * Quién entregó (ingreso) o recibió (salida). `null` en los movimientos anteriores
+   * al 2026-09-22, que se muestran sin él (RF-44).
+   */
+  responsable: string | null;
   /** ISO 8601. Es el orden del historial. */
   registradoEn: string;
   /** El nombre de quien lo registró, aunque hoy esté de baja. */

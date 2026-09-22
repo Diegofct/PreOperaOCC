@@ -27,6 +27,8 @@
  * es estructural, así que los tipos del parte encajan sin convertir nada. De
  * paso queda escrito qué campos participan de verdad en cada regla.
  */
+import { MENSAJES_DE_VIAJE, validarAbscisa } from './cantera';
+import { minutosDeHora } from './horas';
 import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
 
 /* ------------------------------------------------------------------------ */
@@ -38,11 +40,12 @@ import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
  * la pantalla, así que dicen lo mismo en los dos sitios.
  */
 export const MENSAJES_DE_ACTIVIDAD = {
+  sinElegir: 'Elija la actividad.',
   sinCual: 'Escriba cuál fue la actividad.',
   sinUnidad: 'Elija la unidad de la actividad.',
 } as const;
 
-export type CampoDeActividad = 'texto' | 'unidad';
+export type CampoDeActividad = 'clave' | 'texto' | 'unidad';
 
 export interface FaltaDeActividad {
   campo: CampoDeActividad;
@@ -58,12 +61,23 @@ export interface FaltaDeActividad {
  *
  * Recibe `otra` ya decidido y no la clave: la regla no importa el catálogo del
  * presupuesto, y comparar con la clave es trabajo de quien lo tiene a mano.
+ *
+ * ── Sin elegir (cambio del 2026-09-22, RF-82 y RF-83) ──
+ *
+ * La actividad nueva nace sin elegir: una propuesta de antemano se queda puesta el
+ * día que a alguien se le olvida cambiarla. Sin elegir solo se dice eso, bajo el
+ * selector; lo demás depende de qué se elija. `elegida` es opcional y vale
+ * verdadero para quien no lo diga: una actividad ya guardada siempre tiene clave.
  */
 export function faltasDeActividad(actividad: {
+  elegida?: boolean;
   otra: boolean;
   texto?: string | null;
   unidad?: string | null;
 }): FaltaDeActividad[] {
+  if (actividad.elegida === false) {
+    return [{ campo: 'clave', mensaje: MENSAJES_DE_ACTIVIDAD.sinElegir }];
+  }
   if (!actividad.otra) return [];
   const faltas: FaltaDeActividad[] = [];
   if (!actividad.texto?.trim()) {
@@ -87,6 +101,107 @@ export function faltaObservacionDelEnsayo(observacion: string | null | undefined
   return observacion?.trim()
     ? null
     : 'Escriba la observación del ensayo. Si no hay nada que anotar, escriba «Sin observaciones».';
+}
+
+/** Los textos de lo que le falta a un ensayo (cambio del 2026-09-22). */
+export const MENSAJES_DE_ENSAYO = {
+  sinInicio: 'Elija la hora de inicio del ensayo.',
+  sinFin: 'Elija la hora de fin del ensayo.',
+  finNoPosterior: 'La hora de fin tiene que ser posterior a la de inicio.',
+  sinResponsable: 'Escriba quién es el responsable del ensayo.',
+  sinUbicacion: 'Diga dónde se hizo el ensayo: PR y metros, u otro lugar.',
+  sinPr: 'Elija el PR donde se hizo el ensayo.',
+  sinMetros: 'Elija los metros donde se hizo el ensayo.',
+  sinLugar: 'Escriba el lugar donde se hizo el ensayo.',
+} as const;
+
+export type CampoDeEnsayo =
+  | 'horaInicio'
+  | 'horaFin'
+  | 'responsable'
+  | 'ubicacion'
+  | 'pr'
+  | 'metros'
+  | 'lugar'
+  | 'observacion';
+
+export interface FaltaDeEnsayo {
+  campo: CampoDeEnsayo;
+  mensaje: string;
+}
+
+/**
+ * Dónde se hizo un ensayo: en la vía, a la altura de un PR, o en otro lugar escrito
+ * (RF-87). Una sola de las dos formas; los `null` son lo que todavía no se eligió.
+ */
+export type UbicacionPorValidar = { pr: number | null; metros: number | null } | { lugar: string | null };
+
+/** Lo que se mira de un ensayo para dejarlo guardar. */
+export interface EnsayoEvaluable {
+  observacion?: string | null;
+  horaInicio?: string | null;
+  horaFin?: string | null;
+  responsable?: string | null;
+  ubicacion?: UbicacionPorValidar | null;
+}
+
+/**
+ * Lo que le falta a un ensayo para guardarse, en el orden del formulario (spec 004,
+ * RF-84 a RF-88, y RF-72 para la observación).
+ *
+ * ── A quién se le aplica ──
+ *
+ * A todo ensayo **nuevo**. A uno guardado antes del cambio no: no tiene horas ni
+ * responsable, y exigírselos lo volvería imposible de guardar (RF-89). Decidir si
+ * un ensayo es anterior es trabajo de quien tiene lo guardado —el servidor y la
+ * pantalla—, no de esta regla.
+ *
+ * ── El PR y los metros, con la regla de cantera ──
+ *
+ * Los rangos (PR de 0 a 25, metros de 25 en 25) los dice `validarAbscisa`, la misma
+ * regla del viaje, para que las dos listas no puedan discrepar. Solo cambian los
+ * textos de lo que falta: «de llegada» es del viaje, no de un ensayo.
+ */
+export function faltasDelEnsayo(ensayo: EnsayoEvaluable): FaltaDeEnsayo[] {
+  const faltas: FaltaDeEnsayo[] = [];
+
+  const inicio = minutosDeHora(ensayo.horaInicio);
+  const fin = minutosDeHora(ensayo.horaFin);
+  if (inicio === null) faltas.push({ campo: 'horaInicio', mensaje: MENSAJES_DE_ENSAYO.sinInicio });
+  if (fin === null) {
+    faltas.push({ campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.sinFin });
+  } else if (inicio !== null && fin <= inicio) {
+    // Sin cruzar la medianoche: un ensayo que la pasa se registra en dos filas.
+    faltas.push({ campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.finNoPosterior });
+  }
+
+  if (!ensayo.responsable?.trim()) {
+    faltas.push({ campo: 'responsable', mensaje: MENSAJES_DE_ENSAYO.sinResponsable });
+  }
+
+  const ubicacion = ensayo.ubicacion;
+  if (!ubicacion) {
+    faltas.push({ campo: 'ubicacion', mensaje: MENSAJES_DE_ENSAYO.sinUbicacion });
+  } else if ('lugar' in ubicacion) {
+    if (!ubicacion.lugar?.trim()) {
+      faltas.push({ campo: 'lugar', mensaje: MENSAJES_DE_ENSAYO.sinLugar });
+    }
+  } else {
+    for (const falta of validarAbscisa(ubicacion.pr, ubicacion.metros)) {
+      const mensaje =
+        falta.mensaje === MENSAJES_DE_VIAJE.sinPr
+          ? MENSAJES_DE_ENSAYO.sinPr
+          : falta.mensaje === MENSAJES_DE_VIAJE.sinMetros
+            ? MENSAJES_DE_ENSAYO.sinMetros
+            : falta.mensaje;
+      faltas.push({ campo: falta.campo === 'pr' ? 'pr' : 'metros', mensaje });
+    }
+  }
+
+  const sinObservacion = faltaObservacionDelEnsayo(ensayo.observacion);
+  if (sinObservacion) faltas.push({ campo: 'observacion', mensaje: sinObservacion });
+
+  return faltas;
 }
 
 /* ------------------------------------------------------------------------ */

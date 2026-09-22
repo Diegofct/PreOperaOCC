@@ -417,3 +417,144 @@ sin cambiar el comentario deja el archivo mintiendo.
   va en el `detalle`.
 - **Que alguien de OCC busque por número** y crea que la actividad no está. Es lo que Diego
   decidió; queda escrito en los casos límite de la spec.
+
+
+## Cambio del 2026-09-22 — vuelve el número de ítem; cuándo, quién y dónde de cada ensayo (RF-78 a RF-89)
+
+Dos mitades independientes. **Actividades** es casi solo pantalla: deshace la T31 y cambia cómo
+nace una fila nueva. **Ensayos** añade datos, regla, contrato y pantalla, pero sin migración.
+
+### Módulos y archivos
+
+| Archivo | Qué cambia | RF |
+| --- | --- | --- |
+| `src/shared/catalogos/presupuesto.ts` | `etiquetaDeActividad` vuelve a `«4.1.8 · Excavación…»`. Se reescribe su comentario (hoy explica la decisión contraria). | RF-78, RF-79, RF-81 |
+| `src/shared/rules/parte.ts` | `faltasDeActividad` gana el caso «sin elegir» (`clave` vacía → campo `clave`, «Elija la actividad.»). Nueva `faltasDelEnsayo(ensayo)`: sin hora de inicio, sin hora de fin, fin no posterior al inicio, sin responsable, sin ubicación, y las faltas del PR y los metros con `validarAbscisa`; cada una con su campo y su mensaje. `faltaObservacionDelEnsayo` se queda (RF-72 sigue) y `faltasDelEnsayo` la incluye. `bloqueosDelCierre` **no cambia**. | RF-83, RF-85, RF-88, RF-89 |
+| `src/shared/rules/cantera.ts` | Nada: se reutilizan `OPCIONES_DE_PR`, `OPCIONES_DE_METROS`, `validarAbscisa` y `formatearAbscisa`. | RF-87 |
+| `src/features/bitacoras/tipos.ts` | `EnsayoDelParte` gana `horaInicio?`, `horaFin?`, `responsable?` y `ubicacion?: { pr, metros } \| { lugar }`, **opcionales** porque los ensayos guardados no los traen. Nueva `esEnsayoAnterior(ensayo)` = no tiene `horaInicio`. | RF-84 a RF-89 |
+| `src/features/bitacoras/parte.ts` | `EnsayoPedido` con los campos nuevos. `construirEnsayo(pedido, guardado?)`: si `guardado` es un ensayo anterior con el mismo id y el pedido no trae los campos nuevos, se construye como antes (ensayo + observación); en otro caso exige `faltasDelEnsayo` vacío y guarda los cuatro datos, con el responsable y el lugar recortados. | RF-84 a RF-89 |
+| `src/features/panel/contratos.ts` | `ensayoDelParte` acepta `horaInicio`, `horaFin` (`HH:MM`), `responsable` (≤ 120), `ubicacion` (`{ pr, metros }` enteros o `{ lugar }` ≤ 160). **La forma** la valida zod; **si faltan** lo decide el servidor, porque solo él sabe si el id es de un ensayo anterior. `actividadDelParte.clave` pasa a aceptar vacío para que el rechazo diga «Elija la actividad.» en vez de «Falta la actividad.»: el `superRefine` llama a `faltasDeActividad`. `EnsayoDelParteFila` con los campos opcionales. | RF-83 a RF-88 |
+| `src/app/api/panel/partes/[id]+api.ts` | En `laboratorio`, busca el guardado de cada id y se lo pasa a `construirEnsayo`; si hay faltas, 400 con los mensajes de `faltasDelEnsayo` (todos, uno por renglón, como el cierre). La lectura de lo guardado ya existe (`guardado.laboratorio`). | RF-85, RF-88, RF-89 |
+| `src/features/panel/pantalla-partes.tsx` — Actividades | Opciones con «Otra actividad» **primero**. «Añadir actividad» nace con `clave: ''` (hoy `opciones[0]`). Falta bajo el selector tras pulsar Guardar, con la misma regla. | RF-78, RF-80, RF-82, RF-83 |
+| `src/features/panel/pantalla-partes.tsx` — Control Calidad de Obra | `FilaControlDeCalidad` con `horaInicio`, `horaFin`, `responsable`, `tipoUbicacion` (`pr` o `lugar`), `pr`, `metros`, `lugar` y `anterior`. Por ensayo: dos `SelectorDeHora` («Inicio», «Fin»), `Campo` «Responsable», `Selector` «Ubicación» («PR y metros» u «Otro lugar») y, según lo elegido, dos `Selector` de PR y metros o un `Campo` «Lugar». Un ensayo **anterior** se ve con su ensayo y su observación, editables como hoy, y sin los campos nuevos. Tabla de solo lectura con las columnas nuevas. | RF-84 a RF-89 |
+| `scripts/verificar-reglas.ts` | Se invierten los casos de la T31 y se añaden los del ensayo (ver *Verificación*). | Todos |
+
+**Lo que se reutiliza y no se escribe de nuevo:** `SelectorDeHora` (016), `validarAbscisa` y
+las listas de PR y metros (010), `minutosDeHora` (horas), `conservarHeredadas` (el recorrido
+de la sección ya existe; el ensayo anterior **no** es una fila heredada: sigue editable) y
+`filtrarOpciones`, que busca sobre la etiqueta, así que RF-79 cae solo al volver el número a la
+etiqueta.
+
+### Modelo de datos
+
+**No cambia ningún esquema.** Ni `src/db/servidor/esquema.ts` ni `src/db/local/schema.ts`: los
+ensayos viven en el `jsonb` `partes_de_obra.laboratorio`, y las cuatro propiedades nuevas van
+dentro de cada fila, como las observaciones por persona de la 016. Sin migración.
+
+- Un ensayo guardado antes del cambio se lee igual: los campos nuevos no están, y el tipo los
+  declara opcionales (RF-89).
+- La actividad no cambia de forma: el ítem ya se guarda en `clave` e `item` desde el
+  2026-09-16. Lo que vuelve es enseñarlo.
+- **Teléfonos sin actualizar:** no aplica. El parte es solo del panel.
+
+### Decisiones técnicas
+
+- **Ubicación como `{ pr, metros } | { lugar }`, no tres columnas sueltas.** *Descartado:*
+  `pr`, `metros` y `lugar` como campos independientes y nulos. Permitiría guardar un PR **y** un
+  lugar a la vez, o ninguno, y cada lector tendría que decidir cuál manda. Con la unión, un
+  ensayo tiene una ubicación de una sola forma, que es lo que dice RF-87.
+- **Las faltas del ensayo las decide el servidor con lo guardado, no el contrato.**
+  *Descartado:* exigirlas en el `superRefine` de zod, como hoy la observación. El contrato no
+  sabe si un id es de un ensayo anterior, y rechazaría al guardar la sección un ensayo viejo
+  que nadie tocó (RF-89). La pantalla aplica la misma regla, `faltasDelEnsayo`, para marcar
+  bajo cada campo antes de enviar.
+- **«Anterior» se reconoce por la forma guardada (sin `horaInicio`), no por una fecha.**
+  *Descartado:* comparar la fecha del parte con el 2026-09-22. Un parte de antes del cambio
+  puede seguir abierto y recibir ensayos nuevos, que sí deben pedir los datos; y es el mismo
+  criterio que ya distingue materiales y actividades heredadas (`esMaterialHeredado`,
+  `esActividadHeredada`).
+- **El ensayo anterior sigue editable en su ensayo y su observación.** *Descartado:*
+  congelarlo como una fila heredada de solo lectura. Hoy se puede corregir su observación, y
+  quitarle eso sería un cambio que la spec no pide; RF-89 solo dice que no se le exigen los
+  datos nuevos, y completarlos está fuera de alcance, así que no se ofrecen.
+- **«Ubicación» como selector de dos opciones que arranca en «PR y metros».** *Descartado:*
+  una casilla «No aplica PR». El selector nombra las dos formas por igual y deja claro cuál está
+  en uso; la casilla esconde la segunda. Arranca en PR porque la mayoría de los ensayos de la
+  guía se hacen en la vía; el PR y los metros siguen en blanco, así que no se inventa nada.
+- **La etiqueta de la actividad con el número, en el mismo sitio de siempre.** *Descartado:*
+  poner el número en el `detalle` de la opción. `filtrarOpciones` también busca en el detalle,
+  pero el selector lo pinta debajo y en pequeño, y la spec pide el número **delante** (RF-78).
+- **La actividad sin elegir se rechaza con «Elija la actividad.» desde la regla.**
+  *Descartado:* dejar el `textoObligatorio` del contrato, que diría «Falta la actividad.». El
+  mensaje debe ser el mismo en pantalla y en el servidor, y la pantalla lo toma de la regla.
+
+### Impacto en la sincronización
+
+Ninguno. Ni el pull, ni la outbox, ni el orden de `seq`, ni la ingesta cambian: el parte no
+viaja al celular ni sale de él.
+
+### Contrato de API
+
+`PATCH /api/panel/partes/:id`, con `requerirPermiso('bitacoras','escribir')` y `parteEditable`,
+como hoy. El alcance por obra ya lo da `parteEditable`.
+
+- `actividades[]`: igual que hoy, más: `clave` vacía → 400 «Elija la actividad.».
+- `laboratorio[]`: `{ id?, ensayo, observacion, horaInicio, horaFin, responsable, ubicacion }`
+  o `{ id }` (material heredado, como hoy).
+  - Ensayo nuevo o ensayo guardado con los datos nuevos: exige los cuatro → 400 con lo que
+    falta, uno por renglón («Falta la hora de inicio del ensayo.», «La hora de fin del ensayo
+    tiene que ser posterior a la de inicio.», «Falta el responsable del ensayo.», «Falta el PR»,
+    «Faltan los metros», «Falta el lugar del ensayo.»).
+  - `id` de un ensayo **anterior** de ese parte que llega sin los datos nuevos → se guarda con
+    su ensayo y su observación, como antes (RF-89).
+  - Forma inválida (hora que no es `HH:MM`, metros fuera de la lista) → 400 del contrato.
+- **Sin transacciones (Neon por HTTP):** la decisión «anterior o no» sale de la lectura de lo
+  guardado que la ruta ya hace. Si entre la lectura y el `UPDATE` otro computador guardara ese
+  ensayo con los datos nuevos, el segundo guardado lo dejaría sin ellos: el mismo margen que ya
+  se acepta con las filas heredadas. No se pierde nada que se haya escrito en ese guardado.
+- `GET` no cambia: devuelve el `jsonb` tal cual.
+
+### Estrategia de verificación
+
+En `scripts/verificar-reglas.ts`:
+
+- **Actividades:** el caso de la T31 se invierte: la etiqueta de la 4.1.8 empieza por
+  «4.1.8 · »; `filtrarOpciones` con «4.1.8» y con «10.1» encuentra la 4.1.8 y la 10.1;
+  «excavacion» sigue encontrándola; «4.1.9» encuentra la 4.1.9 y la 4.1.96 (caso límite).
+  `faltasDeActividad` con `clave` vacía da «Elija la actividad.».
+- **`faltasDelEnsayo`:** completo con PR y metros → sin faltas; completo con lugar → sin faltas;
+  sin inicio, sin fin, sin responsable (y con solo espacios), sin ubicación, con PR sin metros,
+  con lugar vacío → la falta de cada uno en su campo; fin igual al inicio y fin anterior →
+  rechazados; sin observación → la de RF-72.
+- **`construirEnsayo`:** uno nuevo completo guarda los cuatro datos recortados; uno nuevo sin
+  responsable da `null`; uno con el id de un ensayo anterior y sin datos nuevos se guarda con su
+  ensayo y su observación (RF-89); la ubicación nunca sale con PR y lugar a la vez.
+- **Contrato:** `ensayoDelParte` rechaza una hora «7.30» y unos metros de 30.
+
+Demo en Chrome, sobre PRUEBA-016 (abrir un parte nuevo de un día pasado, porque el de hoy está
+anulado):
+
+- Actividades: la lista empieza por «Otra actividad» y enseña «4.1.8 · …»; buscar «4.1.8» y
+  «10.1» encuentra; «Añadir actividad» sale en blanco y guardar así marca «Elija la
+  actividad.»; una actividad guardada se ve con su número.
+- Ensayos: añadir uno y guardar sin nada marca cada falta; fin antes del inicio se rechaza;
+  con PR y metros se guarda; otro con «Otro lugar» se guarda; al recargar siguen ahí.
+- RF-89: con `fetch` interceptado en la página, un ensayo del `GET` sin los datos nuevos se ve
+  con su ensayo y su observación, sin los campos nuevos y sin error (no hay ensayos reales
+  guardados; se comprueba antes con una lectura).
+
+### Riesgos
+
+- **Que el guardado de la sección rechace un ensayo viejo que nadie tocó.** Es el fallo que
+  más duele: el residente no podría guardar Control Calidad de Obra en un parte que ya tenía
+  ensayos. Lo cubren el caso de `construirEnsayo` con un anterior y la demo interceptada. Si
+  pasara en producción, la salida inmediata es revertir `construirEnsayo` a exigir solo ensayo
+  y observación: los datos nuevos guardados no se pierden, solo dejan de exigirse.
+- **La tabla de solo lectura no cabe.** Hoy suma 720 (240 + 480). Con las columnas nuevas se
+  mantiene en 720: Ensayo 200, Cuándo y dónde 180 (horas arriba, PR o lugar abajo), Responsable
+  140 y Observación 200, más las separaciones. Se comprueba mirando un parte cerrado o anulado
+  en Chrome.
+- **Una fila de ensayo muy larga en edición.** Son siete campos. Van en `FilaDeFormulario`, que
+  ya parte en renglones; la observación sigue en su propio renglón, como hoy.
+- **Revertir la T31 a medias.** Si cambia la etiqueta pero no las pruebas, `verificar` falla,
+  que es lo que se quiere: el caso invertido es la comprobación.

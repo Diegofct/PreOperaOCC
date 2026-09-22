@@ -24,14 +24,20 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
 import { idDeFila, type ViajeDelParte } from "@/features/bitacoras/tipos";
-import { formatearAbscisa } from "@/shared/rules/cantera";
+import {
+  formatearAbscisa,
+  OPCIONES_DE_METROS,
+  OPCIONES_DE_PR,
+} from "@/shared/rules/cantera";
 import {
   CONDICIONES_CLIMA,
   ENSAYOS_DE_CALIDAD,
 } from "@/shared/catalogos/bitacora";
 import {
   desglosarJornada,
+  describirHorarioDelDia,
   horasLegibles,
+  MAXIMO_MINUTOS_EXTRA_POR_DIA,
   validarFranjas,
   mensajeDeFranja,
 } from "@/shared/rules/horas";
@@ -63,11 +69,13 @@ import {
 import { alcanza } from "@/shared/rules/permisos";
 import {
   bloqueosDelCierre,
-  faltaObservacionDelEnsayo,
   faltasDeActividad,
+  faltasDelEnsayo,
   seccionesDelParte,
   TITULO_DE_SECCION,
   type CampoDeActividad,
+  type CampoDeEnsayo,
+  type UbicacionPorValidar,
 } from "@/shared/rules/parte";
 
 import { api, mensajeDe } from "./cliente-api";
@@ -84,6 +92,7 @@ import {
   Formulario,
   Seccion,
   Selector,
+  SelectorDeHora,
   Tabla,
   type Columna,
 } from "./componentes";
@@ -168,7 +177,13 @@ type FilaMaquina = {
   /** Lo que pasó con la máquina ese día (spec 004, RF-45). */
   observaciones: string;
 };
-type FilaPersona = { usuarioId: string; entrada: string; salida: string };
+type FilaPersona = {
+  usuarioId: string;
+  entrada: string;
+  salida: string;
+  /** Lo que explica sus horas ese día (spec 016, RF-26). Opcional. */
+  observaciones: string;
+};
 type FilaActividad = {
   /**
    * Nace en el navegador al pulsar «Añadir actividad», no al guardar: es a lo
@@ -201,6 +216,20 @@ type FilaControlDeCalidad = {
   /** El id del catálogo; vacío hasta que se elige. */
   ensayo: string;
   observacion: string;
+  /** Cuándo, quién y dónde (cambio del 2026-09-22, RF-84 a RF-87). Vacíos hasta elegir. */
+  horaInicio: string;
+  horaFin: string;
+  responsable: string;
+  /** Qué forma de ubicación se está llenando; solo esa viaja (RF-87). */
+  tipoUbicacion: "pr" | "lugar";
+  pr: number | null;
+  metros: number | null;
+  lugar: string;
+  /**
+   * Guardado antes del 2026-09-22, sin horas, responsable ni ubicación (RF-89): se
+   * sigue editando su ensayo y su observación, sin pedirle lo que no tiene.
+   */
+  anterior: boolean;
   /**
    * El material tal como se guardó, si la fila es de antes de que la sección fuera
    * de ensayos (RF-63): se ve de solo lectura y viaja solo con su id.
@@ -239,6 +268,21 @@ export default function PantallaPartes() {
   const cerrado = Boolean(parte?.cerradoEn);
   const anulado = Boolean(parte?.anuladoEn);
   const editable = Boolean(parte) && !cerrado && !anulado;
+
+  /**
+   * ¿La obra del parte lleva control de cantera? (spec 017, RF-12, RF-16.)
+   *
+   * La gerencia lo lee de la obra —lleva todas—; el residente, de su sesión, que es
+   * la de su obra y es lo único que tiene: no puede listar obras.
+   *
+   * **Solo esconde la sección de un parte abierto.** Uno cerrado o anulado enseña lo
+   * que fijó ese día, que es evidencia y no depende de lo que la obra lleve hoy.
+   */
+  const obraDelParte = obras.datos.find((o) => o.id === parte?.obraId) ?? null;
+  const llevaCantera = esGerencia
+    ? (obraDelParte?.canteraActivo ?? true)
+    : (persona?.modulosDeObra.cantera ?? true);
+  const muestraCantera = Boolean(parte) && (llevaCantera || cerrado || anulado);
 
   /** Para que el índice pueda llevar la vista a una sección. */
   const desplazamiento = useRef<ScrollView | null>(null);
@@ -313,8 +357,9 @@ export default function PantallaPartes() {
     historicoCerradas,
     cerrado,
     anulado,
-    // Solo hay sección de cantera con un parte en pantalla.
-    cantera: parte ? conteoCantera : undefined,
+    // Solo hay sección de cantera con un parte en pantalla, y solo si la obra la
+    // lleva o si el parte ya fijó sus viajes (spec 017, RF-12).
+    cantera: muestraCantera ? conteoCantera : undefined,
   });
 
   /**
@@ -486,12 +531,14 @@ export default function PantallaPartes() {
             alGuardar={dia.recargar}
             alMedir={salto.alMedirBanda}
           />
-          <SeccionCantera
-            seccion={seccionCantera}
-            cargando={cantera.cargando}
-            error={cantera.error}
-            alMedir={salto.alMedirBanda}
-          />
+          {muestraCantera ? (
+            <SeccionCantera
+              seccion={seccionCantera}
+              cargando={cantera.cargando}
+              error={cantera.error}
+              alMedir={salto.alMedirBanda}
+            />
+          ) : null}
           <SeccionNotas
             key={`notas-${parte.id}`}
             parte={parte}
@@ -949,6 +996,8 @@ function SeccionPersonal({
       usuarioId: p.usuarioId,
       entrada: p.entrada ?? "",
       salida: p.salida ?? "",
+      // Ausentes en los partes anteriores a la spec 016: se leen vacías (RF-29).
+      observaciones: p.observaciones ?? "",
     })),
   );
   const [guardando, setGuardando] = useState(false);
@@ -970,6 +1019,7 @@ function SeccionPersonal({
           usuarioId: f.usuarioId,
           entrada: f.entrada,
           salida: f.salida,
+          observaciones: f.observaciones,
         })),
       });
       alFallar(null);
@@ -993,6 +1043,13 @@ function SeccionPersonal({
         ) : null
       }
     >
+      {/* Contra qué se cuentan las extras de ese día (spec 016, RF-10). El horario lo
+          decidió el servidor: el vigente de la obra si el parte sigue abierto, el
+          guardado al cerrarlo si no. */}
+      <Text style={estilos.apoyo}>
+        {`Horario de este día: ${describirHorarioDelDia(parte.horario, parte.fecha)}`}
+      </Text>
+
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => {
@@ -1001,6 +1058,7 @@ function SeccionPersonal({
               parte.fecha,
               fila.entrada || null,
               fila.salida || null,
+              parte.horario,
             );
 
             return (
@@ -1016,38 +1074,67 @@ function SeccionPersonal({
                   soloLectura
                   ancho={240}
                 />
-                <Campo
+                <SelectorDeHora
                   etiqueta="Entrada"
                   valor={fila.entrada}
                   onChange={(v) => cambiar(indice, "entrada", v)}
-                  ayuda="HH:MM"
-                  ancho={120}
                 />
-                <Campo
+                <SelectorDeHora
                   etiqueta="Salida"
                   valor={fila.salida}
                   onChange={(v) => cambiar(indice, "salida", v)}
-                  ayuda="HH:MM"
-                  ancho={120}
                 />
                 {desglose ? (
                   <View style={estilos.desglose}>
+                    {/* Trabajadas y ordinarias siempre; las demás solo si hay:
+                        tres «0 min» por persona tapan la cifra que importa (RF-20). */}
                     <Text style={estilos.apoyo}>
-                      {horasLegibles(desglose.trabajados)} trabajadas
+                      {`${horasLegibles(desglose.trabajados)} trabajadas, ` +
+                        `${horasLegibles(desglose.ordinarios)} ordinarias`}
                     </Text>
-                    {desglose.extra > 0 ? (
+                    {desglose.extraDiurna > 0 ? (
                       <Etiqueta tono="atencion">
-                        {horasLegibles(desglose.extra)} extra
+                        {horasLegibles(desglose.extraDiurna)} extra diurnas
                       </Etiqueta>
                     ) : null}
-                    {desglose.nocturnos > 0 ? (
+                    {desglose.extraNocturna > 0 ? (
+                      <Etiqueta tono="atencion">
+                        {horasLegibles(desglose.extraNocturna)} extra nocturnas
+                      </Etiqueta>
+                    ) : null}
+                    {desglose.nocturnosOrdinarios > 0 ? (
                       <Etiqueta tono="neutro">
-                        {horasLegibles(desglose.nocturnos)} nocturnas
+                        {horasLegibles(desglose.nocturnosOrdinarios)} nocturnas
+                        ordinarias
                       </Etiqueta>
                     ) : null}
                     {desglose.dominicalOFestivo ? (
                       <Etiqueta tono="atencion">Domingo o festivo</Etiqueta>
                     ) : null}
+                  </View>
+                ) : null}
+                {/* A diferencia de la de la máquina, no hace falta para cerrar
+                    (RF-27): casi siempre no hay nada que explicar. Se sigue
+                    viendo con el parte cerrado o anulado (RF-28). */}
+                <Campo
+                  etiqueta="Observaciones"
+                  valor={fila.observaciones}
+                  onChange={(v) => cambiar(indice, "observaciones", v)}
+                  multilinea
+                  ayuda={
+                    editable
+                      ? "Opcional. Lo que explica sus horas: llegó tarde, salió a una cita, hizo turno de noche."
+                      : undefined
+                  }
+                />
+                {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
+                {desglose?.masDeDosExtra ? (
+                  <View style={estilos.avisoEnRenglon}>
+                    <Aviso tono="info">
+                      {`${horasLegibles(desglose.extra)} extra en el día: pasa de las ` +
+                        `${MAXIMO_MINUTOS_EXTRA_POR_DIA / 60} que permite la ley. ` +
+                        "Se puede guardar igual."}
+                    </Aviso>
                   </View>
                 ) : null}
                 {editable ? (
@@ -1083,7 +1170,10 @@ function SeccionPersonal({
               // puesto el día que a alguien se le olvide cambiarlo, y nadie
               // distingue después lo escrito de lo que vino solo.
               v &&
-              setFilas([...filas, { usuarioId: v, entrada: "", salida: "" }])
+              setFilas([
+                ...filas,
+                { usuarioId: v, entrada: "", salida: "", observaciones: "" },
+              ])
             }
             vacio="Elija una persona"
             ancho={280}
@@ -1160,6 +1250,7 @@ function SeccionActividades({
     if (fila.heredada) return {};
     return Object.fromEntries(
       faltasDeActividad({
+        elegida: fila.clave !== "",
         otra: fila.clave === CLAVE_OTRA_ACTIVIDAD,
         texto: fila.texto,
         unidad: fila.unidad,
@@ -1212,17 +1303,16 @@ function SeccionActividades({
     }
   }
 
-  // Los ítems del presupuesto con su descripción sola —el número no se muestra
-  // desde el 2026-09-17 (RF-75)— y la salida para lo que no está (RF-64, RF-24).
-  // El buscador del selector encuentra por palabras y ya no por número, porque
-  // busca en la etiqueta (RF-76). El `valor` sigue siendo el ítem: es la clave que
-  // viaja al servidor, no algo que alguien lea.
+  // «Otra actividad» primero (RF-80) y después los ítems del presupuesto con su
+  // número delante (RF-78, RF-64). El buscador del selector encuentra por número o
+  // por palabras porque busca en la etiqueta (RF-79). El `valor` es el ítem: es la
+  // clave que viaja al servidor, no algo que alguien lea.
   const opciones = [
+    { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
     ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
       valor: a.item,
       etiqueta: etiquetaDeActividad(a),
     })),
-    { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
   ];
   const opcionesDeUnidad = UNIDADES_DE_ACTIVIDAD.map((u) => ({
     valor: u.id,
@@ -1325,9 +1415,12 @@ function SeccionActividades({
               <FilaDeFormulario key={fila.id} ultima={ultima}>
                 <Selector
                   etiqueta="Actividad"
-                  valor={fila.clave}
+                  valor={fila.clave || null}
                   opciones={opciones}
                   onChange={(v) => cambiar(indice, "clave", v ?? "")}
+                  vacio="Elija la actividad"
+                  error={faltas.clave}
+                  obligatorio
                   ancho={460}
                 />
                 {otra ? (
@@ -1446,7 +1539,9 @@ function SeccionActividades({
                 ...filas,
                 {
                   id: idDeFila(),
-                  clave: opciones[0]?.valor ?? CLAVE_OTRA_ACTIVIDAD,
+                  // En blanco (RF-82): una actividad propuesta de antemano se queda
+                  // puesta el día que a alguien se le olvida cambiarla.
+                  clave: "",
                   texto: "",
                   unidad: "",
                   cantidad: "",
@@ -1548,19 +1643,15 @@ function SeccionClima({
                 onChange={(v) => cambiar(indice, "condicion", v ?? "")}
                 ancho={220}
               />
-              <Campo
+              <SelectorDeHora
                 etiqueta="Desde"
                 valor={fila.desde}
                 onChange={(v) => cambiar(indice, "desde", v)}
-                ayuda="HH:MM"
-                ancho={120}
               />
-              <Campo
+              <SelectorDeHora
                 etiqueta="Hasta"
                 valor={fila.hasta}
                 onChange={(v) => cambiar(indice, "hasta", v)}
-                ayuda="HH:MM"
-                ancho={120}
               />
               {editable ? (
                 <AccionesFormulario>
@@ -1606,6 +1697,47 @@ function SeccionClima({
 /* Control Calidad de Obra (antes «Laboratorio»; el id sigue siendo ese)     */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Un ensayo recién añadido, sin nada elegido. La ubicación arranca en «PR y
+ * metros» porque la mayoría de los ensayos de la guía se hacen en la vía; el PR y
+ * los metros siguen en blanco, así que no se propone ningún dato (decisión del
+ * plan, cambio del 2026-09-22).
+ */
+const ENSAYO_EN_BLANCO: Omit<FilaControlDeCalidad, "id" | "heredado"> = {
+  ensayo: "",
+  observacion: "",
+  horaInicio: "",
+  horaFin: "",
+  responsable: "",
+  tipoUbicacion: "pr",
+  pr: null,
+  metros: null,
+  lugar: "",
+  anterior: false,
+};
+
+const OPCIONES_DE_UBICACION = [
+  { valor: "pr", etiqueta: "PR y metros" },
+  { valor: "lugar", etiqueta: "Otro lugar" },
+];
+
+/** «10:00 a 11:00 · PR 5 + 050», o «—» en un ensayo anterior o un material (RF-89). */
+function cuandoYDonde(fila: FilaDeControlDeCalidadFila): string {
+  if ("material" in fila || !fila.horaInicio || !fila.ubicacion) return "—";
+  const donde =
+    "lugar" in fila.ubicacion
+      ? fila.ubicacion.lugar
+      : formatearAbscisa(fila.ubicacion.pr, fila.ubicacion.metros);
+  return `${fila.horaInicio} a ${fila.horaFin} · ${donde}`;
+}
+
+/** La ubicación que viaja: solo la forma elegida, nunca las dos (RF-87). */
+function ubicacionDe(fila: FilaControlDeCalidad): UbicacionPorValidar {
+  return fila.tipoUbicacion === "lugar"
+    ? { lugar: fila.lugar }
+    : { pr: fila.pr, metros: fila.metros };
+}
+
 function SeccionLaboratorio({
   parte,
   editable,
@@ -1620,23 +1752,55 @@ function SeccionLaboratorio({
   const [filas, setFilas] = useState<FilaControlDeCalidad[]>(() =>
     parte.laboratorio.map((fila) =>
       "material" in fila
-        ? { id: fila.id, ensayo: "", observacion: "", heredado: fila }
-        : { id: fila.id, ensayo: fila.ensayo, observacion: fila.observacion, heredado: null },
+        ? { ...ENSAYO_EN_BLANCO, id: fila.id, heredado: fila }
+        : {
+            id: fila.id,
+            ensayo: fila.ensayo,
+            observacion: fila.observacion,
+            horaInicio: fila.horaInicio ?? "",
+            horaFin: fila.horaFin ?? "",
+            responsable: fila.responsable ?? "",
+            tipoUbicacion: fila.ubicacion && "lugar" in fila.ubicacion ? "lugar" : "pr",
+            pr: fila.ubicacion && "pr" in fila.ubicacion ? fila.ubicacion.pr : null,
+            metros: fila.ubicacion && "metros" in fila.ubicacion ? fila.ubicacion.metros : null,
+            lugar: fila.ubicacion && "lugar" in fila.ubicacion ? fila.ubicacion.lugar : "",
+            // Por la forma, como el servidor: todo ensayo nuevo lleva sus horas.
+            anterior: fila.horaInicio === undefined,
+            heredado: null,
+          },
     ),
   );
   const [guardando, setGuardando] = useState(false);
 
-  function cambiar(indice: number, campo: "ensayo" | "observacion", valor: string) {
+  function cambiar<K extends keyof FilaControlDeCalidad>(
+    indice: number,
+    campo: K,
+    valor: FilaControlDeCalidad[K],
+  ) {
     setFilas(filas.map((f, i) => (i === indice ? { ...f, [campo]: valor } : f)));
   }
 
-  function faltasDe(fila: FilaControlDeCalidad): { ensayo?: string; observacion?: string } {
+  function faltasDe(
+    fila: FilaControlDeCalidad,
+  ): Partial<Record<CampoDeEnsayo | "ensayo", string>> {
     if (fila.heredado) return {};
-    return {
-      ensayo: fila.ensayo ? undefined : "Elija el ensayo.",
-      // La regla que también aplica el servidor (RF-72).
-      observacion: faltaObservacionDelEnsayo(fila.observacion) ?? undefined,
-    };
+    // La misma regla que aplica el servidor al construir el ensayo (RF-72, RF-84 a
+    // RF-88); aquí solo se reparte bajo cada campo, la primera falta de cada uno.
+    const faltas: Partial<Record<CampoDeEnsayo | "ensayo", string>> = {};
+    if (!fila.ensayo) faltas.ensayo = "Elija el ensayo.";
+    // A uno anterior solo se le mira la observación (RF-72, RF-89), como en el servidor.
+    const reglas = faltasDelEnsayo({
+      observacion: fila.observacion,
+      horaInicio: fila.horaInicio,
+      horaFin: fila.horaFin,
+      responsable: fila.responsable,
+      ubicacion: ubicacionDe(fila),
+    });
+    for (const falta of reglas) {
+      if (fila.anterior && falta.campo !== "observacion") continue;
+      faltas[falta.campo] ??= falta.mensaje;
+    }
+    return faltas;
   }
 
   async function guardar() {
@@ -1652,7 +1816,22 @@ function SeccionLaboratorio({
         laboratorio: filas.map((f) =>
           f.heredado
             ? { id: f.id }
-            : { id: f.id, ensayo: f.ensayo, observacion: f.observacion },
+            : f.anterior
+              ? // Sin datos nuevos: el servidor lo reconoce por su id y lo guarda como antes.
+                { id: f.id, ensayo: f.ensayo, observacion: f.observacion }
+              : {
+                id: f.id,
+                ensayo: f.ensayo,
+                observacion: f.observacion,
+                horaInicio: f.horaInicio,
+                horaFin: f.horaFin,
+                responsable: f.responsable,
+                // Ya validada arriba: si faltara el PR o los metros no se llega aquí.
+                ubicacion:
+                  f.tipoUbicacion === "lugar"
+                    ? { lugar: f.lugar }
+                    : { pr: f.pr!, metros: f.metros! },
+              },
         ),
       });
       alFallar(null);
@@ -1672,19 +1851,35 @@ function SeccionLaboratorio({
 
   // De solo lectura, las dos formas en la misma tabla: un ensayo dice su
   // observación; un material de antes, su cantidad (RF-63).
+  // Desde el 2026-09-22 también cuándo, quién y dónde. Suman 720, lo mismo que las
+  // dos columnas de antes, para que quepan en el marco del parte; lo que una fila
+  // anterior o un material no tienen se lee «—» (RF-89). Varios renglones por celda:
+  // es evidencia, y cortada con «…» no dice quién ni dónde.
   const columnas: Columna<FilaDeControlDeCalidadFila>[] = [
     {
       clave: "nombre",
       titulo: "Ensayo o material",
-      ancho: 240,
+      ancho: 200,
       pintar: (f) => <Celda>{f.nombre}</Celda>,
+    },
+    {
+      clave: "cuandoYDonde",
+      titulo: "Cuándo y dónde",
+      ancho: 180,
+      pintar: (f) => <Celda lineas={3}>{cuandoYDonde(f)}</Celda>,
+    },
+    {
+      clave: "responsable",
+      titulo: "Responsable",
+      ancho: 140,
+      pintar: (f) => <Celda lineas={3}>{("responsable" in f && f.responsable) || "—"}</Celda>,
     },
     {
       clave: "detalle",
       titulo: "Observación o cantidad",
-      ancho: 480,
+      ancho: 200,
       pintar: (f) => (
-        <Celda>{"material" in f ? `${f.cantidad} ${f.unidad}` : f.observacion}</Celda>
+        <Celda lineas={6}>{"material" in f ? `${f.cantidad} ${f.unidad}` : f.observacion}</Celda>
       ),
     },
   ];
@@ -1753,6 +1948,87 @@ function SeccionLaboratorio({
                   obligatorio
                   ancho={300}
                 />
+                {fila.anterior ? (
+                  <View style={estilos.avisoEnRenglon}>
+                    <Aviso tono="info">
+                      Registrado antes de que se pidieran las horas, el responsable y el
+                      lugar: se conserva así.
+                    </Aviso>
+                  </View>
+                ) : null}
+                {/* Cuándo, quién y dónde (RF-84 a RF-87): obligatorios en todo
+                    ensayo nuevo. Las horas con los desplegables de todo el panel. */}
+                {fila.anterior ? null : (
+                  <>
+                    <SelectorDeHora
+                      etiqueta="Inicio"
+                      valor={fila.horaInicio}
+                      onChange={(v) => cambiar(indice, "horaInicio", v)}
+                      error={faltas.horaInicio}
+                      obligatorio
+                    />
+                    <SelectorDeHora
+                      etiqueta="Fin"
+                      valor={fila.horaFin}
+                      onChange={(v) => cambiar(indice, "horaFin", v)}
+                      error={faltas.horaFin}
+                      obligatorio
+                    />
+                    <Campo
+                      etiqueta="Responsable"
+                      valor={fila.responsable}
+                      onChange={(v) => cambiar(indice, "responsable", v)}
+                      error={faltas.responsable}
+                      obligatorio
+                      ancho={260}
+                    />
+                    <Selector
+                      etiqueta="Ubicación"
+                      valor={fila.tipoUbicacion}
+                      opciones={OPCIONES_DE_UBICACION}
+                      onChange={(v) => cambiar(indice, "tipoUbicacion", v === "lugar" ? "lugar" : "pr")}
+                      obligatorio
+                      ancho={200}
+                    />
+                    {fila.tipoUbicacion === "pr" ? (
+                      <>
+                        <Selector
+                          etiqueta="PR"
+                          valor={fila.pr === null ? null : String(fila.pr)}
+                          opciones={OPCIONES_DE_PR.map((n) => ({ valor: String(n), etiqueta: `PR ${n}` }))}
+                          onChange={(v) => cambiar(indice, "pr", v === null ? null : Number(v))}
+                          vacio="Elija el PR"
+                          error={faltas.pr}
+                          obligatorio
+                          ancho={170}
+                        />
+                        <Selector
+                          etiqueta="Metros"
+                          valor={fila.metros === null ? null : String(fila.metros)}
+                          opciones={OPCIONES_DE_METROS.map((n) => ({
+                            valor: String(n),
+                            etiqueta: `+ ${String(n).padStart(3, "0")}`,
+                          }))}
+                          onChange={(v) => cambiar(indice, "metros", v === null ? null : Number(v))}
+                          vacio="Elija los metros"
+                          error={faltas.metros}
+                          obligatorio
+                          ancho={170}
+                        />
+                      </>
+                    ) : (
+                      <Campo
+                        etiqueta="Lugar"
+                        valor={fila.lugar}
+                        onChange={(v) => cambiar(indice, "lugar", v)}
+                        ayuda={faltas.lugar ? undefined : "Por ejemplo, planta de trituración o laboratorio."}
+                        error={faltas.lugar}
+                        obligatorio
+                        ancho={260}
+                      />
+                    )}
+                  </>
+                )}
                 {/* Obligatoria: si no hay nada que anotar, «Sin observaciones» (RF-72). */}
                 <Campo
                   etiqueta="Observación"
@@ -1772,10 +2048,7 @@ function SeccionLaboratorio({
               titulo="Añadir ensayo"
               tono="secundario"
               onPress={() =>
-                setFilas([
-                  ...filas,
-                  { id: idDeFila(), ensayo: "", observacion: "", heredado: null },
-                ])
+                setFilas([...filas, { ...ENSAYO_EN_BLANCO, id: idDeFila(), heredado: null }])
               }
             />
           </PieDeSeccion>
@@ -2118,4 +2391,7 @@ const estilos = StyleSheet.create({
     gap: Spacing.two,
     flexWrap: "wrap",
   },
+  // Renglón propio dentro de la fila: al lado de los campos no se leería. Lo usan
+  // el aviso de horas extra de Personal y el del ensayo anterior.
+  avisoEnRenglon: { width: "100%" },
 });

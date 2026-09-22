@@ -1,0 +1,2 @@
+ALTER TABLE "obras" ADD COLUMN "horario" jsonb DEFAULT '{"semana":[{"desde":"07:30","hasta":"12:00"},{"desde":"13:30","hasta":"17:00"}],"sabado":[{"desde":"07:30","hasta":"12:00"}]}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "partes_de_obra" ADD COLUMN "horario" jsonb;

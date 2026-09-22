@@ -51,7 +51,8 @@ export function BarraNavegacion() {
   const [anchoCuenta, setAnchoCuenta] = useState(0);
   const [anchosEnlaces, setAnchosEnlaces] = useState<Partial<Record<Modulo, number>>>({});
 
-  const modulos = modulosVisibles(persona?.rol ?? 'operador');
+  // Su cargo y lo que lleva su obra (spec 017, RF-7).
+  const modulos = modulosVisibles(persona?.rol ?? 'operador', persona?.modulosDeObra);
   const medidos = modulos.map((m) => anchosEnlaces[m]).filter((a): a is number => a !== undefined);
   const todoMedido = anchoMarca > 0 && anchoCuenta > 0 && medidos.length === modulos.length;
   const cabe =

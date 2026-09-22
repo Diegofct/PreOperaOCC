@@ -1,7 +1,8 @@
 /**
  * Registrar un viaje de cantera (spec 010, RF-7 a RF-19, RF-30, RF-34 y RF-35).
  *
- * Todo se **elige** de una lista, salvo la fecha y la hora: el material, la volqueta,
+ * Todo se **elige** de una lista, salvo la fecha —la hora también, en desplegables de
+ * 15 minutos desde la spec 016—: el material, la volqueta,
  * el conductor, el origen y el destino salen de las opciones que el servidor da para
  * esa obra (solo lo vigente y elegible), y el PR y los metros, de sus listas (RF-12,
  * RF-13). Son como mucho ocho elecciones con destino obra (requisito no funcional).
@@ -42,12 +43,22 @@ import {
   Formulario,
   Modal,
   Selector,
+  SelectorDeHora,
 } from './componentes';
 import { ETIQUETA_TIPO_SITIO, type OpcionesDeCantera, type ViajeRegistrado } from './contratos';
 
-/** La hora de ahora en la obra, `HH:MM`. */
+/**
+ * La hora de ahora en la obra, `HH:MM`, **redondeada hacia abajo al cuarto de hora**.
+ *
+ * La hora se elige en desplegables de 15 en 15 minutos (spec 016, RF-30). Con los
+ * minutos exactos, la ventana abriría con un «37» suelto que no está en la lista.
+ * Hacia abajo y no al más cercano: un viaje no puede quedar registrado a una hora que
+ * todavía no ha llegado.
+ */
 function horaDeAhora(): string {
-  return new Date(Date.now() - DESFASE_COLOMBIA_MS).toISOString().slice(11, 16);
+  const ahora = new Date(Date.now() - DESFASE_COLOMBIA_MS).toISOString().slice(11, 16);
+  const minutos = Math.floor(Number(ahora.slice(3)) / 15) * 15;
+  return `${ahora.slice(0, 3)}${String(minutos).padStart(2, '0')}`;
 }
 
 /**
@@ -175,14 +186,12 @@ export function VentanaViaje({
               error={faltaDe('fecha')}
               ancho={170}
             />
-            <Campo
+            <SelectorDeHora
               etiqueta="Hora"
               obligatorio
               valor={hora}
               onChange={setHora}
-              ayuda="HH:MM"
               error={faltaDe('hora')}
-              ancho={110}
             />
             <Selector
               etiqueta="Material"

@@ -18,7 +18,12 @@ import { and, asc, eq, isNull, type SQL } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { canteraMateriales, canteraSitios, obras } from '@/db/servidor/esquema';
 import type { MaterialDeCanteraFila, SitioDeCanteraFila } from '@/features/panel/contratos';
-import { alcanzaLaObra, filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
+import {
+  alcanzaLaObra,
+  filtroDeModulo,
+  filtroDeObra,
+  veTodasLasObras,
+} from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 
 /* ── La obra de la petición ────────────────────────────────────────────── */
@@ -80,7 +85,14 @@ export async function leerSitios(condicion: SQL | undefined): Promise<SitioDeCan
     })
     .from(canteraSitios)
     .leftJoin(obras, eq(obras.id, canteraSitios.obraId))
-    .where(and(isNull(canteraSitios.eliminadoEn), condicion))
+    // Las obras que no llevan control de cantera no salen (spec 017, RF-10).
+    .where(
+      and(
+        isNull(canteraSitios.eliminadoEn),
+        filtroDeModulo('cantera', canteraSitios.obraId),
+        condicion,
+      ),
+    )
     .orderBy(asc(canteraSitios.nombreNormalizado));
 }
 
@@ -110,7 +122,13 @@ export async function leerMateriales(
     })
     .from(canteraMateriales)
     .leftJoin(obras, eq(obras.id, canteraMateriales.obraId))
-    .where(and(isNull(canteraMateriales.eliminadoEn), condicion))
+    .where(
+      and(
+        isNull(canteraMateriales.eliminadoEn),
+        filtroDeModulo('cantera', canteraMateriales.obraId),
+        condicion,
+      ),
+    )
     .orderBy(asc(canteraMateriales.nombreNormalizado));
 }
 

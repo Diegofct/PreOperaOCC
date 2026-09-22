@@ -68,6 +68,11 @@ export function viajesDelDiaEnSql(obra: SQL, fecha: SQL): SQL<ViajeDelParte[]> {
     where v.obra_id = ${obra}
       and v.fecha = ${fecha}
       and v.anulado_en is null
+      -- Solo si la obra lleva control de cantera (spec 017, RF-12 y RF-13). Va dentro
+      -- de la misma consulta y no como una lectura aparte: en el cierre esto corre
+      -- dentro del propio UPDATE, así que un parte de una obra sin el módulo se
+      -- cierra con la lista vacía sin que nadie tenga que acordarse de comprobarlo.
+      and exists (select 1 from obras ob where ob.id = v.obra_id and ob.cantera_activo)
   )`;
 }
 
