@@ -12,6 +12,69 @@ el compose y el perfil de compilación del APK. Aquí empieza lo que toca máqui
 
 ---
 
+## Cómo está montado de verdad *(comprobado el 2026-09-23)*
+
+> Lo que sigue **no es el plan, es la máquina**. Se levantó mirando el VPS con Diego, y
+> corrige varias cosas que este documento daba por supuestas cuando se escribió el 19 de
+> septiembre. Léelo antes que nada: el procedimiento de los pasos 0 a 7 describe una primera
+> instalación que **ya se hizo**.
+
+**El panel lleva desplegado desde el 2026-09-20** y está sano. `docker ps` lo muestra como
+`preoperaocc-panel`, corriendo `preoperaocc:ultima`, publicado en `127.0.0.1:3000` —solo el
+bucle local, como manda `compose.yaml`—. En `/opt/preoperaocc` están el `compose.yaml`
+(idéntico al del repositorio, byte a byte) y el `.env` con permisos `600`.
+
+**El dominio es `occ.licitapp-elementaling.cloud`.**
+
+### El vecino, y por qué el proxy no es lo que decía este documento
+
+El VPS lo comparte con **LicitApp**, que son tres contenedores: `licitapp-backend-1` (Java),
+`licitapp-db-1` (MySQL) y `licitapp-proxy-1`.
+
+Ese proxy es **Caddy, y corre en un contenedor del vecino**, no instalado en el sistema. Tiene
+los puertos 80 y 443. Así que:
+
+- **No hay `/etc/caddy/` ni `systemctl reload caddy`.** La sección «Si el proxy es Caddy» de más
+  abajo describe una instalación de sistema que en esta máquina no existe.
+- **No hay nginx.** `grep server_name /etc/nginx/sites-enabled/` sale vacío.
+- El bloque del panel ya está dentro del `Caddyfile` de LicitApp, al final, con su propio
+  comentario. Caddy termina el TLS y pasa las peticiones a `preoperaocc-panel:3000`.
+
+### La unión entre las dos redes, que no está en ningún archivo
+
+Caddy llega al panel **por nombre de contenedor**, y eso solo funciona si comparten red. Pero el
+`compose.yaml` del panel no declara ninguna: crea la suya, `preoperaocc_default`.
+
+Lo que hay es una conexión hecha **a mano**, y está del lado del proxy:
+
+| Contenedor | Redes |
+| --- | --- |
+| `preoperaocc-panel` | `preoperaocc_default` |
+| `licitapp-proxy-1` | `licitapp_licitapp-net` **y** `preoperaocc_default` |
+
+O sea, alguien corrió `docker network connect preoperaocc_default licitapp-proxy-1`. **Eso no
+está en ningún compose ni en ningún script**, y es la razón de las dos advertencias que siguen.
+
+> ### ⚠️ Nunca `docker compose down` en `/opt/preoperaocc`
+>
+> `down` **borra la red** `preoperaocc_default`. Al borrarla, el proxy se desengancha, y aunque
+> el panel vuelva a levantarse sano, Caddy ya no sabe llegar: el sitio queda caído y
+> `docker compose ps` dice **healthy**, porque el contenedor lo está. El síntoma no señala a la
+> causa. **Siempre `up -d`.**
+>
+> Si llegara a pasar, se arregla reconectando:
+> `docker network connect preoperaocc_default licitapp-proxy-1`
+
+> ### ⚠️ No sobrescribas el `compose.yaml` del VPS sin mirar
+>
+> Hoy es idéntico al del repositorio, así que copiarlo es inofensivo. Si algún día dejan de
+> serlo, copiarlo a ciegas puede llevarse por delante algo que solo existe en la máquina.
+
+**Que el panel se recree con `up -d` es seguro**: entra en `preoperaocc_default`, que es su red
+por defecto, y el proxy ya está ahí esperándolo.
+
+---
+
 ## Paso 0 — Los datos de tu VPS
 
 Antes de nada, rellena esto. Todo lo demás se copia y se pega tal cual.
@@ -308,24 +371,142 @@ curl -I "https://$PANEL_DOMINIO"
 
 ---
 
-## Actualizar el panel más adelante
+## Actualizar el panel · paso a paso *(reescrito el 2026-09-23)*
 
-Con OCC ya usándolo, se acepta un corte breve fuera del horario de obra (RF-11). Los
-operadores no se enteran: el celular trabaja sin señal y su cola reintenta sola.
+Con OCC ya usándolo, se acepta un corte breve **fuera del horario de obra** (RF-11). Los
+operadores no se enteran: el celular trabaja sin señal y su cola reintenta sola. Quien sí puede
+perder algo es un residente llenando una bitácora en ese momento — cada sección guarda por su
+cuenta, así que sería lo que no haya guardado.
+
+**Se trabaja en dos ventanas**, y confundirlas es el error más fácil:
+
+- **Ventana A — el VPS**, conectado por ssh.
+- **Ventana B — la máquina de desarrollo**, en la raíz del repositorio, con Docker Desktop
+  abierto.
+
+### 1 · Comprobar que se entra al VPS *(ventana B)*
 
 ```sh
-# En desarrollo
-docker build -t preoperaocc:ultima .
-docker save preoperaocc:ultima | gzip | ssh USUARIO@IP_DEL_VPS 'gunzip | docker load'
-
-# En el VPS
-cd "$PANEL_DIR" && docker compose up -d      # recrea el contenedor con la imagen nueva
-docker compose ps                             # healthy
+ssh -i ~/.ssh/preoperaocc_vps root@179.199.132.56 "echo funciona"
 ```
 
-> **Reversa:** hay que tener la imagen anterior etiquetada antes de sobrescribir.
-> Antes de construir: `docker tag preoperaocc:ultima preoperaocc:anterior` en el VPS.
-> Para volver: retiquetar `anterior` como `ultima` y `docker compose up -d`.
+**Se entra con llave y sin contraseña.** El 2026-09-23 se comprobó que `~/.ssh/preoperaocc_vps`
+(la pública dice `preoperaocc-despliegue`) abre la sesión como `root` en `179.199.132.56`, que
+es la IP a la que resuelven tanto `licitapp-elementaling.cloud` como el subdominio del panel.
+
+Consecuencia práctica, y es la que ahorra el enredo: **lo de las dos ventanas es opcional**.
+Todo lo que abajo va *(ventana A)* se puede lanzar desde la máquina de desarrollo poniéndole
+delante `ssh -i ~/.ssh/preoperaocc_vps root@179.199.132.56`. El 2026-09-22 se perdió un intento
+entero mezclando las ventanas y dejando los huecos `USUARIO@IP` sin rellenar; por eso aquí ya
+no quedan huecos.
+
+Si algún día esto falla, el paso 5 no se puede hacer como está escrito: significaría que al VPS
+se entra por otro camino (la consola web de Hostinger, por ejemplo) y hay que buscar otra forma
+de mover la imagen.
+
+### 2 · Aplicar las migraciones pendientes *(ventana B)*
+
+```sh
+npx tsx --env-file=.env scripts/migrar-produccion.ts
+```
+
+> ### ⚠️ `npm run db:migrar:servidor` **no** migra producción
+>
+> En el mismo servidor de Neon hay **dos bases**, y la diferencia está solo en el nombre:
+>
+> | Quién | Base |
+> | --- | --- |
+> | El `.env` de desarrollo | `neondb` |
+> | El contenedor del VPS (`/opt/preoperaocc/.env`) | **`preoperaocc`** |
+>
+> Host, usuario y contraseña son los mismos, así que `db:migrar:servidor` **conecta sin
+> problema, migra la de desarrollo y dice «Listo»**. Producción queda intacta y nada avisa.
+> Eso fue exactamente lo que pasó el 2026-09-23. Por eso el comando de arriba es
+> `scripts/migrar-produccion.ts`, que reescribe el nombre de la base en memoria.
+
+**Este paso no se salta nunca, aunque «no haya migraciones nuevas».** Si no hay nada pendiente
+el script no hace nada; si lo hay y no se corre, el despliegue sale *healthy* y el panel queda
+roto para todo el mundo —entra y falla en cada pantalla— hasta que alguien lee los registros.
+Pasó el 2026-09-23, con `obras.almacen_activo`.
+
+Va **antes** de encender a propósito: las migraciones de este proyecto son `ADD COLUMN`
+aditivos, así que la imagen vieja sigue funcionando con las columnas nuevas puestas. Aplicarlas
+primero significa que nunca hay un minuto con el código nuevo y la base vieja.
+
+### 3 · La red de seguridad *(ventana A)*
+
+```sh
+docker tag preoperaocc:ultima preoperaocc:anterior && docker images preoperaocc
+```
+
+**Tienen que salir dos líneas**, `ultima` y `anterior`. Si sale una sola, parar.
+
+Esto no es opcional: **normalmente no existe ninguna imagen de reserva**. Sin este paso, un
+despliegue que salga mal no tiene vuelta atrás.
+
+### 4 · Construir *(ventana B)*
+
+```sh
+docker build -t preoperaocc:ultima .
+```
+
+Se construye aquí **a propósito**: empaquetar es lo que más memoria consume del proyecto y el
+VPS podría quedarse sin RAM justo ahí.
+
+### 5 · Transferir *(ventana B)*
+
+```sh
+docker save preoperaocc:ultima | gzip | ssh -i ~/.ssh/preoperaocc_vps root@179.199.132.56 "gunzip | docker load"
+```
+
+Unos 436 MB antes de comprimir. Si la conexión se corta, se repite: no deja nada a medias.
+Termina diciendo `Loaded image: preoperaocc:ultima`.
+
+### 6 · Encender *(ventana A)*
+
+```sh
+cd /opt/preoperaocc && docker compose up -d && docker compose ps
+```
+
+Debe decir **healthy** en menos de un minuto. **`up -d`, nunca `down`** — ver la advertencia de
+la sección «Cómo está montado de verdad».
+
+### 7 · Comprobar, y en este orden *(ventana A)*
+
+```sh
+curl -I https://licitapp-elementaling.cloud          # EL VECINO VA PRIMERO
+curl -I https://occ.licitapp-elementaling.cloud      # y después el panel
+```
+
+Los dos, `200`. Y por último, abrir en el navegador
+`https://occ.licitapp-elementaling.cloud/panel` y mirar que lo que se acaba de desplegar esté
+ahí de verdad: una pantalla, un texto o un botón que antes no existiera.
+
+### Volver atrás *(ventana A)*
+
+```sh
+docker tag preoperaocc:anterior preoperaocc:ultima && cd /opt/preoperaocc && docker compose up -d
+```
+
+### Qué NO hace falta
+
+- **Migraciones**, salvo que el cambio traiga una nueva — pero **compruébalo, no lo supongas**.
+  El 2026-09-23 este documento afirmaba que las 15 primeras (`0000` a `0014`) estaban aplicadas
+  desde el 2026-09-22, y era falso: al desplegar, el panel dejaba entrar y luego respondía
+  *«Algo falló en el servidor»* en cada pantalla, porque `obras.almacen_activo` no existía en
+  Neon. El error no se ve al desplegar —el contenedor arranca *healthy*—, solo al iniciar
+  sesión.
+
+  Antes de dar por terminada una actualización, corre `npm run db:migrar:servidor` desde la
+  máquina de desarrollo. Si no hay nada pendiente no hace nada, así que **no cuesta nada
+  correrlo de más y cuesta un sitio caído no correrlo**. Las migraciones de este proyecto son
+  `ADD COLUMN` aditivos: no borran datos y tampoco rompen la imagen anterior, de modo que se
+  pueden aplicar **antes** de encender la imagen nueva.
+- **APK nuevo**, salvo que el cambio toque `src/app/(operador)/`, `src/db/local/`,
+  `src/features/sync/`, `src/features/checklists/` o `src/app/api/movil/`. Un cambio que solo
+  toca el panel y el servidor no obliga a repartir la app otra vez.
+- **Tocar el proxy.** Caddy ya tiene su ruta al panel; una actualización no la altera. Ese era
+  el único paso con riesgo para el vecino, y actualizar se lo salta entero.
 
 ---
 
