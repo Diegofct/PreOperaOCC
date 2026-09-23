@@ -37,8 +37,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .where(eq(partesDeObra.id, id))
       .limit(1);
 
-    if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('ese parte');
-    if (fila.anuladoEn) return errorDePeticion('Ese parte ya estaba anulado.', 409);
+    if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('esa bitácora');
+    if (fila.anuladoEn) return errorDePeticion('Esa bitácora ya estaba anulada.', 409);
 
     const { motivo } = await cuerpoJson(peticion, anulacion);
 
@@ -56,6 +56,6 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.anuladoEn)))
       .returning({ id: partesDeObra.id, anuladoEn: partesDeObra.anuladoEn });
 
-    return anulado ? ok(anulado) : noEncontrado('ese parte');
+    return anulado ? ok(anulado) : noEncontrado('esa bitácora');
   });
 }

@@ -1451,7 +1451,7 @@ prueba('el rechazo del cierre nombra todo lo que falta, no solo lo primero', () 
   ];
   assert.equal(
     mensajeDelRechazoDeCierre(bloqueos),
-    'No se puede cerrar el parte todavía:\n' +
+    'No se puede cerrar la bitácora todavía:\n' +
       '• Falta llenar: Clima y Notas.\n' +
       '• VOL-01: faltan las observaciones del día.\n' +
       '• Falta la fotografía de al menos una actividad.',

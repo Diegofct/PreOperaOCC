@@ -33,7 +33,7 @@ import {
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
 
-import { api, ErrorApi, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -46,6 +46,7 @@ import {
   SelectorDeHora,
 } from './componentes';
 import { ETIQUETA_TIPO_SITIO, type OpcionesDeCantera, type ViajeRegistrado } from './contratos';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 /**
  * La hora de ahora en la obra, `HH:MM`, **redondeada hacia abajo al cuarto de hora**.
@@ -106,15 +107,21 @@ export function VentanaViaje({
   const [metros, setMetros] = useState<number | null>(null);
 
   const [intentado, setIntentado] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  const [delServidor, setDelServidor] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
+  /*
+   * El estado del intento —si corre, qué falló y de qué campo— sale de
+   * `useAccionDeVentana` (spec 015, RF-25 a RF-27), que es el mismo que usan las
+   * demás ventanas del panel. `intentado` se queda aquí porque es de esta
+   * ventana: distingue «todavía no ha pulsado Guardar» de «pulsó y falta algo»,
+   * y eso lo decide `validarViaje`, no el servidor.
+   */
+  const accion = useAccionDeVentana();
 
   const aLaObra = destino === DESTINO_OBRA;
   const viaje = { fecha, hora, materialId, vehiculoId, conductorId, origenId, destino, pr, metros };
   const faltas = validarViaje(viaje, fechaDeJornada());
   const faltaDe = (campo: CampoDeViaje) =>
-    delServidor[campo] ?? (intentado ? faltas.find((f) => f.campo === campo)?.mensaje : undefined);
+    accion.campoConError(campo) ??
+    (intentado ? faltas.find((f) => f.campo === campo)?.mensaje : undefined);
 
   function elegirDestino(valor: string | null) {
     setDestino(valor);
@@ -127,13 +134,15 @@ export function VentanaViaje({
 
   async function guardar() {
     setIntentado(true);
-    setDelServidor({});
-    setError(null);
+    accion.limpiar();
     if (faltas.length > 0) return;
 
-    setGuardando(true);
-    try {
-      const registro = await api.cantera.viajes.registrar({
+    // Lo que el servidor diga de un campo, bajo ese campo; lo demás, arriba de la
+    // ventana (el aviso de la página queda detrás del telón). De eso se encarga
+    // el hook; aquí solo queda qué hacer cuando sale bien.
+    let registro: ViajeRegistrado | null = null;
+    const bien = await accion.ejecutar(async () => {
+      registro = await api.cantera.viajes.registrar({
         obraId,
         fecha,
         hora,
@@ -145,16 +154,8 @@ export function VentanaViaje({
         pr: aLaObra ? pr : null,
         metros: aLaObra ? metros : null,
       });
-      onRegistrado(registro);
-    } catch (fallo) {
-      // Lo que el servidor diga de un campo, bajo ese campo; lo demás, arriba de la
-      // ventana (el aviso de la página queda detrás del telón).
-      const campos = fallo instanceof ErrorApi ? fallo.campos : undefined;
-      if (campos && Object.keys(campos).length > 0) setDelServidor(campos);
-      else setError(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
-    }
+    });
+    if (bien && registro) onRegistrado(registro);
   }
 
   const falta = queFaltaEnLaObra(opciones);
@@ -175,7 +176,7 @@ export function VentanaViaje({
         </>
       ) : (
         <>
-          {error ? <Aviso tono="error">{error}</Aviso> : null}
+          {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
           <Formulario>
             <Campo
               etiqueta="Fecha"
@@ -290,9 +291,9 @@ export function VentanaViaje({
           <AccionesFormulario>
             <Acciones>
               <Boton
-                titulo={guardando ? 'Guardando…' : 'Registrar viaje'}
+                titulo={accion.ejecutando ? 'Guardando…' : 'Registrar viaje'}
                 onPress={guardar}
-                deshabilitado={guardando}
+                deshabilitado={accion.ejecutando}
               />
               <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
             </Acciones>

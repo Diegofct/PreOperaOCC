@@ -17,7 +17,7 @@
  */
 import { useState } from 'react';
 
-import { api, ErrorApi, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -36,19 +36,18 @@ import {
   type VehiculoFila,
   type VehiculoNuevo,
 } from './contratos';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 export function VentanaCorregirVehiculo({
   vehiculo,
   obras,
   onCerrar,
   onGuardado,
-  onFallo,
 }: {
   vehiculo: VehiculoFila;
   obras: ObraFila[];
   onCerrar: () => void;
   onGuardado: (codigo: string) => void;
-  onFallo: (mensaje: string) => void;
 }) {
   const [codigoInterno, setCodigoInterno] = useState(vehiculo.codigoInterno);
   const [placa, setPlaca] = useState(vehiculo.placa ?? '');
@@ -56,43 +55,37 @@ export function VentanaCorregirVehiculo({
   const [modelo, setModelo] = useState(vehiculo.modelo ?? '');
   const [obraId, setObraId] = useState<string | null>(vehiculo.obraId);
   const [estado, setEstado] = useState<EstadoVehiculo>(vehiculo.estado);
-  const [guardando, setGuardando] = useState(false);
-  /** El código repetido lo dice el servidor, y se lee debajo del campo (spec 007, RF-18). */
-  const [errorDelCodigo, setErrorDelCodigo] = useState<string | null>(null);
+  /*
+   * Un choque en el código se queda en la ventana, bajo su campo, y cualquier
+   * otro fallo arriba de ella: el aviso de la página queda detrás del telón y no
+   * se vería (spec 015, RF-25 y RF-27). Antes esto se resolvía aquí, leyendo
+   * `ErrorApi.campos.codigoInterno` a mano; ahora lo hace el hook para todos los
+   * campos, que es lo mismo sin tener que acordarse en cada ventana.
+   */
+  const accion = useAccionDeVentana();
 
   const faltaCodigo = codigoInterno.trim().length === 0;
 
   async function guardar() {
     if (faltaCodigo) return;
-    setGuardando(true);
-    setErrorDelCodigo(null);
-    try {
-      const cambios: Partial<VehiculoNuevo> = {};
-      if (codigoInterno !== vehiculo.codigoInterno) cambios.codigoInterno = codigoInterno;
-      if (placa !== (vehiculo.placa ?? '')) cambios.placa = placa;
-      if (marca !== (vehiculo.marca ?? '')) cambios.marca = marca;
-      if (modelo !== (vehiculo.modelo ?? '')) cambios.modelo = modelo;
-      if (obraId !== vehiculo.obraId) cambios.obraId = obraId;
-      if (estado !== vehiculo.estado) cambios.estado = estado;
 
-      // Nada que mandar es un cierre, no una petición: pulsar «guardar» sin
-      // haber tocado nada no tiene por qué escribir en la base.
-      if (Object.keys(cambios).length === 0) {
-        onCerrar();
-        return;
-      }
+    const cambios: Partial<VehiculoNuevo> = {};
+    if (codigoInterno !== vehiculo.codigoInterno) cambios.codigoInterno = codigoInterno;
+    if (placa !== (vehiculo.placa ?? '')) cambios.placa = placa;
+    if (marca !== (vehiculo.marca ?? '')) cambios.marca = marca;
+    if (modelo !== (vehiculo.modelo ?? '')) cambios.modelo = modelo;
+    if (obraId !== vehiculo.obraId) cambios.obraId = obraId;
+    if (estado !== vehiculo.estado) cambios.estado = estado;
 
-      await api.vehiculos.editar(vehiculo.id, cambios);
-      onGuardado(codigoInterno);
-    } catch (fallo) {
-      // Un choque en el código se queda en la ventana, bajo su campo: el aviso de
-      // la página queda detrás del telón y no se vería.
-      const delCodigo = fallo instanceof ErrorApi ? fallo.campos?.codigoInterno : undefined;
-      if (delCodigo) setErrorDelCodigo(delCodigo);
-      else onFallo(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
+    // Nada que mandar es un cierre, no una petición: pulsar «guardar» sin
+    // haber tocado nada no tiene por qué escribir en la base.
+    if (Object.keys(cambios).length === 0) {
+      onCerrar();
+      return;
     }
+
+    const bien = await accion.ejecutar(() => api.vehiculos.editar(vehiculo.id, cambios));
+    if (bien) onGuardado(codigoInterno);
   }
 
   return (
@@ -101,13 +94,14 @@ export function VentanaCorregirVehiculo({
         El tipo de equipo no se corrige: decide el formato del preoperacional y el medidor, y
         cambiarlo dejaría sin sentido las actas ya firmadas de esta máquina.
       </Aviso>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
           etiqueta="Código interno"
           obligatorio
           valor={codigoInterno}
           onChange={setCodigoInterno}
-          error={faltaCodigo ? 'El código no puede quedar vacío.' : (errorDelCodigo ?? undefined)}
+          error={faltaCodigo ? 'El código no puede quedar vacío.' : accion.campoConError('codigoInterno')}
           ancho={180}
         />
         <Campo etiqueta="Placa" valor={placa} onChange={setPlaca} ancho={140} />
@@ -135,9 +129,9 @@ export function VentanaCorregirVehiculo({
         <AccionesFormulario>
           <Acciones>
             <Boton
-              titulo={guardando ? 'Guardando…' : 'Guardar cambios'}
+              titulo={accion.ejecutando ? 'Guardando…' : 'Guardar cambios'}
               onPress={guardar}
-              deshabilitado={guardando || faltaCodigo}
+              deshabilitado={accion.ejecutando || faltaCodigo}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

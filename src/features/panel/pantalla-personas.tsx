@@ -48,7 +48,7 @@ import {
   type Cargo,
 } from '@/shared/catalogos/cargos';
 
-import { api, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -82,7 +82,9 @@ import { MarcoPantalla, useListado } from './marco';
 import { ordenarFilas, type Orden } from './ordenar';
 import { useSesionPanel } from './sesion';
 import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 import { useOrdenRecordado } from './usar-orden-recordado';
+import { DatoSecreto, VentanaDeSecreto } from './ventana-de-secreto';
 
 /**
  * Qué acceso tiene de verdad una persona, no el nombre interno del rol.
@@ -129,53 +131,21 @@ export default function PantallaPersonas() {
   const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
   const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
 
-  /**
-   * La contraseña recién generada. Vive **solo en memoria y solo un rato**: no
-   * se guarda en claro en la base ni hay endpoint que la devuelva otra vez. Si
-   * se cierra la página antes de anotarla, se genera otra.
-   */
-  const [temporal, setTemporal] = useState<ClaveTemporalFila | null>(null);
-
-  /** Los dos códigos de un operador. Igual que la contraseña: solo esta vez. */
-  const [codigos, setCodigos] = useState<CodigosFila | null>(null);
-
-  /**
-   * A quién se le va a reponer la contraseña, mientras no lo confirmen.
+  /*
+   * A quién se le está reponiendo la contraseña, y a quién se le están emitiendo
+   * los códigos del celular (spec 015, RF-28 a RF-32).
+   *
+   * **Ya no se guarda aquí el secreto generado.** Vivía en esta pantalla y se
+   * pintaba en un aviso de la página, detrás de la ventana desde la que se
+   * había pedido; ahora lo tiene `VentanaDeSecreto`, que lo muestra donde se
+   * pidió y desaparece con ella. Que el secreto no exista fuera de esa ventana
+   * es lo que garantiza que no se quede a la vista de quien pase después.
    *
    * Se guarda la fila entera y no el id porque el aviso nombra a la persona: un
    * "¿confirma?" que no dice a quién afecta no es una confirmación.
    */
-  const [porConfirmar, setPorConfirmar] = useState<PersonaFila | null>(null);
-
-  function pedirConfirmacion(persona: PersonaFila) {
-    setTemporal(null);
-    setCodigos(null);
-    setPorConfirmar(persona);
-  }
-
-  async function generarClave(id: string) {
-    try {
-      setPorConfirmar(null);
-      setCodigos(null);
-      setTemporal(await api.personas.generarClave(id));
-      personas.setError(null);
-    } catch (fallo) {
-      setTemporal(null);
-      personas.setError(mensajeDe(fallo));
-    }
-  }
-
-  async function generarCodigos(id: string) {
-    try {
-      setPorConfirmar(null);
-      setTemporal(null);
-      setCodigos(await api.personas.generarCodigos(id));
-      personas.setError(null);
-    } catch (fallo) {
-      setCodigos(null);
-      personas.setError(mensajeDe(fallo));
-    }
-  }
+  const [accesoDe, setAccesoDe] = useState<PersonaFila | null>(null);
+  const [codigosDe, setCodigosDe] = useState<PersonaFila | null>(null);
 
   const [usuario, setUsuario] = useState('');
   const [nombreCompleto, setNombreCompleto] = useState('');
@@ -326,11 +296,11 @@ export default function PantallaPersonas() {
             {/* Repartir accesos al panel es de gerencia, y un operador no entra a
                 la web: su acceso es el celular con su PIN. */}
             {esGerencia && p.rol !== 'operador' ? (
-              <Boton titulo="Dar acceso" tono="secundario" onPress={() => pedirConfirmacion(p)} />
+              <Boton titulo="Dar acceso" tono="secundario" onPress={() => setAccesoDe(p)} />
             ) : null}
             {/* El operador no entra al panel: lo suyo es activar su celular. */}
             {operaVehiculos(p.cargo) ? (
-              <Boton titulo="Códigos" tono="secundario" onPress={() => generarCodigos(p.id)} />
+              <Boton titulo="Códigos" tono="secundario" onPress={() => setCodigosDe(p)} />
             ) : null}
             <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(p)} />
             <Boton
@@ -355,36 +325,50 @@ export default function PantallaPersonas() {
       error={personas.error ?? obras.error}
       cargando={personas.cargando || obras.cargando}
     >
-      {porConfirmar ? (
-        <Confirmacion
+      {accesoDe ? (
+        <VentanaDeSecreto<ClaveTemporalFila>
+          titulo={`Contraseña de ${accesoDe.usuario}`}
           aviso={
-            `Se le va a generar una contraseña nueva a ${porConfirmar.nombreCompleto} ` +
-            `(usuario "${porConfirmar.usuario}"). La que tenga ahora deja de servir en ese ` +
+            `Se le va a generar una contraseña nueva a ${accesoDe.nombreCompleto} ` +
+            `(usuario "${accesoDe.usuario}"). La que tenga ahora deja de servir en ese ` +
             'momento y se le cerrará la sesión si estaba dentro. La nueva se muestra una sola ' +
             'vez: téngala a mano para dictársela.'
           }
           confirmar="Generar contraseña nueva"
-          onConfirmar={() => generarClave(porConfirmar.id)}
-          onCancelar={() => setPorConfirmar(null)}
+          generar={() => api.personas.generarClave(accesoDe.id)}
+          pintar={(clave) => (
+            <DatoSecreto
+              rotulo={`Contraseña temporal de ${clave.nombreCompleto} · usuario "${clave.usuario}"`}
+              valor={clave.claveTemporal}
+              explicacion="Entréguesela ahora. Al entrar, esa persona tendrá que cambiarla por una suya."
+            />
+          )}
+          onCerrar={() => setAccesoDe(null)}
         />
       ) : null}
 
-      {codigos ? (
-        <Aviso tono="exito">
-          {`Códigos de ${codigos.nombreCompleto} (usuario "${codigos.usuario}"). `}
-          {`ACTIVACIÓN: ${codigos.codigoActivacion} — dícteselo por teléfono; vence en ${codigos.horasDeVigencia} horas y sirve una sola vez. `}
-          {`RESPALDO: ${codigos.codigoRespaldo} — imprímalo y guárdelo en la carpeta de la obra: es la única forma de que recupere su PIN si lo olvida donde no hay señal. `}
-          {'Ninguno de los dos se vuelve a mostrar.'}
-        </Aviso>
-      ) : null}
-
-      {temporal ? (
-        <Aviso tono="exito">
-          {`Contraseña temporal de ${temporal.nombreCompleto} (usuario "${temporal.usuario}"): `}
-          {temporal.claveTemporal}
-          {'. Anótela y entréguesela ahora: no se vuelve a mostrar y no se guarda en ninguna parte. '}
-          {'Al entrar, esa persona tendrá que cambiarla por una suya.'}
-        </Aviso>
+      {codigosDe ? (
+        /* Sin fase de confirmar: emitir códigos no invalida nada de lo que el
+           operador esté usando, así que se pide con el botón y ya. */
+        <VentanaDeSecreto<CodigosFila>
+          titulo={`Códigos de ${codigosDe.usuario}`}
+          generar={() => api.personas.generarCodigos(codigosDe.id)}
+          pintar={(c) => (
+            <>
+              <DatoSecreto
+                rotulo={`Activación · ${c.nombreCompleto} (usuario "${c.usuario}")`}
+                valor={c.codigoActivacion}
+                explicacion={`Dícteselo por teléfono. Vence en ${c.horasDeVigencia} horas y sirve una sola vez.`}
+              />
+              <DatoSecreto
+                rotulo="Respaldo"
+                valor={c.codigoRespaldo}
+                explicacion="Imprímalo y guárdelo en la carpeta de la obra: es la única forma de que recupere su PIN si lo olvida donde no hay señal."
+              />
+            </>
+          )}
+          onCerrar={() => setCodigosDe(null)}
+        />
       ) : null}
 
       <Seccion titulo="Registrar una persona">
@@ -457,12 +441,13 @@ export default function PantallaPersonas() {
           }
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `personas.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25).
             const quien = porDarDeBaja.nombreCompleto;
+            await api.personas.darDeBaja(porDarDeBaja.id);
             setPorDarDeBaja(null);
-            const hechoYa = await personas.ejecutar(() =>
-              api.personas.darDeBaja(porDarDeBaja.id),
-            );
-            if (hechoYa) setHecho(`${quien} quedó dada de baja.`);
+            personas.recargar();
+            setHecho(`${quien} quedó dada de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -478,7 +463,6 @@ export default function PantallaPersonas() {
             setHecho(`${nombre} quedó corregida.`);
             personas.recargar();
           }}
-          onFallo={personas.setError}
         />
       ) : null}
 
@@ -556,58 +540,59 @@ function VentanaCorregirPersona({
   obras,
   onCerrar,
   onGuardado,
-  onFallo,
 }: {
   persona: PersonaFila;
   obras: ObraFila[];
   onCerrar: () => void;
   onGuardado: (nombre: string) => void;
-  onFallo: (mensaje: string) => void;
 }) {
   const [nombreCompleto, setNombreCompleto] = useState(persona.nombreCompleto);
   const [documento, setDocumento] = useState(persona.documento ?? '');
   const [cargo, setCargo] = useState<Cargo | null>(persona.cargo);
   const [rol, setRol] = useState<Rol>(persona.rol);
   const [obraId, setObraId] = useState<string | null>(persona.obraId);
-  const [guardando, setGuardando] = useState(false);
+  /*
+   * **Esta es la ventana que motivó el cambio del 2026-09-22.** Mover a un
+   * almacenista a una obra que no lleva Almacén se rechaza con razón (spec 017,
+   * RF-11), pero el motivo iba al aviso de la página, detrás del telón: la
+   * ventana se quedaba muda y parecía que «Guardar» no hacía nada. Ahora el
+   * motivo sale aquí dentro, y además bajo el campo que el servidor señale
+   * (RF-25, RF-27).
+   */
+  const accion = useAccionDeVentana();
 
   const faltaNombre = nombreCompleto.trim().length === 0;
 
   async function guardar() {
     if (faltaNombre) return;
-    setGuardando(true);
-    try {
-      // Solo los campos que de verdad cambiaron.
-      const cambios: Partial<PersonaNueva> = {};
-      if (nombreCompleto !== persona.nombreCompleto) cambios.nombreCompleto = nombreCompleto;
-      if (documento !== (persona.documento ?? '')) cambios.documento = documento;
-      if (cargo !== persona.cargo) cambios.cargo = cargo;
-      if (rol !== persona.rol) cambios.rol = rol;
-      if (obraId !== persona.obraId) cambios.obraId = obraId;
 
-      if (Object.keys(cambios).length === 0) {
-        onCerrar();
-        return;
-      }
+    // Solo los campos que de verdad cambiaron.
+    const cambios: Partial<PersonaNueva> = {};
+    if (nombreCompleto !== persona.nombreCompleto) cambios.nombreCompleto = nombreCompleto;
+    if (documento !== (persona.documento ?? '')) cambios.documento = documento;
+    if (cargo !== persona.cargo) cambios.cargo = cargo;
+    if (rol !== persona.rol) cambios.rol = rol;
+    if (obraId !== persona.obraId) cambios.obraId = obraId;
 
-      await api.personas.editar(persona.id, cambios);
-      onGuardado(nombreCompleto);
-    } catch (fallo) {
-      onFallo(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
+    if (Object.keys(cambios).length === 0) {
+      onCerrar();
+      return;
     }
+
+    const bien = await accion.ejecutar(() => api.personas.editar(persona.id, cambios));
+    if (bien) onGuardado(nombreCompleto);
   }
 
   return (
     <Modal titulo={`Corregir a ${persona.usuario}`} onCerrar={onCerrar}>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
           etiqueta="Nombre completo"
           obligatorio
           valor={nombreCompleto}
           onChange={setNombreCompleto}
-          error={faltaNombre ? 'El nombre no puede quedar vacío.' : undefined}
+          error={faltaNombre ? 'El nombre no puede quedar vacío.' : accion.campoConError('nombreCompleto')}
           ancho={280}
         />
         <Campo etiqueta="Documento" valor={documento} onChange={setDocumento} ancho={160} />
@@ -629,6 +614,7 @@ function VentanaCorregirPersona({
           valor={rol}
           opciones={ROLES.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
           onChange={(v) => setRol((v as Rol) ?? 'operador')}
+          error={accion.campoConError('rol')}
           ancho={220}
         />
         <Selector
@@ -638,14 +624,15 @@ function VentanaCorregirPersona({
           onChange={setObraId}
           permiteVacio
           vacio="Sin obra (gerencia)"
+          error={accion.campoConError('obraId')}
           ancho={240}
         />
         <AccionesFormulario>
           <Acciones>
             <Boton
-              titulo={guardando ? 'Guardando…' : 'Guardar cambios'}
+              titulo={accion.ejecutando ? 'Guardando…' : 'Guardar cambios'}
               onPress={guardar}
-              deshabilitado={guardando || faltaNombre}
+              deshabilitado={accion.ejecutando || faltaNombre}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

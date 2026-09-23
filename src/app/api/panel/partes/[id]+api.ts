@@ -73,7 +73,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     if (cambios.maquinaria) {
       const ids = cambios.maquinaria.map((m) => m.vehiculoId);
       if (new Set(ids).size !== ids.length) {
-        return errorDePeticion('Una máquina no puede estar dos veces en el mismo parte.', 400);
+        return errorDePeticion('Una máquina no puede estar dos veces en la misma bitácora.', 400);
       }
 
       // El medidor sale del tipo del equipo, no de lo que diga el navegador:
@@ -99,7 +99,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
         // Solo las máquinas de la obra del parte: una volqueta de otra obra en
         // este parte son horas apuntadas donde no trabajó.
         if (!equipo || (equipo.obraId !== null && equipo.obraId !== estado.obraId)) {
-          return errorDePeticion('Ese equipo no es de la obra de este parte.', 400);
+          return errorDePeticion('Ese equipo no es de la obra de esta bitácora.', 400);
         }
       }
 
@@ -130,7 +130,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     if (cambios.personal) {
       const ids = cambios.personal.map((p) => p.usuarioId);
       if (new Set(ids).size !== ids.length) {
-        return errorDePeticion('Una persona no puede estar dos veces en el mismo parte.', 400);
+        return errorDePeticion('Una persona no puede estar dos veces en la misma bitácora.', 400);
       }
 
       for (const persona of cambios.personal) {
@@ -192,7 +192,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
         : undefined;
 
     if ((tocaElDia || cambios.laboratorio !== undefined) && !guardado) {
-      return noEncontrado('ese parte');
+      return noEncontrado('esa bitácora');
     }
 
     // Sin transacciones (Neon por HTTP), entre esta lectura y el UPDATE otro
@@ -277,6 +277,6 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
       .returning(COLUMNAS);
 
-    return fila ? ok(fila) : noEncontrado('ese parte');
+    return fila ? ok(fila) : noEncontrado('esa bitácora');
   });
 }

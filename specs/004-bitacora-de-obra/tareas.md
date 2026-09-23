@@ -965,3 +965,264 @@ personas y no se completan los ensayos anteriores.
 
 **Veredicto del cambio: cumplido (RF-78 a RF-89).** La spec 004 sigue **En curso**: falta T12,
 la validación de toda la spec, que exige cerrar un parte completo.
+
+## Cambio del 2026-09-23 (RF-90 a RF-96)
+
+Dos mitades que no dependen una de otra. **El nombre** (T41 a T44) es reemplazar textos, de
+dentro hacia fuera: primero la regla con su prueba, luego el servidor, luego las pantallas.
+**El selector de obra** (T45, T46) es el defecto de RF-34, que nunca se cumplió. T47 valida.
+
+**Ninguna tarea añade casos a `scripts/verificar-reglas.ts`**, y es correcto: este cambio no
+crea ni modifica ninguna regla de negocio. Lo que sí hace T41 es **corregir un caso que ya
+existe**, porque compara un texto literal que cambia.
+
+- [x] T41. El texto de `bloqueosDelCierre` y su caso en el guion, juntos. (RF-90)
+      `src/shared/rules/parte.ts:659` dice «No se puede cerrar el parte todavía:» y
+      `scripts/verificar-reglas.ts:1454` lo compara **literal**. Cambiar uno sin el otro deja
+      el guion en rojo, así que van en la misma tarea (constitución §5). **La lógica de la
+      regla no se toca**: solo esa frase.
+      Hecho cuando: los tres comandos en verde, y `npm run verificar` pasa con el texto nuevo
+      —o sea, que se cambiaron los dos sitios y no solo uno—.
+
+- [x] T42. Los 15 mensajes de rechazo del servidor. (RF-90)
+      En `src/app/api/panel/partes+api.ts` y en `partes/[id]+api.ts`, `anular`, `cerrar`,
+      `cantera` y `foto`. Solo el **texto**: ni rutas, ni forma de respuesta, ni códigos de
+      estado, ni `noEncontrado` como función —lo que cambia es el argumento que recibe—.
+      Hecho cuando: los tres comandos en verde; `grep -rn "parte" src/app/api/panel/partes*`
+      no devuelve ningún texto entre comillas dirigido a una persona; y, tras **reiniciar
+      `npm run web`**, intentar abrir la bitácora de mañana responde «No se puede abrir la
+      bitácora de un día que no ha llegado.».
+
+- [x] T43. Los textos de la pantalla de bitácoras. (RF-90, RF-91)
+      `pantalla-partes.tsx`: el título «Parte diario de obra», «Abrir el parte de este día»,
+      «Cerrar el parte», «Anular este parte», el aviso «Al cerrar, el parte queda como registro
+      definitivo…» y la ayuda del motivo de anulación. Y donde se nombra el formato viejo, pasa
+      a **«bitácoras por máquina»** (RF-91).
+      **No se toca ningún identificador**: `parte`, `partes`, `parte.id`, `api.partes` y el
+      nombre del archivo se quedan como están.
+      Hecho cuando: los tres comandos en verde y, en el navegador, la pantalla se titula
+      «Bitácora diaria de obra» y ningún botón ni aviso de ella dice «parte».
+
+- [x] T44. Los textos de Inicio y del índice, **y los comentarios de `parte.ts`**. (RF-90)
+      `pantalla-inicio.tsx`: «Parte del día» y «Llenar el parte de hoy». Y los textos de
+      `secciones-con-indice.tsx` que nombran el documento.
+      > **Ampliada el 2026-09-23 por decisión de Diego.** Entra también repasar los ~40
+      > «parte» de los **comentarios** de `src/shared/rules/parte.ts`. No lo pide RF-90 —nadie
+      > de OCC los lee— pero `AGENTS.md` manda cambiar el comentario cuando cambia la
+      > decisión, y cómo se llama el documento cambió. El **nombre del archivo y los
+      > identificadores no se tocan** (decisión del plan).
+      Hecho cuando: los tres comandos en verde; en el navegador, la tarjeta del Inicio dice
+      «Bitácora del día» y su botón «Llenar la bitácora de hoy»; y en `parte.ts` los «parte»
+      que quedan son solo identificadores, rutas o la nota que explica por qué el código
+      conserva la palabra vieja.
+
+- [x] T45. El selector de obra: gerencia elige cuál bitácora del día está viendo.
+      (RF-92, RF-93, RF-96)
+      El estado pasa de «la primera no anulada» (`pantalla-partes.tsx:265`) a un `obraId`
+      elegido. El selector lista **todas** las obras de gerencia y cada una dice qué tiene ese
+      día: «Cerrada», «Abierta», «Anulada» o nada. Elegida una obra, se muestra su bitácora
+      viva; si solo tiene anuladas, la última marcada «Anulado» (RF-96). Dentro de una misma
+      obra sigue ganando la viva sobre la anulada, como hoy. **El residente no ve selector.**
+      La obra se nombra siempre, aunque ese día solo haya una (RF-93).
+      Hecho cuando: los tres comandos en verde y, con **dos obras con bitácora el mismo día**,
+      gerencia puede ver las dos y cambiar entre ellas sin salir del día — cosa que hoy es
+      imposible.
+
+- [x] T46. Abrir la bitácora de una obra que aún no la tiene, y conservar la obra al cambiar
+      de día. (RF-94, RF-95)
+      Hoy el selector desaparece en cuanto existe una bitácora ese día. Con el de T45, elegir
+      una obra sin bitácora enseña el botón de abrirla, aunque otras obras ya tengan la suya
+      (RF-95). Sin ninguna bitácora ese día, sigue pidiendo la obra antes de abrir, como hoy
+      (RF-94). Y al pasar al día anterior o siguiente, **se mantiene la obra elegida** si
+      existe.
+      Hecho cuando: los tres comandos en verde; con una obra con bitácora y otra sin ella el
+      mismo día, se ve la que hay **y** se puede abrir la que falta; y retroceder un día con
+      una obra elegida sigue mostrando esa misma obra.
+
+- [x] T47. Validación del cambio RF por RF con demo. (RF-90 a RF-96)
+      Los siete recorridos de «Estrategia de verificación» del plan, más el **`grep` de textos
+      visibles**, que es lo que de verdad cierra RF-90: buscar «el parte», «un parte», «ese
+      parte», «este parte», «del parte» y «Parte d» en `src/features/panel/`,
+      `src/app/api/panel/partes*` y `src/shared/rules/parte.ts`. Debe devolver solo comentarios
+      y nombres de variables.
+      Hecho cuando: RF-90 a RF-96 tienen su comprobación con resultado; el `grep` sale limpio;
+      el recorrido como **residente** confirma que no le cambió nada salvo las palabras; los
+      tres comandos en verde; y la spec queda marcada con el cambio cumplido.
+
+### Notas de ejecución — cambio del 2026-09-23
+
+**T41 (2026-09-23).** Texto de `bloqueosDelCierre` y su caso, cambiados juntos. Los tres
+comandos en verde: 251 verificaciones, `typecheck` y `lint` sin salida. Sin esquema, sin
+secretos, sin móvil.
+
+- **Se cambió el guion primero, a propósito, y se comprobó que quedaba en rojo** antes de tocar
+  la regla. El fallo decía exactamente lo que tenía que decir —esperaba «bitácora», recibió
+  «parte»—, que es la prueba de que los dos sitios están atados y de que la tarea no se podía
+  partir en dos.
+- El texto pasa a «No se puede cerrar **la bitácora** todavía:». La lógica de la regla no se
+  tocó: sigue devolviendo todos los bloqueos, uno por renglón (RF-50).
+- **Fuera de la tarea, anotado y no hecho:** el bloque de comentario de
+  `src/shared/rules/parte.ts` y el de varios módulos del panel siguen llamando «parte» al
+  documento. No es texto que lea una persona de OCC, así que no lo pide RF-90, pero `AGENTS.md`
+  dice que al cambiar una decisión se cambia su comentario — y aquí la decisión de cómo se
+  llama el documento **cambió**. Conviene repasarlos al cerrar T43, o dejarlo escrito como
+  deuda. No se tocó para no mezclarlo con esta tarea.
+
+**T42 (2026-09-23).** Los 15 mensajes de rechazo, cambiados. Los tres comandos en verde: 251
+verificaciones, `typecheck` y `lint` sin salida.
+
+- **Exactamente 15**, los mismos que contaba el plan: 3 en `partes+api.ts`, 1 en `anular`, 3 en
+  `[id]+api.ts` y los 8 `noEncontrado('ese parte')` repartidos por seis rutas. El guion de
+  cambio afirmaba cuántas veces debía aparecer cada texto y habría fallado si alguno no
+  estuviera donde se esperaba.
+- **Comprobado contra el servidor de verdad**, no por lectura: un `POST /api/panel/partes` con
+  la fecha de mañana respondió `400` con «No se puede abrir la bitácora de un día que no ha
+  llegado.». Se eligió ese caso porque el servidor lo rechaza **antes** de escribir nada
+  (`partes+api.ts:97`), así que la prueba no deja rastro en la base de OCC.
+- **El servidor de desarrollo recogió el cambio de `+api.ts` sin reiniciar.** `AGENTS.md`
+  advierte lo contrario, y es la **segunda vez** que pasa (ya ocurrió en T7 de la spec 015).
+  Con dos casos, la advertencia parece más pesimista de lo que el CLI hace hoy — pero no se
+  cambia `AGENTS.md` por dos observaciones: reiniciar sigue siendo lo seguro, y el coste de
+  hacerlo es un minuto frente a media hora buscando un texto que ya estaba bien.
+- Comprobado además que no queda **ningún** texto entre comillas con «parte» en esas rutas, ni
+  mensajes de Zod en `contratos.ts` que lo digan. Lo que queda son identificadores, que se
+  quedan por decisión del plan.
+
+**T43 (2026-09-23).** Los seis textos visibles de la pantalla y **los quince comentarios** del
+archivo. Los tres comandos en verde: 251 verificaciones, `typecheck` y `lint` sin salida.
+Comprobado en el navegador: la pantalla se titula «Bitácora diaria de obra», el menú y el
+título por fin coinciden, y no queda ningún «parte» a la vista.
+
+- **Los comentarios entraron por decisión de Diego**, no por RF-90. El bloque de cabecera se
+  reescribió entero: antes describía el documento como «el parte diario de obra» y ahora
+  explica **por qué el código conserva la palabra vieja** mientras la interfaz dice otra. Deja
+  escrita la regla para quien lo lea dentro de meses: *si lo lee una persona, dice bitácora; si
+  lo lee el compilador, dice parte.* Sin esa nota, el archivo `pantalla-partes.tsx` frente a una
+  pantalla titulada «Bitácora» parece un descuido, y alguien lo «arreglaría» de vuelta.
+- **RF-91 ya estaba cumplido en esta pantalla**: la sección del formato viejo se titula
+  «Bitácoras por máquina de ese día» desde antes de este cambio. No hubo que tocar nada.
+- Lo que queda con «parte» en el archivo son cinco líneas: dos rutas de importación, dos
+  dependencias de `useCallback` y la nota nueva que explica la decisión.
+- **`src/shared/rules/parte.ts` no se tocó**: tiene ~40 menciones en comentarios, es otro
+  archivo y no es «la pantalla». Pasa a T44 por decisión de Diego.
+
+**T44 (2026-09-23).** Textos de Inicio y del índice, los 21 comentarios de `parte.ts`, y **dos
+correcciones de tareas anteriores**. Los tres comandos en verde: 251 verificaciones,
+`typecheck` y `lint` sin salida.
+
+### Dos fallos propios, encontrados aquí
+
+**1. El `grep` con el que trabajé en T42 y T43 buscaba mal.** Usaba `[Pp]arte`: minúscula o
+capitalizada, y **en singular**. La tarjeta del Inicio decía «**Partes** de obra» y no salía en
+ninguna búsqueda. Se vio en una captura de pantalla, no en el código. Con el patrón corregido
+—sin distinguir mayúsculas y con el plural— aparecieron **cuatro textos más** en Inicio
+(«Partes de obra» ×2, «Todos cerrados», «reconstruirlos») y uno en `pantalla-ingreso.tsx`.
+*Lección:* para un cambio de palabras, el `grep` se escribe sin distinguir mayúsculas y con el
+plural, y aun así **la captura de pantalla encuentra lo que el `grep` no**.
+
+**2. T42 estaba incompleta, y se marcó como hecha.** Dejó sin cambiar **tres mensajes del
+servidor** en `src/features/bitacoras/servidor/acceso.ts`: «No existe ese parte.», «Ese parte
+está anulado.» y «Ese parte ya está cerrado. Para corregirlo hay que anularlo y abrir otro.».
+Se corrigieron aquí. El motivo no fue descuido al ejecutar: **la lista de archivos del plan
+estaba incompleta**. Decía `src/app/api/panel/partes+api.ts` y `partes/[id]*`, y la guardia que
+comparten el guardado, el cierre y la anulación vive en `src/features/bitacoras/servidor/`
+—precisamente para que una ruta no importe a otra—. T42 cumplió su «Hecho cuando» al pie de la
+letra y aun así entregó a medias: **el criterio era correcto, el alcance no**.
+*Lección:* al planificar un cambio de textos, buscar por **contenido** en todo `src/`, no por la
+lista de carpetas donde uno cree que viven.
+
+### Lo demás
+
+- `pantalla-ingreso.tsx` decía «el parte diario de cada jornada» en la pantalla de entrada. No
+  es del módulo, así que RF-90 no lo pide al pie de la letra, pero lo lee cualquiera que entre
+  y quedaría contradiciendo al resto. Se cambió; si Diego prefiere lo contrario, es una línea.
+- Las dos **bandas de comentario** de `parte.ts` (`/* Qué secciones tiene… */`) llevan relleno
+  hasta el cierre. Al alargar el texto se descuadraban, y el compilador no lo ve: se compensó el
+  relleno y se comprobó **comparando el ancho con el de `git show HEAD`**, no a ojo.
+- **Anotado y no hecho:** siguen diciendo «El parte diario de obra» dos bandas de comentario, en
+  `src/features/panel/contratos.ts:678` y `src/features/bitacoras/tipos.ts:67`. Son comentarios
+  de archivos que no estaban en T44, y esta tarea ya se expandió bastante. Deuda pequeña y
+  localizada.
+
+**T45 (2026-09-23).** El selector de obra. Los tres comandos en verde: 251 verificaciones,
+`typecheck` y `lint` sin salida.
+
+- El defecto era **una línea**: `partes.find((p) => !p.anuladoEn) ?? partes[0]`. El servidor
+  manda todas las bitácoras del día que la sesión alcanza y esa línea se quedaba con la primera.
+  Ahora se filtra por la obra que se está mirando, y el selector vive **fuera** del `parte ? …`,
+  que es lo que hacía que desapareciera en cuanto ese día existía una bitácora.
+- El desplegable dice qué tiene cada obra ese día —«Abierta», «Cerrada», «Anulada»— con el
+  `detalle` que `Opcion` ya tenía. Sin nada, enseña el código de la obra, como antes.
+- **La comprobación la hizo Diego, no yo, y conviene que conste.** Creó una segunda obra
+  (CONSORCIO SANTANDER) y le abrió la bitácora del día. Confirmado después en Chrome: el
+  desplegable lista «Consorcio Antioquia · Abierta» y «CONSORCIO SANTANDER · Abierta», y la
+  cabecera nombra la que se está mirando (RF-93).
+- **Intento fallido, para que no se repita:** antes de que Diego creara la obra se probó a
+  simular dos obras interceptando `fetch`. **No funciona aquí**: la pantalla pide el listado de
+  obras una sola vez al montar, y para que el interceptor lo alcance hay que recargar la
+  página, lo que borra el interceptor. El truco sirve para respuestas que la pantalla vuelve a
+  pedir (el día, que se refresca al cambiar de fecha), no para las que se piden una vez.
+- **Sin comprobar todavía:** RF-96 con datos reales —que una bitácora **anulada** de una obra no
+  quede escondida detrás de la viva de otra—. Las dos obras de hoy están abiertas. Se cubre en
+  T47 anulando una.
+
+**T46 (2026-09-23).** **Sin una línea de código.** Se comprobó antes de implementar, como manda
+la fase, y T45 ya la había resuelto. Los tres comandos en verde.
+
+- **RF-95**, comprobado en Chrome con datos reales: día 2026-09-21, con CONSORCIO SANTANDER
+  elegida. Consorcio Antioquia tiene bitácora ese día y SANTANDER no → sale «Abrir la bitácora
+  de este día». Antes era imposible: el selector desaparecía en cuanto ese día existía una.
+- **La obra elegida se mantiene al cambiar de día**: del 23 al 21 al 20, SANTANDER sigue puesta.
+- **RF-94**, día 2026-09-20 sin ninguna bitácora: se sigue pidiendo la obra antes de abrir.
+- **Por qué sobró la tarea:** el arreglo de T45 fue estructural —sacar el selector del
+  `parte ? …` y filtrar por obra—, y eso resuelve a la vez «ver otra obra» y «abrir la que
+  falta», porque son la misma pregunta. Es lo que el plan ya decía al elegir un solo control en
+  vez de dos; al trocear se partió en dos tareas de más. **No se inventó código para justificar
+  la tarea.**
+
+**Hueco encontrado al mirar los datos, anotado y no tocado.** El 2026-09-22 hay dos bitácoras de
+`PRUEBA-016`, una anulada. Esa obra se dio de baja el 2026-09-23, así que **ya no aparece en el
+selector y sus bitácoras quedan inalcanzables desde el panel**, aunque siguen en la base. No es
+una regresión —antes tampoco se veían, las tapaba la primera obra por orden alfabético— pero
+ahora el selector es la única puerta y el hueco se nota. Roza el principio 4 de la constitución:
+la evidencia está y no hay cómo llegar a ella. Ningún RF lo pide y no es de esta tarea; con
+obras de prueba da igual, pero el día que se dé de baja una obra real con años de bitácoras,
+pasará lo mismo. **Decisión de Diego si merece spec.**
+
+### Validación del cambio (T47, 2026-09-23)
+
+Hecha en Chrome contra la base real, como gerencia, con dos obras con bitácora el mismo día:
+**Consorcio Antioquia** (OBR-001) y **CONSORCIO SANTANDER** (OBR-002), esta última creada por
+Diego para la prueba. Los tres comandos en verde al terminar: 251 verificaciones, `typecheck` y
+`lint` sin salida.
+
+| RF | Cómo se comprobó | Resultado |
+| --- | --- | --- |
+| RF-90 | Barrido de textos visibles —sin distinguir mayúsculas y **con el plural**— sobre `panel/`, `bitacoras/`, `api/panel/` y `rules/parte.ts`. Único acierto: «en ninguna parte» de la ventana de contraseña, que es otro sentido de la palabra | verde |
+| RF-90 (pantalla) | La pantalla se titula «Bitácora diaria de obra»; botones, avisos de cierre y de anulación, todos en «bitácora» | verde |
+| RF-90 (servidor) | `POST /api/panel/partes` con fecha de mañana → 400 «No se puede abrir la bitácora de un día que no ha llegado.» | verde |
+| RF-90 (Inicio) | La tarjeta dice «BITÁCORAS DE OBRA» y «Sin cerrar: reconstruirlas después es adivinar» | verde |
+| RF-91 | La sección del formato viejo se titula «Bitácoras por máquina de ese día» | verde (ya lo cumplía) |
+| RF-92 | Con dos obras el mismo día, el desplegable lista las dos con su estado y deja cambiar entre ellas sin salir del día | verde |
+| RF-93 | La cabecera nombra la obra siempre, incluso con una sola ese día | verde |
+| RF-94 | Día 2026-09-20, sin ninguna bitácora: se sigue pidiendo la obra antes de abrir | verde |
+| RF-95 | Día 2026-09-21, con SANTANDER elegida: Antioquia tiene bitácora y SANTANDER no → sale «Abrir la bitácora de este día». **Antes imposible** | verde |
+| RF-96 | Anulada la de SANTANDER con la de Antioquia viva el mismo día: la anulada se ve marcada «Anulado», con su motivo, y el desplegable distingue «Abierta» de «Anulada» | verde |
+| RF-35 | **Por lectura de código**: el selector se pinta solo bajo `esGerencia` (`pantalla-partes.tsx:470`), la misma condición que ya existía. No se entró como residente: haría falta su contraseña | verde por inspección |
+
+**Veredicto: el cambio del 2026-09-23 a la spec 004 queda Cumplido** (RF-90 a RF-96).
+
+### Lo que no se probó, y por qué
+
+- **RF-35 como residente.** Entrar con su cuenta exige su contraseña, y eso no se hace. Queda
+  por lectura de código, igual que RF-21 y RF-23 de la spec 015.
+- **Anular desde la pantalla.** Para RF-96 hubo que llamar al endpoint directamente, porque el
+  botón «Anular» solo aparece con la bitácora **cerrada** y cerrarla exige las siete secciones.
+  El servidor sí permite anular una abierta. Es el defecto que Diego dejó fuera de alcance a
+  propósito; aquí se nota, porque obligó a rodear la interfaz para probar una conducta suya.
+
+### Datos que quedan en la base
+
+- **Obra `OBR-002` CONSORCIO SANTANDER**, creada por Diego el 2026-09-23 para esta prueba, con
+  su bitácora del día **anulada** con motivo escrito. Decidir si se da de baja.
+- La bitácora de Consorcio Antioquia del 2026-09-23 sigue abierta, como estaba.

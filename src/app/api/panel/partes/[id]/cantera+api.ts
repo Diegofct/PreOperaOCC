@@ -19,6 +19,6 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     if (sesion instanceof Response) return sesion;
 
     const seccion = await canteraDeUnParte(sesion, id);
-    return seccion ? ok(seccion) : noEncontrado('ese parte');
+    return seccion ? ok(seccion) : noEncontrado('esa bitácora');
   });
 }

@@ -53,7 +53,7 @@ export async function rechazoSiNoEsEditable(
 }
 
 /**
- * ¿Se puede escribir todavía en este parte de obra? (spec 004)
+ * ¿Se puede escribir todavía en esta bitácora de obra? (spec 004)
  *
  * Vive aquí y no dentro de la ruta porque lo comparten el guardado, el cierre y
  * la anulación. Una ruta importando a otra ruta funciona, pero deja al
@@ -75,11 +75,11 @@ export async function parteEditable(
     .where(eq(partesDeObra.id, id))
     .limit(1);
 
-  if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('ese parte');
-  if (fila.anuladoEn) return errorDePeticion('Ese parte está anulado.', 409);
+  if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('esa bitácora');
+  if (fila.anuladoEn) return errorDePeticion('Esa bitácora está anulada.', 409);
   if (fila.cerradoEn) {
     return errorDePeticion(
-      'Ese parte ya está cerrado. Para corregirlo hay que anularlo y abrir otro.',
+      'Esa bitácora ya está cerrada. Para corregirla hay que anularla y abrir otra.',
       409,
     );
   }

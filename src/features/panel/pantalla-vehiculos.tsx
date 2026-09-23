@@ -276,10 +276,13 @@ export default function PantallaVehiculos() {
           aviso={porDarDeBaja.codigoInterno + ' deja de aparecer en la flota y de poder asignarse. No se borra: los preoperacionales firmados y las bitácoras cerradas de esa máquina siguen apuntándole.'}
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `vehiculos.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25).
             const equipo = porDarDeBaja;
+            await api.vehiculos.darDeBaja(equipo.id);
             setPorDarDeBaja(null);
-            const listo = await vehiculos.ejecutar(() => api.vehiculos.darDeBaja(equipo.id));
-            if (listo) setHecho(equipo.codigoInterno + ' quedó dado de baja.');
+            vehiculos.recargar();
+            setHecho(equipo.codigoInterno + ' quedó dado de baja.');
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -295,7 +298,6 @@ export default function PantallaVehiculos() {
             setHecho(codigo + ' quedó corregido.');
             vehiculos.recargar();
           }}
-          onFallo={vehiculos.setError}
         />
       ) : null}
 

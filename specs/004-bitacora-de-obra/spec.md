@@ -1,17 +1,24 @@
 # Spec 004 — Bitácora de obra
 
-> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60), 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74), 2026-09-17 (la actividad sin número de ítem, RF-75 a RF-77) y 2026-09-22 (vuelve el número de ítem; hora, responsable y ubicación de cada ensayo, RF-78 a RF-89)
+> Estado: En curso · Fecha: 2026-09-09 · Cambio: 2026-09-14 (Req2 a Req5, RF-45 a RF-57), 2026-09-15 (RF-52 corregido, RF-58 a RF-60), 2026-09-16 (catálogos reales de OCC, RF-61 a RF-74), 2026-09-17 (la actividad sin número de ítem, RF-75 a RF-77) y 2026-09-22 (vuelve el número de ítem; hora, responsable y ubicación de cada ensayo, RF-78 a RF-89) y 2026-09-23 (se llama «bitácora» en toda la interfaz, y gerencia ve las de todas las obras del día, RF-90 a RF-96), **cumplido el 2026-09-23**
 
 ## Contexto y objetivo
 
 Hoy la bitácora del sistema registra una sola cosa: cuántas horas trabajó una máquina. Es
-una bitácora por equipo y por día, y sirve para el control de la maquinaria.
+la **bitácora por máquina** —una por equipo y por día— y sirve para el control de la
+maquinaria.
 
-Pero lo que el residente lleva de verdad cada tarde es el **parte diario de la obra**: qué
+Pero lo que el residente lleva de verdad cada tarde es la **bitácora diaria de la obra**: qué
 máquinas trabajaron y cuánto, quién estuvo y desde qué hora hasta cuál, qué actividades se
 ejecutaron y con qué dimensiones, qué clima hizo y en qué franjas, qué se usó del
 laboratorio, qué hay que dejar anotado, y la fotografía del día. La maquinaria es una
-sección de ese parte, no el parte entero.
+sección de esa bitácora, no la bitácora entera.
+
+> **Sobre las dos palabras** *(2026-09-23)*. Durante el desarrollo, a este documento se le
+> llamó «parte» en la interfaz para distinguirlo de la bitácora por máquina. No funcionó: en
+> la obra nadie lo llama así, y en el panel convivían «Bitácoras» en el menú y «parte» dentro
+> de la pantalla. Desde ahora el documento nuevo es **la bitácora** a secas y al viejo se le
+> dice **bitácora por máquina** (RF-90, RF-91).
 
 Esta spec convierte la bitácora en lo que la obra necesita. Es el cambio más grande de esta
 tanda: no añade campos, cambia de qué habla el documento.
@@ -25,20 +32,22 @@ tanda: no añade campos, cambia de qué habla el documento.
 
 ## Historias de usuario
 
-- H1: Como residente quiero llevar un solo parte diario de mi obra, para no llenar un
+- H1: Como residente quiero llevar una sola bitácora diaria de mi obra, para no llenar un
   documento por cada máquina y tener el día completo en un sitio.
+  *(decía «parte diario» hasta el 2026-09-23; ver RF-90)*
 - H2: Como residente quiero registrar quién trabajó y en qué horario, para saber las horas
   de cada persona y cuáles fueron extras.
 - H3: Como residente quiero registrar las actividades con sus dimensiones y una fotografía,
   para dejar constancia de lo ejecutado y poder medir el avance.
 - H4: Como residente quiero registrar el clima por franjas horarias, para justificar los
   tiempos muertos cuando llovió.
-- H5: Como gerencia quiero consultar el parte de cualquier día y obra, para revisar sin
+- H5: Como gerencia quiero consultar la bitácora de cualquier día y obra, para revisar sin
   tener que pedirlo por teléfono.
+  *(decía «el parte» hasta el 2026-09-23; ver RF-90)*
 
 ## Requisitos funcionales (criterios de aceptación en EARS)
 
-### El parte diario (H1)
+### La bitácora diaria (H1)
 
 - RF-1: EL SISTEMA llevará una bitácora por obra y por día.
 - RF-2: SI ya existe una bitácora viva de esa obra y ese día, ENTONCES EL SISTEMA no creará
@@ -58,7 +67,7 @@ tanda: no añade campos, cambia de qué habla el documento.
   > haber diligenciado todo el parte: bastaba una de las tres secciones, ahora hacen falta
   > las siete. El día sin trabajo, que RF-8 dejaba sin salida, la tiene en RF-53 y RF-54.
 
-### El cierre exige el parte completo (cambio 2026-09-14)
+### El cierre exige la bitácora completa (cambio 2026-09-14)
 
 - RF-50: SI se intenta cerrar una bitácora a la que le falta alguna de estas secciones
   —maquinaria, personal, actividades, clima, control calidad de obra, notas o fotografía del
@@ -290,6 +299,34 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-37: EL SISTEMA permitirá al residente anular una bitácora cerrada de su obra, a
   diferencia del preoperacional, cuya anulación es de la gerencia (001/RF-14).
 
+### Cómo se llama y cómo se consultan varias obras *(cambio 2026-09-23)*
+
+> **Este bloque no pide nada nuevo: arregla dos desviaciones.** La primera es de palabras —la
+> spec dijo «bitácora» desde el principio y la interfaz acabó diciendo «parte»—. La segunda es
+> un **defecto**: RF-34 prometía consultar la bitácora de *cualquier* obra y la pantalla solo
+> deja ver una por día.
+
+- RF-90: EL SISTEMA nombrará **«bitácora»** a este documento en toda la interfaz del módulo
+  —título, descripción, botones, avisos, confirmaciones y mensajes de error— y no usará la
+  palabra «parte» en ninguno de ellos. *(cambio 2026-09-23)*
+- RF-91: EL SISTEMA nombrará **«bitácora por máquina»** al formato anterior, el de una por
+  equipo y día que se conserva de solo lectura, allí donde se muestre o se mencione.
+  *(cambio 2026-09-23, precisa RF-36)*
+- RF-92: CUANDO la gerencia consulte un día en el que **varias obras** tengan bitácora, EL
+  SISTEMA las mostrará todas y permitirá elegir cuál se está viendo, sin salir de ese día.
+  *(cambio 2026-09-23, cumple RF-34, que no se cumplía)*
+- RF-93: MIENTRAS se esté viendo una bitácora, EL SISTEMA dirá de qué obra es, incluso cuando
+  ese día solo haya una. *(cambio 2026-09-23)*
+- RF-94: SI la gerencia abre un día en el que **ninguna** obra tiene bitácora, ENTONCES EL
+  SISTEMA seguirá pidiendo de qué obra es antes de abrirla, como hoy. *(cambio 2026-09-23)*
+- RF-95: SI la gerencia abre un día en el que **algunas** obras ya tienen bitácora y otras no,
+  ENTONCES EL SISTEMA dejará ver las que hay **y** abrir la de una obra que todavía no la
+  tenga. *(cambio 2026-09-23)*
+  > Hoy esto es imposible: en cuanto existe una bitácora ese día, el selector de obra
+  > desaparece de la pantalla.
+- RF-96: EL SISTEMA mostrará las bitácoras **anuladas** de ese día junto a las vivas, marcadas
+  como anuladas, y no las esconderá detrás de una viva de otra obra. *(cambio 2026-09-23)*
+
 ## Superficies afectadas
 
 - [x] **Móvil** — se retira la bitácora del celular; el jefe de obra pasa a llevarla en el
@@ -391,6 +428,20 @@ sus casos en el guion). **Móvil** y **Sincronización**: sin impacto.
   responsable: se siguen viendo y guardando así, y el parte se cierra igual (RF-89); los que
   se añadan desde ahora los piden.
 
+Cambio 2026-09-23: **Panel web** — la palabra «bitácora» en toda la interfaz del módulo
+(RF-90, RF-91) y el selector de obra cuando el día tiene varias (RF-92 a RF-96). **API** — solo
+los **textos** de sus mensajes de rechazo, que el panel muestra tal cual y hoy dicen «parte»
+(RF-90); ninguna ruta, forma ni código de estado cambia. **Reglas** — el texto de
+`bloqueosDelCierre`, por lo mismo, y su caso en el guion de verificación. **Datos**, **Móvil**
+y **Sincronización**: sin impacto.
+
+> **Corregido el 2026-09-23, al planificar.** Este párrafo decía «**API** … sin impacto» y era
+> falso: hay 15 mensajes del servidor que la persona lee y nombran el documento. Lo que no
+> cambia es el contrato —rutas, forma de las respuestas, códigos—, no los textos.
+
+El `GET` de un día ya devuelve las bitácoras de todas las obras del alcance de la sesión,
+ordenadas por obra; lo que falla es que la pantalla se queda con la primera y tira el resto.
+
 ## Fuera de alcance
 
 - Llenar la bitácora desde el celular. Se retira en esta iteración y se retomará, si hace
@@ -398,6 +449,16 @@ sus casos en el guion). **Móvil** y **Sincronización**: sin impacto.
 - Migrar las bitácoras por máquina ya registradas al formato nuevo: se conservan como
   histórico de solo lectura (RF-36).
 - Informes, exportación a hoja de cálculo o PDF, y firmas sobre la bitácora.
+- *(cambio 2026-09-23)* **Renombrar tablas, columnas o archivos de código.** `partes_de_obra`
+  se queda como está: hay filas escritas apuntándole y renombrar una tabla no cambia nada de
+  lo que ve OCC. Lo que cambia es la interfaz.
+- *(cambio 2026-09-23)* **Anular una bitácora abierta sin cerrarla antes.** El servidor ya lo
+  permite y la pantalla lo esconde; se miró al preparar este cambio y Diego lo dejó fuera.
+  Sigue siendo un defecto conocido, sin spec.
+- *(cambio 2026-09-23)* Cambiar quién figura como responsable («Lo lleva …») de una bitácora
+  ya abierta.
+- *(cambio 2026-09-23)* Un listado de bitácoras de varios días. Se sigue consultando un día a
+  la vez, avanzando y retrocediendo.
 - ~~**Calcular solos el área y el volumen**~~ — **entra en alcance el 2026-09-15** (RF-58
   a RF-60). OCC decidió que se multiplica lo que se escribe, en la unidad en que se escriba.
 - El tope de **42 horas semanales**: esta bitácora clasifica el día, no la semana.
@@ -424,13 +485,22 @@ sus casos en el guion). **Móvil** y **Sincronización**: sin impacto.
 - *(cambio 2026-09-22)* Completar las horas, el responsable o la ubicación de los ensayos ya
   guardados (RF-89).
 
+- *(cambio 2026-09-23)* **Un día con dos obras con bitácora**: gerencia las ve las dos y elige
+  cuál mira; ninguna queda escondida detrás de la otra (RF-92).
+- *(cambio 2026-09-23)* **Un día con una obra con bitácora y otra sin ella**: se ve la que hay
+  y se puede abrir la que falta (RF-95).
+- *(cambio 2026-09-23)* **Un día con una bitácora anulada y otra viva de otra obra**: se ven
+  las dos, la anulada marcada como tal (RF-96). Hoy la viva tapa a la anulada.
+- *(cambio 2026-09-23)* **Un residente**: sigue viendo solo la de su obra, sin selector
+  (RF-35). El cambio es de gerencia; a él no le cambia nada salvo las palabras.
+
 ## Criterios de finalización
 
 - Cada RF con su comprobación: las reglas de cálculo y rechazo (RF-10 a RF-12, RF-17,
   RF-18, RF-27, RF-28) como casos en el guion de verificación; el resto, como paso de demo
   manual.
 - Las migraciones existen en las dos bases y las bitácoras anteriores siguen consultándose.
-- Demo manual: llenar el parte de un día completo con dos máquinas, tres personas, dos
+- Demo manual: llenar la bitácora de un día completo con dos máquinas, tres personas, dos
   actividades con fotografía, tres franjas de clima, un ensayo de control de calidad con su
   observación *(cambio 2026-09-16; antes «un elemento de laboratorio»)* —con sus horas,
   su responsable y su PR y metros *(cambio 2026-09-22)*—, una nota y

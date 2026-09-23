@@ -1,7 +1,7 @@
 /**
  * Un documento largo con su índice al lado.
  *
- * Nació para el parte diario, que son nueve secciones en una columna. Antes eran
+ * Nació para la bitácora diaria, que son nueve secciones en una columna. Antes eran
  * nueve rectángulos blancos apilados y quien lo llenaba no sabía en qué punto
  * iba, ni cuántas quedaban, ni qué le faltaba para poder cerrarlo — lo descubría
  * pulsando «Cerrar» y recibiendo un rechazo.
@@ -16,7 +16,7 @@
  * ── Por qué no se toca `Seccion` ──
  *
  * La usan nueve pantallas más. Convertirla en tarjeta sería rediseñar el panel
- * entero dentro de una spec que se acota al parte. Aquí no se modifica nada
+ * entero dentro de una spec que se acota a la bitácora. Aquí no se modifica nada
  * existente: se añade.
  *
  * ── La geometría ──
