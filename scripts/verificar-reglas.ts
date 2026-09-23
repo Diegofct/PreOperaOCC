@@ -3533,12 +3533,33 @@ prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
   }
 });
 
-prueba('están los dieciocho cargos, con slug y rótulo únicos', () => {
+prueba('están los veinte cargos, con slug y rótulo únicos', () => {
   // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
-  // más Gerente (002/RF-13, añadido el 2026-09-19).
-  assert.equal(CARGOS.length, 18);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 18);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 18);
+  // más Gerente (002/RF-13, añadido el 2026-09-19), más Controlador(a) Vial y
+  // Control de Calidad (pedidos por OCC el 2026-09-23).
+  assert.equal(CARGOS.length, 20);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 20);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 20);
+});
+
+prueba('los cargos nuevos de obra no reciben celular', () => {
+  // Pedidos por OCC el 2026-09-23. Ninguno lleva máquina, así que el panel no
+  // les ofrece código de activación: que esto falle significa que alguien puso
+  // `operaVehiculos: true` y un controlador vial acabaría con un teléfono.
+  assert.equal(nombreDeCargo('controlador_vial'), 'Controlador(a) Vial');
+  assert.equal(nombreDeCargo('control_calidad'), 'Control de Calidad');
+  assert.equal(operaVehiculos('controlador_vial'), false);
+  assert.equal(operaVehiculos('control_calidad'), false);
+  assert.equal(rolSugerido('controlador_vial'), 'operador');
+  assert.equal(rolSugerido('control_calidad'), 'operador');
+});
+
+prueba('«Tecnólogo en obra» no es un cargo aparte: es el auxiliar de obra', () => {
+  // OCC lo pidió como cargo nuevo el 2026-09-23 y resultó ser el mismo oficio.
+  // Dos rótulos para el mismo trabajo partirían en dos el listado de personal
+  // de la bitácora. El slug se quedó en `auxiliar`: ya hay personas apuntándole.
+  assert.equal(nombreDeCargo('auxiliar'), 'Auxiliar de obra');
+  assert.equal(cargoPorId('tecnologo_obra'), undefined);
 });
 
 prueba('el gerente propone acceso de administrador y no lleva celular', () => {
@@ -3579,11 +3600,20 @@ prueba('solo la dirección y las residencias entran al panel como residente', ()
 });
 
 prueba('solo el conductor y el operador llevan máquina', () => {
+  // Esta lista gobierna **tres** puertas, y por eso cambiarla se nota tanto:
+  // el código de activación del celular (`personas/[id]/activacion`), quién
+  // puede ser asignado a un vehículo (`asignaciones`, cerrado el 2026-09-23) y
+  // quién puede conducir un viaje de cantera (`rules/cantera`).
   const conMaquina = CARGOS.filter((c) => c.operaVehiculos).map((c) => c.id);
   assert.deepEqual(conMaquina, ['conductor', 'operador']);
   // El caso que da sentido a todo esto: un cadenero no recibe celular.
   assert.equal(operaVehiculos('cadenero_1'), false);
   assert.equal(operaVehiculos('topografo'), false);
+  // Y desde el 2026-09-23, tampoco se le asigna una máquina: la pantalla de
+  // asignaciones filtraba por rol —que en todos estos es `operador`— en vez de
+  // por cargo, así que los doce cargos de a pie aparecían en la lista.
+  assert.equal(operaVehiculos('maestro'), false);
+  assert.equal(operaVehiculos('siso'), false);
 });
 
 prueba('un cargo que no existe no sugiere acceso ni máquina', () => {

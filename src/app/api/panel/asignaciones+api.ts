@@ -6,6 +6,7 @@ import { asignaciones, obras, usuarios, vehiculos } from '@/db/servidor/esquema'
 import { asignacionNueva } from '@/features/panel/contratos';
 import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -81,6 +82,27 @@ export async function POST(peticion: Request) {
     // un residente qué máquinas hay en las obras que no le tocan.
     if (!alcanzaLaObra(sesion, maquina.obraId)) {
       return errorDePeticion('Ese vehículo no existe o está dado de baja.', 404);
+    }
+
+    // El cargo decide quién lleva máquina, igual que decide quién recibe celular
+    // (`personas/[id]/activacion`). Sin esto, la pantalla podía filtrar bien y un
+    // envío directo seguir asignándole una retroexcavadora a un cadenero: una
+    // asignación que nadie puede usar —no hay app sin código de activación— y que
+    // deja escrito que esa persona lleva esa máquina, que es justo lo que el acta
+    // no debe decir.
+    const [aQuien] = await db
+      .select({ cargo: usuarios.cargo })
+      .from(usuarios)
+      .where(and(eq(usuarios.id, usuarioId), isNull(usuarios.eliminadoEn)));
+
+    if (!aQuien) return errorDePeticion('Esa persona no existe o está dada de baja.', 404);
+
+    if (!operaVehiculos(aQuien.cargo)) {
+      return errorDePeticion(
+        `El cargo «${nombreDeCargo(aQuien.cargo)}» no lleva máquina, así que no se le ` +
+          'asignan vehículos. Las asignaciones son para conductores y operadores.',
+        409,
+      );
     }
 
     const yaVigente = await db

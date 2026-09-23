@@ -12,7 +12,7 @@
  */
 import { useCallback, useState } from 'react';
 
-import { nombreDeCargo } from '@/shared/catalogos/cargos';
+import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 
 import { api } from './cliente-api';
 import {
@@ -55,7 +55,17 @@ export default function PantallaAsignaciones() {
   const [vehiculoId, setVehiculoId] = useState<string | null>(null);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
 
-  const operadores = personas.datos.filter((p) => p.rol === 'operador');
+  /**
+   * Quién puede recibir una máquina lo decide el **cargo**, no el rol.
+   *
+   * Filtrar por `rol === 'operador'` ofrecía también al topógrafo, al cadenero,
+   * al SISO o al maestro: doce cargos que existen para que la bitácora registre
+   * su trabajo y no llevan máquina ninguna. La asignación les quedaba inerte
+   * —sin código de activación no hay app que la lea—, pero ensuciaba la lista y
+   * dejaba escrito un dato falso. `operaVehiculos` es el mismo catálogo que ya
+   * decide quién recibe celular; aquí se hace la misma pregunta.
+   */
+  const operadores = personas.datos.filter((p) => operaVehiculos(p.cargo));
 
   async function crear() {
     if (!vehiculoId || !usuarioId) return;

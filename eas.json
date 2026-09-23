@@ -11,7 +11,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://PENDIENTE-DEFINIR-EL-DOMINIO"
+        "EXPO_PUBLIC_API_URL": "https://occ.licitapp-elementaling.cloud"
       }
     }
   }

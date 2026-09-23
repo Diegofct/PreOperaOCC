@@ -10,7 +10,7 @@
  *
  * Así que son dos cosas distintas:
  *
- * - **`cargo`** (esto) dice qué hace la persona en la obra. Diecisiete valores,
+ * - **`cargo`** (esto) dice qué hace la persona en la obra. Veinte valores,
  *   dato de negocio, se muestra en todas partes.
  * - **`rol`** dice qué puede hacer en el sistema, y es lo que lee la tabla de
  *   `shared/rules/permisos`. Eran tres; la spec 008 añadió Almacenista y
@@ -52,7 +52,18 @@ export const CARGOS = [
   { id: 'director', nombre: 'Director', rolSugerido: 'supervisor', operaVehiculos: false },
   { id: 'residente_1', nombre: 'Residente 1', rolSugerido: 'supervisor', operaVehiculos: false },
   { id: 'residente_2', nombre: 'Residente 2', rolSugerido: 'supervisor', operaVehiculos: false },
-  { id: 'auxiliar', nombre: 'Auxiliar', rolSugerido: 'operador', operaVehiculos: false },
+  /**
+   * El slug se queda en `auxiliar` aunque el rótulo diga «de obra»: ya hay
+   * personas registradas apuntando a él y los slugs no se renombran. Que el
+   * rótulo se pueda corregir sin tocar el slug es justamente para lo que sirve
+   * tenerlos separados.
+   *
+   * OCC pidió además «Tecnólogo en obra» y al revisarlo resultó ser **este
+   * mismo oficio con otro nombre**, así que no se añadió un cargo aparte: dos
+   * rótulos para el mismo trabajo parten en dos el listado de personal de la
+   * bitácora sin que nadie lo note.
+   */
+  { id: 'auxiliar', nombre: 'Auxiliar de obra', rolSugerido: 'operador', operaVehiculos: false },
   { id: 'topografo', nombre: 'Topógrafo', rolSugerido: 'operador', operaVehiculos: false },
   { id: 'cadenero_1', nombre: 'Cadenero 1', rolSugerido: 'operador', operaVehiculos: false },
   { id: 'cadenero_2', nombre: 'Cadenero 2', rolSugerido: 'operador', operaVehiculos: false },
@@ -70,6 +81,21 @@ export const CARGOS = [
     operaVehiculos: false,
   },
   { id: 'social', nombre: 'Social', rolSugerido: 'operador', operaVehiculos: false },
+  // Pedidos por OCC el 2026-09-23. Ninguno lleva máquina —el controlador vial
+  // dirige el tránsito y control de calidad trabaja sobre el material—, así que
+  // ninguno recibe código de activación de celular.
+  {
+    id: 'controlador_vial',
+    nombre: 'Controlador(a) Vial',
+    rolSugerido: 'operador',
+    operaVehiculos: false,
+  },
+  {
+    id: 'control_calidad',
+    nombre: 'Control de Calidad',
+    rolSugerido: 'operador',
+    operaVehiculos: false,
+  },
   { id: 'conductor', nombre: 'Conductor', rolSugerido: 'operador', operaVehiculos: true },
   { id: 'operador', nombre: 'Operador', rolSugerido: 'operador', operaVehiculos: true },
   { id: 'ayudante', nombre: 'Ayudante', rolSugerido: 'operador', operaVehiculos: false },

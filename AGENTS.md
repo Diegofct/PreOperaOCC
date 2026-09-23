@@ -154,6 +154,25 @@ verde—, detallada en «Al terminar cualquier tarea».
 - No añadas dependencias, librerías de estilos, gestores de estado ni servicios de red sin preguntar. Para componentes nativos, `@expo/ui` antes que una librería de la comunidad.
 - No toques `app.json`, `eas.json`, `babel.config.js` ni `metro.config.js` sin decir por qué; sus ajustes actuales resuelven problemas concretos ya documentados en sus comentarios.
 
+## Actualizar el VPS
+
+El panel corre en **`occ.licitapp-elementaling.cloud`** (VPS de Hostinger, compartido con
+LicitApp). El procedimiento completo está en **`docs/despliegue.md`** y se sigue entero, pero
+estas cuatro son las que ya costaron una caída y no se deducen de ningún archivo:
+
+- **Se entra con llave, sin contraseña**: `ssh -i ~/.ssh/preoperaocc_vps root@179.199.132.56`.
+  Así que no hacen falta «dos ventanas»: todo se lanza desde la máquina de desarrollo.
+- **Migrar producción es `npx tsx --env-file=.env scripts/migrar-produccion.ts`**, y va **antes**
+  de encender la imagen nueva. En el mismo Neon hay dos bases con el mismo host, usuario y
+  contraseña —`neondb` es la de desarrollo, **`preoperaocc` es producción**—, de modo que
+  `npm run db:migrar:servidor` migra la equivocada y termina diciendo «Listo».
+- **`docker compose down` en `/opt/preoperaocc` tumba el sitio**, porque borra la red que el
+  proxy del vecino tiene conectada a mano. Siempre `up -d`.
+- **Un despliegue no está verificado hasta que alguien inicia sesión.** `healthy` y un `200` no
+  tocan la base: con el esquema atrasado el panel responde «Algo falló en el servidor» en cada
+  pantalla y aun así todo luce sano. La comprobación sin credenciales es pedir
+  `/api/panel/resumen` con una cookie inventada — debe dar **401**, nunca **500**.
+
 ## Al terminar cualquier tarea
 
 Obligatorio, en este orden, y no des la tarea por terminada hasta que los tres pasen en verde:
