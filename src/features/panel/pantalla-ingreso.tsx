@@ -59,7 +59,7 @@ export default function PantallaIngreso() {
             <Text style={estilos.nombre}>Control de Obra</Text>
           </View>
           <Text style={estilos.subtitulo}>
-            Obras, maquinaria, personal y el parte diario de cada jornada
+            Obras, maquinaria, personal y la bitácora diaria de cada jornada
           </Text>
         </View>
 

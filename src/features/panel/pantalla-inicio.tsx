@@ -22,7 +22,7 @@
  *
  * Las horas improductivas no están. Estaban previstas hasta que la spec 004
  * cambió el modelo: en la bitácora por máquina las actividades colgaban de un
- * equipo, y en el parte de obra la maquinaria y las actividades son secciones
+ * equipo, y en la bitácora de obra la maquinaria y las actividades son secciones
  * separadas. Sin un vínculo entre ellas, cualquier cifra de improductividad
  * sería inventada.
  *
@@ -212,12 +212,12 @@ function VistaGerencia({
             tono={datos.minutosExtra === 0 ? 'neutro' : 'atencion'}
           />
           <Cifra
-            titulo="Partes de obra"
+            titulo="Bitácoras de obra"
             valor={`${datos.partesCerrados} de ${datos.partes}`}
             pie={
               datos.partes === datos.partesCerrados
-                ? 'Todos cerrados'
-                : 'Sin cerrar: reconstruirlos después es adivinar'
+                ? 'Todas cerradas'
+                : 'Sin cerrar: reconstruirlas después es adivinar'
             }
             tono={datos.partes === datos.partesCerrados ? 'bueno' : 'atencion'}
           />
@@ -243,8 +243,8 @@ function VistaResidente({ datos }: { datos: ResumenFila }) {
     <>
       {todoEnOrden ? (
         <Aviso tono="exito">
-          Hoy no queda nada pendiente en su obra: todos los equipos tienen su preoperacional y el
-          parte del día está cerrado.
+          Hoy no queda nada pendiente en su obra: todos los equipos tienen su preoperacional y la
+          bitácora del día está cerrada.
         </Aviso>
       ) : null}
 
@@ -273,7 +273,7 @@ function VistaResidente({ datos }: { datos: ResumenFila }) {
             tono={datos.sinInspeccionar === 0 ? 'bueno' : 'malo'}
           />
           <Cifra
-            titulo="Parte del día"
+            titulo="Bitácora del día"
             valor={datos.partesCerrados > 0 ? 'Cerrado' : datos.partes > 0 ? 'Abierto' : 'Sin abrir'}
             pie={
               datos.partesCerrados > 0
@@ -292,7 +292,7 @@ function VistaResidente({ datos }: { datos: ResumenFila }) {
 
       <Seccion titulo="Atajos">
         <Acciones>
-          <Enlace ruta="/panel/bitacoras" titulo="Llenar el parte de hoy" />
+          <Enlace ruta="/panel/bitacoras" titulo="Llenar la bitácora de hoy" />
           <Enlace ruta="/panel/preoperacionales" titulo="Ver los preoperacionales" />
           <Enlace ruta="/panel/asignaciones" titulo="Revisar asignaciones" />
         </Acciones>
@@ -348,7 +348,7 @@ function TablaEquivalente({ datos }: { datos: ResumenFila }) {
     },
     {
       id: 'partes',
-      concepto: 'Partes de obra cerrados',
+      concepto: 'Bitácoras de obra cerradas',
       valor: `${datos.partesCerrados} de ${datos.partes}`,
     },
   ];

@@ -56,6 +56,7 @@ import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
 
 import { CapaFlotante } from './capa-flotante';
 import type { Orden } from './ordenar';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 /* ------------------------------------------------------------------------ */
 /* Texto y avisos                                                          */
@@ -105,7 +106,12 @@ export function Confirmacion({
 }: {
   aviso: string;
   confirmar: string;
-  onConfirmar: () => void;
+  /**
+   * La acción. **Si falla, tiene que lanzar**: es así como esta ventana se
+   * entera y puede mostrar el motivo. Cerrar al salir bien es cosa de quien la
+   * usa, dentro de esta misma función.
+   */
+  onConfirmar: () => Promise<unknown>;
   onCancelar: () => void;
   titulo?: string;
 }) {
@@ -116,18 +122,44 @@ export function Confirmacion({
    * nada. La ventana tapa la página con el telón oscuro, no deja tocar lo de
    * detrás, y Esc, el clic fuera y «Cerrar» equivalen a «Cancelar».
    *
-   * Quien la usa sigue cerrándola **antes** de ejecutar la acción: así un error
-   * sale en la pantalla, a la vista, y no detrás del telón (RF-7).
+   * ── La ventana se queda abierta hasta que la acción sale bien (RF-25) ──
+   *
+   * Antes se cerraba **antes** de ejecutar, para que un error saliera en la
+   * pantalla. No funcionó: la pantalla está detrás del telón mientras la ventana
+   * vive, y al cerrarse el aviso aparecía arriba del todo, donde no mira quien
+   * acaba de pulsar. La gerencia se topó con ello el 2026-09-22 —el servidor
+   * rechazó mover a un almacenista a una obra sin ese módulo y nadie llegó a
+   * leer el motivo—, y RF-25 invirtió la decisión: el motivo va aquí dentro y
+   * desde aquí se reintenta o se cancela.
+   *
+   * Mientras la acción corre no se puede cerrar ni con Esc ni con el telón: una
+   * ventana que desaparece a mitad de vuelo deja la tabla sin recargar y al
+   * servidor haciendo el trabajo igualmente.
    */
+  const accion = useAccionDeVentana();
+
   return (
-    <Modal titulo={titulo} onCerrar={onCancelar}>
+    <Modal titulo={titulo} onCerrar={accion.ejecutando ? () => {} : onCancelar}>
       <View style={estilos.confirmacion}>
         <Text style={estilos.confirmacionSimbolo}>!</Text>
         <View style={estilos.confirmacionCuerpo}>
           <Text style={estilos.confirmacionTexto}>{aviso}</Text>
+          {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
           <View style={estilos.grupoAcciones}>
-            <Boton titulo={confirmar} tono="peligro" onPress={onConfirmar} />
-            <Boton titulo="Cancelar" tono="secundario" onPress={onCancelar} />
+            <Boton
+              titulo={accion.ejecutando ? 'Un momento…' : confirmar}
+              tono="peligro"
+              onPress={() => {
+                void accion.ejecutar(onConfirmar);
+              }}
+              deshabilitado={accion.ejecutando}
+            />
+            <Boton
+              titulo="Cancelar"
+              tono="secundario"
+              onPress={onCancelar}
+              deshabilitado={accion.ejecutando}
+            />
           </View>
         </View>
       </View>
@@ -1201,13 +1233,26 @@ export function Modal({
   titulo,
   children,
   onCerrar,
+  soloBotonCierra = false,
 }: {
   titulo: string;
   children: ReactNode;
   onCerrar: () => void;
+  /**
+   * Quita Esc y el clic en el telón, y deja «Cerrar» como única salida
+   * (spec 015, RF-31).
+   *
+   * **Solo para lo que no se puede volver a ver**: hoy, la ventana que muestra
+   * una contraseña temporal o unos códigos de activación. El servidor no los
+   * guarda en claro, así que un clic distraído fuera de la ventana obliga a
+   * generar otros — y los anteriores ya dejaron de servir. En las otras once
+   * ventanas cerrar sin querer no cuesta nada, y ahí Esc y el telón son lo
+   * cómodo: por eso es una excepción y no el comportamiento de todas.
+   */
+  soloBotonCierra?: boolean;
 }) {
   return (
-    <CapaFlotante visible alCerrar={onCerrar} telon="oscuro">
+    <CapaFlotante visible alCerrar={soloBotonCierra ? () => {} : onCerrar} telon="oscuro">
       {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
       <View style={estilos.centroModal}>
         <View style={estilos.ventana}>

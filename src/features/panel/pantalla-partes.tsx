@@ -1,14 +1,27 @@
 /**
- * El parte diario de obra.
+ * La bitácora diaria de obra.
  *
- * Sustituye a la bitácora por máquina. Lo que antes era un documento por equipo
- * y día es ahora uno por **obra** y día, con la maquinaria dentro como una
- * sección entre siete: maquinaria, personal, actividades, clima, control de calidad,
- * notas y la fotografía del día.
+ * Sustituye a la **bitácora por máquina**. Lo que antes era un documento por
+ * equipo y día es ahora uno por **obra** y día, con la maquinaria dentro como
+ * una sección entre siete: maquinaria, personal, actividades, clima, control de
+ * calidad, notas y la fotografía del día.
+ *
+ * ── Por qué el archivo se sigue llamando «partes» ──
+ *
+ * Durante el desarrollo, a este documento se le dijo «parte» en la interfaz para
+ * distinguirlo del formato viejo. No funcionó —en la obra nadie lo llama así— y
+ * el 2026-09-23 se volvió a «bitácora» en todo lo que lee una persona (004/RF-90,
+ * RF-91). Lo que **no** se renombró fue el código: este archivo, la ruta
+ * `/api/panel/partes`, la tabla `partes_de_obra` y los tipos `Parte*` conservan
+ * la palabra vieja. Renombrarlos era un diff de cientos de líneas que no cambia
+ * nada de lo que ve OCC, y la tabla tiene evidencia escrita apuntándole.
+ *
+ * La regla, por si hay que tocar esto otra vez: **si lo lee una persona, dice
+ * bitácora; si lo lee el compilador, dice parte.**
  *
  * ── Por qué cada sección guarda por su cuenta ──
  *
- * El parte se llena a lo largo de la tarde, no de una sentada: el residente
+ * La bitácora se llena a lo largo de la tarde, no de una sentada: el residente
  * apunta las máquinas a media mañana, el personal cuando sale la gente y las
  * actividades al final. Un único botón de guardar al fondo obligaría a tenerlo
  * todo escrito antes de asegurar nada, y una tarde de trabajo se pierde con
@@ -17,7 +30,7 @@
  * ── Sobre el día ──
  *
  * La fecha por defecto la decide el servidor, no este navegador: quien mira el
- * panel puede estar en otra ciudad y el parte es de la jornada de la obra.
+ * panel puede estar en otra ciudad y la bitácora es de la jornada de la obra.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
@@ -262,7 +275,42 @@ export default function PantallaPartes() {
   );
 
   const partes = dia.datos[0]?.partes ?? [];
-  const parte = partes.find((p) => !p.anuladoEn) ?? partes[0] ?? null;
+
+  /*
+   * Cuál de las bitácoras del día se está mirando (004/RF-92 a RF-96).
+   *
+   * ── El defecto que esto arregla ──
+   *
+   * Aquí había una sola línea: `partes.find((p) => !p.anuladoEn) ?? partes[0]`.
+   * El servidor manda **todas** las bitácoras del día que la sesión alcanza
+   * —para la gerencia, las de todas las obras—, y esa línea se quedaba con la
+   * primera y tiraba el resto. Con dos obras trabajando el mismo día, la
+   * segunda era invisible en el panel aunque estuviera guardada, y RF-34
+   * llevaba prometiendo desde el 2026-09-09 que la gerencia podía consultar la
+   * de *cualquier* obra.
+   *
+   * También escondía las anuladas: `find(!anuladoEn)` prefiere una viva de otra
+   * obra antes que la anulada de la que se quería ver (RF-96).
+   *
+   * El residente no elige nada: el servidor ya le manda solo la suya.
+   */
+  const obraMirada = obraId ?? partes[0]?.obraId ?? null;
+  const deLaObra = obraMirada ? partes.filter((p) => p.obraId === obraMirada) : partes;
+  // Dentro de una misma obra sigue mandando la viva sobre la anulada: es el
+  // modelo de RF-7 —se anula y se abre otra— y no cambia.
+  const parte = deLaObra.find((p) => !p.anuladoEn) ?? deLaObra[0] ?? null;
+
+  /**
+   * Qué tiene cada obra ese día, para leerlo en el desplegable sin entrar
+   * (RF-92). Sin esto hay que abrir obra por obra para saber cuáles faltan por
+   * llenar, que es justo lo que la gerencia mira.
+   */
+  function loQueTieneEseDia(idObra: string): string | undefined {
+    const suyas = partes.filter((p) => p.obraId === idObra);
+    const viva = suyas.find((p) => !p.anuladoEn);
+    if (viva) return viva.cerradoEn ? 'Cerrada' : 'Abierta';
+    return suyas.length > 0 ? 'Anulada' : undefined;
+  }
 
   const esHoy = fecha === fechaDeJornada();
   const cerrado = Boolean(parte?.cerradoEn);
@@ -270,12 +318,12 @@ export default function PantallaPartes() {
   const editable = Boolean(parte) && !cerrado && !anulado;
 
   /**
-   * ¿La obra del parte lleva control de cantera? (spec 017, RF-12, RF-16.)
+   * ¿La obra de la bitácora lleva control de cantera? (spec 017, RF-12, RF-16.)
    *
    * La gerencia lo lee de la obra —lleva todas—; el residente, de su sesión, que es
    * la de su obra y es lo único que tiene: no puede listar obras.
    *
-   * **Solo esconde la sección de un parte abierto.** Uno cerrado o anulado enseña lo
+   * **Solo esconde la sección de una bitácora abierta.** Una cerrada o anulada enseña lo
    * que fijó ese día, que es evidencia y no depende de lo que la obra lleve hoy.
    */
   const obraDelParte = obras.datos.find((o) => o.id === parte?.obraId) ?? null;
@@ -337,7 +385,7 @@ export default function PantallaPartes() {
    * Lo que el índice enseña. Sale de `shared/rules/parte`, que es la misma regla
    * que decide qué impide cerrar — así el índice y el servidor no discrepan.
    *
-   * Refleja **lo guardado**, no lo tecleado: cada sección arranca del parte y a
+   * Refleja **lo guardado**, no lo tecleado: cada sección arranca de la bitácora y a
    * partir de ahí manda lo suyo, y al guardar se recarga el día. Encender una
    * entrada por algo escrito y sin guardar sería decir que está lista cuando
    * todavía se pierde al cerrar el navegador.
@@ -357,8 +405,8 @@ export default function PantallaPartes() {
     historicoCerradas,
     cerrado,
     anulado,
-    // Solo hay sección de cantera con un parte en pantalla, y solo si la obra la
-    // lleva o si el parte ya fijó sus viajes (spec 017, RF-12).
+    // Solo hay sección de cantera con una bitácora en pantalla, y solo si la obra la
+    // lleva o si la bitácora ya fijó sus viajes (spec 017, RF-12).
     cantera: muestraCantera ? conteoCantera : undefined,
   });
 
@@ -382,13 +430,13 @@ export default function PantallaPartes() {
       : [];
 
   async function abrir() {
-    await dia.ejecutar(() => api.partes.abrir(fecha, obraId ?? undefined));
+    await dia.ejecutar(() => api.partes.abrir(fecha, obraMirada ?? undefined));
   }
 
   return (
     <MarcoPantalla
       modulo="bitacoras"
-      titulo="Parte diario de obra"
+      titulo="Bitácora diaria de obra"
       descripcion="Qué se hizo hoy en la obra: máquinas, personal, actividades, clima y control de calidad. Se llena a lo largo del día y se cierra al terminar la jornada."
       error={dia.error ?? vehiculos.error ?? personas.error ?? obras.error}
       cargando={dia.cargando || vehiculos.cargando || personas.cargando}
@@ -416,8 +464,33 @@ export default function PantallaPartes() {
           ) : null}
         </Acciones>
 
+        {/* El selector va fuera del `parte ? …` a propósito: antes desaparecía
+            en cuanto ese día existía una bitácora, y entonces no había forma de
+            ver la de otra obra ni de abrir la que faltaba (RF-92, RF-95). */}
+        {esGerencia ? (
+          <Formulario>
+            <Selector
+              etiqueta="Obra"
+              valor={obraMirada}
+              opciones={obras.datos.map((o) => ({
+                valor: o.id,
+                etiqueta: o.nombre,
+                // Qué tiene ese día; sin nada, su código, que es lo que se
+                // usaba antes para distinguirlas.
+                detalle: loQueTieneEseDia(o.id) ?? o.codigo,
+              }))}
+              onChange={setObraId}
+              vacio="Elija la obra"
+              ancho={320}
+            />
+          </Formulario>
+        ) : null}
+
         {parte ? (
           <View style={estilos.cabecera}>
+            {/* Siempre se dice de qué obra es, aunque ese día solo haya una
+                (RF-93): con el selector encima, no decirlo deja dudando si lo
+                que se mira es lo que se eligió. */}
             <Text style={estilos.obra}>{parte.obraNombre ?? "Sin obra"}</Text>
             {anulado ? (
               <Etiqueta tono="malo">Anulado</Etiqueta>
@@ -432,25 +505,11 @@ export default function PantallaPartes() {
           </View>
         ) : (
           <Formulario>
-            {esGerencia ? (
-              <Selector
-                etiqueta="Obra"
-                valor={obraId}
-                opciones={obras.datos.map((o) => ({
-                  valor: o.id,
-                  etiqueta: o.nombre,
-                  detalle: o.codigo,
-                }))}
-                onChange={setObraId}
-                vacio="Elija la obra"
-                ancho={260}
-              />
-            ) : null}
             <AccionesFormulario>
               <Boton
-                titulo="Abrir el parte de este día"
+                titulo="Abrir la bitácora de este día"
                 onPress={abrir}
-                deshabilitado={esGerencia && !obraId}
+                deshabilitado={esGerencia && !obraMirada}
               />
             </AccionesFormulario>
           </Formulario>
@@ -586,7 +645,7 @@ export default function PantallaPartes() {
  * Los viajes de cantera de ese día en esa obra, **de solo lectura** (RF-26, RF-27).
  *
  * No hay botones: los viajes se registran y se anulan en su módulo, no aquí. Con
- * el parte abierto se ven los vigentes; cerrado, los que quedaron fijados al cerrar
+ * la bitácora abierta se ven los vigentes; cerrada, los que quedaron fijados al cerrar
  * (RF-29), aunque después se hayan registrado o anulado otros de ese día (RF-30).
  * Sin viajes, la sección lo dice en vez de quedar en blanco (RF-31, RF-37).
  */
@@ -695,7 +754,7 @@ function SeccionHistorico({
    * Una bitácora abierta no es evidencia: es un borrador que alguien empezó y
    * nunca terminó. Al mirar la base al planificar esta spec había seis, las seis
    * abiertas y todas de la misma semana en que se probaba este formato — restos
-   * de pruebas, no trabajo registrado. Arrastrarlas al pie del parte nuevo todos
+   * de pruebas, no trabajo registrado. Arrastrarlas al pie de la bitácora nueva todos
    * los días no conservaba nada y ensuciaba el documento.
    *
    * Lo que RF-36 de la spec 004 prometía sigue en pie: una bitácora cerrada de
@@ -805,7 +864,7 @@ function SeccionMaquinaria({
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
-  // El estado arranca del parte y a partir de ahí manda lo que se teclea. No se
+  // El estado arranca de la bitácora y a partir de ahí manda lo que se teclea. No se
   // vuelve a sincronizar con un efecto a propósito: refrescar desde el servidor
   // mientras alguien escribe le borraría lo que está escribiendo. Cambiar de día
   // monta el componente de nuevo, porque lleva `key` con el id del parte.
@@ -918,7 +977,7 @@ function SeccionMaquinaria({
                   }
                 />
                 {/* Va en su propio renglón de la fila, debajo de las lecturas, y
-                    se sigue viendo cuando el parte ya está cerrado (RF-46). */}
+                    se sigue viendo cuando la bitácora ya está cerrada (RF-46). */}
                 <Campo
                   etiqueta="Observaciones del día"
                   valor={fila.observaciones}
@@ -1044,7 +1103,7 @@ function SeccionPersonal({
       }
     >
       {/* Contra qué se cuentan las extras de ese día (spec 016, RF-10). El horario lo
-          decidió el servidor: el vigente de la obra si el parte sigue abierto, el
+          decidió el servidor: el vigente de la obra si la bitácora sigue abierta, el
           guardado al cerrarlo si no. */}
       <Text style={estilos.apoyo}>
         {`Horario de este día: ${describirHorarioDelDia(parte.horario, parte.fecha)}`}
@@ -1115,7 +1174,7 @@ function SeccionPersonal({
                 ) : null}
                 {/* A diferencia de la de la máquina, no hace falta para cerrar
                     (RF-27): casi siempre no hay nada que explicar. Se sigue
-                    viendo con el parte cerrado o anulado (RF-28). */}
+                    viendo con la bitácora cerrada o anulada (RF-28). */}
                 <Campo
                   etiqueta="Observaciones"
                   valor={fila.observaciones}
@@ -1339,7 +1398,7 @@ function SeccionActividades({
             const fotoDeLaFila = (
               // Toda fila tiene id desde que se añade, así que la foto se sube sin
               // guardar antes (RF-47). Si la actividad se quita sin guardar, su
-              // foto no es de ninguna actividad del parte y no se pinta (RF-48).
+              // foto no es de ninguna actividad de la bitácora y no se pinta (RF-48).
               <SubirFoto
                 titulo="Foto de la actividad"
                 rutaDeSubida={`/api/panel/partes/${parte.id}/foto?item=${fila.id}`}
@@ -1367,7 +1426,7 @@ function SeccionActividades({
             ) : null;
 
             // Guardada con la lista anterior: se ve como se guardó y no se toca
-            // (RF-71). Quitarla sí, como cualquier fila de un parte abierto.
+            // (RF-71). Quitarla sí, como cualquier fila de una bitácora abierta.
             if (fila.heredada) {
               const h = fila.heredada;
               const numero = (v: number | null) => (v === null ? "" : String(v));
@@ -2148,7 +2207,7 @@ function SeccionFotoDelDia({
    *
    * Antes se pedían aquí dentro, y entonces el índice no tenía forma de saber
    * cuántas hay para encender su entrada. Se descartó añadir el conteo a la
-   * respuesta del parte: habría que tocar contrato, ruta y serialización para
+   * respuesta de la bitácora: habría que tocar contrato, ruta y serialización para
    * un dato de presentación que la misma pantalla ya está pidiendo.
    */
   fotosDelDia: string[];
@@ -2311,13 +2370,13 @@ function Cierre({
       {editable ? (
         <>
           <Aviso tono="info">
-            Al cerrar, el parte queda como registro definitivo y los horómetros
-            de las máquinas avanzan. Para corregirlo después habrá que anularlo
-            y abrir otro.
+            Al cerrar, la bitácora queda como registro definitivo y los horómetros
+            de las máquinas avanzan. Para corregirla después habrá que anularla
+            y abrir otra.
           </Aviso>
           <Acciones>
             <Boton
-              titulo="Cerrar el parte"
+              titulo="Cerrar la bitácora"
               onPress={cerrar}
               deshabilitado={ocupado}
             />
@@ -2333,7 +2392,7 @@ function Cierre({
               obligatorio
               valor={motivo}
               onChange={setMotivo}
-              ayuda="Queda guardado con su nombre. El parte anulado no se borra y el día vuelve a quedar libre."
+              ayuda="Queda guardado con su nombre. La bitácora anulada no se borra y el día vuelve a quedar libre."
               multilinea
             />
             <AccionesFormulario>
@@ -2355,7 +2414,7 @@ function Cierre({
         ) : (
           <Acciones>
             <Boton
-              titulo="Anular este parte"
+              titulo="Anular esta bitácora"
               tono="peligro"
               onPress={() => setAnulando(true)}
             />

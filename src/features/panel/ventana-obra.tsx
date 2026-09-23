@@ -19,7 +19,7 @@ import { useCallback, useState } from 'react';
 
 import type { HorarioDeObra, Tramo } from '@/shared/rules/horas';
 
-import { api, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -34,6 +34,7 @@ import type { ObraFila, ObraNueva, PersonaFila } from './contratos';
 import { EditorDeHorario, horarioValido } from './editor-horario';
 import { useListado } from './marco';
 import { ModulosDeLaObra, personasSinModulo } from './modulos-de-obra';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 function mismosTramos(a: Tramo[], b: Tramo[]): boolean {
   return a.length === b.length && a.every((t, i) => t.desde === b[i].desde && t.hasta === b[i].hasta);
@@ -47,12 +48,10 @@ export function VentanaCorregirObra({
   obra,
   onCerrar,
   onGuardado,
-  onFallo,
 }: {
   obra: ObraFila;
   onCerrar: () => void;
   onGuardado: (nombre: string) => void;
-  onFallo: (mensaje: string) => void;
 }) {
   const [nombre, setNombre] = useState(obra.nombre);
   const [municipio, setMunicipio] = useState(obra.municipio ?? '');
@@ -62,7 +61,10 @@ export function VentanaCorregirObra({
     almacen: obra.almacenActivo,
     cantera: obra.canteraActivo,
   });
-  const [guardando, setGuardando] = useState(false);
+  // El estado del intento —si corre y qué falló— sale del hook, que deja el
+  // motivo dentro de esta ventana (spec 015, RF-25) y no en el aviso de la
+  // página, que queda detrás del telón.
+  const accion = useAccionDeVentana();
 
   // Para decir a quién deja sin módulo antes de guardar (spec 017, RF-6). Si el
   // listado fallara, el aviso se omite: lo que decide es el servidor.
@@ -72,28 +74,22 @@ export function VentanaCorregirObra({
 
   async function guardar() {
     if (faltaNombre || !horarioValido(horario)) return;
-    setGuardando(true);
-    try {
-      const cambios: Partial<ObraNueva> = {};
-      if (nombre !== obra.nombre) cambios.nombre = nombre;
-      if (municipio !== (obra.municipio ?? '')) cambios.municipio = municipio;
-      if (activa !== obra.activa) cambios.activa = activa;
-      if (modulos.almacen !== obra.almacenActivo) cambios.almacenActivo = modulos.almacen;
-      if (modulos.cantera !== obra.canteraActivo) cambios.canteraActivo = modulos.cantera;
-      if (!mismoHorario(horario, obra.horario)) cambios.horario = horario;
 
-      if (Object.keys(cambios).length === 0) {
-        onCerrar();
-        return;
-      }
+    const cambios: Partial<ObraNueva> = {};
+    if (nombre !== obra.nombre) cambios.nombre = nombre;
+    if (municipio !== (obra.municipio ?? '')) cambios.municipio = municipio;
+    if (activa !== obra.activa) cambios.activa = activa;
+    if (modulos.almacen !== obra.almacenActivo) cambios.almacenActivo = modulos.almacen;
+    if (modulos.cantera !== obra.canteraActivo) cambios.canteraActivo = modulos.cantera;
+    if (!mismoHorario(horario, obra.horario)) cambios.horario = horario;
 
-      await api.obras.editar(obra.id, cambios);
-      onGuardado(nombre);
-    } catch (fallo) {
-      onFallo(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
+    if (Object.keys(cambios).length === 0) {
+      onCerrar();
+      return;
     }
+
+    const bien = await accion.ejecutar(() => api.obras.editar(obra.id, cambios));
+    if (bien) onGuardado(nombre);
   }
 
   return (
@@ -102,6 +98,7 @@ export function VentanaCorregirObra({
         El código de la obra no se corrige: es con lo que se la reconoce en los preoperacionales
         y las bitácoras que ya cuelgan de ella.
       </Aviso>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
           etiqueta="Nombre"
@@ -132,9 +129,9 @@ export function VentanaCorregirObra({
         <AccionesFormulario>
           <Acciones>
             <Boton
-              titulo={guardando ? 'Guardando…' : 'Guardar cambios'}
+              titulo={accion.ejecutando ? 'Guardando…' : 'Guardar cambios'}
               onPress={guardar}
-              deshabilitado={guardando || faltaNombre || !horarioValido(horario)}
+              deshabilitado={accion.ejecutando || faltaNombre || !horarioValido(horario)}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

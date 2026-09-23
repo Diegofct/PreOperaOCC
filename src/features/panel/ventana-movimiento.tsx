@@ -34,7 +34,7 @@ import {
 } from '@/shared/rules/almacen';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
-import { api, ErrorApi, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -45,19 +45,18 @@ import {
   Modal,
 } from './componentes';
 import type { MaterialDeAlmacenFila } from './contratos';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 export function VentanaMovimiento({
   material,
   tipo,
   onCerrar,
   onGuardado,
-  onFallo,
 }: {
   material: MaterialDeAlmacenFila;
   tipo: TipoMovimiento;
   onCerrar: () => void;
   onGuardado: (mensaje: string) => void;
-  onFallo: (mensaje: string) => void;
 }) {
   const hoy = fechaDeJornada();
   const [fecha, setFecha] = useState(hoy);
@@ -66,9 +65,13 @@ export function VentanaMovimiento({
   const [observacion, setObservacion] = useState('');
   const [responsable, setResponsable] = useState('');
   const [intentado, setIntentado] = useState(false);
-  const [guardando, setGuardando] = useState(false);
-  /** Lo que el servidor diga de un campo, bajo ese campo (spec 007, RF-18). */
-  const [delServidor, setDelServidor] = useState<Record<string, string>>({});
+  /*
+   * Lo que el servidor diga de un campo, bajo ese campo, y lo demás arriba de la
+   * ventana (spec 015, RF-25 y RF-27). Antes se elegían a mano los cuatro campos
+   * que se quedaban aquí y cualquier otro se iba al aviso de la página, detrás
+   * del telón; ahora el hook los trata todos igual.
+   */
+  const accion = useAccionDeVentana();
 
   const centesimas = cantidad.trim() === '' ? null : aCentesimas(cantidad);
   const faltas = validarMovimiento(
@@ -76,7 +79,8 @@ export function VentanaMovimiento({
     hoy,
   );
   const faltaDe = (campo: string) =>
-    delServidor[campo] ?? (intentado ? faltas.find((f) => f.campo === campo)?.mensaje : undefined);
+    accion.campoConError(campo) ??
+    (intentado ? faltas.find((f) => f.campo === campo)?.mensaje : undefined);
 
   // RF-15 en vivo: solo con una cantidad legible y mayor que cero, que es cuando
   // compararla con el stock dice algo.
@@ -90,33 +94,24 @@ export function VentanaMovimiento({
 
   async function guardar() {
     setIntentado(true);
-    setDelServidor({});
+    accion.limpiar();
     if (faltas.length > 0 || noAlcanza) return;
 
-    setGuardando(true);
-    try {
-      await api.almacen.movimientos.registrar(
+    const bien = await accion.ejecutar(() =>
+      api.almacen.movimientos.registrar(
         esSalida
           ? { tipo: 'salida', materialId: material.id, fecha, cantidad, paraQue, responsable }
           : { tipo: 'ingreso', materialId: material.id, fecha, cantidad, observacion, responsable },
-      );
-      const cuanto = formatearCantidad(centesimas ?? 0, material.unidad);
-      onGuardado(
-        esSalida
-          ? `Salida de ${cuanto} de ${material.nombre} registrada.`
-          : `Ingreso de ${cuanto} de ${material.nombre} registrado.`,
-      );
-    } catch (fallo) {
-      // Stock que ya no alcanza, fecha, «para qué» o quién: se quedan en la ventana,
-      // bajo su campo. Lo demás sube al aviso de la página.
-      const campos = fallo instanceof ErrorApi ? fallo.campos : undefined;
-      if (campos && (campos.cantidad || campos.fecha || campos.paraQue || campos.responsable)) {
-        setDelServidor(campos);
-      }
-      else onFallo(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
-    }
+      ),
+    );
+    if (!bien) return;
+
+    const cuanto = formatearCantidad(centesimas ?? 0, material.unidad);
+    onGuardado(
+      esSalida
+        ? `Salida de ${cuanto} de ${material.nombre} registrada.`
+        : `Ingreso de ${cuanto} de ${material.nombre} registrado.`,
+    );
   }
 
   return (
@@ -130,6 +125,7 @@ export function VentanaMovimiento({
           ? ' La salida queda a su nombre, con la fecha y para qué se usará.'
           : ' El ingreso queda a su nombre y suma al stock.'}
       </Aviso>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
           etiqueta="Fecha"
@@ -180,10 +176,14 @@ export function VentanaMovimiento({
           <Acciones>
             <Boton
               titulo={
-                guardando ? 'Guardando…' : esSalida ? 'Registrar salida' : 'Registrar ingreso'
+                accion.ejecutando
+                  ? 'Guardando…'
+                  : esSalida
+                    ? 'Registrar salida'
+                    : 'Registrar ingreso'
               }
               onPress={guardar}
-              deshabilitado={guardando || noAlcanza !== null}
+              deshabilitado={accion.ejecutando || noAlcanza !== null}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

@@ -163,10 +163,14 @@ export default function PantallaObras() {
           aviso={porDarDeBaja.nombre + ' deja de aparecer y de poder recibir registros nuevos. No se borra: los preoperacionales, las bitácoras y los partes de esa obra siguen colgando de ella.'}
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `listado.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25). Lo que lanza lo recoge
+            // la `Confirmacion`; aquí solo queda qué hacer al salir bien.
             const obra = porDarDeBaja;
+            await api.obras.darDeBaja(obra.id);
             setPorDarDeBaja(null);
-            const listo = await listado.ejecutar(() => api.obras.darDeBaja(obra.id));
-            if (listo) setHecho(obra.nombre + ' quedó dada de baja.');
+            listado.recargar();
+            setHecho(obra.nombre + ' quedó dada de baja.');
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -181,7 +185,6 @@ export default function PantallaObras() {
             setHecho(nombreObra + ' quedó corregida.');
             listado.recargar();
           }}
-          onFallo={listado.setError}
         />
       ) : null}
 

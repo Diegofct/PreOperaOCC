@@ -17,7 +17,7 @@
  */
 import { useCallback, useState } from 'react';
 
-import { api, ErrorApi, mensajeDe } from './cliente-api';
+import { api } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -42,6 +42,7 @@ import {
   type TipoSitio,
 } from './contratos';
 import { useListado } from './marco';
+import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 const OPCIONES_DE_TIPO = TIPOS_SITIO.map((t) => ({ valor: t, etiqueta: ETIQUETA_TIPO_SITIO[t] }));
 
@@ -170,10 +171,13 @@ function SeccionSitios({
           aviso={`${porDarDeBaja.nombre} deja de ofrecerse como origen o destino de viajes nuevos. No se borra: los viajes que ya lo usaron lo siguen nombrando.`}
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `sitios.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25).
             const sitio = porDarDeBaja;
+            await api.cantera.sitios.darDeBaja(sitio.id);
             setPorDarDeBaja(null);
-            const listo = await sitios.ejecutar(() => api.cantera.sitios.darDeBaja(sitio.id));
-            if (listo) alHacer(`${sitio.nombre} quedó dado de baja.`);
+            sitios.recargar();
+            alHacer(`${sitio.nombre} quedó dado de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -192,7 +196,6 @@ function SeccionSitios({
             sitios.recargar();
             alHacer(`${nuevo} quedó corregido.`);
           }}
-          onFallo={sitios.setError}
         />
       ) : null}
 
@@ -284,12 +287,13 @@ function SeccionMateriales({
           aviso={`${porDarDeBaja.nombre} deja de ofrecerse para viajes nuevos. No se borra: los viajes que ya lo llevaron lo siguen nombrando.`}
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `materiales.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25).
             const material = porDarDeBaja;
+            await api.cantera.materiales.darDeBaja(material.id);
             setPorDarDeBaja(null);
-            const listo = await materiales.ejecutar(() =>
-              api.cantera.materiales.darDeBaja(material.id),
-            );
-            if (listo) alHacer(`${material.nombre} quedó dado de baja.`);
+            materiales.recargar();
+            alHacer(`${material.nombre} quedó dado de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -309,7 +313,6 @@ function SeccionMateriales({
             materiales.recargar();
             alHacer(`${nuevo} quedó corregido.`);
           }}
-          onFallo={materiales.setError}
         />
       ) : null}
 
@@ -348,7 +351,6 @@ function VentanaCorregir({
   onCerrar,
   onGuardar,
   onGuardado,
-  onFallo,
 }: {
   titulo: string;
   nombreActual: string;
@@ -358,12 +360,16 @@ function VentanaCorregir({
   onCerrar: () => void;
   onGuardar: (cambios: { nombre?: string; tipo?: TipoSitio }) => Promise<unknown>;
   onGuardado: (nombre: string) => void;
-  onFallo: (mensaje: string) => void;
 }) {
   const [nombre, setNombre] = useState(nombreActual);
   const [tipo, setTipo] = useState<TipoSitio | undefined>(tipoActual);
-  const [guardando, setGuardando] = useState(false);
-  const [errorDelNombre, setErrorDelNombre] = useState<string | null>(null);
+  /*
+   * El nombre repetido se queda en la ventana, bajo su campo, y lo demás arriba
+   * de ella (spec 015, RF-25 y RF-27): el aviso de la página queda detrás del
+   * telón. Antes se leía `ErrorApi.campos.nombre` a mano y cualquier otro campo
+   * se perdía en la página; el hook los reparte todos.
+   */
+  const accion = useAccionDeVentana();
   const faltaNombre = nombre.trim().length === 0;
 
   async function guardar() {
@@ -376,31 +382,20 @@ function VentanaCorregir({
       return;
     }
 
-    setGuardando(true);
-    setErrorDelNombre(null);
-    try {
-      await onGuardar(cambios);
-      onGuardado(nombre.trim());
-    } catch (fallo) {
-      // El nombre repetido se queda en la ventana, bajo su campo: el aviso de la
-      // página queda detrás del telón.
-      const delNombre = fallo instanceof ErrorApi ? fallo.campos?.nombre : undefined;
-      if (delNombre) setErrorDelNombre(delNombre);
-      else onFallo(mensajeDe(fallo));
-    } finally {
-      setGuardando(false);
-    }
+    const bien = await accion.ejecutar(() => onGuardar(cambios));
+    if (bien) onGuardado(nombre.trim());
   }
 
   return (
     <Modal titulo={titulo} onCerrar={onCerrar}>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
           etiqueta={etiquetaNombre}
           obligatorio
           valor={nombre}
           onChange={setNombre}
-          error={faltaNombre ? 'El nombre no puede quedar vacío.' : (errorDelNombre ?? undefined)}
+          error={faltaNombre ? 'El nombre no puede quedar vacío.' : accion.campoConError('nombre')}
           ancho={280}
         />
         {tipoActual ? (
@@ -416,9 +411,9 @@ function VentanaCorregir({
         <AccionesFormulario>
           <Acciones>
             <Boton
-              titulo={guardando ? 'Guardando…' : 'Guardar cambios'}
+              titulo={accion.ejecutando ? 'Guardando…' : 'Guardar cambios'}
               onPress={guardar}
-              deshabilitado={guardando || faltaNombre}
+              deshabilitado={accion.ejecutando || faltaNombre}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

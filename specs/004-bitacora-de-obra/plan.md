@@ -558,3 +558,150 @@ anulado):
   ya parte en renglones; la observación sigue en su propio renglón, como hoy.
 - **Revertir la T31 a medias.** Si cambia la etiqueta pero no las pruebas, `verificar` falla,
   que es lo que se quiere: el caso invertido es la comprobación.
+
+## Cambio del 2026-09-23 — se llama «bitácora», y gerencia ve las de todas las obras
+
+> Todo lo de arriba es el plan de la spec y de sus cambios anteriores, y **no cambia**.
+> Este bloque cubre RF-90 a RF-96.
+
+### Qué se descubrió al leer el código
+
+Tres cosas que deciden la forma del trabajo:
+
+1. **El menú ya dice «Bitácoras»** (`src/shared/rules/permisos.ts:318`). De ahí venía la
+   incoherencia: el menú con un nombre y la pantalla con otro. **No se toca.**
+2. **El servidor ya manda lo que hace falta para RF-92.** `GET /api/panel/partes?fecha=`
+   devuelve **todas** las bitácoras de ese día dentro del alcance de la sesión, ordenadas por
+   nombre de obra (`partes+api.ts:71-79`). No hay que tocar el endpoint: la pantalla las recibe
+   y las tira en una sola línea, `pantalla-partes.tsx:265`.
+3. **Cambiar el texto de una regla arrastra su prueba.** `src/shared/rules/parte.ts:659` dice
+   «No se puede cerrar el parte todavía:» y `scripts/verificar-reglas.ts:1454` lo comprueba
+   **literal**. Se cambian los dos en la misma tarea (constitución §5).
+
+### Módulos y archivos
+
+| Archivo | Qué cambia | RF |
+| --- | --- | --- |
+| `src/features/panel/pantalla-partes.tsx` | Los textos visibles: título, botón de abrir, avisos de cierre y anulación. Y el **selector de obra**, que hoy solo existe cuando no hay ninguna bitácora ese día. | RF-90, RF-92 a RF-96 |
+| `src/features/panel/pantalla-inicio.tsx` | «Parte del día» → «Bitácora del día»; «Llenar el parte de hoy» → «Llenar la bitácora de hoy». | RF-90 |
+| `src/features/panel/secciones-con-indice.tsx` | Los textos del índice que nombran el documento. | RF-90 |
+| `src/shared/rules/parte.ts` | Solo el texto de `bloqueosDelCierre`. **La lógica no se toca.** | RF-90 |
+| `scripts/verificar-reglas.ts` | El caso de `bloqueosDelCierre`, que compara el texto literal. Va en la **misma** tarea. | RF-90 |
+| `src/app/api/panel/partes+api.ts` y `partes/[id]*` | Los **textos** de 15 mensajes de rechazo. Ni rutas, ni forma, ni códigos. | RF-90 |
+| `src/features/panel/pantalla-partes.tsx` (histórico) | Donde se nombran las bitácoras del formato viejo, pasan a «bitácoras por máquina». | RF-91 |
+
+**Lo que NO se toca, y por qué.** Los identificadores del código —`parte`, `partes`,
+`ParteFila`, `api.partes`, `partesDeObra`, `pantalla-partes.tsx`, la ruta `/api/panel/partes`—
+se quedan como están. La spec lo puso en «Fuera de alcance»: renombrarlos es un diff enorme que
+no cambia nada de lo que ve OCC, y la tabla tiene filas escritas apuntándole. **La regla
+práctica de este cambio: si lo lee una persona, cambia; si lo lee el compilador, no.**
+
+### Modelo de datos
+
+**Sin cambios de esquema.** Ni local, ni servidor, ni migraciones. `partes_de_obra` se queda
+con su nombre.
+
+### Algoritmo / reglas
+
+**No hay regla de negocio nueva.** Lo único con forma de algoritmo es cuál bitácora se enseña,
+que hoy es una línea y pasa a ser una elección:
+
+1. El día trae `partes`, ya ordenadas por nombre de obra (lo hace el servidor).
+2. **Gerencia** elige obra en un selector que lista **todas** sus obras, cada una con lo que
+   tiene ese día: «Cerrada», «Abierta», «Anulada» o nada (RF-92, RF-95).
+3. Elegida una obra:
+   - si tiene bitácora viva, se muestra;
+   - si solo tiene anuladas, se muestra la última, marcada «Anulado» (RF-96);
+   - si no tiene ninguna, sale el botón de abrirla (RF-94, RF-95).
+4. **Dentro de una misma obra**, si hay una anulada y una viva, se sigue mostrando la viva: es
+   el modelo de RF-7 —se anula y se abre otra— y no cambia.
+5. **El residente no ve selector**: su obra es la de su sesión y solo tiene una (RF-35).
+6. Sin obra elegida todavía, se preselecciona la primera que tenga bitácora ese día; si ninguna
+   la tiene, ninguna, y sale el selector para abrir.
+7. La obra elegida **se conserva al cambiar de día** si esa obra existe, para poder recorrer
+   los días de una misma obra hacia atrás sin volver a elegirla en cada uno.
+
+### Decisiones técnicas
+
+- **Un solo selector de obra, que sirve para ver y para abrir** → se descartó poner dos
+  controles (uno para elegir cuál se mira y otro para elegir cuál se abre) porque son la misma
+  pregunta —«¿de qué obra?»— y dos controles obligan a entender la diferencia antes de usarlos.
+  Con uno, elegir una obra sin bitácora enseña el botón de abrirla, que es lo que se quería.
+- **El estado es el `obraId` elegido, no el `parteId`** → se descartó guardar el id de la
+  bitácora porque al cambiar de día ese id ya no existe y habría que recalcularlo; con el
+  `obraId`, cambiar de día mantiene la obra y busca la bitácora que le toque (paso 7).
+- **El selector dice qué tiene cada obra ese día** («Cerrada», «Abierta», «Anulada») → se
+  descartó una lista pelada de obras porque obliga a entrar en cada una para saber cuáles
+  faltan por llenar, que es justo lo que gerencia quiere ver de un vistazo.
+- **No se toca el endpoint** → se descartó añadirle un `obraId` al `GET` para pedir una sola.
+  Ya devuelve todas las del alcance y son dos o tres filas; filtrar en el servidor añadiría un
+  viaje por cada cambio de obra para ahorrar unos bytes.
+- **Los identificadores se quedan en «parte»** → se descartó renombrarlos a la vez. Sería un
+  diff de cientos de líneas en el archivo más grande del panel (2397), con riesgo real de
+  romper algo, para no cambiar nada de lo que ve OCC. Si algún día se hace, es su propia tarea
+  y no mezclada con un cambio de comportamiento.
+- **El texto de la regla se cambia con su prueba en la misma tarea** → se descartó separarlas:
+  `verificar-reglas.ts` compara el texto literal, así que separarlas deja el guion en rojo, y
+  la constitución §5 no admite una tarea que no cierre en verde.
+
+### Impacto en la sincronización
+
+**Sin impacto.** Ni pull, ni `outbox`, ni `seq`, ni idempotencia, ni reevaluación. El módulo es
+solo del panel; el celular no lleva bitácoras desde la spec 004.
+
+### Contrato de API
+
+**Sin cambios de contrato.** Ninguna ruta se añade, se quita ni cambia de forma; las guardias y
+el filtro por obra siguen igual. Lo único que cambia son los **textos** de 15 mensajes de
+rechazo, que el panel muestra tal cual:
+
+- `partes+api.ts`: «No se puede abrir **la bitácora** de un día que no ha llegado.», «Falta
+  decir de qué obra es **la bitácora**.», «No se pudo abrir **la bitácora**.»
+- `partes/[id]/anular+api.ts`: «No existe **esa bitácora**.» (×2) y «**Esa bitácora** ya estaba
+  anulada.»
+- `partes/[id]+api.ts`: «Una máquina no puede estar dos veces en **la misma bitácora**.», «Ese
+  equipo no es de la obra de **esta bitácora**.», «Una persona no puede estar dos veces en **la
+  misma bitácora**.», y «No existe **esa bitácora**.» (×2)
+- `partes/[id]/cerrar+api.ts`, `cantera+api.ts` y `foto+api.ts`: «No existe **esa bitácora**.»
+
+Recordar la trampa del CLI: **el servidor de desarrollo no recompila `+api.ts` en caliente**.
+Tras tocarlos hay que reiniciar `npm run web` o se sigue sirviendo el texto viejo.
+
+### Estrategia de verificación
+
+- **`scripts/verificar-reglas.ts`**: no se añaden casos —no hay regla nueva— pero **se corrige
+  el existente** de `bloqueosDelCierre` (línea 1454), que compara el texto literal. Es la única
+  prueba automática que este cambio toca.
+- **Comprobación de que no queda ni un «parte» a la vista**, que es lo que de verdad cierra
+  RF-90: un `grep` sobre los textos visibles, no sobre el código. Se corre al final, sobre
+  `src/features/panel/`, `src/app/api/panel/partes*` y `src/shared/rules/parte.ts`, buscando
+  «el parte», «un parte», «ese parte», «este parte», «del parte» y «Parte d». Debe devolver
+  solo comentarios y nombres de variables.
+- **Demo manual**, con dos obras y el mismo día:
+  1. Con una sola obra con bitácora: se ve, y la pantalla dice de qué obra es (RF-93).
+  2. Abrir la de la segunda obra **el mismo día**: se puede, y el selector pasa a ofrecer las
+     dos (RF-92, RF-95). *Hoy esto es imposible.*
+  3. Cambiar entre las dos sin salir del día (RF-92).
+  4. Anular una y comprobar que la otra obra sigue viéndose, y que la anulada sigue accesible
+     desde el selector marcada «Anulado» (RF-96).
+  5. Retroceder un día con una obra elegida: se mantiene la obra (paso 7 del algoritmo).
+  6. Entrar como **residente**: sin selector, solo su obra, todo en «bitácora» (RF-35, RF-90).
+  7. Provocar un rechazo del servidor y leer que dice «bitácora» (RF-90).
+- **Comprobaciones extra**: se tocan rutas `+api.ts` → **reiniciar `npm run web`** antes de la
+  demo. No se leen secretos nuevos ni se añaden pantallas al operador.
+
+### Riesgos
+
+- **Que el cambio de texto se coma una palabra que era identificador** y rompa la compilación o,
+  peor, una comparación. *Se detecta:* `npm run typecheck` para lo primero; `npm run verificar`
+  para lo segundo, que es exactamente lo que pasaría con `bloqueosDelCierre`. *Se revierte:*
+  archivo por archivo.
+- **Que quede un «parte» suelto en una pantalla poco visitada.** El compilador no lo ve. *Se
+  detecta:* el `grep` de textos visibles de arriba, que por eso es un paso de la validación y no
+  una comprobación al ojo.
+- **Que preseleccionar obra cambie lo que ve el residente.** Es quien más usa el módulo y no
+  debería notar nada. *Se detecta:* paso 6 de la demo. *Se mitiga:* el selector solo se pinta
+  para quien ve todas las obras, con la misma condición `esGerencia` que ya existe.
+- **Que al cambiar de día con una obra elegida se enseñe la bitácora de otra obra.** Sería peor
+  que el defecto actual: se estaría mirando un día de otra obra sin notarlo. *Se detecta:* paso
+  5 de la demo. *Se mitiga:* RF-93 obliga a decir siempre de qué obra es, incluso con una sola.

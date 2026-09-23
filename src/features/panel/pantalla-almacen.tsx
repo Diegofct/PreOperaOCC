@@ -359,12 +359,13 @@ export default function PantallaAlmacen() {
           aviso={`${porDarDeBaja.nombre} deja de aparecer en el almacén. No se borra: su historial de ingresos y salidas se conserva, y si se vuelve a comprar se puede registrar de nuevo con el mismo nombre.`}
           confirmar="Dar de baja"
           onConfirmar={async () => {
+            // Sin `materiales.ejecutar`: se traga el error y la ventana nunca se
+            // enteraría de que falló (spec 015, RF-25).
             const material = porDarDeBaja;
+            await api.almacen.materiales.darDeBaja(material.id);
             setPorDarDeBaja(null);
-            const listo = await materiales.ejecutar(() =>
-              api.almacen.materiales.darDeBaja(material.id),
-            );
-            if (listo) setHecho(`${material.nombre} quedó dado de baja.`);
+            materiales.recargar();
+            setHecho(`${material.nombre} quedó dado de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -381,7 +382,6 @@ export default function PantallaAlmacen() {
             // El stock de la tabla sale del servidor: se vuelve a pedir, no se suma aquí.
             materiales.recargar();
           }}
-          onFallo={materiales.setError}
         />
       ) : null}
 
@@ -394,7 +394,6 @@ export default function PantallaAlmacen() {
             setHecho(`${corregido} quedó corregido.`);
             materiales.recargar();
           }}
-          onFallo={materiales.setError}
         />
       ) : null}
 

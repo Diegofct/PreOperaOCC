@@ -1,10 +1,10 @@
 /**
- * Reglas del parte diario de obra. Funciones puras, sin I/O.
+ * Reglas de la bitácora diaria de obra. Funciones puras, sin I/O.
  *
  * Dos preguntas que hasta ahora nadie hacía en voz alta, y que la spec 006
  * obliga a responder en dos sitios distintos a la vez:
  *
- *  1. **¿Qué secciones tiene este parte y cuáles están llenas?** Lo necesita el
+ *  1. **¿Qué secciones tiene esta bitácora y cuáles están llenas?** Lo necesita el
  *     índice lateral, que es lo único que le dice al residente por dónde va en
  *     un documento de nueve partes.
  *  2. **¿Qué impide cerrarlo?** Lo necesitaban ya el servidor —para rechazar el
@@ -19,12 +19,12 @@
  * le diría que no — sin que ninguna de las dos estuviera «rota». Aquí hay una
  * sola, y las dos superficies la llaman.
  *
- * ── Por qué las entradas no son los tipos del parte ──
+ * ── Por qué las entradas no son los tipos de la bitácora ──
  *
  * `MaquinaDelParte` y compañía viven en `src/features/bitacoras/tipos.ts`, y
  * `shared/rules` no importa de `features/` —la misma disciplina que ya sigue
  * `fusion.ts`—. Se declaran aquí las formas mínimas que hacen falta; TypeScript
- * es estructural, así que los tipos del parte encajan sin convertir nada. De
+ * es estructural, así que los tipos de la bitácora encajan sin convertir nada. De
  * paso queda escrito qué campos participan de verdad en cada regla.
  */
 import { MENSAJES_DE_VIAJE, validarAbscisa } from './cantera';
@@ -205,7 +205,7 @@ export function faltasDelEnsayo(ensayo: EnsayoEvaluable): FaltaDeEnsayo[] {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Qué secciones tiene el parte y cuáles están llenas                        */
+/* Qué secciones tiene la bitácora y cuáles están llenas                    */
 /* ------------------------------------------------------------------------ */
 
 /**
@@ -250,7 +250,7 @@ export interface SeccionDelParte {
 }
 
 /**
- * Lo que hace falta saber del parte para armar el índice.
+ * Lo que hace falta saber de la bitácora para armar el índice.
  *
  * Son conteos y no las listas enteras a propósito: el índice no necesita leer
  * ninguna fila, solo saber cuántas hay, y pedir menos es lo que garantiza que
@@ -306,7 +306,7 @@ export const IDS_DE_SECCION = [
   'historico',
 ] as const;
 
-/** El id de una sección del parte. Cerrado: no hay más que estas diez. */
+/** El id de una sección de la bitácora. Cerrado: no hay más que estas diez. */
 export type IdDeSeccion = (typeof IDS_DE_SECCION)[number];
 
 function porCuantos(id: string, titulo: string, cuantos: number): SeccionDelParte {
@@ -336,7 +336,7 @@ function seccionDeCantera(cuantos: number | null | undefined): SeccionDelParte[]
 }
 
 /**
- * Las secciones del parte, **en el orden en que se pintan**.
+ * Las secciones de la bitácora, **en el orden en que se pintan**.
  *
  * El orden es dato de la regla y no del JSX, igual que `modulosVisibles` decide
  * el orden de la barra de navegación. Si lo decidiera la pantalla, el índice y
@@ -347,7 +347,7 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
   /**
    * En un día sin trabajo, lo que no se exige y está vacío «no aplica»: decir
    * «sin registrar» invitaría a llenar la maquinaria de un domingo. Si tiene
-   * algo, se enseña lo que tiene — el parte no esconde datos por una marca, y es
+   * algo, se enseña lo que tiene — la bitácora no esconde datos por una marca, y es
    * el cierre quien rechaza la contradicción (004/RF-55).
    */
   const exigible = (id: string, titulo: string, cuantos: number): SeccionDelParte =>
@@ -380,7 +380,7 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
     {
       id: 'cierre',
       titulo: 'Cerrar la jornada',
-      // Anulado cuenta como resuelto: un parte anulado ya no se llena, y decir
+      // Anulado cuenta como resuelto: una bitácora anulada ya no se llena, y decir
       // que le falta cerrarse sería pedir algo que nadie puede hacer.
       estado: conteos.cerrado || conteos.anulado ? 'lleno' : 'vacio',
       cuantos: null,
@@ -399,7 +399,7 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Qué impide cerrar el parte                                                */
+/* Qué impide cerrar la bitácora                                            */
 /* ------------------------------------------------------------------------ */
 
 /** Lo que se mira de una máquina para dejar cerrar. */
@@ -442,18 +442,18 @@ export interface ParteEvaluable {
 }
 
 /**
- * Las fotografías del parte, ya contadas por quien pregunta.
+ * Las fotografías de la bitácora, ya contadas por quien pregunta.
  *
- * Llegan aparte y contadas porque viven en otro sitio que el parte —el almacén
+ * Llegan aparte y contadas porque viven en otro sitio que la bitácora —el almacén
  * de imágenes y su tabla— y leerlas es I/O. La ruta de cierre las consulta y la
  * pantalla ya las tiene cargadas; la regla solo decide con lo que le dan.
  */
 export interface FotosDelParte {
-  /** Cuántas fotografías del día tiene el parte. */
+  /** Cuántas fotografías del día tiene la bitácora. */
   delDia: number;
   /**
    * El id de actividad al que apunta cada foto de actividad. Puede traer ids de
-   * actividades que ya no están en el parte: se subió la foto y la actividad se
+   * actividades que ya no están en la bitácora: se subió la foto y la actividad se
    * quitó sin guardar (004/RF-48). La regla los descarta al cruzarlos.
    */
   itemsConFoto: readonly string[];
@@ -488,7 +488,7 @@ export function validarDiaSinTrabajo(parte: {
   return null;
 }
 
-/** Lo que ya está guardado del parte, en lo que toca al día sin trabajo. */
+/** Lo que ya está guardado de la bitácora, en lo que toca al día sin trabajo. */
 export interface DiaGuardado {
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
@@ -511,13 +511,13 @@ export interface CambiosDelDia {
  *
  * El guardado es parcial: una petición puede traer solo la marca, o solo la
  * maquinaria. Así que no basta con validar lo que llega; hay que validar **cómo
- * queda el parte** mezclando lo que llega con lo guardado. Sin eso, marcar un
+ * queda la bitácora** mezclando lo que llega con lo guardado. Sin eso, marcar un
  * domingo que ya tiene una máquina pasaría porque la petición no trae máquinas,
  * y registrar una máquina en un día marcado pasaría porque la petición no trae la
- * marca — y el parte quedaría contradiciéndose (004/RF-55).
+ * marca — y la bitácora quedaría contradiciéndose (004/RF-55).
  *
  * Quitar la marca borra el motivo: un motivo sin marca haría creer a quien lea
- * el parte que ese día no se trabajó.
+ * la bitácora que ese día no se trabajó.
  */
 export function resolverDiaSinTrabajo(
   guardado: DiaGuardado,
@@ -566,7 +566,7 @@ function faltaLlenar(titulos: readonly string[]): string {
  * ── Qué exige el cierre (spec 004, cambio del 2026-09-14) ──
  *
  * Hasta entonces bastaba una máquina, una persona o una actividad. OCC pidió que
- * no se cierre un parte sin haberlo diligenciado entero, así que ahora hacen
+ * no se cierre una bitácora sin haberla diligenciado entera, así que ahora hacen
  * falta **las siete secciones** (RF-50), y además:
  *
  *  · cada máquina con sus dos lecturas —cada una contra el tope de su propio
@@ -588,7 +588,7 @@ function faltaLlenar(titulos: readonly string[]): string {
  * máquinas, personas y fotos, cada grupo en el orden en que está registrado.
  *
  * Los partes **ya cerrados** antes del cambio no se vuelven a evaluar (RF-56):
- * esta regla solo corre al cerrar, y un parte cerrado no se vuelve a cerrar.
+ * esta regla solo corre al cerrar, y una bitácora cerrada no se vuelve a cerrar.
  */
 export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): string[] {
   const bloqueos: string[] = [];
@@ -656,5 +656,5 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
  * veinte cosas que hacer, y esconder quince no las hace desaparecer.
  */
 export function mensajeDelRechazoDeCierre(bloqueos: readonly string[]): string {
-  return ['No se puede cerrar el parte todavía:', ...bloqueos.map((b) => `• ${b}`)].join('\n');
+  return ['No se puede cerrar la bitácora todavía:', ...bloqueos.map((b) => `• ${b}`)].join('\n');
 }

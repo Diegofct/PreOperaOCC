@@ -48,7 +48,7 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .where(eq(partesDeObra.id, id))
       .limit(1);
 
-    if (!parte) return noEncontrado('ese parte');
+    if (!parte) return noEncontrado('esa bitácora');
 
     // Las fotos viven en otra tabla, así que se leen aquí y la regla las recibe
     // ya contadas: sigue siendo pura. Sin `item` son del día; con él, de la
@@ -93,7 +93,7 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
       .returning({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn });
 
-    if (!fila) return noEncontrado('ese parte');
+    if (!fila) return noEncontrado('esa bitácora');
 
     // Un UPDATE por máquina, y cada uno con su propio `greatest`: el driver
     // habla por HTTP y no da transacciones interactivas, así que se escribe de

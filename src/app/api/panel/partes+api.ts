@@ -96,7 +96,7 @@ export async function POST(peticion: Request) {
     // Un parte de mañana no puede existir: nadie registra lo que todavía no ha
     // pasado, y un dedazo en la fecha bloquearía ese día cuando llegue.
     if (fecha > fechaDeJornada()) {
-      return errorDePeticion('No se puede abrir el parte de un día que no ha llegado.', 400);
+      return errorDePeticion('No se puede abrir la bitácora de un día que no ha llegado.', 400);
     }
 
     // El residente abre el de su obra y solo el de su obra. La gerencia tiene
@@ -108,7 +108,7 @@ export async function POST(peticion: Request) {
       : sesion.obraId;
 
     if (!obraId) {
-      return errorDePeticion('Falta decir de qué obra es el parte.', 400);
+      return errorDePeticion('Falta decir de qué obra es la bitácora.', 400);
     }
 
     const id = uuidv7();
@@ -141,6 +141,6 @@ export async function POST(peticion: Request) {
 
     return fila
       ? ok(conHorarioEfectivo(fila), fila.id === id ? 201 : 200)
-      : errorDePeticion('No se pudo abrir el parte.', 500);
+      : errorDePeticion('No se pudo abrir la bitácora.', 500);
   });
 }

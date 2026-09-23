@@ -93,7 +93,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       .where(eq(partesDeObra.id, id))
       .limit(1);
 
-    if (!parte || !alcanzaLaObra(sesion, parte.obraId)) return noEncontrado('ese parte');
+    if (!parte || !alcanzaLaObra(sesion, parte.obraId)) return noEncontrado('esa bitácora');
 
     const filas = await baseServidor()
       .select({
