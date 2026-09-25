@@ -19,6 +19,8 @@ import { z } from 'zod';
 import type { Periodo } from '@/shared/rules/jornada';
 import { IDS_UNIDAD, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { IDS_CARGO, type Cargo } from '@/shared/catalogos/cargos';
+import type { FranjaGranulometrica } from '@/shared/catalogos/franjas-granulometricas';
+import { SERIE_DE_TAMICES, type IdTamiz } from '@/shared/catalogos/tamices';
 import {
   aCentesimas,
   MENSAJES_DE_MOVIMIENTO,
@@ -38,6 +40,13 @@ import {
 } from '@/shared/catalogos/presupuesto';
 import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
 import type { ViajeDelParte } from '@/features/bitacoras/tipos';
+import type { EventoDelEnsayo, GranulometriaDelParte } from '@/features/laboratorio/tipos';
+import type {
+  EstadoVisibleEnsayo,
+  MasasDelEnsayo,
+  ResultadoGranulometria,
+  RetenidosDelEnsayo,
+} from '@/shared/rules/granulometria';
 import {
   HORARIO_PROPUESTO,
   minutosDeHora,
@@ -140,6 +149,8 @@ const camposDeObra = {
    */
   almacenActivo: z.boolean(),
   canteraActivo: z.boolean(),
+  /** Laboratorio (spec 018, RF-11). */
+  laboratorioActivo: z.boolean(),
 };
 
 export const obraNueva = z.object({
@@ -151,6 +162,9 @@ export const obraNueva = z.object({
   // Una obra nace con los dos módulos, como las que ya existían (RF-2, RF-3).
   almacenActivo: camposDeObra.almacenActivo.default(true),
   canteraActivo: camposDeObra.canteraActivo.default(true),
+  // Y con laboratorio propuesto encendido (spec 018, RF-13). Las obras que ya
+  // existían quedaron apagadas por el default de la base (RF-12), que es otra cosa.
+  laboratorioActivo: camposDeObra.laboratorioActivo.default(true),
 });
 
 /**
@@ -171,6 +185,7 @@ export interface ObraFila {
   horario: HorarioDeObra;
   almacenActivo: boolean;
   canteraActivo: boolean;
+  laboratorioActivo: boolean;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1358,3 +1373,168 @@ export interface ConsultaDeViajes {
 
 /** La sección «Control Cantera» de un parte, como la decide `canteraDelParte`. */
 export type CanteraDelParteFila = CanteraDelParte<ViajeDelParte>;
+
+/* ------------------------------------------------------------------------ */
+/* Laboratorio: granulometría (spec 018)                                     */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Una masa en gramos: con decimales, nunca negativa (RF-33).
+ *
+ * El tope no es de la norma: es para que un dedo que se va sobre el cero no guarde
+ * seis toneladas. La muestra más grande del formato ronda los siete kilos.
+ */
+const masa = z
+  .number({ error: 'La masa va en números.' })
+  .finite('La masa va en números.')
+  .min(0, 'Una masa no puede ser negativa.')
+  .max(1_000_000, 'Esa masa es demasiado grande: las masas van en gramos.');
+
+/** En un alta, lo que no viene es «sin digitar» (`null`): el borrador nace a medias (RF-31). */
+const masaNueva = masa.nullable().default(null);
+/** En una corrección, ausente es «no se toca» y `null` es «se borra» (ver `AGENTS.md`). */
+const masaParcial = masa.nullable().optional();
+
+/** Texto del encabezado en un alta: lo vacío o lo ausente es `null`. */
+const textoDelEnsayo = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullable()
+    .default(null)
+    .transform((v) => (v && v.length > 0 ? v : null));
+
+/**
+ * La masa retenida de cada tamiz, por su id. **Estricto**: un tamiz que no es de la
+ * serie se rechaza en vez de guardarse en silencio, donde nadie lo leería.
+ */
+const retenidos = (celda: typeof masaParcial) =>
+  z
+    .object(
+      Object.fromEntries(SERIE_DE_TAMICES.map((t) => [t.id, celda])) as Record<
+        IdTamiz,
+        typeof celda
+      >,
+    )
+    .strict();
+
+/**
+ * Registrar un ensayo (RF-23 a RF-32). Todo es opcional: el borrador puede nacer
+ * vacío y llenarse en varios días. Lo que exige el envío lo decide `validarEnsayo`.
+ *
+ * **No hay campo para porcentajes, tamaños ni veredicto**, y Zod descarta lo que no
+ * está en el esquema: si llegan, se ignoran (RF-42). Los calcula el servidor.
+ *
+ * `obraId` solo lo usa la gerencia; a los demás el servidor les pone la suya.
+ */
+export const ensayoNuevo = z.object({
+  obraId: idOpcional,
+  material: textoDelEnsayo(160),
+  fuente: textoDelEnsayo(160),
+  localizacion: textoDelEnsayo(200),
+  numeroInforme: textoDelEnsayo(40),
+  fechaRecepcion: fechaDeJornadaZod.nullable().default(null),
+  fechaEjecucion: fechaDeJornadaZod.nullable().default(null),
+  franjaId: textoDelEnsayo(64),
+  masas: z
+    .object({ humeda: masaNueva, seca: masaNueva, tara: masaNueva, lavada: masaNueva })
+    .default({ humeda: null, seca: null, tara: null, lavada: null }),
+  retenidos: retenidos(masaParcial).default({}),
+  observaciones: textoDelEnsayo(1000),
+});
+
+export type EnsayoNuevo = z.input<typeof ensayoNuevo>;
+
+/**
+ * Corregir un borrador o un devuelto (RF-22, RF-71). Escrito a mano, con los
+ * `*Parcial`, por lo mismo que `obraEditada`: con los defaults del alta, corregir las
+ * observaciones vaciaría las masas.
+ *
+ * Masas y retenidos llegan **solo los que cambian**, y el servidor los funde con los
+ * guardados. La obra no se cambia corrigiendo.
+ */
+export const ensayoEditado = z.object({
+  material: textoParcial(160),
+  fuente: textoParcial(160),
+  localizacion: textoParcial(200),
+  numeroInforme: textoParcial(40),
+  fechaRecepcion: fechaDeJornadaZod.nullable().optional(),
+  fechaEjecucion: fechaDeJornadaZod.nullable().optional(),
+  franjaId: idParcial,
+  masas: z
+    .object({ humeda: masaParcial, seca: masaParcial, tara: masaParcial, lavada: masaParcial })
+    .strict()
+    .optional(),
+  retenidos: retenidos(masaParcial).optional(),
+  observaciones: textoParcial(1000),
+});
+
+export type EnsayoEditado = z.input<typeof ensayoEditado>;
+
+/** Devolver un ensayo enviado: con el comentario de qué corregir (RF-78, RF-79). */
+export const devolucion = z.object({
+  comentario: textoObligatorio(500, 'el comentario de la devolución'),
+});
+
+/** Quién firmó un paso del ensayo, como se imprime en el informe. */
+export interface FirmaDelEnsayo {
+  nombre: string;
+  cargo: string | null;
+  /** ISO 8601. */
+  en: string;
+}
+
+/** Un renglón del listado de ensayos (RF-101). */
+export interface EnsayoFila {
+  id: string;
+  obraId: string;
+  obraCodigo: string;
+  numeroInforme: string | null;
+  material: string | null;
+  fuente: string | null;
+  franjaId: string | null;
+  /** El nombre de la franja copiada al ensayo, no el del catálogo de hoy. */
+  franja: string | null;
+  fechaRecepcion: string | null;
+  fechaEjecucion: string | null;
+  veredicto: 'cumple' | 'no_cumple' | null;
+  estado: EstadoVisibleEnsayo;
+  /** ISO 8601. */
+  registradoEn: string;
+}
+
+/** Un ensayo entero, para verlo, corregirlo o imprimirlo. */
+export interface EnsayoDetalle extends EnsayoFila {
+  obraNombre: string;
+  localizacion: string | null;
+  observaciones: string | null;
+  masas: MasasDelEnsayo;
+  retenidos: RetenidosDelEnsayo;
+  /** La franja entera con que se juzga (RF-21). */
+  franjaCopia: FranjaGranulometrica | null;
+  /** Lo calculado por el servidor al guardar (RF-42). */
+  resultado: ResultadoGranulometria | null;
+  revisado: FirmaDelEnsayo | null;
+  aprobado: FirmaDelEnsayo | null;
+  /** El de la última devolución, mientras está devuelto (RF-81). */
+  comentarioDevolucion: string | null;
+  anulado: (FirmaDelEnsayo & { motivo: string }) | null;
+  historia: EventoDelEnsayo[];
+}
+
+/** Lo que responde el listado: los ensayos y cuántos esperan aprobación (RF-105). */
+export interface ConsultaDeEnsayos {
+  ensayos: EnsayoFila[];
+  pendientes: number;
+}
+
+/**
+ * La parte de Control Calidad de Obra que viene del módulo (RF-106 a RF-112):
+ * vigentes mientras el parte está abierto; fijados desde que se cierra;
+ * `antes_del_modulo` si se cerró antes de que existiera.
+ */
+export interface GranulometriaDelParteFila {
+  estado: 'vigentes' | 'fijados' | 'antes_del_modulo';
+  ensayos: GranulometriaDelParte[];
+}

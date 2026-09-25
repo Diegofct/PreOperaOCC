@@ -17,6 +17,7 @@ const COLUMNAS = {
   horario: obras.horario,
   almacenActivo: obras.almacenActivo,
   canteraActivo: obras.canteraActivo,
+  laboratorioActivo: obras.laboratorioActivo,
 };
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {

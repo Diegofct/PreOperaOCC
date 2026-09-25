@@ -109,6 +109,10 @@ export const CARGOS = [
     rolSugerido: 'encargado_planta',
     operaVehiculos: false,
   },
+  // Spec 018, RF-3. Registra los ensayos de laboratorio de su obra y entra solo a
+  // ese módulo. Distinto de «Control de Calidad», que es personal de obra sin acceso
+  // al panel.
+  { id: 'laboratorista', nombre: 'Laboratorista', rolSugerido: 'laboratorista', operaVehiculos: false },
 ] as const satisfies readonly DefinicionCargo[];
 
 export type Cargo = (typeof CARGOS)[number]['id'];

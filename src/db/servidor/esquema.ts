@@ -57,9 +57,17 @@ import type {
   PersonaDelParte,
   ViajeDelParte,
 } from '../../features/bitacoras/tipos';
+import type { EventoDelEnsayo, GranulometriaDelParte } from '../../features/laboratorio/tipos';
 import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
 import type { Cargo } from '../../shared/catalogos/cargos';
+import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
+import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
+import type {
+  MasasDelEnsayo,
+  ResultadoGranulometria,
+  RetenidosDelEnsayo,
+} from '../../shared/rules/granulometria';
 import { ROLES } from '../../shared/rules/permisos';
 import type {
   PlantillaChecklist,
@@ -121,6 +129,12 @@ export const tipoMovimientoAlmacen = pgEnum('tipo_movimiento_almacen', ['ingreso
 /** Qué es un sitio de origen o destino de un viaje de cantera (spec 010, RF-1). */
 export const tipoSitioCantera = pgEnum('tipo_sitio_cantera', ['cantera', 'planta', 'otro']);
 
+/**
+ * En qué punto del flujo está un ensayo de laboratorio (spec 018). Anulado y
+ * descartado son marcas de tiempo aparte: ver `shared/catalogos/estados-ensayo`.
+ */
+export const estadoEnsayo = pgEnum('estado_ensayo', ESTADOS_ENSAYO);
+
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
   timestamp('actualizado_en', { withTimezone: true, mode: 'date' })
@@ -166,6 +180,14 @@ export const obras = pgTable(
      */
     almacenActivo: boolean('almacen_activo').notNull().default(true),
     canteraActivo: boolean('cantera_activo').notNull().default(true),
+    /**
+     * Laboratorio (spec 018). **Default `false`, al revés que los dos de arriba**, y
+     * ese default es RF-12: el módulo es nuevo, y encenderlo en todas las obras que ya
+     * existían le pondría a cada residente un módulo vacío en el menú. La gerencia lo
+     * enciende donde hay laboratorio. El «propuesto encendido» de una obra nueva
+     * (RF-13) lo pone el alta, no la base.
+     */
+    laboratorioActivo: boolean('laboratorio_activo').notNull().default(false),
     eliminadoEn: eliminadoEn(),
     creadoEn: creadoEn(),
     actualizadoEn: actualizadoEn(),
@@ -556,6 +578,12 @@ export const partesDeObra = pgTable(
      */
     cantera: jsonb('cantera').$type<ViajeDelParte[]>(),
     /**
+     * Los ensayos de granulometría fijados al cerrar (spec 018, RF-111). Nula y sin
+     * default por lo mismo que `cantera`: `null` es «nunca se fijó» —abierto, o
+     * cerrado antes de esta spec— y `[]` es «se cerró sin ensayos ese día».
+     */
+    granulometrias: jsonb('granulometrias').$type<GranulometriaDelParte[]>(),
+    /**
      * El horario de la obra con que se calcularon las horas del personal, fijado
      * al cerrar o anular el parte (spec 016, RF-23 y RF-24). Nulo y sin default por
      * lo mismo que `cantera`: `null` es «todavía abierto» —manda el horario vigente
@@ -879,6 +907,128 @@ export const canteraViajes = pgTable(
       sql`${t.destinoId} is null or ${t.destinoId} <> ${t.origenId}`,
     ),
     check('ck_cantera_viaje_hora', sql`${t.hora} ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'`),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Laboratorio (spec 018, solo del servidor)                                 */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Un ensayo de granulometría (formato LAB-FR-01-2025, INV E-123-13).
+ *
+ * ── Qué va en columna y qué en `jsonb` ──
+ *
+ * En columna, lo que se filtra o se ordena: obra, fechas, franja, estado, veredicto.
+ * En `jsonb`, las masas por id de tamiz: dieciséis columnas obligarían a una
+ * migración si cambia la serie, y una tabla hija de renglones serían dos escrituras
+ * por guardado sin transacción (Neon por HTTP no la da).
+ *
+ * ── Lo que calcula el servidor ──
+ *
+ * `resultado` y `veredicto` salen de `calcularGranulometria` al guardar, con la
+ * misma función que usa la pantalla; nunca se aceptan hechos (RF-42). El veredicto
+ * va además en columna para que el listado filtre por él sin abrir el `jsonb`.
+ *
+ * ── Borrador a medias ──
+ *
+ * El encabezado es nulo mientras el ensayo es borrador (RF-31): la muestra se recibe
+ * un día y se tamiza otro. Lo que exige el envío lo decide la regla, no la base.
+ *
+ * Los `check` repiten en la base lo que el flujo garantiza, para que ni una petición
+ * hecha por fuera ni una sentencia a mano dejen un ensayo imposible.
+ */
+export const ensayosGranulometria = pgTable(
+  'ensayos_granulometria',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+
+    material: text('material'),
+    fuente: text('fuente'),
+    localizacion: text('localizacion'),
+    numeroInforme: text('numero_informe'),
+    /** `claveDeInforme(numero_informe)`: con esta se compara la unicidad (RF-40). */
+    claveInforme: text('clave_informe'),
+    /** `YYYY-MM-DD`, días en la obra. */
+    fechaRecepcion: date('fecha_recepcion', { mode: 'string' }),
+    fechaEjecucion: date('fecha_ejecucion', { mode: 'string' }),
+
+    /** Para filtrar. Lo que vale para juzgar es la copia de abajo. */
+    franjaId: text('franja_id'),
+    /**
+     * La franja **entera**, copiada del catálogo al escogerla (RF-21): si el catálogo
+     * se corrige, los ensayos ya hechos siguen juzgándose con la suya.
+     */
+    franja: jsonb('franja').$type<FranjaGranulometrica>(),
+
+    masas: jsonb('masas')
+      .$type<MasasDelEnsayo>()
+      .notNull()
+      .default({ humeda: null, seca: null, tara: null, lavada: null }),
+    retenidos: jsonb('retenidos').$type<RetenidosDelEnsayo>().notNull().default({}),
+    observaciones: text('observaciones'),
+
+    resultado: jsonb('resultado').$type<ResultadoGranulometria>(),
+    veredicto: text('veredicto').$type<'cumple' | 'no_cumple'>(),
+
+    estado: estadoEnsayo('estado').notNull().default('borrador'),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    /** «Revisó»: quien lo envió (RF-75). */
+    revisadoPor: text('revisado_por').references(() => usuarios.id),
+    revisadoEn: timestamp('revisado_en', { withTimezone: true, mode: 'date' }),
+    /** «Aprobó» (RF-83). Su fecha es la de emisión del informe (RF-84). */
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    /** El de la última devolución; la historia guarda todos. */
+    comentarioDevolucion: text('comentario_devolucion'),
+
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+
+    /** RF-94. Se anexa en la misma sentencia que cambia el estado, nunca aparte. */
+    historia: jsonb('historia').$type<EventoDelEnsayo[]>().notNull().default([]),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    // Parcial por lo mismo que el del parte: anular o descartar un ensayo deja libre
+    // su número (RF-41), y sin número todavía —un borrador— no choca con nadie.
+    uniqueIndex('ux_ensayo_granulometria_informe')
+      .on(t.obraId, t.claveInforme)
+      .where(sql`anulado_en is null and descartado_en is null and clave_informe is not null`),
+    // El listado por periodo y la sección del parte de un día.
+    index('ix_ensayo_granulometria_obra_fecha').on(t.obraId, t.fechaEjecucion),
+    check(
+      'ck_ensayo_granulometria_veredicto',
+      sql`${t.veredicto} is null or ${t.veredicto} in ('cumple', 'no_cumple')`,
+    ),
+    // Solo se anula lo aprobado (RF-86), con motivo escrito (RF-87).
+    check(
+      'ck_ensayo_granulometria_anulado',
+      sql`${t.anuladoEn} is null
+       or (${t.estado} = 'aprobado' and ${t.anuladoPor} is not null
+           and ${t.motivoAnulacion} is not null and btrim(${t.motivoAnulacion}) <> '')`,
+    ),
+    // Solo se descarta lo que el laboratorista todavía tiene en sus manos (RF-90).
+    check(
+      'ck_ensayo_granulometria_descartado',
+      sql`${t.descartadoEn} is null or ${t.estado} in ('borrador', 'devuelto')`,
+    ),
+    // Enviado o aprobado ⇒ alguien lo revisó; aprobado ⇒ alguien lo aprobó; devuelto
+    // ⇒ con el comentario de por qué (RF-75, RF-79, RF-83).
+    check(
+      'ck_ensayo_granulometria_firmas',
+      sql`(${t.estado} not in ('enviado', 'aprobado') or ${t.revisadoPor} is not null)
+       and (${t.estado} <> 'aprobado' or (${t.aprobadoPor} is not null and ${t.aprobadoEn} is not null))
+       and (${t.estado} <> 'devuelto' or ${t.comentarioDevolucion} is not null)`,
+    ),
   ],
 );
 

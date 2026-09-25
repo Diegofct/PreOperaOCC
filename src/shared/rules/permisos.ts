@@ -28,10 +28,20 @@
  * que cada oficio de la obra acabara pidiendo su propio permiso. Almacenista y
  * Encargado de Planta no son eso. No son un cargo más dentro de un acceso que ya
  * existe: ven un módulo que nadie más lleva y **nada** de lo demás, y eso no cabe
- * en ninguno de los tres. Se añadieron esos dos y ninguno más; un oficio nuevo
- * sigue siendo un cargo, no un rol.
+ * en ninguno de los tres. Un oficio nuevo sigue siendo un cargo, no un rol.
+ *
+ * El Laboratorista (spec 018) entró por la misma puerta y por el mismo motivo: ve
+ * solo el laboratorio. Como residente vería la obra entera; como operador no
+ * entraría al panel.
  */
-export const ROLES = ['admin', 'supervisor', 'operador', 'almacenista', 'encargado_planta'] as const;
+export const ROLES = [
+  'admin',
+  'supervisor',
+  'operador',
+  'almacenista',
+  'encargado_planta',
+  'laboratorista',
+] as const;
 export type Rol = (typeof ROLES)[number];
 
 /**
@@ -47,6 +57,7 @@ export const ETIQUETA_ROL: Record<Rol, string> = {
   operador: 'Operador',
   almacenista: 'Almacenista',
   encargado_planta: 'Encargado de Planta',
+  laboratorista: 'Laboratorista',
 };
 
 /** Los módulos del panel, en el orden en que se muestran. */
@@ -62,23 +73,28 @@ export const MODULOS = [
   // residente son consulta, no el trabajo de todos los días.
   'almacen',
   'cantera',
+  // Spec 018. Al final por lo mismo: es el trabajo de otro oficio, y para el
+  // residente es aprobar lo que el laboratorio le envía.
+  'laboratorio',
 ] as const;
 export type Modulo = (typeof MODULOS)[number];
 
 /**
  * Qué módulos lleva la obra de una persona (spec 017, RF-1).
  *
- * Los dos que se pueden apagar por obra. Quien no está adscrito a ninguna —la
- * gerencia— los tiene los dos encendidos: lleva todas las obras, y lo que se le
- * oculta son las obras apagadas dentro de cada módulo, no el módulo (RF-10).
+ * Los que se pueden apagar por obra: Almacén y Control Cantera (spec 017) y
+ * Laboratorio (spec 018, RF-11). Quien no está adscrito a ninguna —la gerencia— los
+ * tiene todos encendidos: lleva todas las obras, y lo que se le oculta son las obras
+ * apagadas dentro de cada módulo, no el módulo (RF-10).
  */
 export interface ModulosDeObra {
   almacen: boolean;
   cantera: boolean;
+  laboratorio: boolean;
 }
 
 /** La obra que lo lleva todo: lo de quien no tiene obra, y el punto de partida. */
-export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true };
+export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true, laboratorio: true };
 
 /**
  * `ver` es entrar al módulo. `listar` es que su listado responda.
@@ -88,8 +104,13 @@ export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true }
  * respondiendo, porque las pantallas de Asignaciones y Bitácoras los necesitan
  * para llenar los selectores de a quién y a qué se asigna. Cerrar también el
  * listado —que parece lo coherente— deja esas dos pantallas sin datos.
+ *
+ * `aprobar` es aprobar o devolver un ensayo de laboratorio (spec 018). Es aparte de
+ * `escribir` porque son dos personas distintas: el laboratorista escribe y no
+ * aprueba, el residente aprueba y no escribe. Con las acciones que había no se
+ * podían decir las dos cosas.
  */
-export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar';
+export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar' | 'aprobar';
 
 const NADA: readonly Accion[] = [];
 
@@ -111,6 +132,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   obras: {
     admin: ['ver', 'listar', 'escribir'],
@@ -118,6 +140,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   personas: {
     admin: ['ver', 'listar', 'escribir', 'activar'],
@@ -125,6 +148,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   vehiculos: {
     admin: ['ver', 'listar', 'escribir'],
@@ -132,6 +156,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   asignaciones: {
     admin: ['ver', 'listar', 'escribir'],
@@ -139,6 +164,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   bitacoras: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -146,6 +172,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   preoperacionales: {
     // Anular es corregir evidencia firmada por otro: se queda en gerencia. La
@@ -155,6 +182,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   // El residente consulta el almacén y la cantera de su obra, pero no registra ni
   // anula (spec 008, RF-12 y RF-13): es el trabajo de otro oficio.
@@ -171,6 +199,7 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: ['ver', 'listar', 'escribir'],
     encargado_planta: NADA,
+    laboratorista: NADA,
   },
   cantera: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -178,6 +207,19 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     operador: NADA,
     almacenista: NADA,
     encargado_planta: ['ver', 'listar', 'escribir', 'anular'],
+    laboratorista: NADA,
+  },
+  // Spec 018. El laboratorista registra, envía y descarta —todo eso es escribir—,
+  // pero no aprueba ni anula (RF-92): quien hace el ensayo no es quien lo da por
+  // bueno. El residente hace de coordinador de laboratorio: aprueba, devuelve y
+  // anula lo aprobado (RF-77, RF-78, RF-86), pero no registra ensayos.
+  laboratorio: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    supervisor: ['ver', 'listar', 'aprobar', 'anular'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: ['ver', 'listar', 'escribir'],
   },
 };
 
@@ -217,7 +259,7 @@ export function modulosVisibles(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MOD
  * debajo del residente, son otra cosa, y con cualquier número que se les pusiera
  * o el residente podría darlos o figurarían como más que él. Así que se dice
  * explícito: los dos accesos nuevos, como la gerencia, solo los da la gerencia
- * (RF-17).
+ * (RF-17). El de laboratorista, igual (spec 018, RF-2).
  */
 const PUEDE_DAR: Record<Rol, readonly Rol[]> = {
   admin: ROLES,
@@ -225,6 +267,7 @@ const PUEDE_DAR: Record<Rol, readonly Rol[]> = {
   operador: [],
   almacenista: [],
   encargado_planta: [],
+  laboratorista: [],
 };
 
 /** ¿Puede dar este acceso a alguien? */
@@ -253,6 +296,7 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
   escribir: 'crear o modificar este registro',
   anular: 'anular este registro',
   activar: 'emitir códigos de activación',
+  aprobar: 'aprobar ni devolver este ensayo',
 };
 
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
@@ -262,6 +306,7 @@ const QUIEN_ES: Record<Rol, string> = {
   operador: 'el operador',
   almacenista: 'el almacenista',
   encargado_planta: 'el encargado de planta',
+  laboratorista: 'el laboratorista',
 };
 
 /**
@@ -319,6 +364,7 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
   preoperacionales: 'Preoperacionales',
   almacen: 'Almacén',
   cantera: 'Control Cantera',
+  laboratorio: 'Laboratorio',
 };
 
 /**
@@ -333,26 +379,36 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
 /**
  * ¿Este módulo está apagado en esa obra? (spec 017, RF-7 a RF-9.)
  *
- * Solo Almacén y Control Cantera se apagan por obra; los demás no dependen de la
- * obra, así que nunca están apagados, diga lo que diga lo que llegue.
+ * Solo Almacén, Control Cantera y Laboratorio se apagan por obra; los demás no
+ * dependen de la obra, así que nunca están apagados, diga lo que diga lo que llegue.
  */
 export function moduloApagado(modulo: Modulo, modulos: ModulosDeObra): boolean {
   if (modulo === 'almacen') return !modulos.almacen;
   if (modulo === 'cantera') return !modulos.cantera;
+  if (modulo === 'laboratorio') return !modulos.laboratorio;
   return false;
 }
+
+/** El módulo para el que existe cada acceso de oficio; `null` los que no dependen de uno. */
+const MODULO_DEL_ROL: Record<Rol, Modulo | null> = {
+  admin: null,
+  supervisor: null,
+  operador: null,
+  almacenista: 'almacen',
+  encargado_planta: 'cantera',
+  laboratorista: 'laboratorio',
+};
 
 /**
  * Por qué no se le puede dar ese acceso en esa obra, o `null` (spec 017, RF-11).
  *
- * El almacenista y el encargado de planta existen **para** su módulo: darle ese
- * acceso a alguien en una obra que no lo lleva es dejarlo con una cuenta que solo
- * sabe decirle que su obra no tiene dónde trabajar. Los demás roles no dependen de
+ * El almacenista, el encargado de planta y el laboratorista existen **para** su
+ * módulo: darle ese acceso a alguien en una obra que no lo lleva es dejarlo con una
+ * cuenta que solo sabe decirle que su obra no tiene dónde trabajar. Los demás roles no dependen de
  * estos interruptores.
  */
 export function motivoParaNoDarRolEnObra(rol: Rol, modulos: ModulosDeObra): string | null {
-  const modulo: Modulo | null =
-    rol === 'almacenista' ? 'almacen' : rol === 'encargado_planta' ? 'cantera' : null;
+  const modulo = MODULO_DEL_ROL[rol];
   if (!modulo || !moduloApagado(modulo, modulos)) return null;
   return `Esa obra no lleva el módulo ${NOMBRE_DE_MODULO[modulo]}.`;
 }

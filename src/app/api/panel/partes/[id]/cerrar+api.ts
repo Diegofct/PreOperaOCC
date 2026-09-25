@@ -5,6 +5,10 @@ import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { horarioDeLaObraDelParte } from '@/features/bitacoras/servidor/horario';
 import { viajesParaFijarAlCerrar } from '@/features/cantera/servidor/parte';
+import {
+  granulometriasParaFijarAlCerrar,
+  granulometriasVigentes,
+} from '@/features/laboratorio/servidor/parte';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 import { bloqueosDelCierre, mensajeDelRechazoDeCierre } from '@/shared/rules/parte';
@@ -34,6 +38,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
 
     const [parte] = await db
       .select({
+        obraId: partesDeObra.obraId,
+        fecha: partesDeObra.fecha,
         maquinaria: partesDeObra.maquinaria,
         personal: partesDeObra.personal,
         actividades: partesDeObra.actividades,
@@ -73,7 +79,12 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     // El rechazo los nombra **todos** en un solo mensaje, uno por renglón
     // (spec 004, RF-50). Antes mandaba el primero, y el residente descubría lo
     // que le faltaba de uno en uno a base de pulsar Cerrar.
-    const bloqueos = bloqueosDelCierre(parte, fotos);
+    // Los ensayos de granulometría vigentes del día llenan Control Calidad de Obra
+    // igual que una fila a mano (spec 018, RF-110). Viven en su módulo, así que se
+    // cuentan aquí y la regla los recibe contados, como las fotos.
+    const ensayosDelModulo = (await granulometriasVigentes(parte.obraId, parte.fecha)).length;
+
+    const bloqueos = bloqueosDelCierre({ ...parte, ensayosDelModulo }, fotos);
     if (bloqueos.length > 0) return errorDePeticion(mensajeDelRechazoDeCierre(bloqueos), 400);
 
     // Los viajes de cantera de ese día quedan fijados **en la misma sentencia** que
@@ -83,17 +94,43 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     //
     // El horario de la obra se fija igual y por lo mismo (spec 016, RF-23): desde
     // aquí las horas del parte se leen con él aunque la gerencia lo corrija después.
+    //
+    // Los ensayos de granulometría, igual (spec 018, RF-111): desde aquí el parte
+    // dice lo que había al cerrarlo, aunque después se aprueben o se anulen (RF-112).
+    //
+    // Y si lo único que llenaba Control Calidad de Obra eran esos ensayos, el cierre
+    // lo vuelve a exigir en la misma sentencia: un ensayo descartado entre el conteo
+    // de arriba y este `UPDATE` dejaría, si no, un parte cerrado con la sección vacía.
+    const dependeDeLosEnsayos =
+      !parte.sinTrabajo && parte.laboratorio.length === 0 && ensayosDelModulo > 0;
+
     const [fila] = await db
       .update(partesDeObra)
       .set({
         cerradoEn: new Date(),
         cantera: viajesParaFijarAlCerrar(),
+        granulometrias: granulometriasParaFijarAlCerrar(),
         horario: horarioDeLaObraDelParte(),
       })
-      .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
+      .where(
+        and(
+          eq(partesDeObra.id, id),
+          isNull(partesDeObra.cerradoEn),
+          dependeDeLosEnsayos
+            ? sql`jsonb_array_length(${granulometriasParaFijarAlCerrar()}) > 0`
+            : undefined,
+        ),
+      )
       .returning({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn });
 
-    if (!fila) return noEncontrado('esa bitácora');
+    if (!fila) {
+      return dependeDeLosEnsayos
+        ? errorDePeticion(
+            'Los ensayos de laboratorio de este día cambiaron mientras cerraba. Vuelva a intentarlo.',
+            409,
+          )
+        : noEncontrado('esa bitácora');
+    }
 
     // Un UPDATE por máquina, y cada uno con su propio `greatest`: el driver
     // habla por HTTP y no da transacciones interactivas, así que se escribe de

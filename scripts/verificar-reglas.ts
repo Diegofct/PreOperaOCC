@@ -54,6 +54,7 @@ import {
   alcanza,
   avisoDeModuloAjeno,
   avisoDeModuloApagado,
+  ETIQUETA_ROL,
   moduloApagado,
   motivoParaNoDarRolEnObra,
   ROLES,
@@ -141,6 +142,31 @@ import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules
 import { colocarLista } from '../src/shared/rules/flotante';
 import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
+import {
+  franjaPorId,
+  FRANJAS_GRANULOMETRICAS,
+  type FranjaGranulometrica,
+} from '../src/shared/catalogos/franjas-granulometricas';
+import { SERIE_DE_TAMICES, TAMICES_CON_ABERTURA } from '../src/shared/catalogos/tamices';
+import {
+  calcularGranulometria,
+  claveDeInforme,
+  ETIQUETA_ESTADO_ENSAYO,
+  estadoVisible,
+  filtrarEnsayos,
+  formatearNumero,
+  granulometriasDelParte,
+  leerMasa,
+  redondear,
+  transicionPermitida,
+  validarEnsayo,
+  veredictoDe,
+  type AccionSobreEnsayo,
+  type EnsayoAValidar,
+  type EntradaGranulometria,
+  type EstadoVisibleEnsayo,
+  type RetenidosDelEnsayo,
+} from '../src/shared/rules/granulometria';
 import { vehiculos } from '../src/db/servidor/esquema';
 import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
 import type { PersonaEnSesion } from '../src/features/auth/servidor/sesion';
@@ -229,8 +255,12 @@ import {
 } from '../src/features/bitacoras/tipos';
 import {
   actividadDelParte,
+  anulacion,
   asignacionEditada,
+  devolucion,
   ensayoDelParte,
+  ensayoEditado,
+  ensayoNuevo,
   materialDeCanteraEditado,
   materialDeCanteraNuevo,
   materialEditado,
@@ -2115,8 +2145,9 @@ prueba('la gerencia alcanza todos los módulos', () => {
   assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
 });
 
-prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén y cantera', () => {
-  // Spec 001 / RF-1, ampliado por 008 / RF-12: almacén y cantera, en consulta.
+prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera y laboratorio', () => {
+  // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta) y por
+  // 018 / RF-7 (laboratorio, donde además aprueba).
   assert.deepEqual(modulosVisibles('supervisor'), [
     'inicio',
     'asignaciones',
@@ -2124,6 +2155,7 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
     'preoperacionales',
     'almacen',
     'cantera',
+    'laboratorio',
   ]);
 });
 
@@ -2162,7 +2194,7 @@ prueba('emitir códigos de activación es solo de la gerencia', () => {
 prueba('el operador no alcanza nada del panel', () => {
   assert.deepEqual(modulosVisibles('operador'), []);
   for (const modulo of MODULOS) {
-    for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar'] as const) {
       assert.equal(alcanza('operador', modulo, accion), false, `${modulo}/${accion}`);
     }
   }
@@ -2245,6 +2277,7 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
     'preoperacionales',
     'almacen',
     'cantera',
+    'laboratorio',
   ]);
 });
 
@@ -2342,21 +2375,106 @@ prueba('cada rol entra por su módulo', () => {
   assert.equal(moduloDeEntrada('operador'), null);
 });
 
-prueba('un módulo apagado en la obra lo está solo para Almacén y Control Cantera', () => {
-  // Spec 017 / RF-7 a RF-9 (cambio 2026-09-22). Solo esos dos se apagan por obra;
-  // los demás no dependen de la obra y nunca están apagados.
+/* ── Laboratorista (spec 018) ── */
+
+prueba('el laboratorista solo entra a laboratorio, y por ahí entra', () => {
+  // Spec 018 / RF-4 y RF-5.
+  assert.deepEqual(modulosVisibles('laboratorista'), ['laboratorio']);
+  assert.equal(moduloDeEntrada('laboratorista'), 'laboratorio');
+  assert.equal(ETIQUETA_ROL.laboratorista, 'Laboratorista');
+});
+
+prueba('el laboratorista no toca nada fuera de su módulo', () => {
+  // Spec 018 / RF-4: ni ver, ni listar, ni el inicio.
+  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio')) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar'] as const) {
+      assert.equal(alcanza('laboratorista', modulo, accion), false, `${modulo}/${accion}`);
+    }
+  }
+  // Y nadie de los otros módulos de oficio entra al suyo.
+  assert.equal(alcanza('almacenista', 'laboratorio', 'ver'), false);
+  assert.equal(alcanza('encargado_planta', 'laboratorio', 'ver'), false);
+  assert.equal(alcanza('operador', 'laboratorio', 'ver'), false);
+});
+
+prueba('el laboratorista registra, pero no aprueba ni anula', () => {
+  // Spec 018 / RF-23, RF-72, RF-90 y RF-92. Enviar y descartar son escribir.
+  for (const accion of ['ver', 'listar', 'escribir'] as const) {
+    assert.ok(alcanza('laboratorista', 'laboratorio', accion), accion);
+  }
+  assert.equal(alcanza('laboratorista', 'laboratorio', 'aprobar'), false);
+  assert.equal(alcanza('laboratorista', 'laboratorio', 'anular'), false);
+});
+
+prueba('el residente aprueba y anula ensayos, pero no los registra', () => {
+  // Spec 018 / RF-7, RF-77, RF-78 y RF-86: hace de coordinador de laboratorio.
+  for (const accion of ['ver', 'listar', 'aprobar', 'anular'] as const) {
+    assert.ok(alcanza('supervisor', 'laboratorio', accion), accion);
+  }
+  assert.equal(alcanza('supervisor', 'laboratorio', 'escribir'), false);
+  // La gerencia, todo (RF-9).
+  for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
+    assert.ok(alcanza('admin', 'laboratorio', accion), accion);
+  }
+  // Aprobar no existe fuera del laboratorio.
+  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio')) {
+    for (const rol of ROLES) {
+      assert.equal(alcanza(rol, modulo, 'aprobar'), false, `${rol} ${modulo}/aprobar`);
+    }
+  }
+});
+
+prueba('solo la gerencia da el acceso de laboratorista', () => {
+  // Spec 018 / RF-2.
+  assert.ok(puedeCambiarRol('admin', 'laboratorista'));
+  for (const rol of ['supervisor', 'almacenista', 'encargado_planta', 'laboratorista', 'operador'] as const) {
+    assert.equal(puedeCambiarRol(rol, 'laboratorista'), false, rol);
+  }
+  assert.equal(puedeCambiarRol('laboratorista', 'operador'), false);
+  assert.equal(
+    motivoParaNoDarRol('supervisor', 'laboratorista'),
+    'Solo la gerencia puede dar el acceso de Laboratorista.',
+  );
+});
+
+prueba('el rechazo en el laboratorio dice quién sí puede', () => {
+  // Spec 018 / RF-10.
+  assert.equal(
+    motivoDeRechazo('laboratorio', 'aprobar'),
+    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia y el residente o el director.',
+  );
+  assert.equal(
+    motivoDeRechazo('laboratorio', 'escribir'),
+    'No puede crear o modificar este registro: lo hacen la gerencia y el laboratorista.',
+  );
+  assert.equal(
+    motivoDeRechazo('laboratorio', 'anular'),
+    'No puede anular este registro: lo hacen la gerencia y el residente o el director.',
+  );
+});
+
+prueba('el cargo Laboratorista sugiere su acceso y no lleva máquina', () => {
+  // Spec 018 / RF-3.
+  assert.equal(nombreDeCargo('laboratorista'), 'Laboratorista');
+  assert.equal(rolSugerido('laboratorista'), 'laboratorista');
+  assert.equal(operaVehiculos('laboratorista'), false);
+});
+
+prueba('un módulo apagado en la obra lo está solo para Almacén, Control Cantera y Laboratorio', () => {
+  // Spec 017 / RF-7 a RF-9 (cambio 2026-09-22), más Laboratorio (018/RF-11). Solo
+  // esos tres se apagan por obra; los demás no dependen de la obra.
   const conTodo = TODOS_LOS_MODULOS;
-  const sinAlmacen = { almacen: false, cantera: true };
-  const sinCantera = { almacen: true, cantera: false };
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const sinCantera = { ...TODOS_LOS_MODULOS, cantera: false };
 
   assert.equal(moduloApagado('almacen', sinAlmacen), true);
   assert.equal(moduloApagado('almacen', conTodo), false);
   assert.equal(moduloApagado('cantera', sinCantera), true);
   assert.equal(moduloApagado('cantera', conTodo), false);
   assert.equal(moduloApagado('almacen', sinCantera), false);
-  for (const modulo of MODULOS.filter((m) => m !== 'almacen' && m !== 'cantera')) {
+  for (const modulo of MODULOS.filter((m) => !['almacen', 'cantera', 'laboratorio'].includes(m))) {
     assert.equal(
-      moduloApagado(modulo, { almacen: false, cantera: false }),
+      moduloApagado(modulo, { almacen: false, cantera: false, laboratorio: false }),
       false,
       `${modulo} no se apaga por obra`,
     );
@@ -2372,9 +2490,9 @@ prueba('un módulo apagado en la obra lo está solo para Almacén y Control Cant
 
 prueba('el menú de cada quien depende de su cargo y de los módulos de su obra', () => {
   // Spec 017 / RF-7. El cargo abre el módulo; la obra tiene que llevarlo.
-  const sinAlmacen = { almacen: false, cantera: true };
-  const sinCantera = { almacen: true, cantera: false };
-  const sinNada = { almacen: false, cantera: false };
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const sinCantera = { ...TODOS_LOS_MODULOS, cantera: false };
+  const sinNada = { almacen: false, cantera: false, laboratorio: false };
 
   assert.deepEqual(modulosVisibles('almacenista', TODOS_LOS_MODULOS), ['almacen']);
   assert.deepEqual(modulosVisibles('almacenista', sinAlmacen), []);
@@ -2385,6 +2503,7 @@ prueba('el menú de cada quien depende de su cargo y de los módulos de su obra'
   const residente = modulosVisibles('supervisor', sinNada);
   assert.ok(residente.includes('bitacoras'), residente.join(','));
   assert.ok(!residente.includes('almacen') && !residente.includes('cantera'));
+  assert.ok(!residente.includes('laboratorio'));
 
   // La gerencia lleva todas las obras: ve los nueve módulos siempre (RF-10 es lo
   // que a ella le esconde las obras apagadas, no el módulo).
@@ -2395,8 +2514,8 @@ prueba('el menú de cada quien depende de su cargo y de los módulos de su obra'
 
 prueba('no se da el acceso de un módulo que la obra no lleva', () => {
   // Spec 017 / RF-11. El cargo existe, pero esa obra no lleva ese módulo.
-  const sinAlmacen = { almacen: false, cantera: true };
-  const sinCantera = { almacen: true, cantera: false };
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const sinCantera = { ...TODOS_LOS_MODULOS, cantera: false };
 
   assert.equal(
     motivoParaNoDarRolEnObra('almacenista', sinAlmacen),
@@ -2411,13 +2530,53 @@ prueba('no se da el acceso de un módulo que la obra no lleva', () => {
   assert.equal(motivoParaNoDarRolEnObra('encargado_planta', TODOS_LOS_MODULOS), null);
   assert.equal(motivoParaNoDarRolEnObra('almacenista', sinCantera), null);
   // Los demás roles no dependen de estos módulos.
-  for (const rol of ROLES.filter((r) => r !== 'almacenista' && r !== 'encargado_planta')) {
+  for (const rol of ROLES.filter((r) => !['almacenista', 'encargado_planta', 'laboratorista'].includes(r))) {
     assert.equal(
-      motivoParaNoDarRolEnObra(rol, { almacen: false, cantera: false }),
+      motivoParaNoDarRolEnObra(rol, { almacen: false, cantera: false, laboratorio: false }),
       null,
       `${rol} no depende de los módulos de la obra`,
     );
   }
+});
+
+prueba('una obra nueva propone el laboratorio encendido; corregirla sin el campo no lo toca', () => {
+  // Spec 018 / RF-13: el alta lo propone encendido. Las obras que ya existían
+  // quedaron apagadas por el default de la base (RF-12), no por este contrato.
+  const nueva = obraNueva.parse({ codigo: 'OBR-9', nombre: 'Prueba' });
+  assert.equal(nueva.laboratorioActivo, true);
+  assert.equal(obraNueva.parse({ codigo: 'OBR-9', nombre: 'Prueba', laboratorioActivo: false }).laboratorioActivo, false);
+  // En un PATCH, ausente es «no se toca»: corregir el nombre no enciende ni apaga nada.
+  assert.equal('laboratorioActivo' in obraEditada.parse({ nombre: 'Otro nombre' }), false);
+  assert.equal(obraEditada.parse({ laboratorioActivo: true }).laboratorioActivo, true);
+});
+
+prueba('el laboratorio se enciende por obra, y apagado nadie de la obra lo ve', () => {
+  // Spec 018 / RF-11 y RF-14.
+  const sinLaboratorio = { ...TODOS_LOS_MODULOS, laboratorio: false };
+  assert.equal(moduloApagado('laboratorio', sinLaboratorio), true);
+  assert.equal(moduloApagado('laboratorio', TODOS_LOS_MODULOS), false);
+  // Los otros dos no dependen de este interruptor.
+  assert.equal(moduloApagado('almacen', sinLaboratorio), false);
+  assert.equal(moduloApagado('laboratorio', { ...TODOS_LOS_MODULOS, almacen: false }), false);
+
+  assert.deepEqual(modulosVisibles('laboratorista', TODOS_LOS_MODULOS), ['laboratorio']);
+  assert.deepEqual(modulosVisibles('laboratorista', sinLaboratorio), []);
+  assert.ok(modulosVisibles('supervisor', TODOS_LOS_MODULOS).includes('laboratorio'));
+  assert.ok(!modulosVisibles('supervisor', sinLaboratorio).includes('laboratorio'));
+  // La gerencia lo ve siempre: a ella se le esconden las obras apagadas (RF-8).
+  assert.ok(modulosVisibles('admin', sinLaboratorio).includes('laboratorio'));
+
+  assert.match(avisoDeModuloApagado('laboratorio'), /módulo Laboratorio/);
+});
+
+prueba('no se da el acceso de laboratorista en una obra sin laboratorio', () => {
+  // Spec 018 / RF-14, que aplica 017/RF-11.
+  assert.equal(
+    motivoParaNoDarRolEnObra('laboratorista', { ...TODOS_LOS_MODULOS, laboratorio: false }),
+    'Esa obra no lleva el módulo Laboratorio.',
+  );
+  assert.equal(motivoParaNoDarRolEnObra('laboratorista', TODOS_LOS_MODULOS), null);
+  assert.equal(motivoParaNoDarRolEnObra('almacenista', { ...TODOS_LOS_MODULOS, laboratorio: false }), null);
 });
 
 prueba('el aviso de módulo ajeno dice dónde está el trabajo de cada quien', () => {
@@ -3533,13 +3692,14 @@ prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
   }
 });
 
-prueba('están los veinte cargos, con slug y rótulo únicos', () => {
+prueba('están los veintiún cargos, con slug y rótulo únicos', () => {
   // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
   // más Gerente (002/RF-13, añadido el 2026-09-19), más Controlador(a) Vial y
-  // Control de Calidad (pedidos por OCC el 2026-09-23).
-  assert.equal(CARGOS.length, 20);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 20);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 20);
+  // Control de Calidad (pedidos por OCC el 2026-09-23), más Laboratorista
+  // (018/RF-3).
+  assert.equal(CARGOS.length, 21);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 21);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 21);
 });
 
 prueba('los cargos nuevos de obra no reciben celular', () => {
@@ -4399,6 +4559,638 @@ prueba('ordenar no cambia la lista que recibe', () => {
   const copia = FILAS_DE_ORDEN.map((f) => f.nombre);
   ordenarFilas(FILAS_DE_ORDEN, porNombre, 'desc', porNombre);
   assert.deepEqual(nombresDe(FILAS_DE_ORDEN), copia);
+});
+
+/* ── Laboratorio: granulometría (spec 018) ── */
+
+console.log('\nLaboratorio: granulometría\n');
+
+prueba('la serie de tamices es la del formato, de mayor a menor y con el fondo al final', () => {
+  // Anexo B de la spec: los quince tamices del LAB-FR-01-2025 y el fondo.
+  assert.equal(SERIE_DE_TAMICES.length, 16);
+  assert.deepEqual(
+    SERIE_DE_TAMICES.map((t) => t.nombre),
+    ['2"', '1½"', '1"', '¾"', '½"', '⅜"', 'N.º 4', 'N.º 8', 'N.º 10', 'N.º 16', 'N.º 30', 'N.º 40', 'N.º 50', 'N.º 100', 'N.º 200', 'Fondo'],
+  );
+
+  const fondo = SERIE_DE_TAMICES[SERIE_DE_TAMICES.length - 1];
+  assert.equal(fondo.id, 'fondo');
+  assert.equal(fondo.mm, null);
+
+  const aberturas = TAMICES_CON_ABERTURA.map((t) => t.mm);
+  assert.equal(aberturas.length, 15);
+  for (let i = 1; i < aberturas.length; i++) {
+    assert.ok(aberturas[i] < aberturas[i - 1], `${TAMICES_CON_ABERTURA[i].nombre} no es menor que el anterior`);
+  }
+
+  // Los id son la llave con que un ensayo guarda sus masas: no pueden repetirse.
+  assert.equal(new Set(SERIE_DE_TAMICES.map((t) => t.id)).size, 16);
+});
+
+prueba('cada franja del catálogo apunta a tamices que existen y tiene límites posibles', () => {
+  const conAbertura = new Set<string>(TAMICES_CON_ABERTURA.map((t) => t.id));
+  assert.ok(FRANJAS_GRANULOMETRICAS.length > 0);
+  assert.equal(new Set(FRANJAS_GRANULOMETRICAS.map((f) => f.id)).size, FRANJAS_GRANULOMETRICAS.length);
+
+  for (const franja of FRANJAS_GRANULOMETRICAS) {
+    const limites = Object.entries(franja.limites);
+    assert.ok(limites.length > 0, `${franja.id} no controla ningún tamiz`);
+    for (const [tamiz, limite] of limites) {
+      // El fondo no tiene «% pasa»: ninguna franja puede controlarlo.
+      assert.ok(conAbertura.has(tamiz), `${franja.id} apunta a un tamiz que no existe: ${tamiz}`);
+      assert.ok(0 <= limite.min && limite.min <= limite.max && limite.max <= 100, `${franja.id}/${tamiz}`);
+    }
+  }
+});
+
+prueba('la franja SBG-50 tiene los límites del formato de laboratorio', () => {
+  // Anexo A: las columnas «Límite inferior» y «Límite superior» del Excel (Q36:R45).
+  const franja = franjaPorId('sbg_50');
+  assert.ok(franja);
+  assert.equal(franja.nombre, 'Subbase granular SBG-50');
+  assert.deepEqual(
+    TAMICES_CON_ABERTURA.flatMap((t) => {
+      const limite = franja.limites[t.id];
+      return limite ? [[t.nombre, limite.min, limite.max]] : [];
+    }),
+    [
+      ['2"', 100, 100],
+      ['1½"', 70, 95],
+      ['1"', 60, 90],
+      ['½"', 45, 75],
+      ['⅜"', 40, 70],
+      ['N.º 4', 25, 55],
+      ['N.º 10', 15, 40],
+      ['N.º 40', 6, 25],
+      ['N.º 100', 3, 18],
+      ['N.º 200', 2, 15],
+    ],
+  );
+  assert.equal(franjaPorId('no_existe'), undefined);
+});
+
+/** El ensayo del Excel LAB-FR-01-2025 (anexo C de la spec 018). */
+function ensayoDelExcel(): EntradaGranulometria {
+  return {
+    masas: { humeda: 6830, seca: 6621, tara: 0, lavada: null },
+    retenidos: {
+      t_2: 0,
+      t_1_1_2: 895.1,
+      t_1: 1094.9,
+      t_3_4: 565.3,
+      t_1_2: 767.5,
+      t_3_8: 375.6,
+      n_4: 792.9,
+      n_8: 444.7,
+      n_10: 110.1,
+      n_16: 248.5,
+      n_30: 409.8,
+      n_40: 369.7,
+      n_50: 181.2,
+      n_100: 100.5,
+      n_200: 40.8,
+      fondo: 8.2,
+    },
+  };
+}
+
+const aDos = (valor: number) => Math.round(valor * 100) / 100;
+
+prueba('con las masas del Excel, el cálculo da los mismos porcentajes que la hoja', () => {
+  const resultado = calcularGranulometria(ensayoDelExcel());
+  assert.ok(resultado.completo);
+
+  // RF-45: masa inicial seca menos la tara.
+  assert.equal(resultado.masaSinTara, 6621);
+  // RF-44: (6830 − 6621) / 6621 × 100 = 3,1566…, que se muestra con un decimal.
+  assert.equal(Math.round((resultado.humedad ?? 0) * 10) / 10, 3.2);
+
+  // RF-46 a RF-48: los quince «% pasa» de la columna F del Excel, a dos decimales.
+  assert.deepEqual(
+    resultado.renglones.filter((r) => r.tamiz !== 'fondo').map((r) => aDos(r.pasa ?? -1)),
+    [100, 86.48, 69.94, 61.41, 49.81, 44.14, 32.17, 25.45, 23.79, 20.03, 13.84, 8.26, 5.52, 4.01, 3.39],
+  );
+  // El % retenido y el acumulado del 1½", también como la hoja (D16 y E16).
+  const unoYMedio = resultado.renglones[1];
+  assert.equal(aDos(unoYMedio.porcentajeRetenido), 13.52);
+  assert.equal(aDos(unoYMedio.retenidoAcumulado), 13.52);
+  assert.equal(aDos(resultado.renglones[2].retenidoAcumulado), 30.06);
+
+  // RF-52: el fondo lleva su retenido, pero no «% pasa». La hoja mostraba 3,27.
+  const fondo = resultado.renglones[resultado.renglones.length - 1];
+  assert.equal(fondo.tamiz, 'fondo');
+  assert.equal(fondo.pasa, null);
+  assert.equal(aDos(fondo.retenidoAcumulado), 96.73);
+
+  assert.equal(aDos(resultado.sumaRetenida), 6404.8);
+
+  // RF-49 y RF-50: los que la hoja traía escritos a mano, ahora calculados.
+  assert.deepEqual(resultado.tamanoMaximo, { tamiz: 't_2' });
+  assert.equal(resultado.tamanoMaximoNominal, 't_1_1_2');
+});
+
+prueba('la tara se descuenta antes de sacar los porcentajes', () => {
+  const entrada = ensayoDelExcel();
+  entrada.masas = { humeda: 7330, seca: 7121, tara: 500, lavada: null };
+  const resultado = calcularGranulometria(entrada);
+  assert.ok(resultado.completo);
+  assert.equal(resultado.masaSinTara, 6621);
+  assert.equal(aDos(resultado.renglones[1].pasa ?? -1), 86.48);
+});
+
+prueba('si el primer tamiz ya retiene, el tamaño máximo es mayor que la serie', () => {
+  // RF-51: no hay tamiz de la serie por el que pase el 100 %.
+  const entrada = ensayoDelExcel();
+  entrada.retenidos = { ...entrada.retenidos, t_2: 120 };
+  const resultado = calcularGranulometria(entrada);
+  assert.ok(resultado.completo);
+  assert.deepEqual(resultado.tamanoMaximo, { mayorQue: 't_2' });
+  assert.equal(resultado.tamanoMaximoNominal, 't_2');
+});
+
+prueba('el tamaño máximo es el tamiz más pequeño por el que todavía pasa todo', () => {
+  // Nada retenido hasta el ½": el máximo es el ½" y el nominal, el ⅜".
+  const entrada = ensayoDelExcel();
+  entrada.retenidos = { ...entrada.retenidos, t_2: 0, t_1_1_2: 0, t_1: 0, t_3_4: 0, t_1_2: 0 };
+  const resultado = calcularGranulometria(entrada);
+  assert.ok(resultado.completo);
+  assert.deepEqual(resultado.tamanoMaximo, { tamiz: 't_1_2' });
+  assert.equal(resultado.tamanoMaximoNominal, 't_3_8');
+});
+
+prueba('sin la masa húmeda no hay humedad, pero sí porcentajes', () => {
+  // La humedad es informativa: no entra en ningún otro cálculo (RF-44).
+  const entrada = ensayoDelExcel();
+  entrada.masas = { ...entrada.masas, humeda: null };
+  const resultado = calcularGranulometria(entrada);
+  assert.ok(resultado.completo);
+  assert.equal(resultado.humedad, null);
+});
+
+prueba('si falta una masa necesaria, el cálculo dice qué falta en vez de dar porcentajes', () => {
+  // RF-56.
+  const sinSeca = ensayoDelExcel();
+  sinSeca.masas = { ...sinSeca.masas, seca: null, tara: null };
+  const faltante = calcularGranulometria(sinSeca);
+  assert.equal(faltante.completo, false);
+  assert.ok(!faltante.completo);
+  assert.deepEqual(faltante.faltan, ['la masa inicial seca', 'la tara']);
+
+  const sinUnTamiz = ensayoDelExcel();
+  sinUnTamiz.retenidos = { ...sinUnTamiz.retenidos, n_40: null, fondo: undefined };
+  const incompleto = calcularGranulometria(sinUnTamiz);
+  assert.ok(!incompleto.completo);
+  assert.deepEqual(incompleto.faltan, ['la masa retenida en el tamiz N.º 40', 'la masa retenida en el fondo']);
+
+  // Masa seca sin tara en cero: dividir no tiene sentido.
+  const todoTara = ensayoDelExcel();
+  todoTara.masas = { ...todoTara.masas, seca: 500, tara: 500 };
+  const cero = calcularGranulometria(todoTara);
+  assert.ok(!cero.completo);
+  assert.deepEqual(cero.faltan, ['una masa inicial seca mayor que la tara']);
+});
+
+prueba('se redondea como Excel, no como la aritmética binaria', () => {
+  // `Math.round(69.995 * 100) / 100` da 69,99 porque 69,995 no existe en binario.
+  // Excel muestra 70,00, y el veredicto se juzga con lo que se muestra (RF-58).
+  assert.equal(redondear(69.995, 2), 70);
+  assert.equal(redondear(1.005, 2), 1.01);
+  assert.equal(redondear(3.1566, 1), 3.2);
+  assert.equal(redondear(86.48089412475457, 2), 86.48);
+  assert.equal(redondear(-0.305, 2), -0.31);
+});
+
+/** Mil gramos secos, sin tara, con todo lo retenido donde se diga y el resto en cero. */
+function ensayoDeMilGramos(retenidos: RetenidosDelEnsayo, lavada: number | null = null): EntradaGranulometria {
+  const vacio = Object.fromEntries(SERIE_DE_TAMICES.map((t) => [t.id, 0])) as RetenidosDelEnsayo;
+  return { masas: { humeda: null, seca: 1000, tara: 0, lavada }, retenidos: { ...vacio, ...retenidos } };
+}
+
+prueba('el lavado avisa solo cuando lo tamizado se aleja más de 0,3 % de M2', () => {
+  // RF-53 y RF-54. 1000 g lavados y 997 g tamizados: 3 g, justo el 0,3 %.
+  const justo = calcularGranulometria(ensayoDeMilGramos({ n_4: 500, n_200: 497 }, 1000));
+  assert.ok(justo.completo && justo.lavado);
+  assert.equal(redondear(justo.lavado.diferencia, 1), 3);
+  assert.equal(redondear(justo.lavado.porcentaje, 2), 0.3);
+  assert.equal(justo.lavado.aviso, false);
+
+  const pasado = calcularGranulometria(ensayoDeMilGramos({ n_4: 500, n_200: 496.9 }, 1000));
+  assert.ok(pasado.completo && pasado.lavado);
+  assert.equal(redondear(pasado.lavado.porcentaje, 2), 0.31);
+  assert.equal(pasado.lavado.aviso, true);
+
+  // Tamizado de más también avisa: el signo dice hacia dónde, el porcentaje cuánto.
+  const ganado = calcularGranulometria(ensayoDeMilGramos({ n_4: 500, n_200: 504 }, 1000));
+  assert.ok(ganado.completo && ganado.lavado);
+  assert.equal(redondear(ganado.lavado.diferencia, 1), -4);
+  assert.equal(ganado.lavado.aviso, true);
+
+  // Sin M2 —como el Excel, que la dejaba en blanco— no hay dato ni aviso.
+  const sinLavada = calcularGranulometria(ensayoDelExcel());
+  assert.ok(sinLavada.completo);
+  assert.equal(sinLavada.lavado, null);
+});
+
+prueba('el ensayo del Excel cumple la franja SBG-50', () => {
+  const sbg50 = franjaPorId('sbg_50');
+  assert.ok(sbg50);
+  const resultado = calcularGranulometria(ensayoDelExcel(), sbg50);
+  assert.ok(resultado.completo && resultado.veredicto);
+  assert.equal(resultado.veredicto.global, 'cumple');
+  // Juzga los diez tamices que la franja controla, y solo esos (RF-57).
+  assert.deepEqual(
+    resultado.veredicto.tamices.map((t) => [t.tamiz, t.pasa, t.posicion]),
+    [
+      ['t_2', 100, 'dentro'],
+      ['t_1_1_2', 86.48, 'dentro'],
+      ['t_1', 69.94, 'dentro'],
+      ['t_1_2', 49.81, 'dentro'],
+      ['t_3_8', 44.14, 'dentro'],
+      ['n_4', 32.17, 'dentro'],
+      ['n_10', 23.79, 'dentro'],
+      ['n_40', 8.26, 'dentro'],
+      ['n_100', 4.01, 'dentro'],
+      ['n_200', 3.39, 'dentro'],
+    ],
+  );
+  // Sin franja escogida no hay veredicto, pero sí resultados.
+  const sinFranja = calcularGranulometria(ensayoDelExcel());
+  assert.ok(sinFranja.completo);
+  assert.equal(sinFranja.veredicto, null);
+});
+
+prueba('el veredicto se juzga con el porcentaje que se muestra, límites incluidos', () => {
+  // RF-57 y RF-58. En el 1½" la franja pide de 70 a 95.
+  const franja: FranjaGranulometrica = {
+    id: 'prueba',
+    nombre: 'Prueba',
+    norma: '—',
+    limites: { t_1_1_2: { min: 70, max: 95 } },
+  };
+  const posicion = (retenido: number) => {
+    const resultado = calcularGranulometria(ensayoDeMilGramos({ t_1_1_2: retenido }), franja);
+    assert.ok(resultado.completo && resultado.veredicto);
+    return [resultado.veredicto.global, resultado.veredicto.tamices[0].posicion, resultado.veredicto.tamices[0].pasa];
+  };
+
+  assert.deepEqual(posicion(300), ['cumple', 'dentro', 70]);
+  // 69,995 se muestra como 70,00: cumple, aunque en binario quede por debajo.
+  assert.deepEqual(posicion(300.05), ['cumple', 'dentro', 70]);
+  // RF-59 y RF-61: fuera, y hacia qué lado.
+  assert.deepEqual(posicion(310), ['no_cumple', 'debajo', 69]);
+  assert.deepEqual(posicion(50), ['cumple', 'dentro', 95]);
+  assert.deepEqual(posicion(40), ['no_cumple', 'encima', 96]);
+});
+
+prueba('un solo tamiz fuera basta para no cumplir', () => {
+  // RF-59 y RF-60: el ensayo del Excel, con el N.º 200 lavado de más.
+  const sbg50 = franjaPorId('sbg_50');
+  assert.ok(sbg50);
+  const entrada = ensayoDelExcel();
+  entrada.retenidos = { ...entrada.retenidos, n_200: 0, fondo: 0 };
+  entrada.masas = { ...entrada.masas, seca: 6621 + 1000 };
+  const resultado = calcularGranulometria(entrada, sbg50);
+  assert.ok(resultado.completo && resultado.veredicto);
+  assert.equal(resultado.veredicto.global, 'no_cumple');
+  const fuera = resultado.veredicto.tamices.filter((t) => t.posicion !== 'dentro');
+  assert.ok(fuera.length > 0);
+  assert.ok(fuera.some((t) => t.tamiz === 'n_200' && t.posicion === 'encima'));
+});
+
+prueba('con datos incompletos no hay veredicto', () => {
+  // RF-63: ni CUMPLE ni NO CUMPLE sobre porcentajes que no se pudieron calcular.
+  const entrada = ensayoDelExcel();
+  entrada.retenidos = { ...entrada.retenidos, n_40: null };
+  const resultado = calcularGranulometria(entrada, franjaPorId('sbg_50') ?? null);
+  assert.equal(resultado.completo, false);
+  assert.ok(!('veredicto' in resultado));
+});
+
+/** El ensayo del Excel, con su encabezado, listo para enviar. */
+function ensayoCompleto(): EnsayoAValidar {
+  return {
+    material: 'Subbase granular',
+    fuente: 'Cantera la Fortune',
+    localizacion: 'CANTERA #2 (PUERTO NARE)',
+    numeroInforme: 'No. 6',
+    fechaRecepcion: '2026-09-20',
+    fechaEjecucion: '2026-09-22',
+    franjaId: 'sbg_50',
+    ...ensayoDelExcel(),
+    masas: { humeda: 6830, seca: 6621, tara: 0, lavada: 6410 },
+  };
+}
+
+const HOY_EN_OBRA = '2026-09-24';
+
+/** Los campos que rechaza, en orden. */
+function camposRechazados(ensayo: EnsayoAValidar, modo: 'borrador' | 'envio' = 'borrador') {
+  return validarEnsayo(ensayo, HOY_EN_OBRA, modo).map((e) => e.campo);
+}
+
+prueba('el ensayo del Excel, completo, se puede enviar', () => {
+  assert.deepEqual(validarEnsayo(ensayoCompleto(), HOY_EN_OBRA, 'envio'), []);
+});
+
+prueba('ninguna masa puede ser negativa, y se dice cuál', () => {
+  // RF-33.
+  const ensayo = ensayoCompleto();
+  ensayo.masas = { ...ensayo.masas, tara: -1 };
+  ensayo.retenidos = { ...ensayo.retenidos, n_40: -0.5 };
+  const errores = validarEnsayo(ensayo, HOY_EN_OBRA, 'borrador');
+  assert.deepEqual(
+    errores.filter((e) => e.mensaje.includes('negativa')),
+    [
+      { campo: 'masas.tara', mensaje: 'La tara no puede ser negativa.' },
+      { campo: 'retenidos.n_40', mensaje: 'La masa retenida en el tamiz N.º 40 no puede ser negativa.' },
+    ],
+  );
+});
+
+prueba('las masas tienen que ser coherentes entre sí', () => {
+  // RF-34: la muestra no puede pesar más seca que húmeda.
+  const masSeca = ensayoCompleto();
+  masSeca.masas = { ...masSeca.masas, seca: 6900 };
+  assert.ok(camposRechazados(masSeca).includes('masas.seca'));
+
+  // RF-35: la tara no puede igualar ni pasar la masa seca.
+  const tara = ensayoCompleto();
+  tara.masas = { ...tara.masas, tara: 6621 };
+  assert.ok(camposRechazados(tara).includes('masas.tara'));
+
+  // RF-36: lo lavado no puede pesar más que lo que se secó antes de lavar.
+  const lavada = ensayoCompleto();
+  lavada.masas = { ...lavada.masas, lavada: 6700 };
+  assert.deepEqual(camposRechazados(lavada), ['masas.lavada']);
+});
+
+prueba('lo retenido no puede sumar más que la muestra, y se dan las dos cifras', () => {
+  // RF-37.
+  const ensayo = ensayoCompleto();
+  ensayo.retenidos = { ...ensayo.retenidos, fondo: 300 };
+  const errores = validarEnsayo(ensayo, HOY_EN_OBRA, 'borrador');
+  assert.deepEqual(errores, [
+    {
+      campo: 'retenidos',
+      mensaje: 'Lo retenido suma 6.696,6 g y la masa seca sin tara es 6.621 g: no puede ser mayor.',
+    },
+  ]);
+});
+
+prueba('las fechas del ensayo van en orden y ninguna es futura', () => {
+  // RF-38.
+  const alReves = ensayoCompleto();
+  alReves.fechaEjecucion = '2026-09-19';
+  assert.deepEqual(camposRechazados(alReves), ['fechaEjecucion']);
+
+  // RF-39: el día en la obra es el límite, y hoy mismo vale.
+  const hoy = ensayoCompleto();
+  hoy.fechaRecepcion = HOY_EN_OBRA;
+  hoy.fechaEjecucion = HOY_EN_OBRA;
+  assert.deepEqual(camposRechazados(hoy), []);
+
+  const futura = ensayoCompleto();
+  futura.fechaRecepcion = '2026-09-25';
+  futura.fechaEjecucion = '2026-09-26';
+  assert.deepEqual(camposRechazados(futura), ['fechaRecepcion', 'fechaEjecucion']);
+});
+
+prueba('un borrador a medias se guarda, pero no se envía', () => {
+  // RF-31 y RF-73: lo incompleto se admite mientras es borrador.
+  const aMedias: EnsayoAValidar = {
+    material: 'Subbase granular',
+    fuente: '  ',
+    localizacion: null,
+    numeroInforme: null,
+    fechaRecepcion: '2026-09-20',
+    fechaEjecucion: null,
+    franjaId: null,
+    masas: { humeda: 6830, seca: null, tara: null, lavada: null },
+    retenidos: { t_2: 0 },
+  };
+  assert.deepEqual(validarEnsayo(aMedias, HOY_EN_OBRA, 'borrador'), []);
+
+  const alEnviar = validarEnsayo(aMedias, HOY_EN_OBRA, 'envio');
+  assert.deepEqual(alEnviar.slice(0, 9), [
+    { campo: 'fuente', mensaje: 'Falta la fuente.' },
+    { campo: 'localizacion', mensaje: 'Falta la localización.' },
+    { campo: 'numeroInforme', mensaje: 'Falta el número de informe.' },
+    { campo: 'fechaEjecucion', mensaje: 'Falta la fecha de ejecución.' },
+    { campo: 'franja', mensaje: 'Falta escoger la franja.' },
+    { campo: 'masas.seca', mensaje: 'Falta la masa inicial seca.' },
+    { campo: 'masas.tara', mensaje: 'Falta la tara.' },
+    { campo: 'masas.lavada', mensaje: 'Falta la masa seca después del lavado.' },
+    { campo: 'retenidos.t_1_1_2', mensaje: 'Falta la masa retenida en el tamiz 1½".' },
+  ]);
+  // Los catorce tamices sin digitar y el fondo, uno por uno.
+  assert.equal(alEnviar.filter((e) => e.campo.startsWith('retenidos.')).length, 15);
+});
+
+prueba('una franja que no está en el catálogo no se acepta', () => {
+  const ensayo = ensayoCompleto();
+  ensayo.franjaId = 'bg_99';
+  assert.deepEqual(validarEnsayo(ensayo, HOY_EN_OBRA, 'borrador'), [
+    { campo: 'franja', mensaje: 'Esa franja no está en el catálogo.' },
+  ]);
+});
+
+prueba('el número de informe se compara sin mayúsculas ni espacios', () => {
+  // RF-40.
+  assert.equal(claveDeInforme('No. 6 '), claveDeInforme('no.6'));
+  assert.equal(claveDeInforme('  LAB – 012 '), 'lab–012');
+  assert.notEqual(claveDeInforme('No. 6'), claveDeInforme('No. 7'));
+});
+
+prueba('cada estado admite solo sus pasos', () => {
+  // RF-71 a RF-90. Filas: estado; columnas: editar, enviar, aprobar, devolver, anular, descartar.
+  const acciones: AccionSobreEnsayo[] = ['editar', 'enviar', 'aprobar', 'devolver', 'anular', 'descartar'];
+  const esperado: Record<EstadoVisibleEnsayo, boolean[]> = {
+    borrador: [true, true, false, false, false, true],
+    devuelto: [true, true, false, false, false, true],
+    enviado: [false, false, true, true, false, false],
+    aprobado: [false, false, false, false, true, false],
+    anulado: [false, false, false, false, false, false],
+    descartado: [false, false, false, false, false, false],
+  };
+  for (const [estado, fila] of Object.entries(esperado) as [EstadoVisibleEnsayo, boolean[]][]) {
+    assert.deepEqual(
+      acciones.map((accion) => transicionPermitida(estado, accion)),
+      fila,
+      estado,
+    );
+  }
+});
+
+prueba('un ensayo de granulometría del día llena Control Calidad de Obra para cerrar', () => {
+  // Spec 018 / RF-110: el residente no tiene que volver a anotar a mano el ensayo.
+  const sinFilasAMano = { ...PARTE_COMPLETO, laboratorio: [] };
+  const nombra = (bloqueos: string[]) => bloqueos.some((b) => b.includes('Control Calidad de Obra'));
+
+  assert.equal(nombra(bloqueosDelCierre({ ...sinFilasAMano, ensayosDelModulo: 1 }, FOTOS_COMPLETAS)), false);
+  assert.equal(nombra(bloqueosDelCierre({ ...sinFilasAMano, ensayosDelModulo: 0 }, FOTOS_COMPLETAS)), true);
+  // Ausente es como hoy: sin filas a mano, la sección falta.
+  assert.equal(nombra(bloqueosDelCierre(sinFilasAMano, FOTOS_COMPLETAS)), true);
+  assert.deepEqual(bloqueosDelCierre(PARTE_COMPLETO, FOTOS_COMPLETAS), []);
+});
+
+prueba('el índice del parte cuenta los ensayos del módulo en Control Calidad de Obra', () => {
+  // Spec 018 / RF-110: con la sección a mano vacía no sale «sin registrar».
+  const conEnsayo = estadoDe({ ...PARTE_VACIO, ensayosDelModulo: 2 }, 'laboratorio');
+  assert.equal(conEnsayo?.estado, 'lleno');
+  assert.equal(conEnsayo?.cuantos, 2);
+  assert.equal(estadoDe({ ...PARTE_VACIO, laboratorio: 1, ensayosDelModulo: 2 }, 'laboratorio')?.cuantos, 3);
+  assert.equal(estadoDe(PARTE_VACIO, 'laboratorio')?.estado, 'vacio');
+});
+
+prueba('un ensayo nuevo se registra vacío, y los resultados que lleguen hechos se ignoran', () => {
+  // RF-31: un borrador puede nacer sin nada.
+  const vacio = ensayoNuevo.parse({});
+  assert.equal(vacio.material, null);
+  assert.equal(vacio.fechaEjecucion, null);
+  assert.equal(vacio.franjaId, null);
+  assert.deepEqual(vacio.masas, { humeda: null, seca: null, tara: null, lavada: null });
+  assert.deepEqual(vacio.retenidos, {});
+
+  // RF-42: ni porcentajes ni veredicto se aceptan desde fuera; el servidor los calcula.
+  const conTrampa = ensayoNuevo.parse({
+    material: '  Subbase granular ',
+    veredicto: 'cumple',
+    resultado: { completo: true },
+    masas: { seca: 6621 },
+    retenidos: { t_2: 0, n_40: 369.7 },
+  });
+  assert.equal(conTrampa.material, 'Subbase granular');
+  assert.equal('veredicto' in conTrampa, false);
+  assert.equal('resultado' in conTrampa, false);
+  assert.deepEqual(conTrampa.masas, { humeda: null, seca: 6621, tara: null, lavada: null });
+  assert.deepEqual(conTrampa.retenidos, { t_2: 0, n_40: 369.7 });
+});
+
+prueba('el contrato del ensayo rechaza masas negativas y tamices que no existen', () => {
+  // RF-33, antes de que la petición llegue a la regla.
+  const negativa = ensayoNuevo.safeParse({ masas: { tara: -1 } });
+  assert.equal(negativa.success, false);
+  assert.deepEqual(negativa.error?.issues[0]?.path, ['masas', 'tara']);
+  assert.equal(negativa.error?.issues[0]?.message, 'Una masa no puede ser negativa.');
+
+  const retenidoNegativo = ensayoNuevo.safeParse({ retenidos: { n_200: -0.1 } });
+  assert.deepEqual(retenidoNegativo.error?.issues[0]?.path, ['retenidos', 'n_200']);
+
+  // Un tamiz que no es de la serie no se guarda en silencio.
+  assert.equal(ensayoNuevo.safeParse({ retenidos: { n_325: 10 } }).success, false);
+  assert.equal(ensayoNuevo.safeParse({ fechaEjecucion: '24/09/2026' }).success, false);
+});
+
+prueba('corregir un ensayo distingue lo ausente de lo que se borra', () => {
+  // AGENTS.md: en un PATCH parcial, ausente y vacío no son lo mismo.
+  assert.deepEqual(ensayoEditado.parse({ observaciones: 'Muestra húmeda' }), {
+    observaciones: 'Muestra húmeda',
+  });
+  // Solo la masa que viene: las demás no se tocan.
+  assert.deepEqual(ensayoEditado.parse({ masas: { tara: 0 } }), { masas: { tara: 0 } });
+  assert.deepEqual(ensayoEditado.parse({ retenidos: { n_40: null } }), { retenidos: { n_40: null } });
+  // `null` o vacío sí borra.
+  assert.deepEqual(ensayoEditado.parse({ material: '', franjaId: null }), { material: null, franjaId: null });
+  // La obra de un ensayo no se cambia corrigiéndolo.
+  assert.equal('obraId' in ensayoEditado.parse({ obraId: 'otra' }), false);
+  assert.equal(ensayoEditado.safeParse({ masas: { seca: -5 } }).success, false);
+});
+
+prueba('devolver pide comentario y anular pide motivo', () => {
+  // RF-79 y RF-87.
+  assert.equal(
+    devolucion.safeParse({ comentario: '   ' }).error?.issues[0]?.message,
+    'Falta el comentario de la devolución.',
+  );
+  assert.deepEqual(devolucion.parse({ comentario: ' Revisar el N.º 200 ' }), { comentario: 'Revisar el N.º 200' });
+  assert.equal(anulacion.safeParse({ motivo: '' }).success, false);
+});
+
+prueba('el veredicto que se guarda sale del cálculo, y sin cálculo completo no hay', () => {
+  // RF-42 y RF-63: la columna que filtra el listado dice lo mismo que el resultado.
+  const sbg50 = franjaPorId('sbg_50') ?? null;
+  assert.equal(veredictoDe(calcularGranulometria(ensayoDelExcel(), sbg50)), 'cumple');
+  assert.equal(veredictoDe(calcularGranulometria(ensayoDelExcel(), null)), null);
+  const incompleto = ensayoDelExcel();
+  incompleto.retenidos = { ...incompleto.retenidos, fondo: null };
+  assert.equal(veredictoDe(calcularGranulometria(incompleto, sbg50)), null);
+});
+
+prueba('un número de informe repetido se dice en su campo', () => {
+  // RF-40: lo decide el índice único, y el 409 apunta a la casilla.
+  assert.deepEqual(duplicadoDe('ux_ensayo_granulometria_informe'), {
+    mensaje: 'Ya hay un ensayo vigente con ese número de informe en esta obra.',
+    campo: 'numeroInforme',
+  });
+});
+
+prueba('el parte muestra los ensayos vigentes mientras está abierto y los fijados al cerrar', () => {
+  // Spec 018 / RF-106, RF-111 y RF-112.
+  const ensayo = { id: 'e1' };
+  assert.deepEqual(granulometriasDelParte({ cerrado: false, fijados: null, vigentes: [ensayo] }), {
+    estado: 'vigentes',
+    ensayos: [ensayo],
+  });
+  // Cerrado manda lo fijado, aunque hoy haya otros ensayos de ese día.
+  assert.deepEqual(granulometriasDelParte({ cerrado: true, fijados: [], vigentes: [ensayo] }), {
+    estado: 'fijados',
+    ensayos: [],
+  });
+  // Cerrado antes de que existiera el módulo: no se afirma que no hubo ensayos.
+  assert.deepEqual(granulometriasDelParte({ cerrado: true, fijados: null, vigentes: [ensayo] }), {
+    estado: 'antes_del_modulo',
+    ensayos: [],
+  });
+});
+
+prueba('el listado de ensayos se filtra por material, franja, estado y veredicto', () => {
+  // Spec 018 / RF-103. Sin filtro, todos; cada filtro se suma a los demás.
+  const ensayos = [
+    { id: 'a', material: 'Subbase granular', franjaId: 'sbg_50', estado: 'aprobado', veredicto: 'cumple' },
+    { id: 'b', material: 'Subbase granular', franjaId: 'sbg_50', estado: 'enviado', veredicto: 'no_cumple' },
+    { id: 'c', material: 'Afirmado', franjaId: null, estado: 'borrador', veredicto: null },
+  ] as const;
+  const ids = (filtros: Parameters<typeof filtrarEnsayos>[1]) => filtrarEnsayos(ensayos, filtros).map((e) => e.id);
+  assert.deepEqual(ids({}), ['a', 'b', 'c']);
+  assert.deepEqual(ids({ material: 'Subbase granular' }), ['a', 'b']);
+  assert.deepEqual(ids({ material: 'Subbase granular', veredicto: 'no_cumple' }), ['b']);
+  assert.deepEqual(ids({ estado: 'borrador' }), ['c']);
+  assert.deepEqual(ids({ franjaId: 'sbg_50', estado: 'aprobado' }), ['a']);
+  // «Sin veredicto» es un filtro de verdad: lo que todavía no se puede juzgar.
+  assert.deepEqual(ids({ veredicto: 'sin_veredicto' }), ['c']);
+});
+
+prueba('una masa se lee con coma o con punto, y lo que no es número se dice', () => {
+  // RF-25: en Colombia se escribe «895,1»; el teclado numérico da «895.1».
+  assert.deepEqual(leerMasa('895,1'), { valor: 895.1 });
+  assert.deepEqual(leerMasa(' 895.1 '), { valor: 895.1 });
+  assert.deepEqual(leerMasa('0'), { valor: 0 });
+  // Vacío es «sin digitar», no cero: el borrador puede esperar (RF-31).
+  assert.deepEqual(leerMasa(''), { valor: null });
+  assert.deepEqual(leerMasa('   '), { valor: null });
+  assert.deepEqual(leerMasa('89a'), { error: 'Escriba solo el número, en gramos.' });
+  assert.deepEqual(leerMasa('1.234,5'), { error: 'Escriba solo el número, en gramos.' });
+  // El signo se deja pasar: el rechazo de las negativas lo da la regla, con su mensaje.
+  assert.deepEqual(leerMasa('-3'), { valor: -3 });
+});
+
+prueba('las cifras del ensayo se muestran con coma y con el redondeo de Excel', () => {
+  // RF-55: porcentajes a dos decimales, humedad a uno.
+  assert.equal(formatearNumero(86.48089412475457, 2), '86,48');
+  assert.equal(formatearNumero(100, 2), '100,00');
+  assert.equal(formatearNumero(69.995, 2), '70,00');
+  assert.equal(formatearNumero(3.1566, 1), '3,2');
+  assert.equal(formatearNumero(6404.8, 1), '6404,8');
+});
+
+prueba('anulado y descartado mandan sobre el estado en que quedaron', () => {
+  const ahora = new Date();
+  assert.equal(estadoVisible('aprobado', null, null), 'aprobado');
+  assert.equal(estadoVisible('aprobado', ahora, null), 'anulado');
+  assert.equal(estadoVisible('borrador', null, ahora), 'descartado');
+  // Cómo se nombra cada uno en pantalla y en los rechazos.
+  assert.equal(ETIQUETA_ESTADO_ENSAYO.enviado, 'Enviado');
+  assert.equal(Object.keys(ETIQUETA_ESTADO_ENSAYO).length, 6);
 });
 
 /* ------------------------------------------------------------------------ */
