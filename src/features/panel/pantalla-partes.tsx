@@ -32,11 +32,14 @@
  * La fecha por defecto la decide el servidor, no este navegador: quien mira el
  * panel puede estar en otra ciudad y la bitácora es de la jornada de la obra.
  */
+import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
 import { idDeFila, type ViajeDelParte } from "@/features/bitacoras/tipos";
+import { EtiquetaDeEstado, EtiquetaDeVeredicto } from "@/features/laboratorio/etiquetas";
+import type { GranulometriaDelParte } from "@/features/laboratorio/tipos";
 import {
   formatearAbscisa,
   OPCIONES_DE_METROS,
@@ -94,6 +97,7 @@ import {
 import { api, mensajeDe } from "./cliente-api";
 import {
   Acciones,
+  Ayuda,
   AccionesFormulario,
   FilaDeFormulario,
   Aviso,
@@ -123,6 +127,7 @@ import type {
   FilaDeControlDeCalidadFila,
   MaterialDelParteFila,
   CanteraDelParteFila,
+  GranulometriaDelParteFila,
   DiaDeObra,
   JornadaFila,
   ObraFila,
@@ -382,6 +387,26 @@ export default function PantallaPartes() {
       : (seccionCantera?.viajes.length ?? 0);
 
   /**
+   * Los ensayos de granulometría del día, del módulo Laboratorio (spec 018, RF-106
+   * a RF-112). Pedidos aquí, como los viajes, porque cuentan para el índice y para
+   * el cierre (RF-110). El servidor ya decide qué entra: vigentes con el parte
+   * abierto —ninguno si la obra no lleva laboratorio (RF-15)—, fijados si se cerró.
+   */
+  const granulometrias = useListado<GranulometriaDelParteFila>(
+    useCallback(
+      () =>
+        parte
+          ? api.partes.granulometrias(parte.id).then((g) => [g])
+          : Promise.resolve([]),
+      [parte],
+    ),
+  );
+  const seccionGranulometrias = granulometrias.datos[0] ?? null;
+  // Mientras cargan cuentan cero: la sección a mano sigue mandando, y el servidor
+  // vuelve a contarlos al cerrar, así que nada se cierra por un conteo a medias.
+  const ensayosDelModulo = seccionGranulometrias?.ensayos.length ?? 0;
+
+  /**
    * Lo que el índice enseña. Sale de `shared/rules/parte`, que es la misma regla
    * que decide qué impide cerrar — así el índice y el servidor no discrepan.
    *
@@ -396,6 +421,8 @@ export default function PantallaPartes() {
     actividades: parte?.actividades.length ?? 0,
     clima: parte?.clima.length ?? 0,
     laboratorio: parte?.laboratorio.length ?? 0,
+    // Los ensayos del módulo llenan Control Calidad de Obra (spec 018, RF-110).
+    ensayosDelModulo,
     notas: parte?.notas ?? "",
     // Con la marca, lo que no se exige sale como «no aplica» (RF-54).
     sinTrabajo: parte?.sinTrabajo ?? false,
@@ -422,8 +449,8 @@ export default function PantallaPartes() {
   // Mientras las fotos cargan no se evalúa: diría «falta la fotografía del día»
   // durante el segundo en que todavía no se sabe si la hay.
   const bloqueos =
-    parte && !cerrado && !anulado && !fotos.cargando
-      ? bloqueosDelCierre(parte, {
+    parte && !cerrado && !anulado && !fotos.cargando && !granulometrias.cargando
+      ? bloqueosDelCierre({ ...parte, ensayosDelModulo }, {
           delDia: fotosDelDia.length,
           itemsConFoto: fotos.datos.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
         })
@@ -589,6 +616,7 @@ export default function PantallaPartes() {
             editable={editable}
             alGuardar={dia.recargar}
             alMedir={salto.alMedirBanda}
+            granulometrias={seccionGranulometrias}
           />
           {muestraCantera ? (
             <SeccionCantera
@@ -1802,7 +1830,12 @@ function SeccionLaboratorio({
   editable,
   alGuardar,
   alMedir,
-}: PropsSeccion) {
+  granulometrias,
+}: PropsSeccion & {
+  /** Los ensayos del módulo Laboratorio de ese día (spec 018), ya decididos por el servidor. */
+  granulometrias: GranulometriaDelParteFila | null;
+}) {
+  const delModulo = granulometrias?.ensayos ?? [];
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -1947,7 +1980,7 @@ function SeccionLaboratorio({
     <SeccionEnMarco
       id="laboratorio"
       error={error}
-      titulo={`${TITULO_DE_SECCION.laboratorio} (${filas.length})`}
+      titulo={`${TITULO_DE_SECCION.laboratorio} (${filas.length + delModulo.length})`}
       alMedir={alMedir}
       accion={
         editable ? (
@@ -2116,11 +2149,87 @@ function SeccionLaboratorio({
         <Tabla
           columnas={columnas}
           filas={parte.laboratorio}
-          vacio="Ese día no se registró nada en control de calidad."
+          vacio={
+            delModulo.length > 0
+              ? "Nada escrito a mano: los ensayos de ese día están abajo."
+              : "Ese día no se registró nada en control de calidad."
+          }
           variante="desnuda"
         />
       )}
+      {delModulo.length > 0 && granulometrias ? (
+        <EnsayosDelModulo seccion={granulometrias} />
+      ) : null}
     </SeccionEnMarco>
+  );
+}
+
+/**
+ * Los ensayos de granulometría del día, del módulo Laboratorio (spec 018, RF-106 a
+ * RF-109, RF-112). **De solo lectura**: se registran, se corrigen y se aprueban en su
+ * módulo, y desde aquí solo se abren (RF-108, RF-109). Con el parte cerrado son los
+ * fijados al cerrar, con el estado que tenían ese día, aunque después se aprueben o
+ * se anulen.
+ */
+function EnsayosDelModulo({ seccion }: { seccion: GranulometriaDelParteFila }) {
+  const columnasEnsayos: Columna<GranulometriaDelParte>[] = [
+    {
+      clave: "informe",
+      titulo: "Informe",
+      ancho: 90,
+      pintar: (e) => <Celda>{e.numeroInforme ?? "—"}</Celda>,
+    },
+    {
+      clave: "material",
+      titulo: "Material",
+      ancho: 170,
+      pintar: (e) => <Celda lineas={2}>{e.material ?? "—"}</Celda>,
+    },
+    {
+      clave: "franja",
+      titulo: "Franja",
+      ancho: 180,
+      pintar: (e) => <Celda lineas={2}>{e.franja ?? "Sin escoger"}</Celda>,
+    },
+    {
+      clave: "veredicto",
+      titulo: "Veredicto",
+      ancho: 130,
+      pintar: (e) => <EtiquetaDeVeredicto veredicto={e.veredicto} />,
+    },
+    {
+      clave: "estado",
+      titulo: "Estado",
+      ancho: 110,
+      pintar: (e) => <EtiquetaDeEstado estado={e.estado} />,
+    },
+    {
+      clave: "abrir",
+      titulo: "",
+      ancho: 90,
+      pintar: (e) => (
+        <Acciones>
+          <Boton
+            titulo="Abrir"
+            tono="secundario"
+            onPress={() =>
+              router.push({ pathname: "/panel/laboratorio/[id]", params: { id: e.id } })
+            }
+          />
+        </Acciones>
+      ),
+    },
+  ];
+
+  return (
+    <>
+      <Ayuda>
+        {seccion.estado === "fijados"
+          ? "Ensayos de granulometría del módulo Laboratorio, fijados al cerrar la bitácora con el estado que tenían ese día. Lo que se apruebe o anule después no cambia esta lista."
+          : "Ensayos de granulometría del módulo Laboratorio con fecha de ejecución este día. Se registran y se aprueban en Laboratorio; al cerrar la bitácora, esta lista queda fijada."}
+      </Ayuda>
+      <Tabla columnas={columnasEnsayos} filas={seccion.ensayos} vacio="" variante="desnuda" />
+    </>
   );
 }
 

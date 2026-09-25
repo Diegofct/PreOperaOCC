@@ -262,6 +262,11 @@ export interface ConteosDelParte {
   actividades: number;
   clima: number;
   laboratorio: number;
+  /**
+   * Ensayos de granulometría del módulo Laboratorio de ese día (018/RF-110): cuentan
+   * como filas de Control Calidad de Obra. Ausente es cero, como antes de la spec.
+   */
+  ensayosDelModulo?: number;
   /** El texto tal cual. El recorte se hace aquí, no en la pantalla. */
   notas: string;
   /** `null` mientras no hayan cargado. */
@@ -360,7 +365,11 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
     exigible('personal', TITULO_DE_SECCION.personal, conteos.personal),
     exigible('actividades', TITULO_DE_SECCION.actividades, conteos.actividades),
     porCuantos('clima', TITULO_DE_SECCION.clima, conteos.clima),
-    exigible('laboratorio', TITULO_DE_SECCION.laboratorio, conteos.laboratorio),
+    exigible(
+      'laboratorio',
+      TITULO_DE_SECCION.laboratorio,
+      conteos.laboratorio + (conteos.ensayosDelModulo ?? 0),
+    ),
     ...seccionDeCantera(conteos.cantera),
     {
       id: 'notas',
@@ -435,6 +444,12 @@ export interface ParteEvaluable {
   clima: unknown[];
   /** La sección de Control Calidad de Obra. Ídem. */
   laboratorio: unknown[];
+  /**
+   * Los ensayos de granulometría vigentes del día, ya contados por quien pregunta
+   * (018/RF-110): llenan Control Calidad de Obra igual que una fila a mano. Viven en
+   * su módulo, no en el parte, así que la regla los recibe contados y sigue pura.
+   */
+  ensayosDelModulo?: number;
   notas: string | null;
   /** Ausente es no marcado, como en todos los partes anteriores al cambio. */
   sinTrabajo?: boolean;
@@ -611,7 +626,9 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
   if (parte.personal.length === 0) faltan.push(TITULO_DE_SECCION.personal);
   if (parte.actividades.length === 0) faltan.push(TITULO_DE_SECCION.actividades);
   if (parte.clima.length === 0) faltan.push(TITULO_DE_SECCION.clima);
-  if (parte.laboratorio.length === 0) faltan.push(TITULO_DE_SECCION.laboratorio);
+  if (parte.laboratorio.length + (parte.ensayosDelModulo ?? 0) === 0) {
+    faltan.push(TITULO_DE_SECCION.laboratorio);
+  }
   if (!hayTexto(parte.notas)) faltan.push(TITULO_DE_SECCION.notas);
   if (fotos.delDia === 0) faltan.push(TITULO_DE_SECCION.fotografia);
   if (faltan.length > 0) bloqueos.push(faltaLlenar(faltan));

@@ -28,7 +28,7 @@ import {
 } from './componentes';
 import { EditorDeHorario, horarioValido } from './editor-horario';
 import { MarcoPantalla, useListado } from './marco';
-import { ModulosDeLaObra } from './modulos-de-obra';
+import { MODULOS_DE_OBRA_NUEVA, ModulosDeLaObra } from './modulos-de-obra';
 import { VentanaCorregirObra } from './ventana-obra';
 import type { ObraFila } from './contratos';
 
@@ -41,9 +41,8 @@ export default function PantallaObras() {
   // Arranca con el propuesto (spec 016, RF-3): la gerencia lo ajusta, no lo escribe
   // desde cero.
   const [horario, setHorario] = useState<HorarioDeObra>(HORARIO_PROPUESTO);
-  // Los dos módulos, como las obras que ya existían (spec 017, RF-2, RF-3).
-  const [almacenActivo, setAlmacenActivo] = useState(true);
-  const [canteraActivo, setCanteraActivo] = useState(true);
+  // Los tres módulos propuestos encendidos (spec 017, RF-3; spec 018, RF-13).
+  const [modulos, setModulos] = useState(MODULOS_DE_OBRA_NUEVA);
 
   const [editando, setEditando] = useState<ObraFila | null>(null);
   const [porDarDeBaja, setPorDarDeBaja] = useState<ObraFila | null>(null);
@@ -57,8 +56,9 @@ export default function PantallaObras() {
         municipio,
         activa: true,
         horario,
-        almacenActivo,
-        canteraActivo,
+        almacenActivo: modulos.almacen,
+        canteraActivo: modulos.cantera,
+        laboratorioActivo: modulos.laboratorio,
       }),
     );
     if (creada) {
@@ -67,8 +67,7 @@ export default function PantallaObras() {
       setNombre('');
       setMunicipio('');
       setHorario(HORARIO_PROPUESTO);
-      setAlmacenActivo(true);
-      setCanteraActivo(true);
+      setModulos(MODULOS_DE_OBRA_NUEVA);
     }
   }
 
@@ -138,14 +137,7 @@ export default function PantallaObras() {
           />
           <Campo etiqueta="Municipio" valor={municipio} onChange={setMunicipio} ancho={220} />
           <EditorDeHorario valor={horario} onChange={setHorario} />
-          <ModulosDeLaObra
-            almacen={almacenActivo}
-            cantera={canteraActivo}
-            onCambiar={(cuales) => {
-              setAlmacenActivo(cuales.almacen);
-              setCanteraActivo(cuales.cantera);
-            }}
-          />
+          <ModulosDeLaObra elegidos={modulos} onCambiar={setModulos} />
           <AccionesFormulario>
             <Boton
               titulo="Registrar obra"

@@ -22,6 +22,7 @@ export const ENLACES_DE_MODULO = {
   preoperacionales: { ruta: '/panel/preoperacionales', titulo: 'Preoperacionales' },
   almacen: { ruta: '/panel/almacen', titulo: 'Almacén' },
   cantera: { ruta: '/panel/cantera', titulo: 'Control Cantera' },
+  laboratorio: { ruta: '/panel/laboratorio', titulo: 'Laboratorio' },
   // `as const` conserva las rutas como literales, que es lo que exigen las
   // rutas tipadas de Expo Router; `satisfies` obliga a que estén todos.
 } as const satisfies Record<Modulo, { ruta: string; titulo: string }>;

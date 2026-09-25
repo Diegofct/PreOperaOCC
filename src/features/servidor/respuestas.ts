@@ -175,6 +175,13 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
         mensaje: 'Ya hay un material de cantera con ese nombre en esta obra.',
         campo: 'nombre',
       };
+    case 'ux_ensayo_granulometria_informe':
+      // Spec 018, RF-40. El índice compara sin mayúsculas ni espacios, y solo entre
+      // ensayos vigentes: uno anulado o descartado deja libre su número (RF-41).
+      return {
+        mensaje: 'Ya hay un ensayo vigente con ese número de informe en esta obra.',
+        campo: 'numeroInforme',
+      };
     default:
       return { mensaje: 'Ya existe un registro con esos datos.' };
   }

@@ -25,11 +25,16 @@ import type {
   ClaveNueva,
   ClaveTemporalFila,
   CodigosFila,
+  ConsultaDeEnsayos,
   ConsultaDeMovimientos,
   ConsultaDeViajes,
   CredencialesIngreso,
   JornadaDePreoperacionales,
   DiaDeObra,
+  EnsayoDetalle,
+  EnsayoEditado,
+  EnsayoNuevo,
+  GranulometriaDelParteFila,
   JornadaFila,
   LlantaFila,
   LlantaNueva,
@@ -252,6 +257,9 @@ export const api = {
     cerrar: (id: string) => panelEnviar<{ id: string }>(`/partes/${id}/cerrar`, 'POST'),
     /** La sección «Control Cantera»: vigentes si está abierto, fijados si está cerrado. */
     cantera: (id: string) => panel<CanteraDelParteFila>(`/partes/${id}/cantera`),
+    /** Los ensayos de granulometría del día, del módulo Laboratorio (spec 018). */
+    granulometrias: (id: string) =>
+      panel<GranulometriaDelParteFila>(`/partes/${id}/granulometrias`),
     anular: (id: string, motivo: string) =>
       panelEnviar<{ id: string }>(`/partes/${id}/anular`, 'POST', { motivo }),
   },
@@ -361,6 +369,37 @@ export const api = {
       anular: (id: string, motivo: string) =>
         panelEnviar<{ id: string }>(`/almacen/movimientos/${id}/anular`, 'POST', { motivo }),
     },
+  },
+
+  /**
+   * El laboratorio: ensayos de granulometría (spec 018).
+   *
+   * `obraId` solo lo tiene en cuenta el servidor para la gerencia. Cada paso del
+   * flujo es su propia ruta y responde el ensayo entero, ya recalculado.
+   */
+  laboratorio: {
+    listar: ({ obraId, desde, hasta }: { obraId?: string | null; desde: string; hasta: string }) => {
+      const parametros = new URLSearchParams({ desde, hasta });
+      if (obraId) parametros.set('obraId', obraId);
+      return panel<ConsultaDeEnsayos>(`/laboratorio/granulometrias?${parametros.toString()}`);
+    },
+    detalle: (id: string) => panel<EnsayoDetalle>(`/laboratorio/granulometrias/${id}`),
+    crear: (datos: EnsayoNuevo) =>
+      panelEnviar<EnsayoDetalle>('/laboratorio/granulometrias', 'POST', datos),
+    corregir: (id: string, cambios: EnsayoEditado) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}`, 'PATCH', cambios),
+    enviar: (id: string) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/enviar`, 'POST'),
+    aprobar: (id: string) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/aprobar`, 'POST'),
+    devolver: (id: string, comentario: string) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/devolver`, 'POST', {
+        comentario,
+      }),
+    anular: (id: string, motivo: string) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/anular`, 'POST', { motivo }),
+    descartar: (id: string) =>
+      panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/descartar`, 'POST'),
   },
 
   /**

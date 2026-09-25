@@ -32,10 +32,11 @@ export async function GET(peticion: Request) {
         // El residente también lo lee: el parte le dice el horario de su obra
         // (spec 016, RF-10), aunque cambiarlo sea solo de gerencia (RF-5).
         horario: obras.horario,
-        // Qué módulos lleva (spec 017): el panel arma con esto los selectores de
-        // obra de Almacén y Cantera, y la ficha sus casillas.
+        // Qué módulos lleva (specs 017 y 018): el panel arma con esto los selectores
+        // de obra de Almacén, Cantera y Laboratorio, y la ficha sus casillas.
         almacenActivo: obras.almacenActivo,
         canteraActivo: obras.canteraActivo,
+        laboratorioActivo: obras.laboratorioActivo,
       })
       .from(obras)
       // El residente ve la suya; la gerencia, todas. La condición la decide
@@ -75,6 +76,7 @@ export async function POST(peticion: Request) {
         horario: obras.horario,
         almacenActivo: obras.almacenActivo,
         canteraActivo: obras.canteraActivo,
+        laboratorioActivo: obras.laboratorioActivo,
       });
 
     return ok(fila, 201);

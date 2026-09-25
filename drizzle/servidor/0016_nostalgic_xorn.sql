@@ -1,0 +1,1 @@
+ALTER TABLE "obras" ADD COLUMN "laboratorio_activo" boolean DEFAULT false NOT NULL;

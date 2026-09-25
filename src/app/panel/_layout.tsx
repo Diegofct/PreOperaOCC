@@ -43,6 +43,15 @@ export default function LayoutPanel() {
           />
           <Stack.Screen name="almacen" options={{ title: 'Almacén · Control de Obra OCC' }} />
           <Stack.Screen name="cantera" options={{ title: 'Control Cantera · Control de Obra OCC' }} />
+          <Stack.Screen name="laboratorio" options={{ title: 'Laboratorio · Control de Obra OCC' }} />
+          <Stack.Screen
+            name="laboratorio/[id]"
+            options={{ title: 'Ensayo de granulometría · Control de Obra OCC' }}
+          />
+          <Stack.Screen
+            name="laboratorio/[id]/informe"
+            options={{ title: 'Informe de granulometría · Control de Obra OCC' }}
+          />
         </Stack>
       </MarcoSesion>
     </ProveedorSesionPanel>

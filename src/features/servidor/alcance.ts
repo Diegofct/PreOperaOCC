@@ -60,8 +60,15 @@ export function filtroDeObra(persona: PersonaEnSesion, columna: PgColumn): SQL |
  * ya junta `obras` y en una que no, y ninguna tiene que cambiar su forma para poder
  * filtrar.
  */
-export function filtroDeModulo(modulo: 'almacen' | 'cantera', columnaObra: PgColumn): SQL {
-  const bandera = modulo === 'almacen' ? obras.almacenActivo : obras.canteraActivo;
+export function filtroDeModulo(
+  modulo: 'almacen' | 'cantera' | 'laboratorio',
+  columnaObra: PgColumn,
+): SQL {
+  const bandera = {
+    almacen: obras.almacenActivo,
+    cantera: obras.canteraActivo,
+    laboratorio: obras.laboratorioActivo,
+  }[modulo];
   return sql`exists (select 1 from ${obras} where ${obras.id} = ${columnaObra} and ${bandera})`;
 }
 

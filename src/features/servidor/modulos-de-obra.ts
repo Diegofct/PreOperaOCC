@@ -3,8 +3,8 @@
  *
  * La sesión ya trae los de la obra **de quien pide** (`PersonaEnSesion.modulosDeObra`),
  * que es lo que mira la guardia. Esto es para el otro caso: cuando la gerencia habla
- * de la obra **de otra persona** —darle el acceso de almacenista o de encargado de
- * planta— y hay que mirar los módulos de esa obra, no los suyos (RF-11).
+ * de la obra **de otra persona** —darle el acceso de almacenista, de encargado de
+ * planta o de laboratorista— y hay que mirar los módulos de esa obra, no los suyos (RF-11).
  *
  * Vive aquí y no dentro de una ruta porque lo usan las dos de personas, y una ruta no
  * importa a otra.
@@ -24,7 +24,11 @@ export async function modulosDeLaObra(obraId: string | null): Promise<ModulosDeO
   if (!obraId) return TODOS_LOS_MODULOS;
 
   const [fila] = await baseServidor()
-    .select({ almacen: obras.almacenActivo, cantera: obras.canteraActivo })
+    .select({
+      almacen: obras.almacenActivo,
+      cantera: obras.canteraActivo,
+      laboratorio: obras.laboratorioActivo,
+    })
     .from(obras)
     .where(eq(obras.id, obraId))
     .limit(1);

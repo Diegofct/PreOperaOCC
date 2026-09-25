@@ -121,6 +121,7 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
       obraId: usuarios.obraId,
       almacenActivo: obras.almacenActivo,
       canteraActivo: obras.canteraActivo,
+      laboratorioActivo: obras.laboratorioActivo,
       activo: usuarios.activo,
       eliminadoEn: usuarios.eliminadoEn,
     })
@@ -155,7 +156,12 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
     rol: fila.rol,
     obraId: fila.obraId,
     modulosDeObra: fila.obraId
-      ? { almacen: fila.almacenActivo ?? true, cantera: fila.canteraActivo ?? true }
+      ? {
+          almacen: fila.almacenActivo ?? true,
+          cantera: fila.canteraActivo ?? true,
+          // Apagado si no se sabe, como el default de la columna (018/RF-12).
+          laboratorio: fila.laboratorioActivo ?? false,
+        }
       : TODOS_LOS_MODULOS,
     // Lo rellena `guardia.ts`, que es quien consulta la credencial.
     debeCambiarClave: false,

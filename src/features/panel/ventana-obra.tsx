@@ -60,6 +60,7 @@ export function VentanaCorregirObra({
   const [modulos, setModulos] = useState({
     almacen: obra.almacenActivo,
     cantera: obra.canteraActivo,
+    laboratorio: obra.laboratorioActivo,
   });
   // El estado del intento —si corre y qué falló— sale del hook, que deja el
   // motivo dentro de esta ventana (spec 015, RF-25) y no en el aviso de la
@@ -81,6 +82,9 @@ export function VentanaCorregirObra({
     if (activa !== obra.activa) cambios.activa = activa;
     if (modulos.almacen !== obra.almacenActivo) cambios.almacenActivo = modulos.almacen;
     if (modulos.cantera !== obra.canteraActivo) cambios.canteraActivo = modulos.cantera;
+    if (modulos.laboratorio !== obra.laboratorioActivo) {
+      cambios.laboratorioActivo = modulos.laboratorio;
+    }
     if (!mismoHorario(horario, obra.horario)) cambios.horario = horario;
 
     if (Object.keys(cambios).length === 0) {
@@ -121,8 +125,7 @@ export function VentanaCorregirObra({
         />
         <EditorDeHorario valor={horario} onChange={setHorario} />
         <ModulosDeLaObra
-          almacen={modulos.almacen}
-          cantera={modulos.cantera}
+          elegidos={modulos}
           onCambiar={setModulos}
           sinModulo={personasSinModulo(personas.datos, obra.id, modulos)}
         />
