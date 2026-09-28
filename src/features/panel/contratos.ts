@@ -1010,7 +1010,12 @@ export interface ResumenFila {
   hasta: string;
   obras: number;
   equipos: number;
-  /** De 0 a 100, o `null` si no hay equipos: sin flota no se incumple nada. */
+  /** Los equipos cuyo tipo tiene formato: el denominador del cumplimiento (spec 019). */
+  equiposInspeccionables: number;
+  /**
+   * De 0 a 100, o `null` si no hay equipos inspeccionables: sin flota —o solo
+   * con equipos sin formato— no se incumple nada.
+   */
   cumplimiento: number | null;
   inspeccionadosHoy: number;
   sinInspeccionar: number;

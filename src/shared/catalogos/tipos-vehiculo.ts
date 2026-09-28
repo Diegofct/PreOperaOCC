@@ -50,6 +50,23 @@ export const TIPOS_VEHICULO: TipoVehiculo[] = [
   // estos tipos pero no levantarles un preoperacional. El panel lo avisa.
   { id: 'vibrocompactadora', nombre: 'Vibro Compactadora', claseMedidor: 'horometro', sinFormato: true },
   { id: 'recicladora', nombre: 'Recicladora', claseMedidor: 'horometro', sinFormato: true },
+  // Añadidas en la spec 019, también **sin formato**, por el mismo motivo. Los de
+  // carretera van por kilómetros y la maquinaria por horas, como los anteriores.
+  // El tipo es el oficio de la máquina, no su marca: el camión Ford es un
+  // `camion` con «Ford» en la marca. El carrotanque va aparte del camión porque
+  // OCC los controla por separado; la excavadora es la de llantas, y la de oruga
+  // es otro tipo porque no rueda (no lleva posiciones de llanta).
+  { id: 'camion', nombre: 'Camión', claseMedidor: 'odometro', sinFormato: true },
+  { id: 'carrotanque', nombre: 'Carrotanque', claseMedidor: 'odometro', sinFormato: true },
+  { id: 'excavadora', nombre: 'Excavadora', claseMedidor: 'horometro', sinFormato: true },
+  {
+    id: 'excavadora_oruga',
+    nombre: 'Excavadora de oruga',
+    claseMedidor: 'horometro',
+    sinFormato: true,
+  },
+  { id: 'montacargas', nombre: 'Montacargas', claseMedidor: 'horometro', sinFormato: true },
+  { id: 'carro_taller', nombre: 'Carro taller', claseMedidor: 'odometro', sinFormato: true },
 ];
 
 export const TIPOS_VEHICULO_POR_ID = new Map(TIPOS_VEHICULO.map((t) => [t.id, t]));

@@ -463,3 +463,97 @@ es la del anexo B.
 números del Excel, el servidor, el flujo entero en pantalla, el informe y el parte—, pero
 quedan tres demos pendientes (P1, P2, P3) y dos RF sin cubrir por dudas abiertas (RF-19,
 RF-30). La spec sigue **En curso** y T24 queda sin marcar hasta cerrar esa lista.
+
+---
+
+# Validación — Spec 019
+
+> Fecha: 2026-09-28 · Fase 7 del flujo SDD · 26 RF
+
+## Lo que se ejecutó
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run verificar` | **308 verificaciones correctas**, 9 de ellas nuevas de la spec 019 |
+| `npm run typecheck` | sin errores (app y `scripts/`) |
+| `npm run lint` | sin hallazgos |
+| `npm run db:sembrar:servidor` | desarrollo: 13 tipos, 5 plantillas |
+| Demo en Chrome (T6) | panel de desarrollo, sesión de gerencia, 6 pasos en verde |
+
+No se corrió `expo export` + `grep DATABASE_URL`: ningún módulo que llegue al bundle
+del cliente lee un secreto nuevo. Los únicos que leen `DATABASE_URL` son scripts de Node
+(`scripts/produccion.ts`, `sembrar-produccion.ts`).
+
+## RF por RF
+
+Los casos están en `scripts/verificar-reglas.ts`.
+
+| RF | Qué lo cubre | Resultado |
+| --- | --- | --- |
+| RF-1 Camión | `:2643` (lista sin formato) + T6 paso 1 (selector) | verde |
+| RF-2 Carrotanque aparte | `:2643`, `:2698` (slug y nombre únicos) + T6 paso 1 | verde |
+| RF-3 Excavadora (de llantas) | `:2643`, `:2722` (4 posiciones) + T6 paso 1 | verde |
+| RF-4 Excavadora de oruga aparte | `:2643`, `:2698` + T6 pasos 1 y 4 | verde |
+| RF-5 Montacargas | `:2643` + T6 paso 1 | verde |
+| RF-6 Carro taller | `:2643` + T6 paso 1 | verde |
+| RF-7 Marca como dato, no tipo | T6 paso 2: Camión con marca «Ford» | verde |
+| RF-8 km para camión, carrotanque y carro taller | `:2667` | verde |
+| RF-9 horas para excavadoras y montacargas | `:2667` | verde |
+| RF-10 Solo el medidor del tipo | T6 pasos 2 (solo odómetro) y 4 (solo horómetro) | verde |
+| RF-11 Se registran sin formato | `:2643` (marca ↔ plantilla) + T6 pasos 2 y 4 | verde |
+| RF-12 Se asignan sin formato | Sin cambio de código: la asignación no mira el tipo. No se asignó en la demo | **pendiente de demo** (T7) |
+| RF-13 Aviso en ficha y listado | T6 paso 2: aviso en el formulario y etiqueta «Sin formato» | verde |
+| RF-14 Explicación en el celular | Código: `abrirBorrador` devuelve `sin_formato` sin plantilla | **pendiente de demo** (T7) |
+| RF-15 7 llantas camión/carrotanque/carro taller | `:2722` + T6 paso 3 | verde |
+| RF-16 4 llantas excavadora/montacargas | `:2722` | verde |
+| RF-17 Oruga sin llantas | `:2722` + T6 paso 4 | verde |
+| RF-18 Llegan al celular sin reinstalar | Código: el pull hace upsert de `tiposVehiculo` | **pendiente de demo** (T7) |
+| RF-19 Nada anterior cambia | `:2684` (siete tipos intactos) y `:2643` (plantillas) | verde |
+| RF-20 Un solo sitio | Por construcción: `TIPOS_VEHICULO` es la única lista, y la leen `seed.ts` y `sembrar-servidor.ts` | verde |
+| RF-21 Fuera de «sin preoperacional» | `:2736` + T6 paso 5 (`sinInspeccionar: 3` de 5 equipos) | verde |
+| RF-22 Fuera del porcentaje | `:2736` + T6 paso 5 («0 de 3») | verde |
+| RF-23 Solo sin formato → sin dato | `:2753`, `:2760`. En pantalla no se vio (gerencia ve todas las obras) | verde por caso; demo opcional |
+| RF-24 Entran al parte | T6 paso 6: el selector de maquinaria ofrece los dos equipos nuevos | verde |
+| RF-25 Lectura con su medidor | T6 paso 6: «Odómetro inicial/final (km)», «85 km recorridos» | verde |
+| RF-26 Suman al resumen | T6 paso 6: el resumen pasa a `kilometros: 85` (parte abierto; no se cerró) | verde |
+
+**23 en verde, 3 pendientes de demo en el teléfono** (RF-12, RF-14 y RF-18), todas en T7.
+
+## Alcance
+
+- **Fuera de lo que pidió la spec, un cambio:** el cumplimiento cuenta los inspeccionados
+  dentro de la flota, así que un equipo dado de baja ya no lleva el porcentaje por encima
+  de 100. Está en el plan (Decisiones) y tiene su caso (`:2766`); en los casos normales
+  da el mismo número.
+- **Herramienta de despliegue:** `db:sembrar:produccion` y `scripts/produccion.ts`. La
+  pedía el criterio de finalización de la spec; `migrar-produccion.ts` conserva su
+  comportamiento.
+- **Fuera de alcance, sigue fuera:** formatos de los seis tipos, marcas como tipo,
+  reclasificar equipos, cambios a tipos o llantas existentes, campos propios de un tipo.
+- **Del árbol de trabajo, no son de la spec 019:** `app.json`,
+  `specs/014-despliegue-a-produccion/tareas.md` y `docs/instalar-la-app.md` ya estaban
+  modificados antes de empezar (APK del 2026-09-25).
+
+## Constitución
+
+| Principio | Estado |
+| --- | --- |
+| 1 Local-first | Sin cambios en el móvil; nada nuevo depende de red |
+| 2 La spec manda | Las tres decisiones surgidas se resolvieron en la spec antes del plan |
+| 3 Una regla, un sitio | Cumplimiento en `src/shared/rules/cumplimiento.ts`, pura |
+| 4 Nada se borra | Sin bajas ni ediciones de evidencia |
+| 5 Puerta de calidad | Los tres comandos en verde; casos nuevos por cada regla |
+| 6 Fronteras duras | La regla no importa nada; los secretos solo en scripts de Node |
+| 7 Español y diseño | Textos y nombres en español; sin estilos nuevos |
+| 8 Sin dependencias | Ninguna nueva |
+
+## Veredicto
+
+**No está cumplida todavía.** Todo lo ejecutable está en verde, pero RF-12, RF-14 y RF-18
+exigen el teléfono con el APK instalado, que habla con producción: se cierran en T7,
+después de sembrar producción y desplegar. La spec sigue **En curso** y T8 queda sin
+marcar hasta cerrar T7.
+
+Datos de prueba que quedaron en desarrollo, en la obra «Pruebas spec 018»: `PRUEBA-CAM-01`,
+`PRUEBA-EXO-01` y el parte abierto del 2026-09-28.
+

@@ -65,7 +65,7 @@ El enum de `usuarios.rol` es `admin | supervisor | operador | almacenista | enca
 - Lint: `npm run lint` (`expo lint`).
 - Migraciones del móvil: `npm run db:generate` tras tocar `src/db/local/schema.ts`.
 - Migraciones del servidor: `npm run db:generate:servidor` tras tocar `src/db/servidor/esquema.ts`, y `npm run db:migrar:servidor` para aplicarlas contra Neon.
-- Catálogo del servidor: `npm run db:sembrar:servidor` (tipos de equipo y plantillas; **nunca** obras, personas ni vehículos — eso lo registra la administración).
+- Catálogo del servidor: `npm run db:sembrar:servidor` (tipos de equipo y plantillas; **nunca** obras, personas ni vehículos — eso lo registra la administración). Siembra la base de **desarrollo**; producción es `npm run db:sembrar:produccion`.
 - Cuenta de gerencia: `npm run crear-admin`. Crea o repone la contraseña de un administrador desde la terminal. Es la única forma de entrar al panel la primera vez, y la salida si gerencia se queda fuera.
 
 > **Variables de entorno** (`.env`, ver `.env.ejemplo`): `DATABASE_URL` para Postgres, `SECRETO_TOKENS` para firmar los tokens de los celulares, y `R2_CUENTA_ID` · `R2_BUCKET` · `R2_LLAVE_ID` · `R2_LLAVE_SECRETA` para el almacén de imágenes. `EXPO_PUBLIC_API_URL` es opcional: en desarrollo el teléfono deduce la dirección del propio servidor de Metro.
@@ -166,6 +166,8 @@ estas cuatro son las que ya costaron una caída y no se deducen de ningún archi
   de encender la imagen nueva. En el mismo Neon hay dos bases con el mismo host, usuario y
   contraseña —`neondb` es la de desarrollo, **`preoperaocc` es producción**—, de modo que
   `npm run db:migrar:servidor` migra la equivocada y termina diciendo «Listo».
+  Por lo mismo, **si cambió el catálogo** (tipos de equipo o formatos) se siembra con
+  `npm run db:sembrar:produccion`, nunca con `db:sembrar:servidor`.
 - **`docker compose down` en `/opt/preoperaocc` tumba el sitio**, porque borra la red que el
   proxy del vecino tiene conectada a mano. Siempre `up -d`.
 - **Un despliegue no está verificado hasta que alguien inicia sesión.** `healthy` y un `200` no
