@@ -6,6 +6,8 @@
  * expresar (qué ítems exigen foto, rangos de medidores, ítems que inmovilizan
  * en la maquinaria amarilla) se aplican en `ajustes.ts`.
  */
+import { TIPOS_VEHICULO, TIPOS_VEHICULO_POR_ID } from '@/shared/catalogos/tipos-vehiculo';
+
 import type { PlantillaChecklist } from '../types';
 
 // Aquí se importa **solo la versión vigente** de cada formato. Las anteriores se
@@ -20,14 +22,31 @@ import camioneta from './camioneta.v3.json';
 import motoniveladora from './motoniveladora.v2.json';
 import retrocargador from './retrocargador.v2.json';
 import retroexcavadora from './retroexcavadora.v2.json';
+import { plantillaPrestada } from './prestadas';
 import volqueta from './volqueta.v3.json';
 
-export const PLANTILLAS: PlantillaChecklist[] = [
+/** Los formatos de OCC con hoja propia. */
+const PROPIAS = [
   camioneta,
   volqueta,
   retroexcavadora,
   retrocargador,
   motoniveladora,
 ] as PlantillaChecklist[];
+
+const PROPIAS_POR_TIPO = new Map(PROPIAS.map((p) => [p.tipoVehiculo, p]));
+
+/**
+ * Una por cada tipo que toma prestado un formato (spec 020), derivada de la
+ * versión vigente de su origen. Un origen que no exista no produce nada aquí:
+ * `verificar-reglas.ts` es el que falla en ese caso, no la app en obra.
+ */
+const PRESTADAS = TIPOS_VEHICULO.flatMap((tipo) => {
+  const origen = tipo.formatoDe ? PROPIAS_POR_TIPO.get(tipo.formatoDe) : undefined;
+  const tipoOrigen = tipo.formatoDe ? TIPOS_VEHICULO_POR_ID.get(tipo.formatoDe) : undefined;
+  return origen && tipoOrigen ? [plantillaPrestada(origen, tipo, tipoOrigen)] : [];
+});
+
+export const PLANTILLAS: PlantillaChecklist[] = [...PROPIAS, ...PRESTADAS];
 
 export const PLANTILLAS_POR_TIPO = new Map(PLANTILLAS.map((p) => [p.tipoVehiculo, p]));

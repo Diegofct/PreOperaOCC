@@ -33,6 +33,16 @@ export interface TipoVehiculo {
    * existen de verdad no se separen.
    */
   sinFormato?: boolean;
+  /**
+   * Slug del tipo cuyo formato de preoperacional se usa para este (spec 020).
+   *
+   * OCC no tiene hoja propia para estas máquinas, pero indicó que la del tipo
+   * más parecido sirve. El formato prestado es **el mismo documento**: mismas
+   * preguntas y misma versión, con el título de este tipo. El origen tiene que
+   * tener formato propio y medir con el mismo medidor; `verificar-reglas.ts` lo
+   * comprueba.
+   */
+  formatoDe?: string;
 }
 
 export const TIPOS_VEHICULO: TipoVehiculo[] = [
@@ -45,28 +55,68 @@ export const TIPOS_VEHICULO: TipoVehiculo[] = [
   { id: 'retroexcavadora', nombre: 'Retroexcavadora', claseMedidor: 'horometro' },
   { id: 'retrocargador', nombre: 'Retrocargador', claseMedidor: 'horometro' },
   { id: 'motoniveladora', nombre: 'Motoniveladora', claseMedidor: 'horometro' },
-  // Añadidas en la spec 003. Todavía **sin formato de preoperacional**: OCC no
-  // ha entregado su hoja de cálculo, así que se pueden registrar equipos de
-  // estos tipos pero no levantarles un preoperacional. El panel lo avisa.
-  { id: 'vibrocompactadora', nombre: 'Vibro Compactadora', claseMedidor: 'horometro', sinFormato: true },
-  { id: 'recicladora', nombre: 'Recicladora', claseMedidor: 'horometro', sinFormato: true },
-  // Añadidas en la spec 019, también **sin formato**, por el mismo motivo. Los de
+  // Añadidas en la spec 003 sin formato de preoperacional, porque OCC no había
+  // entregado su hoja. Desde la spec 020 se revisan con uno prestado (`formatoDe`).
+  // Spec 020: las dos toman prestado el de la motoniveladora (ruedas, sin brazo).
+  {
+    id: 'vibrocompactadora',
+    nombre: 'Vibro Compactadora',
+    claseMedidor: 'horometro',
+    formatoDe: 'motoniveladora',
+  },
+  {
+    id: 'recicladora',
+    nombre: 'Recicladora',
+    claseMedidor: 'horometro',
+    formatoDe: 'motoniveladora',
+  },
+  // Añadidas en la spec 019, también sin formato al principio, por el mismo motivo. Los de
   // carretera van por kilómetros y la maquinaria por horas, como los anteriores.
   // El tipo es el oficio de la máquina, no su marca: el camión Ford es un
   // `camion` con «Ford» en la marca. El carrotanque va aparte del camión porque
   // OCC los controla por separado; la excavadora es la de llantas, y la de oruga
   // es otro tipo porque no rueda (no lleva posiciones de llanta).
-  { id: 'camion', nombre: 'Camión', claseMedidor: 'odometro', sinFormato: true },
-  { id: 'carrotanque', nombre: 'Carrotanque', claseMedidor: 'odometro', sinFormato: true },
-  { id: 'excavadora', nombre: 'Excavadora', claseMedidor: 'horometro', sinFormato: true },
+  //
+  // Spec 020: cada una se revisa con el formato de OCC más parecido. Los de
+  // carretera, con el de la camioneta; la excavadora de llantas, con el del
+  // retrocargador (ruedas, brazo y balde); la de oruga, con el de la
+  // retroexcavadora (tren de rodaje); el montacargas, con el de la motoniveladora.
+  {
+    id: 'camion',
+    nombre: 'Camión',
+    claseMedidor: 'odometro',
+    formatoDe: 'camioneta',
+  },
+  {
+    id: 'carrotanque',
+    nombre: 'Carrotanque',
+    claseMedidor: 'odometro',
+    formatoDe: 'camioneta',
+  },
+  {
+    id: 'excavadora',
+    nombre: 'Excavadora',
+    claseMedidor: 'horometro',
+    formatoDe: 'retrocargador',
+  },
   {
     id: 'excavadora_oruga',
     nombre: 'Excavadora de oruga',
     claseMedidor: 'horometro',
-    sinFormato: true,
+    formatoDe: 'retroexcavadora',
   },
-  { id: 'montacargas', nombre: 'Montacargas', claseMedidor: 'horometro', sinFormato: true },
-  { id: 'carro_taller', nombre: 'Carro taller', claseMedidor: 'odometro', sinFormato: true },
+  {
+    id: 'montacargas',
+    nombre: 'Montacargas',
+    claseMedidor: 'horometro',
+    formatoDe: 'motoniveladora',
+  },
+  {
+    id: 'carro_taller',
+    nombre: 'Carro taller',
+    claseMedidor: 'odometro',
+    formatoDe: 'camioneta',
+  },
 ];
 
 export const TIPOS_VEHICULO_POR_ID = new Map(TIPOS_VEHICULO.map((t) => [t.id, t]));
@@ -74,4 +124,13 @@ export const TIPOS_VEHICULO_POR_ID = new Map(TIPOS_VEHICULO.map((t) => [t.id, t]
 /** ¿Este tipo de equipo todavía no tiene formato de preoperacional? */
 export function formatoPendiente(tipoVehiculoId: string | null | undefined): boolean {
   return tipoVehiculoId ? (TIPOS_VEHICULO_POR_ID.get(tipoVehiculoId)?.sinFormato ?? false) : false;
+}
+
+/**
+ * El nombre del tipo cuyo formato usa este, o `null` si su formato es propio o
+ * no tiene ninguno (spec 020). Es lo que dice el panel: «Formato Camioneta».
+ */
+export function formatoPrestadoDe(tipoVehiculoId: string | null | undefined): string | null {
+  const origen = tipoVehiculoId ? TIPOS_VEHICULO_POR_ID.get(tipoVehiculoId)?.formatoDe : undefined;
+  return origen ? (TIPOS_VEHICULO_POR_ID.get(origen)?.nombre ?? null) : null;
 }
