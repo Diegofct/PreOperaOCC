@@ -11,6 +11,8 @@ import {
 import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
+import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
+import { cumplimientoDelDia } from '@/shared/rules/cumplimiento';
 import { desglosarJornada, horarioEfectivo } from '@/shared/rules/horas';
 import {
   avanceDeMedidor,
@@ -122,16 +124,21 @@ export async function GET(peticion: Request) {
       );
 
     const vivas = inspecciones.filter((i) => i.anuladoEn === null);
-    const conFormato = new Set(vivas.map((i) => i.vehiculoId));
+    const inspeccionadosHoy = new Set(vivas.map((i) => i.vehiculoId));
     const noAptos = vivas.filter((i) => i.resultado === 'no_apto').length;
 
     const flota = await db
-      .select({ id: vehiculos.id })
+      .select({ id: vehiculos.id, tipoVehiculoId: vehiculos.tipoVehiculoId })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
       .where(and(isNull(vehiculos.eliminadoEn), filtroDeObra(sesion, vehiculos.obraId)));
 
-    const sinInspeccionar = flota.filter((v) => !conFormato.has(v.id)).length;
+    // Solo cuentan los equipos a los que se les puede levantar preoperacional
+    // (spec 019, RF-21 a RF-23): uno de un tipo sin formato no está pendiente.
+    const dia = cumplimientoDelDia(
+      flota.map((v) => ({ id: v.id, conFormato: !formatoPendiente(v.tipoVehiculoId) })),
+      inspeccionadosHoy,
+    );
 
     /* ── Cuántas obras cubre este resumen ── */
 
@@ -146,11 +153,12 @@ export async function GET(peticion: Request) {
       hasta: hoy,
       obras: obrasVisibles.length,
       equipos: flota.length,
-      // Sin equipos activos el porcentaje no es cero, es «no aplica»: una obra
-      // sin flota no está incumpliendo nada.
-      cumplimiento: flota.length === 0 ? null : Math.round((conFormato.size / flota.length) * 100),
-      inspeccionadosHoy: conFormato.size,
-      sinInspeccionar,
+      equiposInspeccionables: dia.inspeccionables,
+      // Sin equipos inspeccionables el porcentaje no es cero, es «no aplica»:
+      // una obra sin flota —o solo con equipos sin formato— no incumple nada.
+      cumplimiento: dia.cumplimiento,
+      inspeccionadosHoy: dia.inspeccionados,
+      sinInspeccionar: dia.sinInspeccionar,
       noAptos,
       horasMaquina,
       kilometros,

@@ -170,8 +170,10 @@ function VistaGerencia({
             porcentaje={datos.cumplimiento}
             pie={
               datos.cumplimiento === null
-                ? 'Todavía no hay equipos registrados.'
-                : `${datos.inspeccionadosHoy} de ${datos.equipos} equipos inspeccionados`
+                ? datos.equipos === 0
+                  ? 'Todavía no hay equipos registrados.'
+                  : 'Ningún equipo tiene todavía formato de preoperacional.'
+                : `${datos.inspeccionadosHoy} de ${datos.equiposInspeccionables} equipos inspeccionados`
             }
           />
           <Cifra

@@ -17,7 +17,9 @@
  * flota concreta de OCC: nadie ha confirmado todavía si sus volquetas son de
  * doble troque, ni si sus vibrocompactadoras llevan llantas atrás o van sobre
  * rodillo. Igual que el catálogo de actividades de la bitácora, esto es una
- * propuesta que hay que contrastar en obra antes de darla por buena.
+ * propuesta que hay que contrastar en obra antes de darla por buena. Lo mismo
+ * vale para los tipos de la spec 019: camión, carrotanque, carro taller,
+ * excavadora y montacargas.
  */
 
 export interface PosicionLlanta {
@@ -69,6 +71,16 @@ const POSICIONES: Record<string, PosicionLlanta[]> = {
   // se queda vacía y no pasa nada: el equipo sencillamente no lleva llantas.
   vibrocompactadora: [...TRASERAS_SIMPLES],
   recicladora: [...DELANTERAS, ...TRASERAS_SIMPLES],
+  // Spec 019. Camión, carrotanque y carro taller: un solo eje trasero de rueda
+  // doble, no doble troque como la volqueta. Si alguno de OCC resulta de doble
+  // troque, se le añade `dobles(3)` antes de que tenga fichas.
+  camion: [...DELANTERAS, ...dobles(2), REPUESTO],
+  carrotanque: [...DELANTERAS, ...dobles(2), REPUESTO],
+  carro_taller: [...DELANTERAS, ...dobles(2), REPUESTO],
+  excavadora: [...DELANTERAS, ...TRASERAS_SIMPLES],
+  montacargas: [...DELANTERAS, ...TRASERAS_SIMPLES],
+  // La excavadora de oruga no tiene entrada: no rueda sobre llantas, y un
+  // equipo sin posiciones simplemente no ofrece la sección.
 };
 
 /** Las posiciones de este tipo de equipo, en orden de delante hacia atrás. */

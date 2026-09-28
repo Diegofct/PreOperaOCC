@@ -1,7 +1,7 @@
 /**
  * Siembra local de arranque.
  *
- * Solo catálogo: los cinco tipos de equipo y las plantillas de los formatos de
+ * Solo catálogo: los tipos de equipo y las plantillas de los formatos de
  * OCC. Es el respaldo del primer arranque — un teléfono recién activado ya puede
  * abrir un preoperacional aunque el pull todavía no haya corrido.
  *

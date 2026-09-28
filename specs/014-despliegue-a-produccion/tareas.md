@@ -116,7 +116,7 @@ Los cuatro bloques son casi independientes y ese orden no es casual:
 
 ## D — La app del operador (bloqueada hasta que haya dominio)
 
-- [ ] T13. Dirección real en `eas.json` y compilar el APK.
+- [x] T13. Dirección real en `eas.json` y compilar el APK.
       (RF-22, RF-24, RF-27) — *Diego ejecuta, con cuenta de Expo*
       Se rellena la dirección que dejó pendiente T4 y se compila con el perfil de
       producción.
@@ -311,3 +311,12 @@ Los cuatro bloques son casi independientes y ese orden no es casual:
   es la forma del archivo, campo por campo: perfil `production`, `distribution: internal`,
   `buildType: apk`, **sin** `developmentClient`, `autoIncrement`, y la dirección marcada como
   pendiente en vez de apuntando a `localhost`.
+- **T13 — APK compilado el 2026-09-25.** Proyecto de Expo `@diegofct/PreOperaOCC`
+  (`eas init` añadió `extra.eas.projectId` y `owner` a `app.json`). Build
+  `fd0c165f-75b7-414e-88c3-472461ad5046`, perfil `production`, versión 1.0.0, `versionCode` 2,
+  **APK** de 137 MB. La llave de firma se generó y la guarda EAS. Comprobado descargando el
+  APK: el bundle trae `https://occ.licitapp-elementaling.cloud`, no trae
+  `PENDIENTE-DEFINIR` ni el cliente de desarrollo. Aparece la cadena `http://localhost:8081/`
+  en la tabla de textos de Hermes, pero no es nuestra: `urlDelServidor` usa primero
+  `EXPO_PUBLIC_API_URL`, y el camino de Metro arma la dirección en tiempo de ejecución.
+  La guía para operadores quedó en `docs/instalar-la-app.md` (parte de T15).

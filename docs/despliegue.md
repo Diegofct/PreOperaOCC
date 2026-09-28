@@ -433,6 +433,18 @@ Va **antes** de encender a propósito: las migraciones de este proyecto son `ADD
 aditivos, así que la imagen vieja sigue funcionando con las columnas nuevas puestas. Aplicarlas
 primero significa que nunca hay un minuto con el código nuevo y la base vieja.
 
+**Si la versión trae catálogo nuevo** —un tipo de equipo o un formato de preoperacional—,
+siémbralo aquí mismo, después de migrar:
+
+```sh
+npm run db:sembrar:produccion
+```
+
+Los tipos de equipo y los formatos son **filas**, no columnas: ninguna migración los trae, y
+`db:sembrar:servidor` tiene la misma trampa que `db:migrar:servidor` —siembra `neondb`—. Si se
+olvida, el panel no se rompe: el selector de tipo sencillamente no muestra los nuevos. Es
+idempotente, así que ante la duda se corre. Lo introdujo la spec 019.
+
 ### 3 · La red de seguridad *(ventana A)*
 
 ```sh

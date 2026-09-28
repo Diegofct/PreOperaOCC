@@ -3,7 +3,7 @@
  *
  *   npm run db:sembrar:servidor
  *
- * Siembra **solo lo que es catálogo**: los cinco tipos de equipo y las plantillas
+ * Siembra **solo lo que es catálogo**: los tipos de equipo y las plantillas
  * de los formatos de OCC. Ni una obra, ni una persona, ni un vehículo — eso lo
  * registra la administración desde el panel, y ese es justamente el punto del
  * entregable. Una siembra de datos de trabajo aquí volvería a meter datos de
@@ -11,6 +11,9 @@
  *
  * Es idempotente: correrlo dos veces no duplica nada y actualiza la plantilla si
  * el formato cambió de contenido sin cambiar de versión.
+ *
+ * Siembra la base del `.env`, que es la de **desarrollo**. Producción se siembra
+ * con `npm run db:sembrar:produccion` (ver `sembrar-produccion.ts`).
  */
 import { createHash } from 'node:crypto';
 

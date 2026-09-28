@@ -141,6 +141,7 @@ import {
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
 import { colocarLista } from '../src/shared/rules/flotante';
 import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
+import { cumplimientoDelDia } from '../src/shared/rules/cumplimiento';
 import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
 import {
   franjaPorId,
@@ -2649,8 +2650,58 @@ prueba('la marca de «sin formato» cuadra con las plantillas que existen', () =
   }
   assert.deepEqual(
     TIPOS_VEHICULO.filter((x) => x.sinFormato).map((x) => x.id),
-    ['vibrocompactadora', 'recicladora'],
+    [
+      'vibrocompactadora',
+      'recicladora',
+      // Spec 019 / RF-11: entran sin formato hasta que OCC entregue su hoja.
+      'camion',
+      'carrotanque',
+      'excavadora',
+      'excavadora_oruga',
+      'montacargas',
+      'carro_taller',
+    ],
   );
+});
+
+prueba('los tipos de la spec 019 se miden con el medidor de su tablero', () => {
+  // RF-8 y RF-9: los de carretera por kilómetros, la maquinaria por horas.
+  const esperado: Record<string, string> = {
+    camion: 'odometro',
+    carrotanque: 'odometro',
+    carro_taller: 'odometro',
+    excavadora: 'horometro',
+    excavadora_oruga: 'horometro',
+    montacargas: 'horometro',
+  };
+  for (const [id, clase] of Object.entries(esperado)) {
+    const tipo = TIPOS_VEHICULO.find((t) => t.id === id);
+    assert.ok(tipo, `${id}: no está en el catálogo`);
+    assert.equal(tipo.claseMedidor, clase, `${id}: medidor equivocado`);
+  }
+});
+
+prueba('los tipos de equipo anteriores a la spec 019 no cambian', () => {
+  // RF-19: los slugs son llave de vehículos y plantillas ya firmadas.
+  const anteriores = TIPOS_VEHICULO.slice(0, 7).map((t) => [t.id, t.nombre, t.claseMedidor]);
+  assert.deepEqual(anteriores, [
+    ['camioneta', 'Camioneta', 'odometro'],
+    ['volqueta', 'Volqueta', 'odometro'],
+    ['retroexcavadora', 'Retroexcavadora', 'horometro'],
+    ['retrocargador', 'Retrocargador', 'horometro'],
+    ['motoniveladora', 'Motoniveladora', 'horometro'],
+    ['vibrocompactadora', 'Vibro Compactadora', 'horometro'],
+    ['recicladora', 'Recicladora', 'horometro'],
+  ]);
+});
+
+prueba('ningún tipo de equipo repite slug ni nombre', () => {
+  // Un slug repetido haría que dos tipos compartieran fila en las dos bases.
+  const ids = TIPOS_VEHICULO.map((t) => t.id);
+  const nombres = TIPOS_VEHICULO.map((t) => t.nombre);
+  assert.equal(new Set(ids).size, ids.length, 'slug repetido');
+  assert.equal(new Set(nombres).size, nombres.length, 'nombre repetido');
+  for (const id of ids) assert.match(id, /^[a-z_]+$/, `${id}: el slug solo lleva minúsculas y _`);
 });
 
 prueba('cada tipo de equipo con formato tiene posiciones de llanta', () => {
@@ -2666,6 +2717,58 @@ prueba('cada tipo de equipo con formato tiene posiciones de llanta', () => {
   // Doble troque: dirección sencilla, dos ejes de rueda doble y el repuesto.
   assert.equal(posicionesDe('volqueta').length, 11);
   assert.equal(posicionesDe('motoniveladora').length, 6);
+});
+
+prueba('los tipos de la spec 019 tienen su lista de llantas', () => {
+  // RF-15: dos delanteras, un eje trasero de rueda doble y el repuesto.
+  for (const id of ['camion', 'carrotanque', 'carro_taller']) {
+    assert.equal(posicionesDe(id).length, 7, `${id}: 2 + 4 + repuesto`);
+    assert.ok(posicionesDe(id).some((p) => p.id === 'repuesto'), `${id}: sin repuesto`);
+  }
+  // RF-16: dos delanteras y dos traseras.
+  for (const id of ['excavadora', 'montacargas']) {
+    assert.equal(posicionesDe(id).length, 4, `${id}: 2 + 2`);
+  }
+  // RF-17: va sobre orugas; no hay llanta que seguir.
+  assert.deepEqual(posicionesDe('excavadora_oruga'), []);
+});
+
+prueba('el cumplimiento del día no cuenta los equipos sin formato', () => {
+  // Spec 019 / RF-21 y RF-22. Una máquina sin formato no puede tener
+  // preoperacional: contarla como pendiente es una alarma que no se apaga nunca.
+  const flota = [
+    { id: 'v1', conFormato: true },
+    { id: 'v2', conFormato: true },
+    { id: 'v3', conFormato: false },
+    { id: 'v4', conFormato: false },
+  ];
+  assert.deepEqual(cumplimientoDelDia(flota, new Set(['v1'])), {
+    inspeccionables: 2,
+    inspeccionados: 1,
+    sinInspeccionar: 1,
+    cumplimiento: 50,
+  });
+});
+
+prueba('una flota solo sin formato no tiene cumplimiento', () => {
+  // RF-23: ni 0% (nadie incumplió) ni 100% (nadie cumplió): sin dato.
+  const r = cumplimientoDelDia([{ id: 'v1', conFormato: false }], new Set());
+  assert.equal(r.cumplimiento, null);
+  assert.equal(r.sinInspeccionar, 0);
+});
+
+prueba('una flota vacía no tiene cumplimiento', () => {
+  const r = cumplimientoDelDia([], new Set());
+  assert.equal(r.cumplimiento, null);
+  assert.equal(r.inspeccionables, 0);
+});
+
+prueba('un preoperacional de un equipo fuera de la flota no pasa el cumplimiento de 100', () => {
+  // Un equipo inspeccionado hoy y dado de baja después: antes contaba en el
+  // numerador y no en el denominador.
+  const r = cumplimientoDelDia([{ id: 'v1', conFormato: true }], new Set(['v1', 'dado-de-baja']));
+  assert.equal(r.inspeccionados, 1);
+  assert.equal(r.cumplimiento, 100);
 });
 
 prueba('una posición inventada no pertenece a ningún equipo', () => {
