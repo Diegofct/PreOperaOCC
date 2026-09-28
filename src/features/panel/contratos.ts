@@ -614,7 +614,11 @@ export interface PreoperacionalDetalle extends PreoperacionalFila {
   motivoAnulacion: string | null;
   anuladoPorNombre: string | null;
   /** La plantilla con la que se firmó, para poder leerlo como se vio ese día. */
-  plantilla: { secciones: { key: string; titulo: string }[] } | null;
+  plantilla: {
+    /** «Preoperacional Camión (formato Camioneta)» si el formato es prestado (spec 020). */
+    tituloFormato: string;
+    secciones: { key: string; titulo: string }[];
+  } | null;
   imagenes: ImagenDelRegistro[];
 }
 

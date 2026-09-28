@@ -1,6 +1,6 @@
 # Spec 019 — Tipos de equipo nuevos
 
-> Estado: En curso · Fecha: 2026-09-28 · Aprobada: 2026-09-28
+> Estado: Cumplida · Fecha: 2026-09-28 · Aprobada: 2026-09-28 · Cumplida: 2026-09-28
 
 ## Contexto y objetivo
 

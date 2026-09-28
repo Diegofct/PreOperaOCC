@@ -79,6 +79,12 @@ export interface PlantillaChecklist {
   secciones: SeccionChecklist[];
   /** Archivo del que se importó, para poder rastrear el origen. */
   origen: string;
+  /**
+   * Slug del tipo cuyo formato es este, cuando es prestado (spec 020). Ausente
+   * en los formatos propios. Queda en el esquema guardado junto al acta, así que
+   * un preoperacional firmado dice con qué formato de OCC se hizo.
+   */
+  prestadoDe?: string;
 }
 
 /** Respuesta guardada. Se auto-describe: sobrevive a que la plantilla cambie. */

@@ -66,15 +66,15 @@ en verde.
       un parte con el camión en maquinaria cierra y suma sus km al resumen. Cualquier
       sorpresa queda en las Notas de ejecución.
 
-- [ ] T7. Demo en el teléfono con el APK ya instalado. (RF-14, RF-18)
-      **Aplazada hasta después del despliegue** (ver notas de ejecución).
+- [x] T7. Demo en el teléfono con el APK ya instalado. (RF-14, RF-18)
+      **Aplazada hasta después del despliegue**; hecha en producción el 2026-09-28.
       Asignar el camión de T6 a un operador de prueba, sincronizar el teléfono con el
       APK del 2026-09-25 sin reinstalar, y abrir el preoperacional del camión.
       Hecho cuando: el teléfono muestra el camión entre sus equipos y, al abrir el
       preoperacional, la pantalla «Este equipo aún no tiene formato», sin iniciar ningún
       registro.
 
-- [ ] T8. Validación final: recorrido RF por RF de la spec y demo manual. (Todos)
+- [x] T8. Validación final: recorrido RF por RF de la spec y demo manual. (Todos)
       Hecho cuando: cada uno de los 26 RF tiene su comprobación con resultado, los tres
       comandos están en verde y la spec queda marcada como Cumplida. El despliegue
       (sembrar producción, desplegar la imagen e iniciar sesión en el VPS) se hace después,
@@ -141,4 +141,15 @@ en verde.
 - **T8** (2026-09-28): validación en `specs/VALIDACION.md` («Validación — Spec 019»). Hay
   23 RF en verde y 3 pendientes de la demo del teléfono: RF-12, RF-14 y RF-18. **No se
   marca** hasta cerrar T7 en producción; la spec queda **En curso**.
+- **T7** (2026-09-28, en producción, antes de desplegar la spec 020): Diego registró
+  `PRUEBA-CAM-01` (Camión, Ford) en la obra de su operador de prueba y se lo asignó sin
+  quitarle la volqueta. En el teléfono, con el APK del 2026-09-25 sin reinstalar, salió y
+  volvió a entrar con el PIN:
+  - aparecieron los dos equipos;
+  - al abrir el preoperacional del camión salió «Este equipo aún no tiene formato», sin
+    iniciar registro;
+  - la volqueta cargó su formato normal.
+  Diego confirmó: «todo salió como dijiste». Cierra RF-12, RF-14 y RF-18.
+  `PRUEBA-CAM-01` queda en producción para la T6 de la spec 020.
+- **T8** (2026-09-28): 26/26 RF en verde. La spec queda **Cumplida**.
 

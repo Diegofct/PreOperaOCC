@@ -501,13 +501,13 @@ Los casos están en `scripts/verificar-reglas.ts`.
 | RF-9 horas para excavadoras y montacargas | `:2667` | verde |
 | RF-10 Solo el medidor del tipo | T6 pasos 2 (solo odómetro) y 4 (solo horómetro) | verde |
 | RF-11 Se registran sin formato | `:2643` (marca ↔ plantilla) + T6 pasos 2 y 4 | verde |
-| RF-12 Se asignan sin formato | Sin cambio de código: la asignación no mira el tipo. No se asignó en la demo | **pendiente de demo** (T7) |
+| RF-12 Se asignan sin formato | T7 en producción: `PRUEBA-CAM-01` asignado al operador de prueba sin error | verde |
 | RF-13 Aviso en ficha y listado | T6 paso 2: aviso en el formulario y etiqueta «Sin formato» | verde |
-| RF-14 Explicación en el celular | Código: `abrirBorrador` devuelve `sin_formato` sin plantilla | **pendiente de demo** (T7) |
+| RF-14 Explicación en el celular | T7: «Este equipo aún no tiene formato», sin iniciar registro | verde |
 | RF-15 7 llantas camión/carrotanque/carro taller | `:2722` + T6 paso 3 | verde |
 | RF-16 4 llantas excavadora/montacargas | `:2722` | verde |
 | RF-17 Oruga sin llantas | `:2722` + T6 paso 4 | verde |
-| RF-18 Llegan al celular sin reinstalar | Código: el pull hace upsert de `tiposVehiculo` | **pendiente de demo** (T7) |
+| RF-18 Llegan al celular sin reinstalar | T7: APK del 2026-09-25 sin reinstalar; el camión apareció tras volver a entrar con el PIN | verde |
 | RF-19 Nada anterior cambia | `:2684` (siete tipos intactos) y `:2643` (plantillas) | verde |
 | RF-20 Un solo sitio | Por construcción: `TIPOS_VEHICULO` es la única lista, y la leen `seed.ts` y `sembrar-servidor.ts` | verde |
 | RF-21 Fuera de «sin preoperacional» | `:2736` + T6 paso 5 (`sinInspeccionar: 3` de 5 equipos) | verde |
@@ -517,7 +517,7 @@ Los casos están en `scripts/verificar-reglas.ts`.
 | RF-25 Lectura con su medidor | T6 paso 6: «Odómetro inicial/final (km)», «85 km recorridos» | verde |
 | RF-26 Suman al resumen | T6 paso 6: el resumen pasa a `kilometros: 85` (parte abierto; no se cerró) | verde |
 
-**23 en verde, 3 pendientes de demo en el teléfono** (RF-12, RF-14 y RF-18), todas en T7.
+**26 de 26 en verde.** RF-12, RF-14 y RF-18 se cerraron en T7, en producción, el 2026-09-28.
 
 ## Alcance
 
@@ -549,11 +549,11 @@ Los casos están en `scripts/verificar-reglas.ts`.
 
 ## Veredicto
 
-**No está cumplida todavía.** Todo lo ejecutable está en verde, pero RF-12, RF-14 y RF-18
-exigen el teléfono con el APK instalado, que habla con producción: se cierran en T7,
-después de sembrar producción y desplegar. La spec sigue **En curso** y T8 queda sin
-marcar hasta cerrar T7.
+**Cumplida** (2026-09-28). Todo lo ejecutable está en verde, y la prueba en el teléfono
+(T7) se hizo en producción, con el APK instalado y sin reinstalar, antes de desplegar la
+spec 020. Después de la 020 ningún tipo queda sin formato, pero las reglas de «sin
+formato» de esta spec siguen vigentes para tipos futuros (020/RF-25).
 
 Datos de prueba que quedaron en desarrollo, en la obra «Pruebas spec 018»: `PRUEBA-CAM-01`,
 `PRUEBA-EXO-01` y el parte abierto del 2026-09-28.
-
+En producción, `PRUEBA-CAM-01` (Camión) queda asignado al operador de prueba para la spec 020.

@@ -82,7 +82,7 @@ import {
   UNIDADES_ALMACEN,
 } from '../src/shared/catalogos/almacen';
 import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '../src/shared/catalogos/materiales';
-import { PLANTILLAS_POR_TIPO } from '../src/features/checklists/plantillas';
+import { PLANTILLAS, PLANTILLAS_POR_TIPO } from '../src/features/checklists/plantillas';
 import {
   DESGASTE_PARA_CAMBIO,
   hayQueCambiar,
@@ -142,7 +142,12 @@ import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules
 import { colocarLista } from '../src/shared/rules/flotante';
 import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
 import { cumplimientoDelDia } from '../src/shared/rules/cumplimiento';
-import { TIPOS_VEHICULO } from '../src/shared/catalogos/tipos-vehiculo';
+import {
+  formatoPendiente,
+  formatoPrestadoDe,
+  TIPOS_VEHICULO,
+} from '../src/shared/catalogos/tipos-vehiculo';
+import { cadenaCanonicaDePlantilla, idDePlantilla } from '../src/shared/catalogos/plantillas';
 import {
   franjaPorId,
   FRANJAS_GRANULOMETRICAS,
@@ -2650,17 +2655,9 @@ prueba('la marca de «sin formato» cuadra con las plantillas que existen', () =
   }
   assert.deepEqual(
     TIPOS_VEHICULO.filter((x) => x.sinFormato).map((x) => x.id),
-    [
-      'vibrocompactadora',
-      'recicladora',
-      // Spec 019 / RF-11: entran sin formato hasta que OCC entregue su hoja.
-      'camion',
-      'carrotanque',
-      'excavadora',
-      'excavadora_oruga',
-      'montacargas',
-      'carro_taller',
-    ],
+    // Spec 019 / RF-11 los dejó entrar sin formato; la spec 020 les dio uno
+    // prestado a los ocho (RF-1 a RF-8), así que hoy ninguno queda pendiente.
+    [],
   );
 });
 
@@ -2731,6 +2728,113 @@ prueba('los tipos de la spec 019 tienen su lista de llantas', () => {
   }
   // RF-17: va sobre orugas; no hay llanta que seguir.
   assert.deepEqual(posicionesDe('excavadora_oruga'), []);
+});
+
+prueba('cada tipo sin formato propio toma prestado el acordado', () => {
+  // Spec 020 / RF-1 a RF-8: el formato de OCC más parecido a cada máquina.
+  const esperado: Record<string, string> = {
+    excavadora_oruga: 'retroexcavadora',
+    excavadora: 'retrocargador',
+    montacargas: 'motoniveladora',
+    vibrocompactadora: 'motoniveladora',
+    recicladora: 'motoniveladora',
+    camion: 'camioneta',
+    carrotanque: 'camioneta',
+    carro_taller: 'camioneta',
+  };
+  const prestados = Object.fromEntries(
+    TIPOS_VEHICULO.filter((t) => t.formatoDe).map((t) => [t.id, t.formatoDe]),
+  );
+  assert.deepEqual(prestados, esperado);
+  assert.equal(formatoPrestadoDe('camion'), 'Camioneta');
+  assert.equal(formatoPrestadoDe('excavadora_oruga'), 'Retroexcavadora');
+  assert.equal(formatoPrestadoDe('camioneta'), null, 'un formato propio no es prestado');
+  assert.equal(formatoPrestadoDe(null), null);
+});
+
+prueba('el formato de origen es propio y mide lo mismo', () => {
+  // Spec 020 / RF-9 y RF-24: un origen prestado a su vez, o con otro medidor,
+  // le pediría al operador una lectura que su tablero no da.
+  for (const tipo of TIPOS_VEHICULO.filter((t) => t.formatoDe)) {
+    const origen = TIPOS_VEHICULO.find((t) => t.id === tipo.formatoDe);
+    assert.ok(origen, `${tipo.id}: el origen ${tipo.formatoDe} no existe`);
+    assert.equal(origen.formatoDe, undefined, `${tipo.id}: su origen también es prestado`);
+    assert.ok(PLANTILLAS_POR_TIPO.has(origen.id), `${tipo.id}: ${origen.id} no tiene formato propio`);
+    assert.equal(tipo.claseMedidor, origen.claseMedidor, `${tipo.id}: otro medidor que su origen`);
+  }
+});
+
+prueba('el formato prestado es el mismo documento que su origen', () => {
+  // Spec 020 / RF-9, RF-10 y RF-16: mismas preguntas, versión y medidores que
+  // la versión vigente del origen. Si cambia el origen, cambia el prestado.
+  for (const tipo of TIPOS_VEHICULO.filter((t) => t.formatoDe)) {
+    const prestada = PLANTILLAS_POR_TIPO.get(tipo.id);
+    const origen = PLANTILLAS_POR_TIPO.get(tipo.formatoDe!)!;
+    assert.ok(prestada, `${tipo.id}: no tiene plantilla`);
+    assert.deepEqual(prestada.secciones, origen.secciones, `${tipo.id}: otras secciones`);
+    assert.equal(cadenaCanonicaDePlantilla(prestada), cadenaCanonicaDePlantilla(origen));
+    assert.equal(prestada.version, origen.version, `${tipo.id}: otra versión`);
+    assert.deepEqual(prestada.medidores, origen.medidores, `${tipo.id}: otros medidores`);
+    assert.deepEqual(prestada.periodicidades, origen.periodicidades);
+    assert.equal(prestada.prestadoDe, origen.tipoVehiculo);
+    assert.equal(prestada.tipoVehiculo, tipo.id);
+  }
+});
+
+prueba('el formato prestado lleva el título de su tipo y de su origen', () => {
+  // Spec 020 / RF-12 y RF-14.
+  const camion = PLANTILLAS_POR_TIPO.get('camion')!;
+  assert.equal(camion.tituloFormato, 'Preoperacional Camión (formato Camioneta)');
+  assert.equal(camion.prestadoDe, 'camioneta');
+  assert.equal(
+    PLANTILLAS_POR_TIPO.get('excavadora_oruga')!.tituloFormato,
+    'Preoperacional Excavadora de oruga (formato Retroexcavadora)',
+  );
+  assert.equal(idDePlantilla(camion), `camion-v${PLANTILLAS_POR_TIPO.get('camioneta')!.version}`);
+  const ids = PLANTILLAS.map(idDePlantilla);
+  assert.equal(new Set(ids).size, ids.length, 'dos plantillas con el mismo id');
+  assert.equal(PLANTILLAS.length, 13, 'cinco propias y ocho prestadas');
+});
+
+prueba('un formato prestado decide APTO o NO APTO igual que su origen', () => {
+  // Spec 020 / RF-11. «No aplica» en un ítem que inmoviliza no deja la máquina
+  // parada: es la salida para lo que la máquina no tiene (la cuchilla en un
+  // montacargas).
+  const origen = PLANTILLAS_POR_TIPO.get('motoniveladora')!;
+  const prestada = PLANTILLAS_POR_TIPO.get('montacargas')!;
+  const inmovilizante = origen.secciones.flatMap((s) => s.items).find((i) => i.inmoviliza)!;
+  for (const valor of ['no_conforme', 'na'] as const) {
+    const resultados = [origen, prestada].map(
+      (p) =>
+        evaluarPreoperacional(
+          p,
+          p.periodicidades,
+          responderTodo(p, p.periodicidades, { [inmovilizante.key]: valor }),
+        ).resultado,
+    );
+    assert.equal(resultados[0], resultados[1], `${valor}: decisiones distintas`);
+    assert.equal(resultados[0], valor === 'no_conforme' ? 'no_apto' : 'apto');
+  }
+});
+
+prueba('los formatos propios no cambian con los prestados', () => {
+  // Spec 020 / RF-23: sin marca de préstamo, con su tipo y su título de OCC.
+  for (const id of ['camioneta', 'volqueta', 'retroexcavadora', 'retrocargador', 'motoniveladora']) {
+    const propia = PLANTILLAS_POR_TIPO.get(id)!;
+    assert.equal(propia.prestadoDe, undefined, `${id}: marcado como prestado`);
+    assert.equal(propia.tipoVehiculo, id);
+    assert.ok(!propia.tituloFormato.includes('(formato'), `${id}: título cambiado`);
+  }
+});
+
+prueba('ningún tipo queda sin formato hoy', () => {
+  // Spec 020 / RF-20: los ocho prestados cuentan en el cumplimiento del día.
+  // RF-25 —que un tipo futuro sin formato siga avisándose— lo sostiene la prueba
+  // «la marca de sin formato cuadra con las plantillas»: un tipo sin plantilla
+  // que no lleve `sinFormato` la hace fallar.
+  for (const tipo of TIPOS_VEHICULO) {
+    assert.equal(formatoPendiente(tipo.id), false, `${tipo.id}: sigue sin formato`);
+  }
 });
 
 prueba('el cumplimiento del día no cuenta los equipos sin formato', () => {

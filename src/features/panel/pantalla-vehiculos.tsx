@@ -13,7 +13,7 @@
  */
 import { useCallback, useState } from 'react';
 
-import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
+import { formatoPendiente, formatoPrestadoDe } from '@/shared/catalogos/tipos-vehiculo';
 
 import { api } from './cliente-api';
 import {
@@ -73,6 +73,10 @@ export default function PantallaVehiculos() {
   // registrar el equipo —hace falta para asignarlo y para la bitácora—, pero no
   // se le podrá levantar un preoperacional hasta que llegue la hoja.
   const sinFormato = formatoPendiente(tipoVehiculoId);
+  // OCC no tiene hoja propia para este tipo y se revisa con la de otro (spec
+  // 020, RF-19). Se dice al elegirlo, antes de registrar, para que nadie se
+  // sorprenda al ver el acta de un camión con el formato de la camioneta.
+  const formatoPrestado = formatoPrestadoDe(tipoVehiculoId);
   const pideOdometro = tipoElegido?.claseMedidor !== 'horometro';
   const pideHorometro = tipoElegido?.claseMedidor !== 'odometro';
 
@@ -163,6 +167,10 @@ export default function PantallaVehiculos() {
           </Etiqueta>
           {formatoPendiente(v.tipoVehiculoId) ? (
             <Etiqueta tono="atencion">Sin formato</Etiqueta>
+          ) : null}
+          {/* Neutra y no ámbar: es un dato, no un problema (spec 020, RF-18). */}
+          {formatoPrestadoDe(v.tipoVehiculoId) ? (
+            <Etiqueta tono="neutro">{`Formato ${formatoPrestadoDe(v.tipoVehiculoId)}`}</Etiqueta>
           ) : null}
           {v.llantasPorCambiar > 0 ? (
             <Etiqueta tono="malo">
@@ -257,6 +265,11 @@ export default function PantallaVehiculos() {
             <Aviso tono="info">
               Este tipo de equipo todavía no tiene formato de preoperacional. Puede registrarlo y
               asignarlo, pero el operador no podrá inspeccionarlo hasta que OCC entregue la hoja.
+            </Aviso>
+          ) : null}
+          {formatoPrestado ? (
+            <Aviso tono="info">
+              {`OCC no tiene formato propio para este tipo de equipo. Se revisará con el formato de ${formatoPrestado}.`}
             </Aviso>
           ) : null}
           <AccionesFormulario>
