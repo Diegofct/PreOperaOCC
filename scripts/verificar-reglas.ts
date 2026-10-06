@@ -139,6 +139,36 @@ import {
   Spacing,
 } from '../src/constants/medidas';
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
+import { conservarOrigen } from '../src/features/bitacoras/servidor/secciones';
+import {
+  hashDeTokenDeIntegracion,
+  requerirIntegracion,
+  tokenDeIntegracionValido,
+} from '../src/features/servidor/guardia-integracion';
+import {
+  abscisaDeTexto,
+  condicionDeClima,
+  avisoDeReemplazo,
+  conductorDelViaje,
+  destinoDeCategoria,
+  etiquetaDeCategoria,
+  estadoInicialDeCategoria,
+  faltasDelReporte,
+  fusionarReporteEnParte,
+  horaDeTexto,
+  reconocerPersona,
+  reconocerPorNombre,
+  reconocerVehiculo,
+  rechazoDeArchivo,
+  resolverPropuesta,
+  type CatalogosDeLaObra,
+  TAMANO_MAXIMO_DE_ARCHIVO,
+  tipoDeArchivo,
+  type ContextoDelReporte,
+  type PersonaConocida,
+  type ReporteDelDia,
+  type VehiculoConocido,
+} from '../src/shared/rules/whatsapp';
 import { colocarLista } from '../src/shared/rules/flotante';
 import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
 import { cumplimientoDelDia } from '../src/shared/rules/cumplimiento';
@@ -185,6 +215,7 @@ import {
   siguienteIntento,
 } from '../src/shared/rules/reintentos';
 import {
+  avanceDeMedidor,
   esBitacoraCompleta,
   medidorDeClase,
   mensajeDeAvance,
@@ -258,6 +289,7 @@ import {
   esEnsayoAnterior,
   type ActividadDelParte,
   type FilaDeControlDeCalidad,
+  type MaquinaDelParte,
 } from '../src/features/bitacoras/tipos';
 import {
   actividadDelParte,
@@ -275,6 +307,12 @@ import {
   obraEditada,
   obraNueva,
   parteEditado,
+  aprobacion,
+  descarte,
+  devolucionAPendiente,
+  entregaDeWhatsapp,
+  grupoAsociado,
+  propuestaCorregida,
   personaDelParte,
   personaEditada,
   sitioEditado,
@@ -1665,7 +1703,8 @@ prueba('una actividad del presupuesto se guarda con lo que dice el catálogo', (
   };
 
   // La 4.1.8: nombre = descripción completa, ítem y unidad del catálogo aunque el
-  // cliente mande otra unidad y otro texto; cantidad del volumen, no la escrita.
+  // cliente mande otra unidad y otro texto. Desde 021/RF-99 la cantidad escrita
+  // manda sobre el volumen; sin escribir, sale del volumen (RF-100).
   const excavacion = construirActividadDelParte({
     ...base,
     clave: '4.1.8',
@@ -1677,9 +1716,10 @@ prueba('una actividad del presupuesto se guarda con lo que dice el catálogo', (
   assert.equal(excavacion.item, '4.1.8');
   assert.equal(excavacion.nombre, actividadPorItem('4.1.8')!.descripcion);
   assert.equal(excavacion.unidad, 'm³');
-  assert.equal(excavacion.cantidad, 6);
+  assert.equal(excavacion.cantidad, 99);
   assert.equal(excavacion.volumen, 6);
   assert.equal(excavacion.descripcion, 'Box coulvert PR 5');
+  assert.equal(construirActividadDelParte({ ...base, clave: '4.1.8' })!.cantidad, 6);
 
   // La 10.1 (kg): con medidas, la cantidad es la escrita.
   const acero = construirActividadDelParte({ ...base, clave: '10.1', cantidad: 500 })!;
@@ -1895,6 +1935,83 @@ prueba('las observaciones de la máquina se guardan con ella', () => {
   assert.equal(
     construirMaquina({ vehiculoId: 'v-1' }, 'RET-01', 'horometro').observaciones,
     '',
+  );
+});
+
+prueba('el operador de la máquina se guarda con su nombre congelado (021/RF-73, RF-74)', () => {
+  const maquina = construirMaquina(
+    { vehiculoId: 'v-1', medidorInicial: 32524, medidorFinal: 32615, operadorId: 'u-silfrido' },
+    'VOL-01',
+    'odometro',
+    'Silfrido Medina',
+  );
+  assert.equal(maquina.operadorId, 'u-silfrido');
+  assert.equal(maquina.operadorNombre, 'Silfrido Medina');
+
+  // Sin operador elegido, los dos quedan en `null` —presentes— y un nombre suelto
+  // no se guarda: el nombre solo acompaña a un operador elegido.
+  const sinOperador = construirMaquina({ vehiculoId: 'v-1' }, 'VOL-01', 'odometro', 'Alguien');
+  assert.equal(sinOperador.operadorId, null);
+  assert.equal(sinOperador.operadorNombre, null);
+  assert.ok('operadorId' in sinOperador);
+  // Ni el operador ni el origen los pone el formulario: lo escrito a mano no viene de WhatsApp.
+  assert.equal(sinOperador.origen, undefined);
+});
+
+prueba('una máquina guardada antes del operador se lee igual que hoy (021/RF-77)', () => {
+  // Así está en un parte del 2026-09: sin operador ni origen.
+  const anterior: MaquinaDelParte = {
+    id: 'm-vieja',
+    vehiculoId: 'v-1',
+    codigo: 'RET-01',
+    claseMedidor: 'horometro',
+    medidorInicial: 100,
+    medidorFinal: 108,
+    observaciones: 'Sin novedad',
+  };
+  assert.equal(anterior.operadorId, undefined);
+  assert.equal(anterior.origen, undefined);
+  // Y la bitácora la sigue contando como una máquina con sus horas.
+  assert.equal(avanceDeMedidor(anterior.medidorInicial, anterior.medidorFinal), 8);
+});
+
+prueba('guardar a mano conserva la marca «desde WhatsApp» de la fila que es la misma (021/RF-47, RF-48)', () => {
+  const origen = { mensajeId: 'm-1', aprobadoPor: 'u-1', aprobadoEn: '2026-10-05T00:00:00.000Z' };
+  // Máquinas: la misma es la del mismo equipo, aunque su id cambie al reconstruirla.
+  const maquinas = conservarOrigen(
+    [{ id: 'nueva-1', vehiculoId: 'v-1' }, { id: 'nueva-2', vehiculoId: 'v-2' }],
+    [{ id: 'vieja-1', vehiculoId: 'v-1', origen }, { id: 'vieja-2', vehiculoId: 'v-3' }],
+    (nueva, vieja) => 'vehiculoId' in vieja && vieja.vehiculoId === nueva.vehiculoId,
+  );
+  assert.deepEqual(maquinas[0], { id: 'nueva-1', vehiculoId: 'v-1', origen });
+  assert.equal('origen' in maquinas[1], false);
+  // Clima: la misma es la del mismo renglón.
+  const clima = conservarOrigen(
+    [{ id: 'a' }, { id: 'b' }],
+    [{ id: 'x', origen }],
+    (_, __, indice) => indice >= 0,
+  );
+  assert.deepEqual(clima.map((f) => 'origen' in f), [true, false]);
+  // Una fila sin origen (escrita a mano, o un material anterior) no le da nada a nadie.
+  assert.deepEqual(conservarOrigen([{ id: 'e-1' }], [{ id: 'e-1', material: 'cemento' }], () => true), [
+    { id: 'e-1' },
+  ]);
+});
+
+prueba('el guardado de la bitácora acepta el operador de cada máquina, y sin él es nulo (021/RF-73, RF-91)', () => {
+  const conOperador = parteEditado.parse({
+    maquinaria: [{ vehiculoId: 'v-1', medidorInicial: 1, medidorFinal: 2, operadorId: 'u-1' }],
+  });
+  assert.equal(conOperador.maquinaria?.[0].operadorId, 'u-1');
+
+  // Un formulario que no lo manda —el de antes de la 021— deja la máquina sin
+  // operador, no rechaza el guardado.
+  const sinOperador = parteEditado.parse({ maquinaria: [{ vehiculoId: 'v-1' }] });
+  assert.equal(sinOperador.maquinaria?.[0].operadorId, null);
+  assert.equal(
+    parteEditado.parse({ maquinaria: [{ vehiculoId: 'v-1', operadorId: '' }] }).maquinaria?.[0]
+      .operadorId,
+    null,
   );
 });
 
@@ -2151,9 +2268,9 @@ prueba('la gerencia alcanza todos los módulos', () => {
   assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
 });
 
-prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera y laboratorio', () => {
-  // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta) y por
-  // 018 / RF-7 (laboratorio, donde además aprueba).
+prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera, laboratorio y WhatsApp', () => {
+  // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta), por
+  // 018 / RF-7 (laboratorio, donde además aprueba) y por 021 / RF-14 (la bandeja).
   assert.deepEqual(modulosVisibles('supervisor'), [
     'inicio',
     'asignaciones',
@@ -2162,7 +2279,43 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
     'almacen',
     'cantera',
     'laboratorio',
+    'whatsapp',
   ]);
+});
+
+prueba('la bandeja de WhatsApp es de la gerencia y del residente, y nada más (021/RF-14, RF-15)', () => {
+  for (const rol of ['admin', 'supervisor'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'aprobar'] as const) {
+      assert.ok(alcanza(rol, 'whatsapp', accion), `${rol} whatsapp/${accion}`);
+    }
+    assert.equal(alcanza(rol, 'whatsapp', 'anular'), false, `${rol} whatsapp/anular`);
+  }
+  for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
+      assert.equal(alcanza(rol, 'whatsapp', accion), false, `${rol} whatsapp/${accion}`);
+    }
+    assert.ok(!modulosVisibles(rol).includes('whatsapp'), rol);
+  }
+  // Su obra no la apaga: no es de los módulos que se encienden por obra.
+  assert.equal(
+    moduloApagado('whatsapp', { almacen: false, cantera: false, laboratorio: false }),
+    false,
+  );
+  // El rechazo dice qué se intentaba en la bandeja, no lo del laboratorio.
+  assert.equal(
+    motivoDeRechazo('whatsapp', 'aprobar'),
+    'No puede aprobar ni descartar este reporte: lo hacen la gerencia y el residente o el director.',
+  );
+  assert.equal(
+    motivoDeRechazo('laboratorio', 'aprobar'),
+    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia y el residente o el director.',
+  );
+});
+
+prueba('aprobar viajes desde la bandeja no le da Control Cantera al residente (021/RF-84, RF-85)', () => {
+  assert.equal(alcanza('supervisor', 'cantera', 'escribir'), false);
+  assert.equal(alcanza('supervisor', 'cantera', 'anular'), false);
+  assert.ok(alcanza('supervisor', 'cantera', 'listar'));
 });
 
 prueba('el residente no escribe en el maestro de la empresa', () => {
@@ -2284,6 +2437,7 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
     'almacen',
     'cantera',
     'laboratorio',
+    'whatsapp',
   ]);
 });
 
@@ -2422,8 +2576,9 @@ prueba('el residente aprueba y anula ensayos, pero no los registra', () => {
   for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
     assert.ok(alcanza('admin', 'laboratorio', accion), accion);
   }
-  // Aprobar no existe fuera del laboratorio.
-  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio')) {
+  // Aprobar no existe fuera del laboratorio y, desde la spec 021, de la bandeja de
+  // WhatsApp, donde aprobar un reporte es lo que lo pasa a la bitácora.
+  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio' && m !== 'whatsapp')) {
     for (const rol of ROLES) {
       assert.equal(alcanza(rol, modulo, 'aprobar'), false, `${rol} ${modulo}/aprobar`);
     }
@@ -3355,43 +3510,48 @@ prueba('el área de una actividad es largo por ancho', () => {
   assert.equal(medidas.areaCalculada, true);
 });
 
-prueba('la cantidad de una actividad sale de la medida que corresponde a su unidad', () => {
-  // Spec 004, RF-67 a RF-69 y RF-74. Se resuelve sobre las medidas ya resueltas:
-  // el volumen y el área son los que se ven, calculados o escritos.
+prueba('sin cantidad escrita, la cantidad sale de la medida que corresponde a su unidad', () => {
+  // Spec 004, RF-67, RF-69 y RF-74, y 021/RF-100 (antes 004/RF-68). Se resuelve sobre las
+  // medidas ya resueltas: el volumen y el área son los que se ven, calculados o escritos.
   const medidas = (longitud: number | null, ancho: number | null, alto: number | null, area: number | null = null, volumen: number | null = null) =>
     calcularDimensiones({ longitud, ancho, alto, area, volumen });
 
-  // m³ con sus tres medidas: el volumen, y lo escrito a mano no cuenta.
-  assert.deepEqual(resolverCantidad('m3', medidas(3, 4, 0.5), 99), {
+  // m³ con sus tres medidas y nada escrito: el volumen.
+  assert.deepEqual(resolverCantidad('m3', medidas(3, 4, 0.5), null), {
     cantidad: 6,
     cantidadCalculada: true,
     origen: 'volumen',
+    calculada: 6,
   });
   // m³ sin alto: no hay volumen, se escribe a mano.
   assert.deepEqual(resolverCantidad('m3', medidas(3, 4, null), 9), {
     cantidad: 9,
     cantidadCalculada: false,
     origen: null,
+    calculada: null,
   });
-  // m³ con el volumen escrito a mano y sin medidas: RF-68 dice «tenga volumen».
+  // m³ con el volumen escrito a mano y sin medidas: también es «tener volumen».
   assert.deepEqual(resolverCantidad('m3', medidas(null, null, null, null, 7), null), {
     cantidad: 7,
     cantidadCalculada: true,
     origen: 'volumen',
+    calculada: 7,
   });
   // m²: el área. m: la longitud.
   assert.equal(resolverCantidad('m2', medidas(3, 4, null), null).cantidad, 12);
   assert.equal(resolverCantidad('m2', medidas(3, 4, null), null).origen, 'area');
-  assert.deepEqual(resolverCantidad('m', medidas(25, null, null), 3), {
+  assert.deepEqual(resolverCantidad('m', medidas(25, null, null), null), {
     cantidad: 25,
     cantidadCalculada: true,
     origen: 'longitud',
+    calculada: 25,
   });
   // kg, Und y m³-km: las medidas no dan cuánto se hizo, aunque las haya.
   assert.deepEqual(resolverCantidad('kg', medidas(3, 4, 0.5), 500), {
     cantidad: 500,
     cantidadCalculada: false,
     origen: null,
+    calculada: null,
   });
   assert.equal(resolverCantidad('m3_km', medidas(3, 4, 0.5), 1200).cantidad, 1200);
   // Und sin nada escrito: queda en blanco, no es obligatoria (RF-74).
@@ -3399,12 +3559,31 @@ prueba('la cantidad de una actividad sale de la medida que corresponde a su unid
     cantidad: null,
     cantidadCalculada: false,
     origen: null,
+    calculada: null,
   });
   // Sin unidad (una actividad heredada): nada se calcula.
   assert.equal(resolverCantidad(null, medidas(3, 4, 0.5), null).cantidad, null);
   // La regla escribe las claves m3, m2 y m sin importar el catálogo: tienen que
   // seguir siendo claves del catálogo, o la cantidad dejaría de calcularse sin avisar.
   for (const clave of ['m3', 'm2', 'm']) assert.ok(IDS_UNIDAD_DE_ACTIVIDAD.includes(clave), clave);
+});
+
+prueba('la cantidad escrita gana al cálculo, y la calculada se informa al lado (021/RF-99, RF-101)', () => {
+  const medidas = calcularDimensiones({ longitud: 150, ancho: 6.4, alto: 0.25, area: null, volumen: null });
+  // «Suministro de sub-base, medido suelto: 312 m³» con una capa que da 240.
+  assert.deepEqual(resolverCantidad('m3', medidas, 312), {
+    cantidad: 312,
+    cantidadCalculada: false,
+    origen: 'volumen',
+    calculada: 240,
+  });
+  // Escrita igual a la calculada: también es la escrita.
+  assert.equal(resolverCantidad('m3', medidas, 240).cantidadCalculada, false);
+  // Un cero escrito es una cantidad, no un «sin escribir».
+  assert.equal(resolverCantidad('m3', medidas, 0).cantidad, 0);
+  // m²: escrita gana al área.
+  assert.equal(resolverCantidad('m2', medidas, 1000).cantidad, 1000);
+  assert.equal(resolverCantidad('m2', medidas, 1000).calculada, 960);
 });
 
 prueba('a «Otra actividad» se le exige cuál fue y su unidad', () => {
@@ -3834,12 +4013,17 @@ prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
     'pantalla-partes.tsx': AnchoContenidoConIndice - Spacing.four * 2,
   };
 
+  // Con las subcarpetas (spec 021: `panel/whatsapp/`): una pantalla en una carpeta
+  // propia no puede quedar fuera de la cuenta.
   const carpeta = path.join(__dirname, '..', 'src', 'features', 'panel');
-  const pantallas = readdirSync(carpeta).filter((f) => f.endsWith('.tsx'));
+  const pantallas = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) =>
+    f.endsWith('.tsx'),
+  );
 
   let tablas = 0;
-  for (const archivo of pantallas) {
-    const fuente = readFileSync(path.join(carpeta, archivo), 'utf8');
+  for (const ruta of pantallas) {
+    const archivo = path.basename(ruta);
+    const fuente = readFileSync(path.join(carpeta, ruta), 'utf8');
     for (const bloque of fuente.matchAll(/const columnas[^=]*=\s*\[(.*?)\n {2}\];/gs)) {
       const anchos = [...bloque[1].matchAll(/ancho:\s*(\d+)/g)].map((m) => Number(m[1]));
       if (anchos.length === 0) continue;
@@ -3851,7 +4035,7 @@ prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
     }
   }
 
-  assert.ok(tablas >= 8, `se esperaban al menos 8 tablas y se encontraron ${tablas}`);
+  assert.ok(tablas >= 10, `se esperaban al menos 10 tablas y se encontraron ${tablas}`);
 });
 
 /**
@@ -5401,6 +5585,792 @@ prueba('anulado y descartado mandan sobre el estado en que quedaron', () => {
 });
 
 /* ------------------------------------------------------------------------ */
+/* Reportes de WhatsApp: lectura de abscisas, horas y clima (spec 021)       */
+/* ------------------------------------------------------------------------ */
+
+console.log('\nReportes de WhatsApp: lectura\n');
+
+prueba('la abscisa se lee igual escrita con K, ABS K o PR (RF-65)', () => {
+  assert.deepEqual(abscisaDeTexto('K1+170'), { pr: 1, metros: 170 });
+  assert.deepEqual(abscisaDeTexto('ABS K1+ 190'), { pr: 1, metros: 190 });
+  assert.deepEqual(abscisaDeTexto('pr 1 + 140'), { pr: 1, metros: 140 });
+  assert.deepEqual(abscisaDeTexto('desde ABS     K1+170'), { pr: 1, metros: 170 });
+  assert.deepEqual(abscisaDeTexto('K0+800'), { pr: 0, metros: 800 });
+  assert.deepEqual(abscisaDeTexto('PR 12 + 050'), { pr: 12, metros: 50 });
+});
+
+prueba('lo que no es una abscisa queda vacío, sin adivinar (RF-65)', () => {
+  assert.equal(abscisaDeTexto('hola'), null);
+  assert.equal(abscisaDeTexto(''), null);
+  assert.equal(abscisaDeTexto(null), null);
+  assert.equal(abscisaDeTexto('K1'), null);
+  assert.equal(abscisaDeTexto('K1+1700'), null);
+  // «LUK1+170» no es una abscisa pegada a una placa.
+  assert.equal(abscisaDeTexto('LUK1+170'), null);
+});
+
+prueba('la abscisa fuera de la vía se lee igual: la rechaza la regla del destino', () => {
+  // PR 30 y metros 170 no caben en Control Cantera, pero eso lo dice validarAbscisa,
+  // para que el residente vea la falta (RF-86).
+  assert.deepEqual(abscisaDeTexto('K30+170'), { pr: 30, metros: 170 });
+});
+
+prueba('las horas de un chat de obra quedan como HH:MM (RF-66, RF-81, RF-82)', () => {
+  assert.equal(horaDeTexto('9am'), '09:00');
+  assert.equal(horaDeTexto('9 am'), '09:00');
+  assert.equal(horaDeTexto('9:00 am'), '09:00');
+  assert.equal(horaDeTexto('9:30 a.m.'), '09:30');
+  assert.equal(horaDeTexto('3:00 pm'), '15:00');
+  assert.equal(horaDeTexto('6 PM'), '18:00');
+  assert.equal(horaDeTexto('15:00'), '15:00');
+  assert.equal(horaDeTexto('7:00'), '07:00');
+  assert.equal(horaDeTexto('12 m'), '12:00');
+  assert.equal(horaDeTexto('12 pm'), '12:00');
+  assert.equal(horaDeTexto('12 am'), '00:00');
+});
+
+prueba('una hora imposible no se corrige: queda vacía', () => {
+  assert.equal(horaDeTexto('25:00'), null);
+  assert.equal(horaDeTexto('13 pm'), null);
+  assert.equal(horaDeTexto('0 am'), null);
+  assert.equal(horaDeTexto('9:75'), null);
+  assert.equal(horaDeTexto('3 m'), null);
+  assert.equal(horaDeTexto('por la tarde'), null);
+  assert.equal(horaDeTexto(null), null);
+});
+
+prueba('el clima escrito se lleva a una de las cuatro condiciones (RF-66)', () => {
+  assert.equal(condicionDeClima('fue un clima soleado'), 'soleado');
+  assert.equal(condicionDeClima('sol'), 'soleado');
+  assert.equal(condicionDeClima('Despejado'), 'soleado');
+  assert.equal(condicionDeClima('se presentó lluvias'), 'lloviendo');
+  assert.equal(condicionDeClima('llovizna'), 'lloviendo');
+  assert.equal(condicionDeClima('Nublado'), 'nublado');
+  assert.equal(condicionDeClima('parcialmente nublado'), 'parcialmente_nublado');
+  assert.equal(condicionDeClima('parcialmente soleado'), 'parcialmente_nublado');
+});
+
+prueba('un clima que no se entiende queda para que el residente lo elija (RF-67)', () => {
+  assert.equal(condicionDeClima('raro'), null);
+  assert.equal(condicionDeClima('solo trabajamos medio día'), null);
+  assert.equal(condicionDeClima(''), null);
+});
+
+console.log('\nReportes de WhatsApp: equipos y personas\n');
+
+const EQUIPOS_DEL_REPORTE: VehiculoConocido[] = [
+  { id: 'llq375', codigoInterno: 'VOL-01', placa: 'LLQ375', obraId: 'obra-a' },
+  { id: 'llq376', codigoInterno: 'VOL-02', placa: 'LLQ-376', obraId: 'obra-a' },
+  { id: 'zcw128', codigoInterno: 'CT-01', placa: 'ZCW 128', obraId: 'obra-a' },
+  { id: 'motoniveladora', codigoInterno: 'MN-566', placa: null, obraId: null },
+  { id: 'tay076-ajena', codigoInterno: 'VOL-09', placa: 'TAY076', obraId: 'obra-b' },
+  // Dos equipos que un texto descuidado podría confundir.
+  { id: 'gemela-1', codigoInterno: 'RC-762', placa: null, obraId: 'obra-a' },
+  { id: 'gemela-2', codigoInterno: 'RC-762', placa: null, obraId: 'obra-a' },
+];
+
+prueba('el equipo se reconoce por su placa, escrita como venga (RF-70)', () => {
+  assert.equal(reconocerVehiculo('LLQ 375', EQUIPOS_DEL_REPORTE, 'obra-a'), 'llq375');
+  assert.equal(
+    reconocerVehiculo('Volqueta Foton LLQ 375', EQUIPOS_DEL_REPORTE, 'obra-a'),
+    'llq375',
+  );
+  assert.equal(
+    reconocerVehiculo('Volqueta: Foton llq376', EQUIPOS_DEL_REPORTE, 'obra-a'),
+    'llq376',
+  );
+  assert.equal(
+    reconocerVehiculo('Carrotanque ford cargo 815 zcw 128', EQUIPOS_DEL_REPORTE, 'obra-a'),
+    'zcw128',
+  );
+});
+
+prueba('el equipo se reconoce también por su código interno, y los sin obra cuentan', () => {
+  assert.equal(reconocerVehiculo('vol 01', EQUIPOS_DEL_REPORTE, 'obra-a'), 'llq375');
+  assert.equal(
+    reconocerVehiculo('Motoniveladora MN 566', EQUIPOS_DEL_REPORTE, 'obra-a'),
+    'motoniveladora',
+  );
+});
+
+prueba('un equipo de otra obra, uno ambiguo o uno desconocido no se reconocen (RF-71)', () => {
+  assert.equal(
+    reconocerVehiculo('Volqueta Kentworth TAY 076', EQUIPOS_DEL_REPORTE, 'obra-a'),
+    null,
+  );
+  assert.equal(reconocerVehiculo('Retrocargador RC 762', EQUIPOS_DEL_REPORTE, 'obra-a'), null);
+  assert.equal(reconocerVehiculo('Excavadora Liugong 922D', EQUIPOS_DEL_REPORTE, 'obra-a'), null);
+  assert.equal(reconocerVehiculo('', EQUIPOS_DEL_REPORTE, 'obra-a'), null);
+  // Con dos placas en el mismo renglón no se elige ninguna.
+  assert.equal(reconocerVehiculo('LLQ 375 y LLQ 376', EQUIPOS_DEL_REPORTE, 'obra-a'), null);
+});
+
+const PERSONAS_DEL_REPORTE: PersonaConocida[] = [
+  { id: 'silfrido', nombreCompleto: 'Silfrido Medina Pérez' },
+  { id: 'diego-c', nombreCompleto: 'Diego Cardona' },
+  { id: 'diego-r', nombreCompleto: 'Diego Ramírez Ortiz' },
+  { id: 'jesus', nombreCompleto: 'Jesús Arrieta' },
+];
+
+prueba('la persona se reconoce sin tildes, mayúsculas ni el segundo apellido (RF-75, RF-79)', () => {
+  assert.equal(reconocerPersona('silfrido medina', PERSONAS_DEL_REPORTE), 'silfrido');
+  assert.equal(reconocerPersona('Silfrido Medina Perez', PERSONAS_DEL_REPORTE), 'silfrido');
+  assert.equal(reconocerPersona('Diego Cardona', PERSONAS_DEL_REPORTE), 'diego-c');
+  assert.equal(reconocerPersona('jesus', PERSONAS_DEL_REPORTE), 'jesus');
+});
+
+prueba('un nombre que coincide con dos personas, o con ninguna, no se reconoce', () => {
+  assert.equal(reconocerPersona('Diego', PERSONAS_DEL_REPORTE), null);
+  assert.equal(reconocerPersona('Juan Pérez', PERSONAS_DEL_REPORTE), null);
+  assert.equal(reconocerPersona('el mono', PERSONAS_DEL_REPORTE), null);
+  assert.equal(reconocerPersona('', PERSONAS_DEL_REPORTE), null);
+});
+
+prueba('el conductor del viaje es el operador de esa volqueta en el reporte (RF-94)', () => {
+  const maquinas = [
+    { vehiculoId: 'llq375', operadorId: 'silfrido' },
+    { vehiculoId: 'llq376', operadorId: null },
+    { vehiculoId: null, operadorId: 'diego-c' },
+  ];
+  assert.equal(conductorDelViaje('llq375', maquinas), 'silfrido');
+  // Sin operador en el reporte, o volqueta que no está: lo elige el residente (RF-95).
+  assert.equal(conductorDelViaje('llq376', maquinas), null);
+  assert.equal(conductorDelViaje('zcw128', maquinas), null);
+  assert.equal(conductorDelViaje(null, maquinas), null);
+});
+
+console.log('\nReportes de WhatsApp: qué impide aprobar\n');
+
+/** El reporte de la plantilla, ya reconocido y corregido: no le falta nada. */
+function reporteCompleto(): ReporteDelDia {
+  return {
+    fecha: '2026-10-01',
+    clima: [
+      { condicion: 'soleado', desde: '07:00', hasta: '15:00' },
+      { condicion: 'lloviendo', desde: '15:00', hasta: '18:00' },
+    ],
+    actividades: [
+      { clave: '5.2.16', itemEscrito: '5.2.16' },
+      { clave: '5.1.15', itemEscrito: '5.1.15' },
+    ],
+    maquinaria: [
+      {
+        vehiculoId: 'llq375',
+        escrito: 'Volqueta: Foton LLQ 375',
+        operadorId: 'silfrido',
+        operadorEscrito: 'Silfrido Medina',
+        medidorInicial: 32524,
+        medidorFinal: 32615,
+        observaciones: 'Sin novedad',
+      },
+    ],
+    personal: [
+      {
+        usuarioId: 'silfrido',
+        escrito: 'Silfrido Medina',
+        entrada: '07:00',
+        salida: '18:00',
+        observaciones: '',
+      },
+    ],
+    ensayos: [
+      {
+        ensayo: 'densidad_en_campo',
+        escrito: 'densidad',
+        horaInicio: '09:00',
+        horaFin: '10:00',
+        responsable: 'Jesús',
+        ubicacion: { pr: 1, metros: 150 },
+        observacion: '98 %, densidad de primera capa',
+      },
+    ],
+    viajes: [
+      {
+        vehiculoId: 'llq375',
+        materialId: 'sub-base',
+        origenId: 'fortune',
+        destino: 'obra',
+        pr: 1,
+        metros: 175,
+        hora: '07:30',
+        conductorId: 'silfrido',
+      },
+      {
+        vehiculoId: 'llq375',
+        materialId: 'sub-base',
+        origenId: 'fortune',
+        destino: 'obra',
+        pr: 1,
+        metros: 200,
+        hora: '09:10',
+        conductorId: 'silfrido',
+      },
+    ],
+    notas: '',
+  };
+}
+
+const CONTEXTO_DEL_REPORTE: ContextoDelReporte = {
+  hoy: '2026-10-05',
+  claseDeMedidor: () => 'odometro',
+};
+
+/** Las faltas como «sección renglón», para comparar sin depender de los textos. */
+function dondeFalta(reporte: ReporteDelDia): string[] {
+  return faltasDelReporte(reporte, CONTEXTO_DEL_REPORTE).map(
+    (f) => `${f.seccion} ${f.renglon ?? '-'}`,
+  );
+}
+
+prueba('el reporte completo de la plantilla no tiene faltas', () => {
+  assert.deepEqual(faltasDelReporte(reporteCompleto(), CONTEXTO_DEL_REPORTE), []);
+});
+
+prueba('cinco errores salen a la vez, cada uno en su sección y renglón (RF-64)', () => {
+  const reporte = reporteCompleto();
+  reporte.actividades[1] = { clave: null, itemEscrito: '9.9.9' };
+  reporte.ensayos[0] = { ...reporte.ensayos[0], ensayo: null, escrito: 'densidad nuclear' };
+  reporte.viajes[0] = { ...reporte.viajes[0], metros: 170 };
+  reporte.viajes[1] = { ...reporte.viajes[1], hora: null };
+  reporte.personal[0] = { ...reporte.personal[0], usuarioId: null, escrito: 'el mono' };
+
+  const faltas = faltasDelReporte(reporte, CONTEXTO_DEL_REPORTE);
+  assert.deepEqual(
+    faltas.map((f) => `${f.seccion} ${f.renglon}`),
+    ['actividades 1', 'personal 0', 'ensayos 0', 'viajes 0', 'viajes 1'],
+  );
+  const mensajes = faltas.map((f) => f.mensaje);
+  assert.ok(mensajes[0].includes('9.9.9'), 'el ítem que no está se nombra (RF-33)');
+  assert.ok(mensajes[1].includes('el mono'), 'la persona no reconocida se nombra (RF-79)');
+  assert.ok(mensajes[2].includes('densidad nuclear'), 'el ensayo que no está se nombra (RF-36)');
+  assert.equal(mensajes[3], 'Los metros van de 0 a 975, de 25 en 25.'); // RF-86
+  assert.equal(mensajes[4], 'Falta la hora del viaje.'); // RF-83
+
+  // Y una vez corregido, ya no le falta nada.
+  assert.deepEqual(faltasDelReporte(reporteCompleto(), CONTEXTO_DEL_REPORTE), []);
+});
+
+prueba('la maquinaria: equipo y operador no reconocidos, repetida y medidor imposible (RF-71, RF-75)', () => {
+  const reporte = reporteCompleto();
+  reporte.maquinaria.push(
+    { ...reporte.maquinaria[0] },
+    {
+      ...reporte.maquinaria[0],
+      vehiculoId: null,
+      escrito: 'Excavadora Liugong 922D',
+      operadorId: null,
+      operadorEscrito: 'el mono',
+    },
+    { ...reporte.maquinaria[0], vehiculoId: 'llq376', medidorInicial: 500, medidorFinal: 400 },
+  );
+  assert.deepEqual(dondeFalta(reporte), [
+    'maquinaria 1',
+    'maquinaria 2',
+    'maquinaria 2',
+    'maquinaria 3',
+  ]);
+  // Sin operador escrito no es una falta: el operador es opcional (RF-91).
+  const sinOperador = reporteCompleto();
+  sinOperador.maquinaria[0] = { ...sinOperador.maquinaria[0], operadorId: null, operadorEscrito: null };
+  assert.deepEqual(dondeFalta(sinOperador), []);
+});
+
+prueba('el viaje de una volqueta sin operador pide el conductor (RF-95)', () => {
+  const reporte = reporteCompleto();
+  reporte.viajes[0] = { ...reporte.viajes[0], conductorId: null };
+  const faltas = faltasDelReporte(reporte, CONTEXTO_DEL_REPORTE);
+  assert.deepEqual(faltas.map((f) => f.mensaje), ['Elija el conductor.']);
+});
+
+prueba('la fecha, el clima y el personal se validan como en la bitácora (RF-44, RF-59, RF-67)', () => {
+  const futuro = reporteCompleto();
+  futuro.fecha = '2026-10-06';
+  assert.deepEqual(dondeFalta(futuro), ['fecha -']);
+
+  const sinFecha = reporteCompleto();
+  sinFecha.fecha = null;
+  // Los viajes no repiten la falta de la fecha: se dice una vez.
+  assert.deepEqual(dondeFalta(sinFecha), ['fecha -']);
+
+  const clima = reporteCompleto();
+  clima.clima[0] = { ...clima.clima[0], condicion: null };
+  clima.clima[1] = { ...clima.clima[1], desde: '14:00' };
+  assert.deepEqual(dondeFalta(clima), ['clima 0', 'clima -']);
+
+  const horario = reporteCompleto();
+  horario.personal[0] = { ...horario.personal[0], salida: null };
+  assert.deepEqual(dondeFalta(horario), ['personal 0']);
+});
+
+console.log('\nReportes de WhatsApp: categorías y mezcla con la bitácora\n');
+
+prueba('seguimiento e ignorar entran ignorados; lo demás, pendiente (RF-23, RF-90)', () => {
+  assert.equal(estadoInicialDeCategoria('seguimiento'), 'ignorado');
+  assert.equal(estadoInicialDeCategoria('ignorar'), 'ignorado');
+  assert.equal(estadoInicialDeCategoria('reporte_diario'), 'pendiente');
+  assert.equal(estadoInicialDeCategoria('incidente'), 'pendiente');
+  // Una categoría que nadie decidió no se esconde: la ve una persona.
+  assert.equal(estadoInicialDeCategoria('categoria_nueva'), 'pendiente');
+  assert.equal(estadoInicialDeCategoria(null), 'pendiente');
+});
+
+prueba('cada categoría se nombra en español, y una desconocida se muestra como vino (RF-18)', () => {
+  assert.equal(etiquetaDeCategoria('reporte_diario'), 'Reporte diario');
+  assert.equal(etiquetaDeCategoria('vehiculo_maquinaria'), 'Vehículo o maquinaria');
+  assert.equal(etiquetaDeCategoria('categoria_nueva'), 'categoria_nueva');
+  assert.equal(etiquetaDeCategoria(null), 'Sin categoría');
+});
+
+prueba('cada categoría tiene su destino, y una desconocida no crea nada (RF-30, RF-35, RF-38, RF-39, RF-49)', () => {
+  assert.equal(destinoDeCategoria('reporte_diario'), 'reporte');
+  assert.equal(destinoDeCategoria('reporte_actividades'), 'reporte');
+  assert.equal(destinoDeCategoria('laboratorio'), 'control_calidad');
+  assert.equal(destinoDeCategoria('incidente'), 'notas');
+  assert.equal(destinoDeCategoria('vehiculo_maquinaria'), 'notas');
+  assert.equal(destinoDeCategoria('inicio_actividades'), 'notas');
+  assert.equal(destinoDeCategoria('administrativo'), 'notas');
+  assert.equal(destinoDeCategoria('suministro_cantera'), 'cantera');
+  assert.equal(destinoDeCategoria('seguimiento'), 'ninguno');
+  assert.equal(destinoDeCategoria('categoria_nueva'), 'ninguno');
+  assert.equal(destinoDeCategoria(undefined), 'ninguno');
+});
+
+/** Una bitácora abierta con lo de un primer reporte, y un segundo reporte del día. */
+function dosReportesDelDia() {
+  const parte = {
+    maquinaria: [
+      { id: 'm-1', vehiculoId: 'llq375', medidorFinal: 32615 },
+      { id: 'm-2', vehiculoId: 'llq376', medidorFinal: 1000 },
+    ],
+    personal: [
+      { id: 'p-1', usuarioId: 'silfrido', salida: '17:00' },
+      { id: 'p-2', usuarioId: 'diego-c', salida: '17:00' },
+    ],
+    actividades: [{ id: 'a-1' }],
+    clima: [
+      { id: 'c-1', desde: '07:00' },
+      { id: 'c-2', desde: '12:00' },
+    ],
+    laboratorio: [{ id: 'e-1' }],
+    notas: 'Cierre vial en el PR 2.',
+  };
+  const reporte = {
+    maquinaria: [{ id: 'm-3', vehiculoId: 'llq375', medidorFinal: 32700 }],
+    personal: [
+      { id: 'p-3', usuarioId: 'silfrido', salida: '18:00' },
+      { id: 'p-4', usuarioId: 'jesus', salida: '16:00' },
+    ],
+    actividades: [{ id: 'a-2' }],
+    clima: [{ id: 'c-3', desde: '07:00' }],
+    laboratorio: [{ id: 'e-2' }],
+    notas: 'Se varó la LLQ 376 a las 2 pm.',
+  };
+  return { parte, reporte };
+}
+
+prueba('el segundo reporte reemplaza persona, máquina y clima, y suma lo demás (RF-88, RF-92, RF-93)', () => {
+  const { parte, reporte } = dosReportesDelDia();
+  const fusion = fusionarReporteEnParte(parte, reporte);
+
+  // La máquina y la persona repetidas se reemplazan en su sitio; las nuevas, al final.
+  assert.deepEqual(fusion.maquinaria.map((m) => m.id), ['m-3', 'm-2']);
+  assert.equal(fusion.maquinaria[0].medidorFinal, 32700);
+  assert.deepEqual(fusion.personal.map((p) => p.id), ['p-3', 'p-2', 'p-4']);
+  assert.equal(fusion.personal[0].salida, '18:00');
+  // Todo el clima se reemplaza.
+  assert.deepEqual(fusion.clima.map((f) => f.id), ['c-3']);
+  // Actividades, ensayos y notas se suman.
+  assert.deepEqual(fusion.actividades.map((a) => a.id), ['a-1', 'a-2']);
+  assert.deepEqual(fusion.laboratorio.map((e) => e.id), ['e-1', 'e-2']);
+  assert.equal(fusion.notas, 'Cierre vial en el PR 2.\n\nSe varó la LLQ 376 a las 2 pm.');
+});
+
+prueba('un reporte sin clima deja el clima que había, y en una bitácora vacía todo se añade', () => {
+  const { parte, reporte } = dosReportesDelDia();
+  assert.deepEqual(
+    fusionarReporteEnParte(parte, { ...reporte, clima: [] }).clima.map((f) => f.id),
+    ['c-1', 'c-2'],
+  );
+  const vacia = { maquinaria: [], personal: [], actividades: [], clima: [], laboratorio: [], notas: null };
+  const fusion = fusionarReporteEnParte(vacia, reporte);
+  assert.deepEqual(fusion.personal.map((p) => p.id), ['p-3', 'p-4']);
+  assert.equal(fusion.notas, 'Se varó la LLQ 376 a las 2 pm.');
+});
+
+prueba('fusionar dos veces el mismo reporte no duplica nada (reintento de la aprobación)', () => {
+  const { parte, reporte } = dosReportesDelDia();
+  const una = fusionarReporteEnParte(parte, reporte);
+  const dos = fusionarReporteEnParte(una, reporte);
+  assert.deepEqual(dos, una);
+});
+
+prueba('el aviso nombra lo que se va a reemplazar, y no lo de este mismo reporte (RF-89)', () => {
+  const { parte, reporte } = dosReportesDelDia();
+  const aviso = avisoDeReemplazo(parte, reporte);
+  assert.deepEqual(aviso.maquinas.map((m) => m.id), ['m-1']);
+  assert.deepEqual(aviso.personas.map((p) => p.id), ['p-1']);
+  assert.deepEqual(aviso.franjas.map((f) => f.id), ['c-1', 'c-2']);
+
+  // Ya aplicado (un reintento), no hay nada que avisar.
+  const yaAplicado = avisoDeReemplazo(fusionarReporteEnParte(parte, reporte), reporte);
+  assert.deepEqual(yaAplicado, { maquinas: [], personas: [], franjas: [] });
+
+  // Sin clima en el reporte, las franjas no se tocan.
+  assert.deepEqual(avisoDeReemplazo(parte, { ...reporte, clima: [] }).franjas, []);
+});
+
+console.log('\nReportes de WhatsApp: de la propuesta al reporte\n');
+
+const CATALOGOS_DE_PRUEBA: CatalogosDeLaObra = {
+  obraId: 'obra-a',
+  vehiculos: EQUIPOS_DEL_REPORTE,
+  personas: PERSONAS_DEL_REPORTE,
+  sitios: [
+    { id: 'fortune', nombre: 'Cantera Fortune' },
+    { id: 'planta', nombre: 'Planta de trituración' },
+  ],
+  materiales: [
+    { id: 'sub-base', nombre: 'Sub-base granular' },
+    { id: 'base', nombre: 'Base granular' },
+  ],
+};
+
+/** Lo que la IA devolvería por el reporte de la plantilla (esquema 2). */
+const PROPUESTA_DE_LA_PLANTILLA = {
+  fecha_evento: '2026-10-01',
+  clima: [
+    { condicion: 'fue un clima soleado', desde: '7:00 am', hasta: '3:00 pm' },
+    { condicion: 'se presentó lluvias', desde: '3:00 pm', hasta: '6:00 pm' },
+  ],
+  actividades: [
+    {
+      descripcion: 'Capa a estabilizar',
+      abscisa_inicio: 'K1+040',
+      abscisa_fin: 'K1+190',
+      longitud_m: 150,
+      ancho_m: 6.4,
+      espesor_m: 0.25,
+      items_pago: [
+        { codigo: '5.1.15', cantidad: 312 },
+        { codigo: '13.1', cantidad: 20068.8 },
+        { codigo: '9.9.9', cantidad: 1 },
+      ],
+    },
+  ],
+  maquinaria: [
+    {
+      equipo: 'Volqueta: Foton LLQ 375',
+      operador: 'Silfrido Medina',
+      medidor_inicial: 32524,
+      medidor_final: 32615,
+      observacion: 'Sin novedad',
+    },
+    { equipo: 'Volqueta Foton LLQ 376', operador: 'el mono', medidor_inicial: 100, medidor_final: 150 },
+    // Listada sin lecturas: ese día no trabajó (RF-69).
+    { equipo: 'Volqueta Kentworth TAY 153' },
+  ],
+  personal: [{ nombre: 'Silfrido Medina', entrada: '7:00 am', salida: '6:00 pm' }],
+  ensayos: [
+    {
+      tipo: 'densidad',
+      hora_inicio: '9am',
+      hora_fin: '10:00 am',
+      responsable: 'jesus',
+      ubicacion: 'pr 1 + 150',
+      resultado: 98,
+      unidad: '%',
+      cumple: 'si',
+      observacion: 'densidad de primera capa',
+    },
+  ],
+  viajes: [
+    {
+      placa: 'LLQ 375',
+      cantidad: 2,
+      material: 'sub-base',
+      origen: 'Fortune',
+      destino: 'obra',
+      abscisa_llegada: 'PR 1+175',
+      hora: '7:30 am',
+    },
+    { placa: 'LLQ 376', material: 'base granular', origen: 'planta', abscisa_llegada: 'K1+200', hora: '9:10' },
+  ],
+  novedades: [{ descripcion: 'Se varó la LLQ 376 a las 2 pm.' }],
+};
+
+prueba('un sitio, un material o un ensayo se reconocen por su nombre, y ambiguo es ninguno', () => {
+  assert.equal(reconocerPorNombre('fortune', CATALOGOS_DE_PRUEBA.sitios), 'fortune');
+  assert.equal(reconocerPorNombre('Sub-base', CATALOGOS_DE_PRUEBA.materiales), 'sub-base');
+  // «granular» está en los dos materiales.
+  assert.equal(reconocerPorNombre('granular', CATALOGOS_DE_PRUEBA.materiales), null);
+  assert.equal(reconocerPorNombre('arena', CATALOGOS_DE_PRUEBA.materiales), null);
+});
+
+prueba('la propuesta de la plantilla se lee sección por sección (RF-60 a RF-95)', () => {
+  const { reporte, fechaSupuesta } = resolverPropuesta(PROPUESTA_DE_LA_PLANTILLA, CATALOGOS_DE_PRUEBA, {
+    diaDelMensaje: '2026-10-02',
+    destino: 'reporte',
+  });
+  // La fecha del encabezado, no la del mensaje (RF-61).
+  assert.equal(reporte.fecha, '2026-10-01');
+  assert.equal(fechaSupuesta, false);
+  // Clima en franjas con su condición y sus horas (RF-66).
+  assert.deepEqual(reporte.clima, [
+    { condicion: 'soleado', desde: '07:00', hasta: '15:00' },
+    { condicion: 'lloviendo', desde: '15:00', hasta: '18:00' },
+  ]);
+  // Una actividad por ítem, con las abscisas en la descripción (RF-31, RF-34); el
+  // ítem que no está en el presupuesto queda sin elegir y con lo escrito (RF-33).
+  assert.deepEqual(
+    reporte.actividades.map((a) => [a.clave, a.itemEscrito, a.cantidad]),
+    [
+      ['5.1.15', '5.1.15', 312],
+      ['13.1', '13.1', 20068.8],
+      [null, '9.9.9', 1],
+    ],
+  );
+  assert.equal(reporte.actividades[0].descripcion, 'Capa a estabilizar, desde K1+040 hasta K1+190');
+  assert.equal(reporte.actividades[0].alto, 0.25);
+  // Maquinaria: la que no tiene lecturas no entra (RF-69); el operador no
+  // reconocido queda con lo escrito (RF-75).
+  assert.deepEqual(
+    reporte.maquinaria.map((m) => [m.vehiculoId, m.operadorId, m.operadorEscrito]),
+    [
+      ['llq375', 'silfrido', 'Silfrido Medina'],
+      ['llq376', null, 'el mono'],
+    ],
+  );
+  assert.deepEqual(reporte.personal, [
+    { usuarioId: 'silfrido', escrito: 'Silfrido Medina', entrada: '07:00', salida: '18:00', observaciones: '' },
+  ]);
+  // El ensayo: reconocido por su nombre, con horas, ubicación y observación (RF-37, RF-81).
+  assert.deepEqual(reporte.ensayos[0], {
+    ensayo: 'densidad_en_campo',
+    escrito: 'densidad',
+    horaInicio: '09:00',
+    horaFin: '10:00',
+    responsable: 'jesus',
+    ubicacion: { pr: 1, metros: 150 },
+    observacion: 'Resultado: 98 %. Cumple. densidad de primera capa',
+  });
+  // «2 viajes» son dos viajes; el conductor es el operador de esa volqueta (RF-87, RF-94).
+  assert.equal(reporte.viajes.length, 3);
+  assert.deepEqual(reporte.viajes[0], {
+    vehiculoId: 'llq375',
+    materialId: 'sub-base',
+    origenId: 'fortune',
+    destino: 'obra',
+    pr: 1,
+    metros: 175,
+    hora: '07:30',
+    conductorId: 'silfrido',
+  });
+  assert.deepEqual(reporte.viajes[1], reporte.viajes[0]);
+  // Sin destino escrito pero con abscisa de llegada, va a la obra; la volqueta sin
+  // operador reconocido deja el conductor para elegir (RF-95).
+  assert.deepEqual(
+    [reporte.viajes[2].destino, reporte.viajes[2].metros, reporte.viajes[2].conductorId],
+    ['obra', 200, null],
+  );
+  assert.equal(reporte.notas, 'Se varó la LLQ 376 a las 2 pm.');
+
+  // Y lo que no se reconoció es justo lo que falta para aprobar.
+  const faltas = faltasDelReporte(reporte, { hoy: '2026-10-05', claseDeMedidor: () => 'odometro' });
+  assert.deepEqual(
+    faltas.map((f) => `${f.seccion} ${f.renglon}`),
+    ['actividades 2', 'maquinaria 1', 'viajes 2'],
+  );
+});
+
+prueba('sin fecha en el reporte, se toma la del mensaje y se avisa (RF-62)', () => {
+  const resuelto = resolverPropuesta({ fecha_evento: 'ayer' }, CATALOGOS_DE_PRUEBA, {
+    diaDelMensaje: '2026-10-02',
+    destino: 'reporte',
+  });
+  assert.equal(resuelto.reporte.fecha, '2026-10-02');
+  assert.equal(resuelto.fechaSupuesta, true);
+});
+
+prueba('un incidente sin novedades lleva su resumen a las notas (RF-38)', () => {
+  const incidente = resolverPropuesta(
+    { fecha_evento: '2026-10-01', resumen: 'Cierre vial en el PR 2 por derrumbe.' },
+    CATALOGOS_DE_PRUEBA,
+    { diaDelMensaje: '2026-10-01', destino: 'notas' },
+  );
+  assert.equal(incidente.reporte.notas, 'Cierre vial en el PR 2 por derrumbe.');
+  // En un reporte diario, el resumen no es una nota.
+  const reporte = resolverPropuesta(
+    { fecha_evento: '2026-10-01', resumen: 'Reporte del día.' },
+    CATALOGOS_DE_PRUEBA,
+    { diaDelMensaje: '2026-10-01', destino: 'reporte' },
+  );
+  assert.equal(reporte.reporte.notas, '');
+});
+
+prueba('un renglón con una cantidad absurda de viajes no pasa de 30', () => {
+  const resuelto = resolverPropuesta(
+    { fecha_evento: '2026-10-01', viajes: [{ placa: 'LLQ 375', cantidad: 4000 }] },
+    CATALOGOS_DE_PRUEBA,
+    { diaDelMensaje: '2026-10-01', destino: 'cantera' },
+  );
+  assert.equal(resuelto.reporte.viajes.length, 30);
+});
+
+console.log('\nReportes de WhatsApp: archivos\n');
+
+prueba('se guardan fotos, documentos, notas de voz y videos (RF-7, RF-52)', () => {
+  for (const tipo of [
+    'image/jpeg',
+    'image/png',
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'audio/ogg',
+    'video/mp4',
+  ]) {
+    assert.equal(rechazoDeArchivo(tipo, 1000), null, tipo);
+  }
+  // Como llegan de verdad: con parámetros y mayúsculas.
+  assert.equal(tipoDeArchivo('audio/ogg; codecs=opus'), 'audio/ogg');
+  assert.equal(tipoDeArchivo('IMAGE/JPEG'), 'image/jpeg');
+  assert.equal(tipoDeArchivo(null), '');
+});
+
+prueba('un ejecutable, un archivo vacío o uno de más de 16 MB no se guardan', () => {
+  assert.equal(rechazoDeArchivo('application/x-msdownload', 1000)?.estado, 415);
+  assert.equal(rechazoDeArchivo('', 1000)?.estado, 415);
+  assert.equal(rechazoDeArchivo('image/jpeg', 0)?.estado, 422);
+  assert.equal(rechazoDeArchivo('image/jpeg', TAMANO_MAXIMO_DE_ARCHIVO)?.estado, undefined);
+  assert.equal(rechazoDeArchivo('video/mp4', TAMANO_MAXIMO_DE_ARCHIVO + 1)?.estado, 413);
+});
+
+console.log('\nReportes de WhatsApp: contratos\n');
+
+/** Lo que manda n8n por el reporte de la plantilla, con el esquema 2. */
+function entregaDePrueba() {
+  return {
+    esquema: 2,
+    grupo: { id: '120363405170214664@g.us', nombre: 'Berrio_Consorcio Magdalena Medio' },
+    mensaje: {
+      id: '3EB0C431C26A1D3F5A2B',
+      autorId: '123456789@lid',
+      autorNombre: 'Oscar',
+      enviadoEn: '2026-10-01T22:15:00-05:00',
+      tipo: 'texto',
+      texto: 'Reporte octubre 1 de 2026 …',
+    },
+    propuesta: {
+      categoria: 'reporte_diario',
+      fecha_evento: '2026-10-01',
+      clima: [{ condicion: 'soleado', desde: '7:00 am', hasta: '3:00 pm' }],
+      maquinaria: [
+        {
+          equipo: 'Volqueta: Foton LLQ 375',
+          operador: 'Silfrido Medina',
+          medidor_inicial: 32524,
+          medidor_final: 32615,
+          observacion: 'Sin novedad',
+        },
+      ],
+      viajes: [{ placa: 'TFO 420', material: 'Sub-base', origen: 'Fortune', hora: '7:30 am' }],
+      // Un campo que la IA estrene mañana se conserva: la propuesta se guarda tal cual (RF-27).
+      campo_nuevo: 'se conserva',
+    },
+  };
+}
+
+prueba('la entrega con el esquema 2 se acepta, y la propuesta llega tal cual (RF-1, RF-27)', () => {
+  const entrega = entregaDeWhatsapp.parse(entregaDePrueba());
+  assert.equal(entrega.propuesta.categoria, 'reporte_diario');
+  assert.equal(entrega.propuesta.maquinaria[0].operador, 'Silfrido Medina');
+  // Lo que no trae, llega como lista vacía, no como ausente.
+  assert.deepEqual(entrega.propuesta.personal, []);
+  assert.deepEqual(entrega.propuesta.actividades, []);
+  assert.equal((entrega.propuesta as Record<string, unknown>).campo_nuevo, 'se conserva');
+  assert.equal(entrega.mensaje.tieneArchivo, false);
+});
+
+prueba('la entrega con el esquema 1, o sin esquema, se rechaza', () => {
+  const v1 = entregaDeWhatsapp.safeParse({ ...entregaDePrueba(), esquema: 1 });
+  assert.equal(v1.success, false);
+  assert.ok(
+    v1.error!.issues.some((i) => i.message.includes('esquema 2')),
+    JSON.stringify(v1.error!.issues),
+  );
+  const { esquema: _sinEsquema, ...sinEsquema } = entregaDePrueba();
+  assert.equal(entregaDeWhatsapp.safeParse(sinEsquema).success, false);
+});
+
+prueba('la entrega de un chat privado, sin categoría o con fecha inválida se rechaza', () => {
+  const base = entregaDePrueba();
+  assert.equal(
+    entregaDeWhatsapp.safeParse({ ...base, grupo: { ...base.grupo, id: '573001234567@s.whatsapp.net' } })
+      .success,
+    false,
+  );
+  assert.equal(
+    entregaDeWhatsapp.safeParse({ ...base, propuesta: { ...base.propuesta, categoria: '' } }).success,
+    false,
+  );
+  assert.equal(
+    entregaDeWhatsapp.safeParse({ ...base, mensaje: { ...base.mensaje, enviadoEn: 'ayer' } }).success,
+    false,
+  );
+});
+
+prueba('descartar exige motivo, y espacios no son un motivo (RF-55)', () => {
+  assert.equal(descarte.safeParse({ version: 0 }).success, false);
+  assert.equal(descarte.safeParse({ version: 0, motivo: '   ' }).success, false);
+  assert.equal(descarte.parse({ version: 3, motivo: ' Es un chiste ' }).motivo, 'Es un chiste');
+});
+
+prueba('aprobar, corregir, descartar y devolver exigen la versión leída (RF-29)', () => {
+  const propuesta = reporteCompleto();
+  assert.equal(aprobacion.safeParse({ propuesta }).success, false);
+  assert.equal(propuestaCorregida.safeParse({ propuesta }).success, false);
+  assert.equal(descarte.safeParse({ motivo: 'No sirve' }).success, false);
+  assert.equal(devolucionAPendiente.safeParse({}).success, false);
+  assert.equal(aprobacion.safeParse({ version: -1, propuesta }).success, false);
+
+  const aprobada = aprobacion.parse({ version: 2, propuesta });
+  assert.equal(aprobada.soloViajes, false);
+  assert.deepEqual(aprobada.fotos, { delDia: null, porActividad: {} });
+  // El reporte que la regla da por completo es también un cuerpo válido.
+  assert.deepEqual(aprobada.propuesta, propuesta);
+});
+
+prueba('una corrección a medias se puede guardar: lo que falta se exige al aprobar (RF-26, RF-64)', () => {
+  const aMedias = reporteCompleto();
+  aMedias.fecha = null;
+  aMedias.personal[0] = { ...aMedias.personal[0], usuarioId: null, entrada: null };
+  aMedias.viajes[0] = { ...aMedias.viajes[0], hora: null, conductorId: null };
+  assert.equal(propuestaCorregida.safeParse({ version: 0, propuesta: aMedias }).success, true);
+});
+
+prueba('las fotos por actividad se eligen por renglón (RF-50)', () => {
+  const propuesta = reporteCompleto();
+  const conFotos = aprobacion.parse({
+    version: 0,
+    propuesta,
+    fotos: { delDia: 'foto-1', porActividad: { '0': 'foto-2' } },
+  });
+  assert.equal(conFotos.fotos.porActividad['0'], 'foto-2');
+  assert.equal(
+    aprobacion.safeParse({ version: 0, propuesta, fotos: { porActividad: { primera: 'foto-2' } } })
+      .success,
+    false,
+  );
+});
+
+prueba('asociar un grupo exige la obra (RF-8)', () => {
+  const sinObra = grupoAsociado.safeParse({});
+  assert.equal(sinObra.success, false);
+  assert.equal(sinObra.error!.issues[0].message, 'Elija la obra.');
+  assert.equal(grupoAsociado.safeParse({ obraId: '  ' }).success, false);
+  assert.equal(grupoAsociado.parse({ obraId: 'obra-a' }).obraId, 'obra-a');
+});
+
+/* ------------------------------------------------------------------------ */
 /* Criptografía de las contraseñas web                                       */
 /* ------------------------------------------------------------------------ */
 
@@ -5409,6 +6379,66 @@ prueba('anulado y descartado mandan sobre el estado en que quedaron', () => {
  * `crypto.subtle` es exactamente la misma API que usará Cloudflare Workers: lo
  * que se comprueba aquí es lo que va a correr en producción.
  */
+/* ------------------------------------------------------------------------ */
+/* La guardia de la integración de WhatsApp (spec 021)                       */
+/* ------------------------------------------------------------------------ */
+
+async function verificarIntegracion() {
+  console.log('\nGuardia de la integración de WhatsApp\n');
+
+  const token = 'a'.repeat(64);
+  const hash = await hashDeTokenDeIntegracion(token);
+
+  await pruebaAsync('el hash es un SHA-256 en hexadecimal y no el token', async () => {
+    assert.match(hash, /^[0-9a-f]{64}$/);
+    assert.notEqual(hash, token);
+    assert.equal(await hashDeTokenDeIntegracion(token), hash);
+  });
+
+  await pruebaAsync('el token correcto pasa (RF-2)', async () => {
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${token}`, hash), true);
+    // El hash del .env se lee sin importar mayúsculas ni espacios de más.
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${token}`, ` ${hash.toUpperCase()} `), true);
+  });
+
+  await pruebaAsync('un token incorrecto, ausente o de otra forma no pasa (RF-3)', async () => {
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${'b'.repeat(64)}`, hash), false);
+    assert.equal(await tokenDeIntegracionValido(null, hash), false);
+    assert.equal(await tokenDeIntegracionValido('Bearer ', hash), false);
+    assert.equal(await tokenDeIntegracionValido(`Basic ${token}`, hash), false);
+    // El hash mismo no sirve de token: quien vea el .env no entra.
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${hash}`, hash), false);
+  });
+
+  await pruebaAsync('sin hash configurado, o con uno mal escrito, no entra nadie', async () => {
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${token}`, undefined), false);
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${token}`, ''), false);
+    assert.equal(await tokenDeIntegracionValido(`Bearer ${token}`, 'no-es-un-hash'), false);
+  });
+
+  await pruebaAsync('la guardia responde 401 a la cookie del panel y deja pasar el token', async () => {
+    const anterior = process.env.TOKEN_INTEGRACION_WHATSAPP;
+    process.env.TOKEN_INTEGRACION_WHATSAPP = hash;
+    try {
+      const conCookie = new Request('http://localhost/api/integraciones/whatsapp/mensajes', {
+        method: 'POST',
+        headers: { cookie: 'sesion=una-sesion-del-panel' },
+      });
+      const rechazo = await requerirIntegracion(conCookie);
+      assert.equal(rechazo?.status, 401);
+
+      const conToken = new Request('http://localhost/api/integraciones/whatsapp/mensajes', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      assert.equal(await requerirIntegracion(conToken), null);
+    } finally {
+      if (anterior === undefined) delete process.env.TOKEN_INTEGRACION_WHATSAPP;
+      else process.env.TOKEN_INTEGRACION_WHATSAPP = anterior;
+    }
+  });
+}
+
 async function verificarCripto() {
   await pruebaAsync('una contraseña verifica contra su hash y no contra otro', async () => {
     const hash = await hashDeClave('caterpillar-120k');
@@ -5650,6 +6680,7 @@ async function verificarChoques() {
 verificarFirmaS3()
   .then(verificarChoques)
   .then(verificarCripto)
+  .then(verificarIntegracion)
   .then(() => console.log(`\n${pruebas} verificaciones correctas.\n`))
   .catch((error) => {
     console.error('\nFalló una verificación:', error);

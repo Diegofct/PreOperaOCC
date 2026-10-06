@@ -47,13 +47,21 @@ export interface MaquinaPedida {
   medidorInicial?: number | null;
   medidorFinal?: number | null;
   observaciones?: string | null;
+  /** Quién la operó (spec 021, RF-73). El nombre no lo dice el navegador. */
+  operadorId?: string | null;
 }
 
+/**
+ * `operadorNombre` lo busca el servidor con el `operadorId` pedido, como busca el
+ * código del equipo con su id. Sin operador elegido, el nombre se ignora.
+ */
 export function construirMaquina(
   pedida: MaquinaPedida,
   codigo: string,
   claseMedidor: ClaseDeMedidor,
+  operadorNombre: string | null = null,
 ): MaquinaDelParte {
+  const operadorId = pedida.operadorId ?? null;
   return {
     id: uuidv7(),
     vehiculoId: pedida.vehiculoId,
@@ -64,6 +72,9 @@ export function construirMaquina(
     // Siempre presente en lo que se guarda desde el 2026-09-14, aunque vacío:
     // así solo los partes anteriores lo traen ausente (spec 004, RF-45).
     observaciones: pedida.observaciones?.trim() ?? '',
+    // Siempre presentes en lo nuevo, aunque nulos (spec 021, RF-77).
+    operadorId,
+    operadorNombre: operadorId ? operadorNombre : null,
   };
 }
 

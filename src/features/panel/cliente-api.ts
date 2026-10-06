@@ -17,6 +17,10 @@
 import type { Periodo } from '@/shared/rules/jornada';
 
 import type {
+  Aprobacion,
+  DetalleDePropuesta,
+  GrupoFila,
+  PropuestaFila,
   AsignacionFila,
   AsignacionNueva,
   BitacoraEditada,
@@ -68,6 +72,7 @@ import type {
   VehiculoFila,
   VehiculoNuevo,
 } from './contratos';
+import type { EstadoMensajeWhatsapp, ReporteDelDia } from '@/shared/rules/whatsapp';
 
 /**
  * Un fallo que el panel sabe explicar.
@@ -441,6 +446,53 @@ export const api = {
         panelEnviar<ViajeRegistrado>('/cantera/viajes', 'POST', datos),
       anular: (id: string, motivo: string) =>
         panelEnviar<ViajeAnulado>(`/cantera/viajes/${id}/anular`, 'POST', { motivo }),
+    },
+  },
+
+  /**
+   * La bandeja de reportes de WhatsApp (spec 021). Corregir, aprobar, descartar y
+   * devolver mandan la versión que se leyó: si otra persona se adelantó, el
+   * servidor responde 409 (RF-29).
+   */
+  whatsapp: {
+    grupos: {
+      listar: () => panel<{ grupos: GrupoFila[] }>('/whatsapp/grupos').then((r) => r.grupos),
+      asociar: (id: string, obraId: string) =>
+        panelEnviar<GrupoFila>(`/whatsapp/grupos/${encodeURIComponent(id)}`, 'PATCH', { obraId }),
+    },
+    propuestas: {
+      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null) => {
+        const parametros = new URLSearchParams({ estado });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<{ propuestas: PropuestaFila[] }>(
+          `/whatsapp/propuestas?${parametros.toString()}`,
+        ).then((r) => r.propuestas);
+      },
+      ver: (id: string) =>
+        panel<DetalleDePropuesta>(`/whatsapp/propuestas/${encodeURIComponent(id)}`),
+      corregir: (id: string, version: number, propuesta: ReporteDelDia) =>
+        panelEnviar<{ version: number }>(`/whatsapp/propuestas/${encodeURIComponent(id)}`, 'PATCH', {
+          version,
+          propuesta,
+        }),
+      aprobar: (id: string, datos: Aprobacion) =>
+        panelEnviar<{ parteId: string; fecha: string; viajes: number; soloViajes: boolean }>(
+          `/whatsapp/propuestas/${encodeURIComponent(id)}/aprobar`,
+          'POST',
+          datos,
+        ),
+      descartar: (id: string, version: number, motivo: string) =>
+        panelEnviar<{ version: number }>(
+          `/whatsapp/propuestas/${encodeURIComponent(id)}/descartar`,
+          'POST',
+          { version, motivo },
+        ),
+      devolver: (id: string, version: number) =>
+        panelEnviar<{ version: number }>(
+          `/whatsapp/propuestas/${encodeURIComponent(id)}/devolver`,
+          'POST',
+          { version },
+        ),
     },
   },
 

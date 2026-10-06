@@ -37,7 +37,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Colors, Spacing, TextoPanel } from "@/constants/theme";
-import { idDeFila, type ViajeDelParte } from "@/features/bitacoras/tipos";
+import { idDeFila, type OrigenWhatsapp, type ViajeDelParte } from "@/features/bitacoras/tipos";
 import { EtiquetaDeEstado, EtiquetaDeVeredicto } from "@/features/laboratorio/etiquetas";
 import type { GranulometriaDelParte } from "@/features/laboratorio/tipos";
 import {
@@ -173,11 +173,50 @@ function unidadDe(fila: FilaActividad): string | null {
 }
 
 /**
- * La cantidad tal como la ve quien llena la fila: tomada de su medida si la unidad
- * la tiene, escrita si no. La misma regla que aplica el servidor (RF-67 a RF-69).
+ * La cantidad tal como la ve quien llena la fila: la escrita si hay, y si no, la de
+ * su medida. La misma regla que aplica el servidor (spec 021, RF-99 y RF-100).
  */
 function cantidadDe(fila: FilaActividad) {
   return resolverCantidad(unidadDe(fila), medidasDe(fila), aNumero(fila.cantidad));
+}
+
+/** La cantidad guardada como se pinta al abrir: vacía si es la que dan sus medidas. */
+function cantidadInicial(a: {
+  clave: string;
+  unidad?: string;
+  cantidad?: number | null;
+  longitud: number | null;
+  ancho: number | null;
+  alto: number | null;
+  area: number | null;
+  volumen: number | null;
+}): string {
+  if (a.cantidad === null || a.cantidad === undefined) return "";
+  const unidad =
+    a.clave === CLAVE_OTRA_ACTIVIDAD
+      ? (UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ?? null)
+      : (actividadPorItem(a.clave)?.unidad ?? null);
+  const { calculada } = resolverCantidad(
+    unidad,
+    calcularDimensiones({
+      longitud: a.longitud,
+      ancho: a.ancho,
+      alto: a.alto,
+      area: a.area,
+      volumen: a.volumen,
+    }),
+    null,
+  );
+  return calculada !== null && calculada === a.cantidad ? "" : String(a.cantidad);
+}
+
+/** Debajo de la cantidad: de dónde sale si está vacía, o la calculada si se escribió otra. */
+function ayudaDeCantidad(cantidad: ReturnType<typeof cantidadDe>): string | undefined {
+  if (cantidad.calculada === null || !cantidad.origen) return undefined;
+  if (cantidad.cantidadCalculada) return `${AYUDA_DE_CANTIDAD[cantidad.origen]}: ${cantidad.calculada}`;
+  return cantidad.cantidad === cantidad.calculada
+    ? undefined
+    : `Calculada: ${cantidad.calculada}`;
 }
 
 const AYUDA_DE_CANTIDAD: Record<OrigenDeCantidad, string> = {
@@ -194,6 +233,12 @@ type FilaMaquina = {
   final: string;
   /** Lo que pasó con la máquina ese día (spec 004, RF-45). */
   observaciones: string;
+  /**
+   * Quién la operó (spec 021). Todavía no se elige aquí —lo pinta la tarea T23—,
+   * pero se devuelve tal como llegó: la sección se reemplaza entera al guardar, y
+   * sin esto guardar a mano borraría el operador que puso una aprobación.
+   */
+  operadorId: string | null;
 };
 type FilaPersona = {
   usuarioId: string;
@@ -584,6 +629,7 @@ export default function PantallaPartes() {
             vehiculos={vehiculos.datos.filter(
               (v) => v.obraId === parte.obraId || v.obraId === null,
             )}
+            personas={personas.datos}
             editable={editable}
             alGuardar={dia.recargar}
             alMedir={salto.alMedirBanda}
@@ -882,13 +928,28 @@ interface PropsSeccion {
   alGuardar: () => void;
 }
 
+/**
+ * La marca de lo que se aprobó desde un reporte de WhatsApp (spec 021, RF-47). Con
+ * texto y no solo con color: el color nunca es la única señal (constitución 7).
+ */
+function MarcaWhatsapp({ origen }: { origen?: OrigenWhatsapp }) {
+  if (!origen) return null;
+  return <Etiqueta tono="neutro">Desde WhatsApp</Etiqueta>;
+}
+
+/** El `origen` de una fila guardada, si lo tiene: los materiales anteriores no. */
+function origenDe(fila: object | undefined): OrigenWhatsapp | undefined {
+  return fila && "origen" in fila ? (fila.origen as OrigenWhatsapp | undefined) : undefined;
+}
+
 function SeccionMaquinaria({
   parte,
   vehiculos,
+  personas,
   editable,
   alGuardar,
   alMedir,
-}: PropsSeccion & { vehiculos: VehiculoFila[] }) {
+}: PropsSeccion & { vehiculos: VehiculoFila[]; personas: PersonaFila[] }) {
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -903,6 +964,7 @@ function SeccionMaquinaria({
       final: m.medidorFinal === null ? "" : String(m.medidorFinal),
       // Los partes anteriores al 2026-09-14 no las traen.
       observaciones: m.observaciones ?? "",
+      operadorId: m.operadorId ?? null,
     })),
   );
   const [guardando, setGuardando] = useState(false);
@@ -925,6 +987,7 @@ function SeccionMaquinaria({
           medidorInicial: aNumero(f.inicial),
           medidorFinal: aNumero(f.final),
           observaciones: f.observaciones,
+          operadorId: f.operadorId,
         })),
       });
       alFallar(null);
@@ -968,12 +1031,31 @@ function SeccionMaquinaria({
                 key={`${fila.vehiculoId}-${indice}`}
                 ultima={indice === filas.length - 1}
               >
+                <MarcaWhatsapp
+                  origen={origenDe(parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId))}
+                />
                 <Campo
                   etiqueta="Equipo"
                   valor={`${equipo?.codigoInterno ?? fila.vehiculoId}${equipo ? ` · ${equipo.tipoNombre}` : ""}`}
                   onChange={() => {}}
                   // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
                   soloLectura
+                  ancho={240}
+                />
+                {/* Quién la operó (spec 021, RF-73, RF-76). Opcional: se cierra sin él (RF-91). */}
+                <Selector
+                  etiqueta="Operador"
+                  valor={fila.operadorId}
+                  opciones={personas.map((p) => ({
+                    valor: p.id,
+                    etiqueta: p.nombreCompleto,
+                    detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
+                  }))}
+                  onChange={(v) =>
+                    setFilas(filas.map((f, i) => (i === indice ? { ...f, operadorId: v } : f)))
+                  }
+                  vacio="Sin operador"
+                  permiteVacio
                   ancho={240}
                 />
                 <Campo
@@ -1048,7 +1130,7 @@ function SeccionMaquinaria({
               v &&
               setFilas([
                 ...filas,
-                { vehiculoId: v, inicial: "", final: "", observaciones: "" },
+                { vehiculoId: v, inicial: "", final: "", observaciones: "", operadorId: null },
               ])
             }
             vacio="Elija un equipo"
@@ -1153,6 +1235,9 @@ function SeccionPersonal({
                 key={`${fila.usuarioId}-${indice}`}
                 ultima={indice === filas.length - 1}
               >
+                <MarcaWhatsapp
+                  origen={origenDe(parte.personal.find((p) => p.usuarioId === fila.usuarioId))}
+                />
                 <Campo
                   etiqueta="Persona"
                   valor={quien?.nombreCompleto ?? fila.usuarioId}
@@ -1306,8 +1391,11 @@ function SeccionActividades({
       texto: a.clave === CLAVE_OTRA_ACTIVIDAD ? a.nombre : "",
       // Se guarda la etiqueta («m³»); el formulario trabaja con la clave.
       unidad: UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ?? "",
-      cantidad:
-        a.cantidad === null || a.cantidad === undefined ? "" : String(a.cantidad),
+      // Una cantidad que coincide con la que dan sus medidas se trata como calculada
+      // y se pinta vacía: así una bitácora guardada antes del 2026-10-05 —cuando la
+      // cantidad siempre salía del cálculo— no queda con la cifra fija por haberse
+      // abierto (021, caso límite). Solo queda fija si alguien escribe otra.
+      cantidad: cantidadInicial(a),
       descripcion: a.descripcion,
       observaciones: a.observaciones,
       longitud: a.longitud === null ? "" : String(a.longitud),
@@ -1367,9 +1455,9 @@ function SeccionActividades({
                   f.clave === CLAVE_OTRA_ACTIVIDAD
                     ? UNIDADES_DE_ACTIVIDAD.find((u) => u.id === f.unidad)?.id ?? null
                     : null,
-                // Se manda lo que se ve: calculado si hay de dónde, escrito si no. El
-                // servidor lo recalcula igual con la misma regla (RF-58 a RF-60, RF-68).
-                cantidad: cantidadDe(f).cantidad,
+                // Solo la escrita: vacía, el servidor la toma de la medida con la misma
+                // regla (021/RF-99, RF-100). Mandar la calculada la dejaría fija.
+                cantidad: aNumero(f.cantidad),
                 descripcion: f.descripcion,
                 observaciones: f.observaciones,
                 longitud: aNumero(f.longitud),
@@ -1500,6 +1588,7 @@ function SeccionActividades({
             const faltas = intentoGuardar ? faltasDe(fila) : {};
             return (
               <FilaDeFormulario key={fila.id} ultima={ultima}>
+                <MarcaWhatsapp origen={origenDe(parte.actividades.find((a) => a.id === fila.id))} />
                 <Selector
                   etiqueta="Actividad"
                   valor={fila.clave || null}
@@ -1590,17 +1679,16 @@ function SeccionActividades({
                   ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
                   ancho={110}
                 />
-                {/* Cuánto se hizo, en la unidad de la actividad. Con m³, m² o m y su
-                    medida, sale de ella y no se escribe; con kg, Und o m³-km, o sin
-                    la medida, se escribe a mano (RF-67 a RF-69, RF-74). */}
+                {/* Cuánto se hizo, en la unidad de la actividad. Se escribe siempre;
+                    vacía, sale de su medida (m³, m² o m), y la calculada se muestra
+                    debajo para que se note si la escrita es otra (021/RF-99 a RF-101). */}
                 <Campo
                   etiqueta={unidad ? `Cantidad (${etiquetaDeUnidad(unidad)})` : "Cantidad"}
-                  valor={cantidad.cantidadCalculada ? String(cantidad.cantidad) : fila.cantidad}
+                  valor={fila.cantidad}
                   onChange={(v) => cambiar(indice, "cantidad", v)}
                   soloNumeros
-                  soloLectura={cantidad.cantidadCalculada}
-                  ayuda={cantidad.origen ? AYUDA_DE_CANTIDAD[cantidad.origen] : undefined}
-                  ancho={130}
+                  ayuda={ayudaDeCantidad(cantidad)}
+                  ancho={150}
                 />
                 <Campo
                   etiqueta="Observaciones"
@@ -1720,6 +1808,7 @@ function SeccionClima({
         <>
           {filas.map((fila, indice) => (
             <FilaDeFormulario key={indice} ultima={indice === filas.length - 1}>
+              <MarcaWhatsapp origen={origenDe(parte.clima[indice])} />
               <Selector
                 etiqueta="Condición"
                 valor={fila.condicion}
@@ -2030,6 +2119,7 @@ function SeccionLaboratorio({
             const faltas = intentoGuardar ? faltasDe(fila) : {};
             return (
               <FilaDeFormulario key={fila.id} ultima={ultima}>
+                <MarcaWhatsapp origen={origenDe(parte.laboratorio.find((e) => e.id === fila.id))} />
                 <Selector
                   etiqueta="Ensayo"
                   valor={fila.ensayo || null}

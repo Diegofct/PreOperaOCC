@@ -28,6 +28,12 @@ const TABLAS_CON_RELOJ = [
   'bitacoras',
   'media',
   'credenciales_web',
+  // Spec 021. `partes_de_obra` faltaba desde la 004: tenía la columna pero nada la
+  // movía, y la aprobación de un reporte la necesita para notar que alguien guardó
+  // la bitácora entre su lectura y su escritura.
+  'partes_de_obra',
+  'whatsapp_grupos',
+  'whatsapp_mensajes',
 ];
 
 const FUNCION = `

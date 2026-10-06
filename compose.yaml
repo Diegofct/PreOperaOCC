@@ -42,6 +42,9 @@ services:
       R2_BUCKET: ${R2_BUCKET:?falta el bucket del almacén de imágenes}
       R2_LLAVE_ID: ${R2_LLAVE_ID:?falta la llave del almacén de imágenes}
       R2_LLAVE_SECRETA: ${R2_LLAVE_SECRETA:?falta el secreto del almacén de imágenes}
+      # Spec 021. Opcional a propósito: sin ella el panel funciona igual y la
+      # integración de WhatsApp no entra (su guardia está cerrada por defecto).
+      TOKEN_INTEGRACION_WHATSAPP: ${TOKEN_INTEGRACION_WHATSAPP:-}
 
     # Informativo: `docker ps` dice si está sano. No reinicia nada por sí solo,
     # pero es la forma rápida de contestar «¿volvió bien?» después de un

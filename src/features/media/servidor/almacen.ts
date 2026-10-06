@@ -87,8 +87,28 @@ export function claveDeObjeto(duenoTipo: string, duenoId: string, mediaId: strin
   return `${duenoTipo}/${duenoId}/${mediaId}.${extensionDe(mime)}`;
 }
 
+/**
+ * La extensión de la clave. Hasta la spec 021 solo llegaban fotos y firmas (`png`
+ * o `jpg`); con WhatsApp llegan también documentos, audios y videos, y un PDF
+ * guardado como `.jpg` haría mentir al bucket que se audita a ojo. Lo que no esté
+ * aquí sigue siendo `jpg`, que es lo que era antes para todo lo que no fuera PNG.
+ */
+const EXTENSIONES: Record<string, string> = {
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'application/pdf': 'pdf',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'video/mp4': 'mp4',
+};
+
 function extensionDe(mime: string): string {
-  return mime === 'image/png' ? 'png' : 'jpg';
+  return EXTENSIONES[mime] ?? 'jpg';
 }
 
 /**

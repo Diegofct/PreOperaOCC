@@ -1,20 +1,16 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { partesDeObra, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
-import {
-  construirActividadDelParte,
-  construirEnsayo,
-  rechazoDelEnsayo,
-  construirFranja,
-  construirMaquina,
-  construirPersona,
-  conservarHeredadas,
-  esActividadHeredada,
-  esMaterialHeredado,
-} from '@/features/bitacoras/parte';
+import { partesDeObra } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
-import { esEnsayo } from '@/features/bitacoras/tipos';
+import {
+  actividadesDelParte,
+  climaDelParte,
+  conservarOrigen,
+  laboratorioDelParte,
+  maquinariaDelParte,
+  personalDelParte,
+} from '@/features/bitacoras/servidor/secciones';
 import { parteEditado } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import {
@@ -24,8 +20,6 @@ import {
   ok,
   responder,
 } from '@/features/servidor/respuestas';
-import { validarFranjas, mensajeDeFranja, validarHorario, mensajeDeHorario } from '@/shared/rules/horas';
-import { medidorDeClase, mensajeDeAvance, validarAvance } from '@/shared/rules/jornada';
 import { mensajeDeDiaSinTrabajo, resolverDiaSinTrabajo } from '@/shared/rules/parte';
 
 /**
@@ -39,6 +33,11 @@ import { mensajeDeDiaSinTrabajo, resolverDiaSinTrabajo } from '@/shared/rules/pa
  * el id del equipo y sus lecturas; el código interno se busca aquí. Si el nombre
  * llegara del cliente, bastaría con editar la petición para que el parte dijera
  * que trabajó otra persona.
+ *
+ * Cómo se valida y se construye cada sección vive en
+ * `bitacoras/servidor/secciones.ts` desde la spec 021: la aprobación de un reporte
+ * de WhatsApp escribe las mismas secciones y tiene que pasar las mismas
+ * validaciones (RF-59).
  */
 
 const COLUMNAS = {
@@ -70,94 +69,55 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const db = baseServidor();
     const set: Record<string, unknown> = {};
 
-    if (cambios.maquinaria) {
-      const ids = cambios.maquinaria.map((m) => m.vehiculoId);
-      if (new Set(ids).size !== ids.length) {
-        return errorDePeticion('Una máquina no puede estar dos veces en la misma bitácora.', 400);
-      }
-
-      // El medidor sale del tipo del equipo, no de lo que diga el navegador:
-      // una camioneta se controla por kilómetros y una retroexcavadora por
-      // horas de motor, y pedirle a la camioneta horas de motor es pedirle un
-      // dato que su tablero no da.
-      const equipos = ids.length
-        ? await db
+    // Lo guardado se lee una sola vez y solo si hace falta: para el día sin
+    // trabajo, para conservar las filas heredadas de actividades y control de
+    // calidad (RF-63, RF-71) —que no se pueden reconstruir desde ningún catálogo— y
+    // para que lo que vino de WhatsApp conserve su marca (021/RF-47).
+    const leeLoGuardado =
+      cambios.sinTrabajo !== undefined ||
+      cambios.motivoSinTrabajo !== undefined ||
+      cambios.maquinaria !== undefined ||
+      cambios.personal !== undefined ||
+      cambios.actividades !== undefined ||
+      cambios.clima !== undefined ||
+      cambios.laboratorio !== undefined;
+    const guardado = leeLoGuardado
+      ? (
+          await db
             .select({
-              id: vehiculos.id,
-              codigo: vehiculos.codigoInterno,
-              obraId: vehiculos.obraId,
-              clase: tiposVehiculo.claseMedidor,
+              sinTrabajo: partesDeObra.sinTrabajo,
+              motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+              maquinaria: partesDeObra.maquinaria,
+              personal: partesDeObra.personal,
+              actividades: partesDeObra.actividades,
+              clima: partesDeObra.clima,
+              laboratorio: partesDeObra.laboratorio,
             })
-            .from(vehiculos)
-            .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
-            .where(and(inArray(vehiculos.id, ids), isNull(vehiculos.eliminadoEn)))
-        : [];
+            .from(partesDeObra)
+            .where(eq(partesDeObra.id, id))
+            .limit(1)
+        )[0]
+      : undefined;
+    if (leeLoGuardado && !guardado) return noEncontrado('esa bitácora');
 
-      const porId = new Map(equipos.map((v) => [v.id, v]));
-      for (const vehiculoId of ids) {
-        const equipo = porId.get(vehiculoId);
-        // Solo las máquinas de la obra del parte: una volqueta de otra obra en
-        // este parte son horas apuntadas donde no trabajó.
-        if (!equipo || (equipo.obraId !== null && equipo.obraId !== estado.obraId)) {
-          return errorDePeticion('Ese equipo no es de la obra de esta bitácora.', 400);
-        }
-      }
-
-      for (const maquina of cambios.maquinaria) {
-        const clase = medidorDeClase(porId.get(maquina.vehiculoId)!.clase);
-        const error = validarAvance(
-          clase,
-          maquina.medidorInicial ?? null,
-          maquina.medidorFinal ?? null,
-        );
-        // Falta una lectura todavía no es un error mientras se llena: solo se
-        // exigen completas al cerrar. Lo que sí se rechaza ya es una lectura
-        // imposible, porque escrita se queda.
-        if (error === 'final_menor' || error === 'salto_enorme') {
-          return errorDePeticion(
-            mensajeDeAvance(clase, error, maquina.medidorInicial ?? null),
-            400,
-          );
-        }
-      }
-
-      set.maquinaria = cambios.maquinaria.map((m) => {
-        const equipo = porId.get(m.vehiculoId)!;
-        return construirMaquina(m, equipo.codigo, medidorDeClase(equipo.clase));
-      });
+    if (cambios.maquinaria) {
+      const seccion = await maquinariaDelParte(cambios.maquinaria, estado.obraId);
+      if ('error' in seccion) return errorDePeticion(seccion.error, 400);
+      set.maquinaria = conservarOrigen(
+        seccion.filas,
+        guardado!.maquinaria,
+        (nueva, vieja) => 'vehiculoId' in vieja && vieja.vehiculoId === nueva.vehiculoId,
+      );
     }
 
     if (cambios.personal) {
-      const ids = cambios.personal.map((p) => p.usuarioId);
-      if (new Set(ids).size !== ids.length) {
-        return errorDePeticion('Una persona no puede estar dos veces en la misma bitácora.', 400);
-      }
-
-      for (const persona of cambios.personal) {
-        const error = validarHorario(persona.entrada, persona.salida);
-        if (error) return errorDePeticion(mensajeDeHorario(error), 400);
-      }
-
-      const gente = ids.length
-        ? await db
-            .select({
-              id: usuarios.id,
-              nombre: usuarios.nombreCompleto,
-              cargo: usuarios.cargo,
-            })
-            .from(usuarios)
-            .where(and(inArray(usuarios.id, ids), isNull(usuarios.eliminadoEn)))
-        : [];
-
-      const porId = new Map(gente.map((u) => [u.id, u]));
-      for (const usuarioId of ids) {
-        if (!porId.has(usuarioId)) return errorDePeticion('Esa persona no existe.', 400);
-      }
-
-      set.personal = cambios.personal.map((p) => {
-        const persona = porId.get(p.usuarioId)!;
-        return construirPersona(p, persona.nombre, persona.cargo);
-      });
+      const seccion = await personalDelParte(cambios.personal);
+      if ('error' in seccion) return errorDePeticion(seccion.error, 400);
+      set.personal = conservarOrigen(
+        seccion.filas,
+        guardado!.personal,
+        (nueva, vieja) => 'usuarioId' in vieja && vieja.usuarioId === nueva.usuarioId,
+      );
     }
 
     // Día sin trabajo (spec 004, RF-53 a RF-55). Se valida **cómo queda el
@@ -170,87 +130,36 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       cambios.personal !== undefined ||
       cambios.actividades !== undefined;
 
-    // Lo guardado se lee una sola vez, y solo si hace falta: para el día sin trabajo
-    // y para conservar las filas heredadas de actividades y control de calidad
-    // (RF-63, RF-71), que no se pueden reconstruir desde ningún catálogo.
-    const guardado =
-      tocaElDia || cambios.laboratorio !== undefined
-        ? (
-            await db
-              .select({
-                sinTrabajo: partesDeObra.sinTrabajo,
-                motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
-                maquinaria: partesDeObra.maquinaria,
-                personal: partesDeObra.personal,
-                actividades: partesDeObra.actividades,
-                laboratorio: partesDeObra.laboratorio,
-              })
-              .from(partesDeObra)
-              .where(eq(partesDeObra.id, id))
-              .limit(1)
-          )[0]
-        : undefined;
-
-    if ((tocaElDia || cambios.laboratorio !== undefined) && !guardado) {
-      return noEncontrado('esa bitácora');
-    }
-
     // Sin transacciones (Neon por HTTP), entre esta lectura y el UPDATE otro
     // computador puede guardar lo contrario. En las filas heredadas lo peor que pasa
     // es que un guardado vuelva a dejar una que el otro quitó, tomada de lo que se
     // leyó: no se pierde nada y no se inventa nada.
 
     if (cambios.actividades) {
-      // Una fila con el id de una actividad heredada se queda como estaba; las demás
-      // se construyen, y una que no es del presupuesto ni una «otra» completa no se
-      // guarda (spec 004, RF-64, RF-70, RF-71).
-      const filas = conservarHeredadas(
-        cambios.actividades,
+      const seccion = actividadesDelParte(cambios.actividades, guardado!.actividades);
+      if ('error' in seccion) return errorDePeticion(seccion.error, 400);
+      set.actividades = conservarOrigen(
+        seccion.filas,
         guardado!.actividades,
-        esActividadHeredada,
-        // Solo con id y sin ser heredada de este parte no es nada que construir.
-        (fila) => ('clave' in fila ? construirActividadDelParte(fila) : null),
+        (nueva, vieja) => 'id' in vieja && vieja.id === nueva.id,
       );
-      if (filas.some((f) => f === null)) {
-        return errorDePeticion('Esa actividad no está en la lista.', 400);
-      }
-      set.actividades = filas;
     }
 
     if (cambios.clima) {
-      const error = validarFranjas(cambios.clima);
-      if (error) return errorDePeticion(mensajeDeFranja(error), 400);
-      set.clima = cambios.clima.map((c) => construirFranja(c));
+      const seccion = climaDelParte(cambios.clima);
+      if ('error' in seccion) return errorDePeticion(seccion.error, 400);
+      // Las franjas nacen con id nuevo en cada guardado: «la misma» es la del mismo renglón.
+      set.clima = conservarOrigen(seccion.filas, guardado!.clima, (_, __, indice) => indice >= 0);
     }
 
     if (cambios.laboratorio) {
-      // Un material heredado que llega con su id se queda como estaba (RF-63); lo
-      // demás es un ensayo que se construye (RF-61, RF-72) **con el guardado de su
-      // id**: es lo único que dice si es un ensayo anterior al 2026-09-22, al que no
-      // se le exigen horas, responsable ni ubicación (RF-89).
-      const ensayosGuardados = new Map(
-        guardado!.laboratorio.filter(esEnsayo).map((ensayo) => [ensayo.id, ensayo]),
-      );
-      const guardadoDe = (pedido: { id?: string | null }) =>
-        pedido.id ? ensayosGuardados.get(pedido.id) : undefined;
-
-      const filas = conservarHeredadas(
-        cambios.laboratorio,
+      const seccion = laboratorioDelParte(cambios.laboratorio, guardado!.laboratorio);
+      if ('error' in seccion) return errorDePeticion(seccion.error, 400);
+      set.laboratorio = conservarOrigen(
+        seccion.filas,
         guardado!.laboratorio,
-        esMaterialHeredado,
-        (pedido) => construirEnsayo(pedido, guardadoDe(pedido)),
+        (nueva, vieja) => 'id' in vieja && vieja.id === nueva.id,
       );
-      if (filas.some((f) => f === null)) {
-        // Todo lo que falta de una vez, uno por renglón, como el cierre (RF-88): con
-        // varios ensayos, cada renglón dice de cuál es.
-        const renglones = cambios.laboratorio.flatMap((pedido, indice) =>
-          filas[indice] === null
-            ? rechazoDelEnsayo(pedido, guardadoDe(pedido)).map((m) => `Ensayo ${indice + 1}: ${m}`)
-            : [],
-        );
-        return errorDePeticion(renglones.join('\n') || 'Ese ensayo no está en la lista.', 400);
-      }
-      set.laboratorio = filas;
     }
 
     if (cambios.notas !== undefined) set.notas = cambios.notas;

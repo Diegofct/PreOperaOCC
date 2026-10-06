@@ -105,6 +105,36 @@ export interface MaquinaDelParte {
    * lea. Ausente se lee como vacío.
    */
   observaciones?: string;
+  /**
+   * Quién la operó ese día (spec 021, RF-73 y RF-74), y su nombre congelado con el
+   * parte, como el código del equipo: la persona puede cambiar de nombre o irse
+   * de la empresa y el parte tiene que seguir diciendo quién fue.
+   *
+   * Opcional en dos sentidos. En el tipo, porque los partes anteriores al
+   * 2026-10-05 no lo traen y se conservan así (RF-77). Y en el negocio: se puede
+   * cerrar la bitácora sin él (RF-91). Lo nuevo lo guarda siempre, `null` si nadie
+   * lo eligió, para que solo lo anterior lo tenga ausente.
+   */
+  operadorId?: string | null;
+  operadorNombre?: string | null;
+  /** Spec 021, RF-46. */
+  origen?: OrigenWhatsapp;
+}
+
+/**
+ * De qué mensaje de WhatsApp salió una fila del parte, quién lo aprobó y cuándo
+ * (spec 021, RF-46). Es lo que pinta la marca «desde WhatsApp» (RF-47).
+ *
+ * Ausente en todo lo escrito a mano. Va dentro de la fila, y no en una tabla
+ * aparte, por lo mismo que las secciones van en `jsonb`: aprobar escribe el parte
+ * en un solo `UPDATE`, y el origen no puede quedarse a medio guardar.
+ */
+export interface OrigenWhatsapp {
+  mensajeId: string;
+  /** El id de quien aprobó. */
+  aprobadoPor: string;
+  /** ISO 8601. */
+  aprobadoEn: string;
 }
 
 /** Una persona que trabajó ese día, con su horario. */
@@ -122,6 +152,8 @@ export interface PersonaDelParte {
    * cerrar. Ausente en los partes anteriores, que se leen como sin observaciones.
    */
   observaciones?: string;
+  /** Spec 021, RF-46. */
+  origen?: OrigenWhatsapp;
 }
 
 /** Una actividad ejecutada, con sus dimensiones. */
@@ -153,6 +185,8 @@ export interface ActividadDelParte {
   unidad?: string;
   /** Cuánto se hizo, en esa unidad; `null` si no se anotó (RF-67 a RF-69, RF-74). */
   cantidad?: number | null;
+  /** Spec 021, RF-46. */
+  origen?: OrigenWhatsapp;
 }
 
 /** Un tramo del día con su clima. */
@@ -163,6 +197,8 @@ export interface FranjaDeClima {
   /** "HH:MM". */
   desde: string;
   hasta: string;
+  /** Spec 021, RF-46. */
+  origen?: OrigenWhatsapp;
 }
 
 /**
@@ -199,6 +235,8 @@ export interface EnsayoDelParte {
   horaFin?: string;
   responsable?: string;
   ubicacion?: UbicacionDelEnsayo;
+  /** Spec 021, RF-46. */
+  origen?: OrigenWhatsapp;
 }
 
 /** En la vía, a la altura de un PR, u otro lugar escrito (RF-87). Nunca las dos. */

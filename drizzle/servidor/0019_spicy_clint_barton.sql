@@ -1,0 +1,3 @@
+ALTER TABLE "whatsapp_mensajes" ADD COLUMN "obra_decidida_id" text;--> statement-breakpoint
+ALTER TABLE "whatsapp_mensajes" ADD CONSTRAINT "whatsapp_mensajes_obra_decidida_id_obras_id_fk" FOREIGN KEY ("obra_decidida_id") REFERENCES "public"."obras"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "ix_whatsapp_mensaje_obra_decidida" ON "whatsapp_mensajes" USING btree ("obra_decidida_id");

@@ -39,7 +39,7 @@ import {
   type UnidadDeActividad,
 } from '@/shared/catalogos/presupuesto';
 import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
-import type { ViajeDelParte } from '@/features/bitacoras/tipos';
+import type { OrigenWhatsapp, ViajeDelParte } from '@/features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '@/features/laboratorio/tipos';
 import type {
   EstadoVisibleEnsayo,
@@ -55,6 +55,7 @@ import {
   type HorarioDeObra,
 } from '@/shared/rules/horas';
 import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
+import type { ReporteDelDia } from '@/shared/rules/whatsapp';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -729,6 +730,12 @@ export const maquinaDelParte = z.object({
    * para un párrafo largo; más ya es un informe y va en las notas del día.
    */
   observaciones: textoOpcional(1000).transform((v) => v ?? ''),
+  /**
+   * Quién la operó (spec 021, RF-73). Opcional (RF-91). El formulario lo devuelve
+   * tal como lo recibió: la sección se reemplaza entera al guardar, y sin esto
+   * guardar la maquinaria a mano borraría el operador que puso una aprobación.
+   */
+  operadorId: idOpcional,
 });
 
 export const personaDelParte = z.object({
@@ -901,9 +908,15 @@ export interface MaquinaDelParteFila {
   medidorFinal: number | null;
   /** Ausente en los partes anteriores al 2026-09-14. */
   observaciones?: string;
+  /** Spec 021. Ausentes en los partes anteriores al 2026-10-05 (RF-77). */
+  operadorId?: string | null;
+  operadorNombre?: string | null;
+  origen?: OrigenWhatsapp;
 }
 
 export interface PersonaDelParteFila {
+  /** De qué mensaje de WhatsApp salió (spec 021, RF-47). */
+  origen?: OrigenWhatsapp;
   id: string;
   usuarioId: string;
   nombre: string;
@@ -915,6 +928,8 @@ export interface PersonaDelParteFila {
 }
 
 export interface ActividadDelParteFila {
+  /** De qué mensaje de WhatsApp salió (spec 021, RF-47). */
+  origen?: OrigenWhatsapp;
   id: string;
   clave: string;
   nombre: string;
@@ -933,6 +948,8 @@ export interface ActividadDelParteFila {
 }
 
 export interface FranjaDeClimaFila {
+  /** De qué mensaje de WhatsApp salió (spec 021, RF-47). */
+  origen?: OrigenWhatsapp;
   id: string;
   condicion: string;
   nombre: string;
@@ -949,6 +966,8 @@ export interface MaterialDelParteFila {
 }
 
 export interface EnsayoDelParteFila {
+  /** De qué mensaje de WhatsApp salió (spec 021, RF-47). */
+  origen?: OrigenWhatsapp;
   id: string;
   ensayo: string;
   nombre: string;
@@ -1353,6 +1372,8 @@ export interface ViajeFila {
   /** ISO 8601. */
   registradoEn: string;
   registradoPorNombre: string | null;
+  /** El mensaje de WhatsApp del que se aprobó, o `null` (spec 021, RF-47). */
+  mensajeWhatsappId: string | null;
   anulado: boolean;
   anuladoEn: string | null;
   anuladoPorNombre: string | null;
@@ -1547,3 +1568,343 @@ export interface GranulometriaDelParteFila {
   estado: 'vigentes' | 'fijados' | 'antes_del_modulo';
   ensayos: GranulometriaDelParte[];
 }
+
+/* ------------------------------------------------------------------------ */
+/* Reportes de WhatsApp (spec 021)                                           */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * ── Lo que entrega la integración ──
+ *
+ * La propuesta de la IA llega en `snake_case`, como la escribe el modelo, y **se
+ * guarda tal como llegó** (RF-27): por eso su forma es tolerante —todo opcional,
+ * listas vacías por defecto y campos desconocidos conservados (`looseObject`)—.
+ * Aquí solo se exige lo que la bandeja necesita para no romperse: la categoría y
+ * que cada lista sea una lista. Leerla de verdad es trabajo de la resolución
+ * contra los catálogos (T14), que no confía en la IA para los formatos.
+ *
+ * `esquema: 2` no es un adorno. La versión 1 —la que usaba la prueba de la fase 3—
+ * no trae clima, personal ni maquinaria con operador, y aceptarla llenaría la
+ * bandeja de reportes a medias que parecerían completos.
+ */
+const textoDeIa = z.string().nullish();
+const numeroDeIa = z.number().nullish();
+const listaDeIa = <T extends z.ZodType>(fila: T) => z.array(fila).max(200).default([]);
+
+export const propuestaDeIa = z.looseObject({
+  categoria: z.string().trim().min(1, 'Falta la categoría.').max(60),
+  resumen: textoDeIa,
+  fecha_evento: textoDeIa,
+  complementa_a: textoDeIa,
+  confianza: textoDeIa,
+  requiere_revision: z.boolean().nullish(),
+  motivo_revision: textoDeIa,
+  clima: listaDeIa(
+    z.looseObject({ condicion: textoDeIa, desde: textoDeIa, hasta: textoDeIa }),
+  ),
+  actividades: listaDeIa(
+    z.looseObject({
+      descripcion: textoDeIa,
+      abscisa_inicio: textoDeIa,
+      abscisa_fin: textoDeIa,
+      longitud_m: numeroDeIa,
+      ancho_m: numeroDeIa,
+      espesor_m: numeroDeIa,
+      volumen_m3: numeroDeIa,
+      items_pago: listaDeIa(
+        z.looseObject({
+          codigo: textoDeIa,
+          descripcion: textoDeIa,
+          cantidad: numeroDeIa,
+          unidad: textoDeIa,
+        }),
+      ),
+    }),
+  ),
+  maquinaria: listaDeIa(
+    z.looseObject({
+      equipo: textoDeIa,
+      operador: textoDeIa,
+      medidor_inicial: numeroDeIa,
+      medidor_final: numeroDeIa,
+      observacion: textoDeIa,
+    }),
+  ),
+  personal: listaDeIa(
+    z.looseObject({ nombre: textoDeIa, entrada: textoDeIa, salida: textoDeIa, observacion: textoDeIa }),
+  ),
+  ensayos: listaDeIa(
+    z.looseObject({
+      tipo: textoDeIa,
+      hora_inicio: textoDeIa,
+      hora_fin: textoDeIa,
+      responsable: textoDeIa,
+      ubicacion: textoDeIa,
+      resultado: z.union([z.number(), z.string()]).nullish(),
+      unidad: textoDeIa,
+      cumple: textoDeIa,
+      observacion: textoDeIa,
+    }),
+  ),
+  viajes: listaDeIa(
+    z.looseObject({
+      placa: textoDeIa,
+      /** Cuántos viajes dice el renglón; uno si no lo dice (RF-87). */
+      cantidad: numeroDeIa,
+      material: textoDeIa,
+      origen: textoDeIa,
+      destino: textoDeIa,
+      abscisa_llegada: textoDeIa,
+      hora: textoDeIa,
+    }),
+  ),
+  novedades: listaDeIa(z.looseObject({ tipo: textoDeIa, descripcion: textoDeIa })),
+});
+
+export type PropuestaDeIa = z.infer<typeof propuestaDeIa>;
+
+/** Los tipos de mensaje que guarda la captura. */
+export const TIPOS_DE_MENSAJE_WHATSAPP = ['texto', 'imagen', 'documento', 'audio', 'video', 'otro'] as const;
+
+/** `POST /api/integraciones/whatsapp/mensajes` (RF-1). */
+export const entregaDeWhatsapp = z.object({
+  esquema: z.literal(2, { error: 'La integración tiene que mandar la propuesta con el esquema 2.' }),
+  grupo: z.object({
+    // El JID de un grupo de WhatsApp. Un chat privado (`…@s.whatsapp.net`) no es de
+    // ninguna obra y la integración no debería mandarlo (fuera de alcance).
+    id: z.string().trim().regex(/^[\w.-]+@g\.us$/, 'El grupo no es un grupo de WhatsApp.'),
+    nombre: textoObligatorio(200, 'el nombre del grupo'),
+  }),
+  mensaje: z.object({
+    id: textoObligatorio(200, 'el id del mensaje'),
+    autorId: textoObligatorio(200, 'el autor'),
+    autorNombre: textoOpcional(200),
+    enviadoEn: z.iso.datetime({ offset: true, error: 'La fecha del mensaje va en ISO 8601.' }),
+    tipo: z.enum(TIPOS_DE_MENSAJE_WHATSAPP),
+    texto: textoOpcional(20000),
+    tieneArchivo: z.boolean().default(false),
+  }),
+  propuesta: propuestaDeIa,
+});
+
+export type EntregaDeWhatsapp = z.input<typeof entregaDeWhatsapp>;
+
+/*
+ * ── Lo que corrige y aprueba el residente ──
+ *
+ * La propuesta corregida tiene la forma de `ReporteDelDia` (`rules/whatsapp`), la
+ * misma para todas las categorías: un incidente es un reporte con solo notas, y un
+ * resultado de laboratorio, uno con solo ensayos. Así hay una sola pantalla de
+ * corrección y una sola regla de faltas.
+ *
+ * Es **tolerante a propósito**: guardar una corrección a medias es válido (RF-26);
+ * lo que falta se exige al aprobar, con `faltasDelReporte` (RF-64), no aquí.
+ */
+const idDeElegido = z.string().trim().max(64).nullable();
+const textoDeCorreccion = (max: number) => z.string().max(max).nullable();
+const numeroDeCorreccion = z.number().finite().nullable();
+
+const ubicacionCorregida = z.union([
+  z.object({ pr: z.number().int().nullable(), metros: z.number().int().nullable() }),
+  z.object({ lugar: textoDeCorreccion(200) }),
+]);
+
+export const reporteCorregido = z.object({
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha va como AAAA-MM-DD.').nullable(),
+  clima: z
+    .array(
+      z.object({
+        condicion: textoDeCorreccion(40),
+        desde: textoDeCorreccion(5),
+        hasta: textoDeCorreccion(5),
+      }),
+    )
+    .max(12),
+  actividades: z
+    .array(
+      z.object({
+        clave: textoDeCorreccion(20),
+        itemEscrito: textoDeCorreccion(40),
+        texto: textoDeCorreccion(500).optional(),
+        unidad: textoDeCorreccion(20).optional(),
+        descripcion: z.string().max(1000).optional(),
+        longitud: numeroDeCorreccion.optional(),
+        ancho: numeroDeCorreccion.optional(),
+        alto: numeroDeCorreccion.optional(),
+        cantidad: numeroDeCorreccion.optional(),
+      }),
+    )
+    .max(40),
+  maquinaria: z
+    .array(
+      z.object({
+        vehiculoId: idDeElegido,
+        escrito: z.string().max(200),
+        operadorId: idDeElegido,
+        operadorEscrito: textoDeCorreccion(200),
+        medidorInicial: numeroDeCorreccion,
+        medidorFinal: numeroDeCorreccion,
+        observaciones: z.string().max(1000),
+      }),
+    )
+    .max(40),
+  personal: z
+    .array(
+      z.object({
+        usuarioId: idDeElegido,
+        escrito: z.string().max(200),
+        entrada: textoDeCorreccion(5),
+        salida: textoDeCorreccion(5),
+        observaciones: z.string().max(1000),
+      }),
+    )
+    .max(80),
+  ensayos: z
+    .array(
+      z.object({
+        ensayo: textoDeCorreccion(60),
+        escrito: z.string().max(200),
+        horaInicio: textoDeCorreccion(5),
+        horaFin: textoDeCorreccion(5),
+        responsable: textoDeCorreccion(200),
+        ubicacion: ubicacionCorregida.nullable(),
+        observacion: textoDeCorreccion(1000),
+      }),
+    )
+    .max(40),
+  viajes: z
+    .array(
+      z.object({
+        vehiculoId: idDeElegido,
+        materialId: idDeElegido,
+        origenId: idDeElegido,
+        destino: idDeElegido,
+        pr: z.number().int().nullable(),
+        metros: z.number().int().nullable(),
+        hora: textoDeCorreccion(5),
+        conductorId: idDeElegido,
+      }),
+    )
+    .max(200),
+  notas: z.string().max(4000),
+}) satisfies z.ZodType<ReporteDelDia>;
+
+/** La versión que leyó quien corrige o decide (RF-29). */
+const versionLeida = z.number({ error: 'Falta la versión de la propuesta que se leyó.' }).int().min(0);
+
+/** `PATCH /api/panel/whatsapp/propuestas/:id` (RF-26). */
+export const propuestaCorregida = z.object({
+  version: versionLeida,
+  propuesta: reporteCorregido,
+});
+
+/**
+ * `POST /api/panel/whatsapp/propuestas/:id/aprobar` (RF-30 a RF-51, RF-96).
+ *
+ * Las fotos se eligen al aprobar (RF-50, RF-51): la del día, y por actividad, con
+ * la clave como el número de renglón de la actividad en la propuesta («0», «1»…).
+ * `soloViajes` es lo que se ofrece con la bitácora del día cerrada.
+ */
+export const aprobacion = z.object({
+  version: versionLeida,
+  propuesta: reporteCorregido,
+  fotos: z
+    .object({
+      delDia: z.string().trim().max(64).nullish().transform((v) => v || null),
+      porActividad: z.record(z.string().regex(/^\d+$/), z.string().trim().min(1).max(64)).default({}),
+    })
+    .default({ delDia: null, porActividad: {} }),
+  soloViajes: z.boolean().default(false),
+});
+
+export type Aprobacion = z.input<typeof aprobacion>;
+
+/** `POST …/descartar` (RF-54, RF-55). */
+export const descarte = z.object({
+  version: versionLeida,
+  motivo: textoObligatorio(500, 'el motivo del descarte'),
+});
+
+/** `POST …/devolver`: un ignorado vuelve a pendiente (RF-25). */
+export const devolucionAPendiente = z.object({ version: versionLeida });
+
+/** Un grupo de WhatsApp en la lista de la gerencia (RF-8 a RF-10). */
+export interface GrupoFila {
+  id: string;
+  nombre: string;
+  obraId: string | null;
+  obraNombre: string | null;
+  asociadoEn: string | null;
+  pendientes: number;
+  ultimoMensajeEn: string | null;
+}
+
+/** Un mensaje en la lista de la bandeja (RF-16 a RF-19). */
+export interface PropuestaFila {
+  id: string;
+  enviadoEn: string;
+  autorNombre: string | null;
+  grupoNombre: string;
+  obraId: string;
+  obraNombre: string;
+  categoria: string | null;
+  resumen: string | null;
+  motivoRevision: string | null;
+  estado: 'pendiente' | 'ignorado' | 'aprobado' | 'descartado';
+  /** Fotos y documentos, los suyos y los de los mensajes que lo complementan. */
+  archivos: number;
+  complementos: number;
+  viajesAprobados: boolean;
+}
+
+/** Un archivo del mensaje o de sus complementos, servido por `/api/panel/media/:id`. */
+export interface ArchivoDeLaPropuesta {
+  id: string;
+  mensajeId: string;
+  mime: string;
+}
+
+/** Cómo está la bitácora del día del hecho, para avisar antes de aprobar (RF-40 a RF-43). */
+export type EstadoDeLaBitacoraDelDia = 'no_existe' | 'abierta' | 'cerrada';
+
+/** `GET /api/panel/whatsapp/propuestas/:id` (RF-17 a RF-22, RF-60 a RF-62, RF-89). */
+export interface DetalleDePropuesta extends PropuestaFila {
+  texto: string | null;
+  version: number;
+  /** El autor, con su nombre y cargo del sistema si se le reconoce (RF-21, RF-22). */
+  autor: { usuarioId: string | null; nombre: string; cargo: string | null };
+  /** El destino de su categoría (`destinoDeCategoria`). */
+  destino: 'reporte' | 'control_calidad' | 'notas' | 'cantera' | 'ninguno';
+  /** La corregida si alguien corrigió; si no, la de la IA leída contra los catálogos. */
+  reporte: ReporteDelDia;
+  corregida: boolean;
+  /** La fecha salió del mensaje porque el reporte no la traía (RF-62). */
+  fechaSupuesta: boolean;
+  /** Lo que todavía impide aprobar (RF-64). */
+  faltas: { seccion: string; renglon: number | null; mensaje: string }[];
+  complementosDelMensaje: { id: string; enviadoEn: string; texto: string | null }[];
+  archivosDelMensaje: ArchivoDeLaPropuesta[];
+  bitacoraDelDia: EstadoDeLaBitacoraDelDia;
+  canteraActiva: boolean;
+  /** Lo que la aprobación reemplazaría en la bitácora abierta del día (RF-89). */
+  reemplaza: { maquinas: string[]; personas: string[]; clima: boolean };
+  /** La propuesta de la IA tal como llegó, para comparar (RF-27). */
+  propuestaIa: Record<string, unknown>;
+  /**
+   * Lo que se puede elegir en esta obra para completar lo que no se reconoció
+   * (RF-71, RF-75, RF-79, RF-83, RF-95): los mismos catálogos contra los que se
+   * leyó la propuesta, para que la pantalla no ofrezca algo que el servidor
+   * rechazaría al aprobar.
+   */
+  opciones: {
+    equipos: { id: string; codigoInterno: string; placa: string | null }[];
+    personas: { id: string; nombreCompleto: string; cargo: string | null }[];
+    cantera: OpcionesDeCantera;
+  };
+}
+
+/** `PATCH /api/panel/whatsapp/grupos/:id` (RF-8, RF-9, RF-13). */
+export const grupoAsociado = z.object({
+  // Con su mensaje también cuando no viene: sin él, Zod responde en inglés.
+  obraId: z.string({ error: 'Elija la obra.' }).trim().min(1, 'Elija la obra.').max(64),
+});

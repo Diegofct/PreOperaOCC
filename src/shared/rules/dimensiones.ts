@@ -102,10 +102,15 @@ export type OrigenDeCantidad = 'volumen' | 'area' | 'longitud';
 
 export interface CantidadResuelta {
   cantidad: number | null;
-  /** Salió de una medida: se muestra pero no se deja escribir. */
+  /** Salió de una medida porque no se escribió ninguna (021/RF-100). */
   cantidadCalculada: boolean;
-  /** De cuál, para decírselo a quien la lee («Del volumen»). */
+  /** De qué medida sale la calculada, para decírselo a quien la lee («Del volumen»). */
   origen: OrigenDeCantidad | null;
+  /**
+   * La que dan las medidas, **se use o no** (021/RF-101): con una cantidad escrita
+   * distinta, la pantalla la muestra al lado para que la diferencia se vea.
+   */
+  calculada: number | null;
 }
 
 /**
@@ -120,16 +125,33 @@ export interface CantidadResuelta {
  *
  * Sin unidad —una actividad guardada antes del 2026-09-16— no se calcula nada.
  */
+/**
+ * Cuánto se hizo de una actividad.
+ *
+ * **La escrita manda** (spec 021, RF-99, que reemplaza 004/RF-68 el 2026-10-05). Lo
+ * que se cobra no siempre es el volumen geométrico de la capa —el material medido
+ * suelto ocupa más—, y lo sabe quien reporta. Sin cantidad escrita, se toma de la
+ * medida que corresponde a la unidad: el volumen en m³, el área en m², la longitud
+ * en m (RF-100). Con kg, Und o m³-km las medidas no dicen cuánto se hizo.
+ *
+ * La calculada se devuelve siempre que se pueda calcular, también cuando no se usa:
+ * la pantalla la muestra al lado de la escrita (RF-101).
+ */
 export function resolverCantidad(
   unidad: string | null,
   medidas: Pick<Dimensiones, 'longitud' | 'area' | 'volumen'>,
   cantidadEscrita: number | null,
 ): CantidadResuelta {
-  const origen = unidad ? MEDIDA_DE_LA_UNIDAD[unidad] : undefined;
-  const valor = origen ? medidas[origen] : null;
+  const medida = unidad ? MEDIDA_DE_LA_UNIDAD[unidad] : undefined;
+  const valor = medida ? medidas[medida] : null;
+  const calculada = valor ?? null;
+  const origen = medida && calculada !== null ? medida : null;
 
-  if (origen && valor !== null) {
-    return { cantidad: valor, cantidadCalculada: true, origen };
+  if (cantidadEscrita !== null) {
+    return { cantidad: cantidadEscrita, cantidadCalculada: false, origen, calculada };
   }
-  return { cantidad: cantidadEscrita, cantidadCalculada: false, origen: null };
+  if (calculada !== null) {
+    return { cantidad: calculada, cantidadCalculada: true, origen, calculada };
+  }
+  return { cantidad: null, cantidadCalculada: false, origen: null, calculada: null };
 }

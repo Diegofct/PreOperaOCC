@@ -69,6 +69,7 @@ import type {
   RetenidosDelEnsayo,
 } from '../../shared/rules/granulometria';
 import { ROLES } from '../../shared/rules/permisos';
+import { ESTADOS_MENSAJE_WHATSAPP } from '../../shared/rules/whatsapp';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -99,7 +100,17 @@ export const estadoVehiculo = pgEnum('estado_vehiculo', [
   'no_apto',
 ]);
 export const origenAsignacion = pgEnum('origen_asignacion', ['supervisor', 'autoasignada']);
-export const duenoMedia = pgEnum('dueno_media', ['preoperacional', 'bitacora', 'documento']);
+/**
+ * De quién es un archivo. `whatsapp` (spec 021): la foto o el documento de un
+ * mensaje, con `dueno_id` = el id del mensaje. Al aprobar, la foto elegida gana
+ * otra fila con dueño `bitacora` que apunta **al mismo objeto** de R2 (RF-50).
+ */
+export const duenoMedia = pgEnum('dueno_media', [
+  'preoperacional',
+  'bitacora',
+  'documento',
+  'whatsapp',
+]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
   'firma_operador',
@@ -134,6 +145,9 @@ export const tipoSitioCantera = pgEnum('tipo_sitio_cantera', ['cantera', 'planta
  * descartado son marcas de tiempo aparte: ver `shared/catalogos/estados-ensayo`.
  */
 export const estadoEnsayo = pgEnum('estado_ensayo', ESTADOS_ENSAYO);
+
+/** Dónde está un mensaje en la bandeja de WhatsApp (spec 021). Ver `rules/whatsapp`. */
+export const estadoMensajeWhatsapp = pgEnum('estado_mensaje_whatsapp', ESTADOS_MENSAJE_WHATSAPP);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -879,6 +893,12 @@ export const canteraViajes = pgTable(
     destinoObra: boolean('destino_obra').notNull(),
     pr: integer('pr'),
     metros: integer('metros'),
+    /**
+     * El mensaje de WhatsApp del que salió, si se aprobó desde la bandeja (spec
+     * 021, RF-46 y RF-47). Nulo en lo registrado en el módulo. `registrado_por` es
+     * entonces quien aprobó.
+     */
+    mensajeWhatsappId: text('mensaje_whatsapp_id').references(() => whatsappMensajes.id),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),
@@ -1029,6 +1049,131 @@ export const ensayosGranulometria = pgTable(
        and (${t.estado} <> 'aprobado' or (${t.aprobadoPor} is not null and ${t.aprobadoEn} is not null))
        and (${t.estado} <> 'devuelto' or ${t.comentarioDevolucion} is not null)`,
     ),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Reportes de WhatsApp (spec 021, solo del servidor)                        */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Un grupo de WhatsApp y la obra a la que pertenece (RF-8 a RF-13).
+ *
+ * El id es el de WhatsApp (`…@g.us`): la integración lo manda con cada mensaje y
+ * así el grupo se crea solo la primera vez, sin obra, para que la gerencia lo
+ * asocie (RF-10). Mientras no tenga obra, sus mensajes no salen en ninguna bandeja
+ * (RF-11), porque **la obra de un mensaje sin decidir sale de su grupo** y no se
+ * copia en él: cambiar la obra del grupo mueve los pendientes sin reescribir nada
+ * (RF-13). Lo ya decidido se queda donde se decidió: ver `obra_decidida_id`.
+ */
+export const whatsappGrupos = pgTable(
+  'whatsapp_grupos',
+  {
+    id: text('id').primaryKey(),
+    nombre: text('nombre').notNull(),
+    obraId: text('obra_id').references(() => obras.id),
+    asociadoPor: text('asociado_por').references(() => usuarios.id),
+    asociadoEn: timestamp('asociado_en', { withTimezone: true, mode: 'date' }),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [index('ix_whatsapp_grupo_obra').on(t.obraId)],
+);
+
+/**
+ * Un mensaje capturado, con lo que propuso la IA y lo que decidió una persona.
+ *
+ * ── El id ──
+ *
+ * El de WhatsApp. Es la llave de idempotencia de la integración (RF-4): una
+ * entrega repetida cae sobre la misma fila, y la sentencia que la recibe decide en
+ * una sola vuelta si reemplaza la propuesta o la conserva (RF-5, RF-6).
+ *
+ * ── Dos propuestas ──
+ *
+ * `propuesta_ia` es la de la IA tal como llegó y no se toca nunca (RF-27).
+ * `propuesta` es la corregida por el residente, nula mientras nadie corrija. Van
+ * en `jsonb` porque una propuesta es un documento que se corrige y se aprueba
+ * entero; partirla en tablas serían varias escrituras sin transacción.
+ *
+ * ── La versión ──
+ *
+ * Sube en cada corrección o decisión. Quien corrige o decide manda la que leyó, y
+ * si otra persona se le adelantó, su sentencia no encuentra la fila y recibe un
+ * 409 (RF-29).
+ *
+ * ── Nada se borra ──
+ *
+ * Ni el mensaje, ni la propuesta, ni la decisión (RF-58): descartar es un estado,
+ * con motivo, quién y cuándo (RF-56).
+ */
+export const whatsappMensajes = pgTable(
+  'whatsapp_mensajes',
+  {
+    id: text('id').primaryKey(),
+    grupoId: text('grupo_id')
+      .notNull()
+      .references(() => whatsappGrupos.id),
+    /** El `lid` de WhatsApp del autor. */
+    autorId: text('autor_id').notNull(),
+    /** Como se llama en WhatsApp. Lo que se muestra si no está registrado (RF-22). */
+    autorNombre: text('autor_nombre'),
+    enviadoEn: timestamp('enviado_en', { withTimezone: true, mode: 'date' }).notNull(),
+    /** texto, imagen, documento, audio o video. */
+    tipo: text('tipo').notNull(),
+    texto: text('texto'),
+    /** La de la IA (`CATEGORIAS_DE_WHATSAPP`). Texto y no enum: la IA puede estrenar una. */
+    categoria: text('categoria'),
+    /** El mensaje al que esta foto o respuesta pertenece, según la IA (RF-20). */
+    complementaA: text('complementa_a'),
+    propuestaIa: jsonb('propuesta_ia').$type<Record<string, unknown>>().notNull(),
+    propuesta: jsonb('propuesta').$type<Record<string, unknown>>(),
+    estado: estadoMensajeWhatsapp('estado').notNull().default('pendiente'),
+    version: integer('version').notNull().default(0),
+    /** Con la bitácora cerrada, los viajes se aprueban solos (RF-96 a RF-98). */
+    viajesAprobadosEn: timestamp('viajes_aprobados_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    descartadoPor: text('descartado_por').references(() => usuarios.id),
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    motivoDescarte: text('motivo_descarte'),
+    /** La bitácora a la que fue al aprobarse. */
+    parteId: text('parte_id').references(() => partesDeObra.id),
+    /**
+     * La obra en la que se aprobó o descartó, escrita en la misma sentencia que la
+     * decisión. Nula mientras no se decide: entonces manda la obra del grupo.
+     *
+     * Existe por RF-13. Si la obra saliera siempre del grupo, cambiar un grupo de
+     * obra llevaría también lo ya decidido, y el historial de aprobados de la obra
+     * nueva mostraría reportes que nunca fueron suyos. Añadida en la tarea T13
+     * (migración 0019); el plan original no la tenía.
+     */
+    obraDecididaId: text('obra_decidida_id').references(() => obras.id),
+    recibidoEn: timestamp('recibido_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    // La bandeja: los de un grupo, en un estado, por fecha (RF-16, RF-24).
+    index('ix_whatsapp_mensaje_bandeja').on(t.grupoId, t.estado, t.enviadoEn),
+    // Las fotos y respuestas que cuelgan de un reporte (RF-20).
+    index('ix_whatsapp_mensaje_complementa').on(t.complementaA),
+    check(
+      'ck_whatsapp_mensaje_descarte',
+      // Descartar exige motivo (RF-55), y no basta con espacios.
+      sql`${t.estado} <> 'descartado'
+       or (${t.motivoDescarte} is not null and length(trim(${t.motivoDescarte})) > 0
+           and ${t.descartadoPor} is not null and ${t.descartadoEn} is not null)`,
+    ),
+    check(
+      'ck_whatsapp_mensaje_aprobacion',
+      sql`${t.estado} <> 'aprobado'
+       or (${t.aprobadoPor} is not null and ${t.aprobadoEn} is not null)`,
+    ),
+    check('ck_whatsapp_mensaje_version', sql`${t.version} >= 0`),
+    // El historial de aprobados y descartados de una obra (RF-24, RF-13).
+    index('ix_whatsapp_mensaje_obra_decidida').on(t.obraDecididaId),
   ],
 );
 
