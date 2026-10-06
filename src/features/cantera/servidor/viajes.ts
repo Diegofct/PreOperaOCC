@@ -74,6 +74,8 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
       anuladoEn: canteraViajes.anuladoEn,
       anuladoPorNombre: anulador.nombreCompleto,
       motivoAnulacion: canteraViajes.motivoAnulacion,
+      // Spec 021, RF-47: el viaje se aprobó desde un reporte de WhatsApp.
+      mensajeWhatsappId: canteraViajes.mensajeWhatsappId,
     })
     .from(canteraViajes)
     .innerJoin(canteraMateriales, eq(canteraMateriales.id, canteraViajes.materialId))

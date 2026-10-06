@@ -76,6 +76,9 @@ export const MODULOS = [
   // Spec 018. Al final por lo mismo: es el trabajo de otro oficio, y para el
   // residente es aprobar lo que el laboratorio le envía.
   'laboratorio',
+  // Spec 021. Al final por lo mismo que los anteriores: no es un registro propio,
+  // es la bandeja de lo que se reportó por WhatsApp para pasarlo a la bitácora.
+  'whatsapp',
 ] as const;
 export type Modulo = (typeof MODULOS)[number];
 
@@ -221,6 +224,19 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar', 'escribir'],
   },
+  // Spec 021. La bandeja de WhatsApp es del residente y de la gerencia (RF-14,
+  // RF-15): corregir es escribir, y aprobar crea registros en la bitácora y en
+  // Control Cantera. **La fila `cantera` no cambia**: el residente aprueba los
+  // viajes de un reporte desde aquí, pero sigue sin registrarlos a mano (RF-84,
+  // RF-85). Asociar un grupo a su obra es de la gerencia y lo exige su ruta.
+  whatsapp: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar'],
+    supervisor: ['ver', 'listar', 'escribir', 'aprobar'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -299,6 +315,15 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
   aprobar: 'aprobar ni devolver este ensayo',
 };
 
+/**
+ * Lo que se intentaba cuando no es lo de la tabla de arriba. «Aprobar» se escribió
+ * para el laboratorio, y en la bandeja de WhatsApp no se devuelve un ensayo: se
+ * aprueba o se descarta un reporte.
+ */
+const QUE_SE_INTENTABA_EN: Partial<Record<Modulo, Partial<Record<Accion, string>>>> = {
+  whatsapp: { aprobar: 'aprobar ni descartar este reporte' },
+};
+
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
 const QUIEN_ES: Record<Rol, string> = {
   admin: 'la gerencia',
@@ -321,7 +346,7 @@ const QUIEN_ES: Record<Rol, string> = {
  */
 export function motivoDeRechazo(modulo: Modulo, accion: Accion): string {
   const quienes = ROLES.filter((rol) => alcanza(rol, modulo, accion)).map((rol) => QUIEN_ES[rol]);
-  const que = `No puede ${QUE_SE_INTENTABA[accion]}`;
+  const que = `No puede ${QUE_SE_INTENTABA_EN[modulo]?.[accion] ?? QUE_SE_INTENTABA[accion]}`;
   if (quienes.length === 0) return `${que}.`;
 
   const ultimo = quienes[quienes.length - 1];
@@ -365,6 +390,7 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
   almacen: 'Almacén',
   cantera: 'Control Cantera',
   laboratorio: 'Laboratorio',
+  whatsapp: 'Reportes de WhatsApp',
 };
 
 /**

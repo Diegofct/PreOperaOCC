@@ -181,6 +181,7 @@ R2_CUENTA_ID=...
 R2_BUCKET=...
 R2_LLAVE_ID=...
 R2_LLAVE_SECRETA=...
+TOKEN_INTEGRACION_WHATSAPP=...el hash de un token nuevo, no el de desarrollo (puede ir vacío)...
 PUERTO_PANEL=3000
 FIN
 
@@ -197,6 +198,10 @@ curl -I "http://127.0.0.1:$PANEL_PUERTO/panel"   # debe responder 200
 ```
 
 Si falta alguna variable, compose **se niega a arrancar** y dice cuál. Es a propósito.
+La excepción es `TOKEN_INTEGRACION_WHATSAPP` (spec 021): vacía, el panel arranca igual y la
+integración de WhatsApp queda cerrada. El token y su hash salen de
+`npx tsx scripts/token-integracion.ts`; **el token va en n8n y el hash en este `.env`**. Use uno
+distinto al de desarrollo, y para rotarlo emita otro y cambie los dos.
 
 > **Reversa:** `cd "$PANEL_DIR" && docker compose down`. El vecino ni se enteró.
 

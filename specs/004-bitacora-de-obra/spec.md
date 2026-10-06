@@ -181,6 +181,9 @@ tanda: no añade campos, cambia de qué habla el documento.
 - RF-68: CUANDO la unidad de la actividad sea m³ y tenga volumen, m² y tenga área, o m y
   tenga longitud, EL SISTEMA tomará ese valor como cantidad, igual que calcula el área y el
   volumen (RF-58, RF-59).
+  > **Reemplazado por 021/RF-99 a RF-101 el 2026-10-05.** La cantidad escrita manda; el cálculo
+  > solo se usa cuando no hay cantidad escrita, y se muestra al lado como referencia. Lo pidió OCC
+  > al ver un reporte de WhatsApp: el material medido suelto no es el volumen de la capa.
 - RF-69: SI la unidad de la actividad es kg, Und o m³-km, o le falta la medida de la que se
   toma según RF-68, ENTONCES EL SISTEMA permitirá escribir la cantidad a mano.
 - RF-70: CUANDO se elija «Otra actividad», EL SISTEMA exigirá escribir cuál fue (RF-24) y

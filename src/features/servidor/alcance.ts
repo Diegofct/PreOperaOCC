@@ -73,6 +73,21 @@ export function filtroDeModulo(
 }
 
 /**
+ * Como `filtroDeObra`, pero **sin dejar pasar las filas sin obra** (spec 021).
+ *
+ * En la bandeja de WhatsApp «sin obra» no es «de todos»: es un grupo que la
+ * gerencia todavía no asoció, y sus mensajes no salen en ninguna bandeja (RF-11),
+ * tampoco en la de la gerencia, que los ve en la lista de grupos pendientes de
+ * asociar. Recibe una expresión y no una columna porque la obra de un mensaje se
+ * calcula (`whatsapp/servidor/obra.ts`).
+ */
+export function filtroDeObraEstricto(persona: PersonaEnSesion, obra: SQL): SQL {
+  if (veTodasLasObras(persona)) return sql`${obra} is not null`;
+  if (!persona.obraId) return sql`false`;
+  return sql`${obra} = ${persona.obraId}`;
+}
+
+/**
  * ¿Puede tocar una fila que pertenece a esta obra?
  *
  * Para editar y dar de baja, donde no hay consulta que filtrar sino una fila

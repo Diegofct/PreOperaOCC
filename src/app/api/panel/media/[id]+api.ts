@@ -3,9 +3,11 @@ import { eq } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { bitacoras, media, preoperacionales } from '@/db/servidor/esquema';
 import { leer } from '@/features/media/servidor/almacen';
-import { alcanzaLaObra } from '@/features/servidor/alcance';
-import { requerirSesion } from '@/features/servidor/guardia';
+import { alcanzaLaObra, veTodasLasObras } from '@/features/servidor/alcance';
+import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
 import { noEncontrado, responder } from '@/features/servidor/respuestas';
+import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
+import { alcanza } from '@/shared/rules/permisos';
 
 /**
  * Sirve una imagen al panel. `GET /api/panel/media/:id`.
@@ -50,7 +52,9 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     // "No existe" y no "no puede", igual que en el resto del panel: confirmar
     // que el id es real ya le diría a un residente qué se registra en las obras
     // que no le tocan.
-    if (!alcanzaLaObra(sesion, await obraDeLaImagen(fila.duenoTipo, fila.duenoId))) {
+    if (fila.duenoTipo === 'whatsapp') {
+      if (!(await alcanzaElMensaje(sesion, fila.duenoId))) return noEncontrado('esa imagen');
+    } else if (!alcanzaLaObra(sesion, await obraDeLaImagen(fila.duenoTipo, fila.duenoId))) {
       return noEncontrado('esa imagen');
     }
 
@@ -96,4 +100,23 @@ async function obraDeLaImagen(
   }
 
   return null;
+}
+
+/**
+ * ¿Puede ver los archivos de este mensaje de WhatsApp? (spec 021, RF-53.)
+ *
+ * Aparte de `obraDeLaImagen` porque aquí «sin obra» no puede significar «de
+ * todos»: un grupo que la gerencia todavía no asoció no es de ninguna bandeja
+ * (RF-11), y sus fotos son de la gerencia y de nadie más. Y hace falta además el
+ * permiso de la bandeja: un almacenista de esa obra no ve lo que se habló en el
+ * grupo.
+ */
+async function alcanzaElMensaje(sesion: PersonaEnSesion, mensajeId: string): Promise<boolean> {
+  if (!alcanza(sesion.rol, 'whatsapp', 'ver')) return false;
+  if (veTodasLasObras(sesion)) return true;
+
+  // La misma regla que la bandeja (`whatsapp/servidor/obra.ts`): lo decidido, en
+  // la obra donde se decidió; lo demás, en la de su grupo.
+  const obraId = await obraDeUnMensaje(mensajeId);
+  return Boolean(obraId && sesion.obraId && obraId === sesion.obraId);
 }

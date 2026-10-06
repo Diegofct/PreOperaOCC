@@ -166,6 +166,8 @@ export function ListadoDeViajes({
         <>
           <Celda>{v.registradoPorNombre ?? '—'}</Celda>
           <Celda>{momento(v.registradoEn)}</Celda>
+          {/* Aprobado desde un reporte de WhatsApp (spec 021, RF-47). */}
+          {v.mensajeWhatsappId ? <Etiqueta tono="neutro">Desde WhatsApp</Etiqueta> : null}
           {v.anulado ? (
             // El motivo entero: es lo único que explica la anulación (RF-24).
             <Celda lineas={4}>

@@ -132,4 +132,16 @@ en verde.
     dice «Camionetas y volquetas, por odómetro», y desde la 019 también suman camiones,
     carrotanques y carros taller. Igual la de «Horas de máquina» («Maquinaria amarilla»),
     que sigue siendo cierta.
+- **T6, parte de despliegue** (2026-09-28, 17:30, commit `7785aec`):
+  - `db:sembrar:produccion` → `preoperaocc` con 13 tipos y 13 plantillas;
+  - `migrar-produccion` sin pendientes;
+  - respaldo `anterior` = `d1c64fa` (la de la 019); imagen nueva `0ceb633` construida, con
+    0 secretos en `dist/client`, transferida y encendida con `up -d`: healthy en unos
+    10 s;
+  - vecino 200, panel 200, `/api/panel/resumen` con cookie inventada 401.
+  Con la sesión de Diego, en Vehículos de producción hay 6 equipos reales con etiqueta
+  prestada: `CAMION-01` y `CTANQUE-01/02` → Camioneta; `EXC-01` (oruga) → Retroexcavadora;
+  `REC-01` y `VIBROCMP-01` → Motoniveladora. Ninguno queda «Sin formato». El resumen da
+  24 equipos, 24 inspeccionables y 24 sin preoperacional a esa hora (RF-18, RF-20).
+  `PRUEBA-CAM-01` no aparece con ese código en producción. **Falta la parte del teléfono.**
 
