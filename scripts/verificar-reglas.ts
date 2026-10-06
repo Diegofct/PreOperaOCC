@@ -21,6 +21,7 @@ import { firmarPeticion } from '../src/features/media/servidor/firma-s3';
 import { respuestaEnviada } from '../src/features/servidor/envios';
 import {
   conReintentoSiChoca,
+  cuerpoJson,
   duplicadoDe,
   MENSAJE_DE_CHOQUE,
   responder,
@@ -183,7 +184,7 @@ import {
   gruposDelMenu,
   regimenDelMenu,
 } from '../src/shared/rules/menu';
-import { moduloDeLaRuta } from '../src/features/panel/modulos';
+import { moduloDeLaRuta, tituloDeLaPestana } from '../src/features/panel/modulos';
 import {
   CLAVE_PREFERENCIA_MENU,
   guardarPreferencia,
@@ -223,7 +224,7 @@ import {
   type RetenidosDelEnsayo,
 } from '../src/shared/rules/granulometria';
 import { vehiculos } from '../src/db/servidor/esquema';
-import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
+import { alcanzaLaImagen, alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
 import type { PersonaEnSesion } from '../src/features/auth/servidor/sesion';
 import {
   debeRendirse,
@@ -2641,6 +2642,43 @@ prueba('un navegador que no deja guardar no rompe el menú (022/RF-8, RF-11)', (
   // Y sin navegador (el servidor pinta la página sin `window`): igual que la primera vez.
   assert.equal(leerPreferencia(null), null);
   assert.equal(guardarPreferencia(null, 'plegado'), false);
+});
+
+prueba('una foto solo la ve quien alcanza la obra de su registro (defecto de media, 2026-10-06)', () => {
+  // Las fotos del parte diario cuelgan de `partes_de_obra`, y la ruta de imágenes las
+  // buscaba en la tabla vieja `bitacoras`: no las encontraba, quedaban «sin obra» y
+  // `alcanzaLaObra` deja pasar lo que no tiene obra. Un residente podía ver la foto
+  // del día de otra obra con solo tener su id.
+  const residenteA = sesionDe('supervisor', 'obra-a');
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-a' }), true);
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-b' }), false);
+  // El hueco: un dueño que no se encuentra **no** es «de todos».
+  assert.equal(alcanzaLaImagen(residenteA, { existe: false, obraId: null }), false);
+  // Un registro que sí existe y no lleva obra conserva la regla de siempre.
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: null }), true);
+  // La gerencia ve todo, también lo huérfano: es quien tiene que poder revisarlo.
+  const gerencia = sesionDe('admin', null);
+  assert.equal(alcanzaLaImagen(gerencia, { existe: false, obraId: null }), true);
+  assert.equal(alcanzaLaImagen(gerencia, { existe: true, obraId: 'obra-b' }), true);
+});
+
+prueba('la pestaña dice en qué pantalla se está (defecto de títulos, 2026-10-06)', () => {
+  // Expo Router 57 no copia el título del `Stack` a la pestaña (`documentTitle` va
+  // apagado), así que los títulos declarados nunca se veían. Ahora salen de la ruta.
+  assert.equal(tituloDeLaPestana('/panel'), 'Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/whatsapp'), 'Reportes de WhatsApp · Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/cantera'), 'Control Cantera · Control de Obra OCC');
+  assert.equal(
+    tituloDeLaPestana('/panel/laboratorio/abc'),
+    'Ensayo de granulometría · Control de Obra OCC',
+  );
+  assert.equal(
+    tituloDeLaPestana('/panel/laboratorio/abc/informe'),
+    'Informe de granulometría · Control de Obra OCC',
+  );
+  // Una ruta que no es de ningún módulo queda con el nombre del sistema.
+  assert.equal(tituloDeLaPestana('/panel/desconocido'), 'Control de Obra OCC');
 });
 
 prueba('cada rol entra por su módulo', () => {
@@ -6908,6 +6946,30 @@ function choqueDePostgres(): Error {
 }
 
 async function verificarChoques() {
+  await pruebaAsync('un cuerpo que no es JSON responde 400 y no 500 (defecto, 2026-10-06)', async () => {
+    // `cuerpoJson` lo detectaba, pero lanzaba un error que `responder` no reconocía y
+    // salía como «Algo falló en el servidor»: un falso fallo en el registro de errores.
+    const esquema = { parse: (dato: unknown) => dato };
+    const peticion = (cuerpo: string) =>
+      new Request('http://localhost/api/prueba', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: cuerpo,
+      });
+
+    const mala = await responder(async () => {
+      await cuerpoJson(peticion('esto no es json'), esquema);
+      return Response.json({ ok: true });
+    });
+    assert.equal(mala.status, 400);
+    assert.equal(((await mala.json()) as { error: string }).error, 'El cuerpo de la petición no es JSON válido.');
+
+    // Y un cuerpo bueno sigue pasando.
+    const buena = await responder(async () => Response.json(await cuerpoJson(peticion('{"a":1}'), esquema)));
+    assert.equal(buena.status, 200);
+    assert.deepEqual(await buena.json(), { a: 1 });
+  });
+
   await pruebaAsync('un choque de dos salidas simultáneas se repite una vez', async () => {
     // El primer intento choca y no guardó nada; el segundo ve el stock nuevo.
     let intentos = 0;

@@ -98,3 +98,25 @@ export function alcanzaLaObra(persona: PersonaEnSesion, obraId: string | null): 
   if (!persona.obraId) return false;
   return obraId === null || obraId === persona.obraId;
 }
+
+/**
+ * ¿Puede ver una imagen, sabiendo de qué registro cuelga?
+ *
+ * Aparte de `alcanzaLaObra` por el caso que esa no distingue: **un dueño que no se
+ * encuentra**. Para `alcanzaLaObra`, «sin obra» es «de todos», y eso está bien para un
+ * registro que existe y no lleva obra. Pero una imagen cuyo registro no aparece no es
+ * de todos: es una imagen que no se sabe de quién es. Hasta el 2026-10-06 las fotos
+ * del parte diario caían ahí —se buscaban en la tabla vieja `bitacoras`, no en
+ * `partes_de_obra`— y cualquier residente podía ver la foto del día de otra obra.
+ *
+ * La gerencia sí la ve: lleva todas las obras, y alguien tiene que poder revisar lo
+ * que quedó huérfano.
+ */
+export function alcanzaLaImagen(
+  persona: PersonaEnSesion,
+  dueno: { existe: boolean; obraId: string | null },
+): boolean {
+  if (veTodasLasObras(persona)) return true;
+  if (!dueno.existe) return false;
+  return alcanzaLaObra(persona, dueno.obraId);
+}

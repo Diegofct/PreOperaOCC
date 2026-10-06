@@ -565,3 +565,29 @@ en verde.
     - D4, cubierta por la prueba de anchos y las mediciones a 1024, porque el servidor estaba
       demasiado lento para el recorrido visual completo.
   - **Spec 022 Cumplida.**
+
+## Correcciones posteriores al cierre (2026-10-06)
+
+Tres defectos anteriores a la 022, pedidos por el usuario antes de la fase 5. No cambian
+el comportamiento acordado en ninguna spec: lo devuelven a lo que ya decían. Cada uno lleva
+su prueba en `verificar` (384 verificaciones).
+
+1. **Fotos del parte diario visibles desde otra obra**, en `src/app/api/panel/media/[id]+api.ts`.
+   - **Causa:** las fotos del día cuelgan de `partes_de_obra` con el tipo `bitacora`, pero la
+     ruta las buscaba en la tabla vieja `bitacoras`. No las encontraba, quedaban «sin obra»,
+     y `alcanzaLaObra` deja pasar lo que no tiene obra.
+   - **Arreglo:**
+     - `duenoDeLaImagen` busca primero en `partes_de_obra` y luego en `bitacoras`, y dice si
+       el dueño existe;
+     - una regla nueva, `alcanzaLaImagen` en `alcance.ts`, no deja ver a nadie fuera de
+       gerencia una imagen cuyo dueño no aparece;
+     - el tipo `documento`, que hoy nada crea, queda solo para gerencia.
+2. **Un cuerpo que no es JSON respondía 500**, en `src/features/servidor/respuestas.ts`.
+   `cuerpoJson` lanza ahora `CuerpoNoJson`, y `responder` lo convierte en un 400 con su
+   motivo. Corrige las 42 rutas que usan `cuerpoJson`.
+3. **Los títulos de pestaña nunca se aplicaban**, porque Expo Router 57 lleva `documentTitle`
+   apagado.
+   - **Arreglo:** `tituloDeLaPestana(ruta)` en `modulos.ts`, que es pura y tiene su prueba, y
+     un componente `TituloDeLaPestana` en el layout del panel.
+   - Se quitaron los `Stack.Screen` con `title`, que no tenían efecto, para que el título viva
+     en un solo sitio.

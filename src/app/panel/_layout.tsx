@@ -1,4 +1,5 @@
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
+import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import '@/features/panel/fuentes.css';
@@ -8,6 +9,7 @@ import { BarraSuperior } from '@/features/panel/barra-superior';
 import { ProveedorMenu } from '@/features/panel/estado-menu';
 import { MarcoSesion } from '@/features/panel/marco-sesion';
 import { MenuLateral, TelonDelMenu } from '@/features/panel/menu-lateral';
+import { tituloDeLaPestana } from '@/features/panel/modulos';
 import { ProveedorSesionPanel } from '@/features/panel/sesion';
 
 /**
@@ -31,12 +33,16 @@ import { ProveedorSesionPanel } from '@/features/panel/sesion';
  *
  * Las tipografías del panel (spec 022) se cargan aquí y solo aquí: el CSS no
  * entra al grafo del operador, y el celular no cambia (RF-34).
+ *
+ * Las pantallas no se declaran una por una con su `title`: Expo Router 57 no lo
+ * lleva a la pestaña, y el título sale de la ruta con `tituloDeLaPestana`.
  */
 export default function LayoutPanel() {
   return (
     <ProveedorSesionPanel>
       <MarcoSesion>
         <ProveedorMenu>
+          <TituloDeLaPestana />
           <View style={estilos.panel}>
             <BarraSuperior />
             <View style={estilos.cuerpo}>
@@ -47,54 +53,7 @@ export default function LayoutPanel() {
                     headerShown: false,
                     contentStyle: { backgroundColor: Panel.fondo },
                   }}
-                >
-                  <Stack.Screen name="index" options={{ title: 'Control de Obra OCC' }} />
-                  <Stack.Screen name="obras" options={{ title: 'Obras · Control de Obra OCC' }} />
-                  <Stack.Screen
-                    name="personas"
-                    options={{ title: 'Personas · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="vehiculos"
-                    options={{ title: 'Vehículos · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="asignaciones"
-                    options={{ title: 'Asignaciones · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="bitacoras"
-                    options={{ title: 'Bitácoras · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="preoperacionales"
-                    options={{ title: 'Preoperacionales · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="almacen"
-                    options={{ title: 'Almacén · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="cantera"
-                    options={{ title: 'Control Cantera · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="laboratorio"
-                    options={{ title: 'Laboratorio · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="laboratorio/[id]"
-                    options={{ title: 'Ensayo de granulometría · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="laboratorio/[id]/informe"
-                    options={{ title: 'Informe de granulometría · Control de Obra OCC' }}
-                  />
-                  <Stack.Screen
-                    name="whatsapp"
-                    options={{ title: 'Reportes de WhatsApp · Control de Obra OCC' }}
-                  />
-                </Stack>
+                />
                 <TelonDelMenu />
               </View>
             </View>
@@ -103,6 +62,22 @@ export default function LayoutPanel() {
       </MarcoSesion>
     </ProveedorSesionPanel>
   );
+}
+
+/**
+ * Pone el título de la pestaña según la pantalla (ver `tituloDeLaPestana`).
+ *
+ * Va dentro de `MarcoSesion`: sin sesión, o con la contraseña obligatoria, el título
+ * lo pone el propio `MarcoSesion` («Ingresar · …»), y este no está montado.
+ */
+function TituloDeLaPestana() {
+  const ruta = usePathname();
+  useEffect(() => {
+    // La guarda es por el paquete nativo, donde estas pantallas entran inertes.
+    if (typeof document === 'undefined') return;
+    document.title = tituloDeLaPestana(ruta);
+  }, [ruta]);
+  return null;
 }
 
 const estilos = StyleSheet.create({

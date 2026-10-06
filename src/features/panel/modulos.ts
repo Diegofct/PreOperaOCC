@@ -49,3 +49,26 @@ export function moduloDeLaRuta(ruta: string): Modulo | null {
   }
   return null;
 }
+
+const SISTEMA = 'Control de Obra OCC';
+
+/**
+ * El título de la pestaña del navegador para una dirección del panel.
+ *
+ * Existe porque Expo Router 57 no copia el `title` de cada pantalla del `Stack` a la
+ * pestaña: su `NavigationContainer` lleva `documentTitle` apagado. Los títulos que
+ * declaraba el layout nunca se vieron —todas las pestañas del panel quedaban en
+ * blanco— y era difícil distinguir cinco pestañas abiertas (defecto corregido el
+ * 2026-10-06). Sale de la ruta, igual que el módulo resaltado del menú.
+ */
+export function tituloDeLaPestana(ruta: string): string {
+  if (/^\/panel\/laboratorio\/[^/]+\/informe\/?$/.test(ruta)) {
+    return `Informe de granulometría · ${SISTEMA}`;
+  }
+  if (/^\/panel\/laboratorio\/[^/]+\/?$/.test(ruta)) {
+    return `Ensayo de granulometría · ${SISTEMA}`;
+  }
+  const modulo = moduloDeLaRuta(ruta);
+  if (!modulo || modulo === 'inicio') return SISTEMA;
+  return `${ENLACES_DE_MODULO[modulo].titulo} · ${SISTEMA}`;
+}
