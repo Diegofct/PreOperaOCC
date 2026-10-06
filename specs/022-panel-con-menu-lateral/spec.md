@@ -1,6 +1,6 @@
 # Spec 022 — Panel con menú lateral y diseño nuevo
 
-> Estado: Aprobada · Fecha: 2026-10-06
+> Estado: Cumplida (2026-10-06) · Fecha: 2026-10-06
 
 ## Contexto y objetivo
 

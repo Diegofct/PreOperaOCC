@@ -30,3 +30,22 @@ export const ENLACES_DE_MODULO = {
 
 /** La ruta de un módulo, como literal que acepta `Link` y `Redirect`. */
 export type RutaDeModulo = (typeof ENLACES_DE_MODULO)[Modulo]['ruta'];
+
+/**
+ * El módulo al que pertenece una dirección, para resaltarlo en el menú (spec 022,
+ * RF-6).
+ *
+ * Por prefijo y no por igualdad: el informe de un ensayo vive en
+ * `/panel/laboratorio/<id>/informe` y tiene que marcar Laboratorio. El prefijo se
+ * corta en una barra, para que una ruta como `/panel/obrasx` no pase por Obras.
+ * Inicio es la única que se compara entera: todas empiezan por `/panel`.
+ */
+export function moduloDeLaRuta(ruta: string): Modulo | null {
+  const limpia = ruta.length > 1 ? ruta.replace(/\/+$/, '') : ruta;
+  if (limpia === ENLACES_DE_MODULO.inicio.ruta) return 'inicio';
+  for (const [modulo, enlace] of Object.entries(ENLACES_DE_MODULO) as [Modulo, { ruta: string }][]) {
+    if (modulo === 'inicio') continue;
+    if (limpia === enlace.ruta || limpia.startsWith(`${enlace.ruta}/`)) return modulo;
+  }
+  return null;
+}

@@ -63,26 +63,6 @@ export const Grosor = {
 } as const;
 
 /**
- * Lo que mide cada lado de la barra de navegación. Spec 006 / RF-1.
- *
- * El truco del centrado está aquí: **las dos columnas laterales —la marca y la
- * cuenta— comparten esta misma base**, así que el reparto del espacio sobrante
- * es simétrico y el bloque de enlaces queda centrado respecto a la barra, no
- * respecto al hueco que quede libre. Es lo que hace que se vea igual de centrado
- * con los cuatro módulos del residente que con los siete de la gerencia: el
- * centrado no depende de lo que mida el centro.
- *
- * El valor sale de la cuenta a 1280: 1232 de ancho útil, menos 32 de las dos
- * separaciones, menos los ~750 que ocupan siete enlaces, deja ~225 por lado. Si
- * algún día los enlaces envuelven a dos renglones, se baja este número — el
- * centrado no se rompe, solo crece el alto de la barra.
- */
-export const AnchoLadoBarra = 224;
-
-/** Por debajo de esto la barra pasa a dos renglones. Spec 006 / RF-3. */
-export const AnchoMinimoBarraCentrada = 1100;
-
-/**
  * El índice lateral del parte diario. Spec 006 / RF-7.
  *
  * Nueve entradas con su rótulo, su glifo de estado y su conteo. Más estrecho no
@@ -92,18 +72,13 @@ export const AnchoMinimoBarraCentrada = 1100;
 export const AnchoIndiceDeSecciones = 220;
 
 /**
- * Lo que le queda al parte cuando el índice se lleva su parte. **Derivado, no
- * escrito**: si mañana cambia el tope de página o el ancho del índice, esto se
- * mueve solo, y con ello el presupuesto de anchos de tabla que comprueba
- * `scripts/verificar-reglas.ts`. Escribir aquí un 1036 a mano sería garantizar
- * que un día los dos números dejen de cuadrar sin que nadie se entere.
- */
-export const AnchoContenidoConIndice =
-  MaxContentWidthPanel - AnchoIndiceDeSecciones - Spacing.four;
-
-/**
  * Por debajo de esto el índice deja de ser columna y sube encima del parte como
  * una tira horizontal. Spec 006 / RF-16.
+ *
+ * Desde la spec 022 se compara con el **ancho del contenido** (`anchoDelContenido`),
+ * no con el de la ventana: con el menú lateral abierto, la ventana miente por 248.
+ * El presupuesto de tablas del parte sale de aquí: a dos columnas, en el peor
+ * caso, quedan 1000 − 220 − 24 − 48 = 708, y eso comprueba `verificar-reglas.ts`.
  *
  * Sube, **no desaparece**: es la única señal de qué falta para poder cerrar la
  * jornada, y esconderla justo en la pantalla pequeña es esconderla en la obra.
@@ -144,3 +119,75 @@ export const Radio = {
 
 /** Separación mínima entre dos objetivos táctiles adyacentes. */
 export const SeparacionTactil = 12;
+
+/**
+ * El menú lateral del panel. Spec 022.
+ *
+ * Abierto lleva ícono y nombre; «Reportes de WhatsApp», el rótulo más largo, cabe
+ * sin partirse en un renglón con su ícono. Plegado deja solo el ícono, con el
+ * margen justo para que la píldora del activo no toque los bordes.
+ */
+export const AnchoMenuAbierto = 248;
+export const AnchoMenuPlegado = 72;
+
+/**
+ * Por debajo de esto el menú no se queda fijo abierto: va plegado y, al abrirlo,
+ * se dibuja **encima** del contenido (spec 022, RF-12 y RF-13).
+ *
+ * Es el ancho desde el que la spec promete el panel completo con el menú abierto:
+ * a 1280 quedan 984 de contenido, y con las columnas encogibles todas las tablas
+ * caben. Más abajo, el menú abierto se comería lo que necesitan.
+ */
+export const AnchoMinimoMenuFijo = 1280;
+
+/** El ancho más angosto en el que la spec promete el panel completo (022, RNF). */
+export const AnchoMinimoPanel = 1024;
+
+/**
+ * Lo que se come la barra de desplazamiento vertical de la pantalla. Spec 022.
+ *
+ * En Windows, que es lo que hay en la oficina de la obra, Chrome dibuja una barra
+ * de 15 px que **sí ocupa** ancho. Medido en Chrome el 2026-10-06: a 1024 con el
+ * menú plegado, el marco de una tabla medía 889 y no los 904 de la cuenta sin ella.
+ */
+export const AnchoBarraDesplazamiento = 16;
+
+/**
+ * Las pilas tipográficas del panel. Spec 022, RF-22 y RF-23.
+ *
+ * Los archivos los declara `src/features/panel/fuentes.css`; aquí solo va el
+ * nombre con su respaldo, para que mientras carga —o si algo falla— se vea una
+ * letra del sistema y no un hueco. Son cadenas y no dependen de la plataforma,
+ * por eso viven aquí y no junto a `Fonts` en `theme.ts`.
+ *
+ * - `texto`: títulos, párrafos, celdas, campos. Todo lo que se lee.
+ * - `rotulo`: botones, títulos de grupo del menú y cabeceras de tabla, siempre en
+ *   mayúsculas y con `EspaciadoLetra.rotulo`.
+ */
+export const FuentePanel = {
+  texto: "'Plus Jakarta Sans', system-ui, 'Segoe UI', sans-serif",
+  rotulo: "'Space Grotesk', 'Plus Jakarta Sans', system-ui, sans-serif",
+} as const;
+
+/**
+ * Espaciado entre letras del panel. Spec 022.
+ *
+ * Los títulos grandes se aprietan un poco —a ese tamaño el espaciado normal se ve
+ * flojo— y los rótulos en mayúsculas se abren, que es lo que los hace legibles a
+ * 12 px. Son los valores de egg.live, escalados a nuestros tamaños.
+ */
+export const EspaciadoLetra = {
+  titulo: -0.6,
+  rotulo: 0.84,
+} as const;
+
+/**
+ * Cuánto puede encogerse una columna de tabla del panel. Spec 022, RF-27.
+ *
+ * Con el menú lateral el contenido pierde hasta 248 de ancho, y las tablas
+ * calibradas contra 1280 dejaban de caber. Cada columna parte de su `ancho` y,
+ * si falta sitio, baja hasta este tanto por uno —partiendo el texto en dos
+ * renglones— antes de que la tabla tenga que desplazarse. 0,65 deja la tabla
+ * más ancha (1268) en 869 de 904, el contenido más angosto que la spec promete.
+ */
+export const EncogimientoColumna = 0.65;

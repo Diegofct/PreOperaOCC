@@ -29,7 +29,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 
 import { Acciones, AccionesFormulario, Aviso, Boton, Modal } from './componentes';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
@@ -174,7 +174,12 @@ export function VentanaDeSecreto<T>({
 }
 
 const estilos = StyleSheet.create({
-  aviso: { fontSize: TextoPanel.cuerpo, lineHeight: 21, color: Colors.light.text },
+  aviso: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 21,
+    color: Panel.texto,
+  },
 
   dato: {
     gap: Spacing.one,
@@ -186,24 +191,27 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.fondoCabecera,
   },
   rotulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.micro,
     fontWeight: '800',
     letterSpacing: 0.4,
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
   /**
    * Grande y espaciado porque casi siempre se **dicta por teléfono**, letra por
    * letra, mientras alguien lo apunta en la obra.
    */
   valor: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cifra,
     fontWeight: '700',
     letterSpacing: 2,
-    color: Colors.light.text,
+    color: Panel.texto,
   },
   explicacion: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.apoyo,
     lineHeight: 19,
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
 });

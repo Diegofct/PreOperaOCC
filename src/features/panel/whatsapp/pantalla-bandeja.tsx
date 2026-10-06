@@ -124,6 +124,9 @@ export default function PantallaBandeja() {
       clave: 'resumen',
       titulo: 'Qué entendió la IA',
       ancho: 255,
+      // La que cede cuando falta sitio (spec 022, RF-27): es la de más texto y se
+      // lee bien en varios renglones; así los botones conservan su ancho.
+      anchoMinimo: 140,
       pintar: (p) => (
         <>
           <Celda lineas={3}>{p.resumen ?? '—'}</Celda>
@@ -135,6 +138,8 @@ export default function PantallaBandeja() {
       clave: 'archivos',
       titulo: 'Adjuntos',
       ancho: 90,
+      // No por debajo de su título: «ADJUNTOS» se partía a media palabra (spec 022).
+      anchoMinimo: 84,
       pintar: (p) => (
         <Celda lineas={2}>
           {p.archivos === 0 ? '—' : `${p.archivos} ${p.archivos === 1 ? 'archivo' : 'archivos'}`}
@@ -156,6 +161,8 @@ export default function PantallaBandeja() {
       clave: 'abrir',
       titulo: '',
       ancho: 100,
+      // No por debajo de su botón: «Revisar» mide 87 (spec 022, RF-27).
+      anchoMinimo: 90,
       pintar: (p) => (
         <Acciones>
           <Boton
@@ -306,6 +313,8 @@ function GruposDeWhatsapp({
       clave: 'accion',
       titulo: '',
       ancho: 110,
+      // No por debajo de su botón: «Cambiar» y «Asociar» miden 91 (spec 022, RF-27).
+      anchoMinimo: 94,
       pintar: (g) => (
         <Acciones>
           <Boton

@@ -36,7 +36,7 @@ import { router } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { Colors, Spacing, TextoPanel } from "@/constants/theme";
+import { FuentePanel, Panel, Spacing, TextoPanel } from "@/constants/theme";
 import { idDeFila, type OrigenWhatsapp, type ViajeDelParte } from "@/features/bitacoras/tipos";
 import { EtiquetaDeEstado, EtiquetaDeVeredicto } from "@/features/laboratorio/etiquetas";
 import type { GranulometriaDelParte } from "@/features/laboratorio/tipos";
@@ -2627,8 +2627,9 @@ function Cierre({
 const estilos = StyleSheet.create({
   /** Lo que impide cerrar, en el pie del índice. Se lee, no se decora. */
   bloqueo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.micro,
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
     lineHeight: 16,
   },
   cabecera: {
@@ -2638,11 +2639,12 @@ const estilos = StyleSheet.create({
     flexWrap: "wrap",
   },
   obra: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.seccion,
     fontWeight: "800",
-    color: Colors.light.text,
+    color: Panel.texto,
   },
-  apoyo: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
   desglose: {
     flexDirection: "row",
     alignItems: "center",

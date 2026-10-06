@@ -15,7 +15,15 @@
 import { useCallback, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Estado, Marca, MaxContentWidthPanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import {
+  Estado,
+  FuentePanel,
+  MaxContentWidthPanel,
+  Panel,
+  Radio,
+  Spacing,
+  TextoPanel,
+} from '@/constants/theme';
 import { alcanza } from '@/shared/rules/permisos';
 
 import { api, mensajeDe } from './cliente-api';
@@ -69,8 +77,14 @@ export function DetallePreoperacional({
     return (
       <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.contenedor}>
         <View style={estilos.columna}>
-          <Boton titulo="◀ Volver" tono="secundario" onPress={onVolver} />
-          {detalle.error ? <Aviso tono="error">{detalle.error}</Aviso> : <Text>Cargando…</Text>}
+          <Acciones>
+            <Boton titulo="◀ Volver" tono="secundario" onPress={onVolver} />
+          </Acciones>
+          {detalle.error ? (
+            <Aviso tono="error">{detalle.error}</Aviso>
+          ) : (
+            <Text style={estilos.subtitulo}>Cargando…</Text>
+          )}
         </View>
       </ScrollView>
     );
@@ -97,7 +111,11 @@ export function DetallePreoperacional({
   return (
     <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.contenedor}>
       <View style={estilos.columna}>
-        <Boton titulo="◀ Volver a la lista" tono="secundario" onPress={onVolver} />
+        {/* En `Acciones` para que mida lo que su texto: a lo ancho de la columna, la
+            píldora (spec 022) se leía como una barra y no como un botón. */}
+        <Acciones>
+          <Boton titulo="◀ Volver a la lista" tono="secundario" onPress={onVolver} />
+        </Acciones>
 
         {detalle.error ? <Aviso tono="error">{detalle.error}</Aviso> : null}
 
@@ -337,19 +355,37 @@ function porOrdenDeLectura(a: ImagenDelRegistro, b: ImagenDelRegistro): number {
 }
 
 const estilos = StyleSheet.create({
-  pantalla: { flex: 1, backgroundColor: Colors.light.background },
+  pantalla: { flex: 1, backgroundColor: Panel.fondo },
   contenedor: { alignItems: 'center', padding: Spacing.four },
   columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.four },
   encabezado: { gap: Spacing.one },
-  subtitulo: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
+  subtitulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.textoApoyo,
+  },
 
   veredicto: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  criticoTexto: { fontSize: TextoPanel.cuerpo, fontWeight: '700', color: Marca.critico },
+  criticoTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '700',
+    color: Estado.noConforme,
+  },
 
   datos: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.four },
   dato: { gap: Spacing.half },
-  datoTitulo: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
-  datoValor: { fontSize: TextoPanel.cuerpo, fontWeight: '700', color: Colors.light.text },
+  datoTitulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.textoApoyo,
+  },
+  datoValor: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '700',
+    color: Panel.texto,
+  },
 
   hallazgo: {
     gap: Spacing.half,
@@ -360,11 +396,30 @@ const estilos = StyleSheet.create({
     backgroundColor: Estado.atencionFondo,
   },
   hallazgoCritico: { borderColor: Estado.noConforme, backgroundColor: Estado.noConformeFondo },
-  hallazgoLabel: { fontSize: TextoPanel.cuerpo, fontWeight: '700', color: Colors.light.text },
-  hallazgoAviso: { fontSize: TextoPanel.cuerpo, fontWeight: '700', color: Estado.noConforme },
-  hallazgoNota: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
+  hallazgoLabel: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '700',
+    color: Panel.texto,
+  },
+  hallazgoAviso: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '700',
+    color: Estado.noConforme,
+  },
+  hallazgoNota: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.textoApoyo,
+  },
 
-  observaciones: { fontSize: TextoPanel.cuerpo, lineHeight: 24, color: Colors.light.text },
+  observaciones: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 24,
+    color: Panel.texto,
+  },
 
   seccion: {
     gap: Spacing.one,
@@ -374,9 +429,10 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.md,
   },
   seccionTitulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '800',
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
     marginBottom: Spacing.two,
   },
   item: {
@@ -387,14 +443,24 @@ const estilos = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Panel.bordeSuave,
   },
-  itemLabel: { flex: 1, fontSize: TextoPanel.cuerpo, color: Colors.light.text },
-  itemValor: { fontSize: TextoPanel.cuerpo, fontWeight: '700' },
+  itemLabel: {
+    fontFamily: FuentePanel.texto,
+    flex: 1,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.texto,
+  },
+  itemValor: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, fontWeight: '700' },
 
   imagenes: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
   imagen: { width: 240, gap: Spacing.one },
   /** La firma es un trazo ancho y bajo: en una tarjeta estrecha no se lee. */
   imagenFirma: { width: '100%' },
-  imagenTitulo: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },
+  imagenTitulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    fontWeight: '700',
+    color: Panel.texto,
+  },
   miniatura: {
     width: '100%',
     height: 180,
@@ -415,9 +481,10 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.fondo,
   },
   pendienteTexto: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.apoyo,
     lineHeight: 20,
     textAlign: 'center',
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
 });

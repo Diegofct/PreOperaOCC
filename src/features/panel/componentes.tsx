@@ -30,13 +30,15 @@ import {
   Text,
   TextInput,
   View,
+  type FlexStyle,
 } from 'react-native';
 
 import {
   CampoPanel,
-  Colors,
+  EspaciadoLetra,
   Estado,
-  Marca,
+  FuentePanel,
+  Grosor,
   Movimiento,
   Panel,
   Radio,
@@ -55,6 +57,7 @@ import {
 import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
 
 import { CapaFlotante } from './capa-flotante';
+import { anchoMinimoDeColumna } from './columnas';
 import type { Orden } from './ordenar';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
 
@@ -205,30 +208,34 @@ export function Boton({
   deshabilitado?: boolean;
 }) {
   /**
-   * El botón principal va en el grafito de OCC, no en su rojo.
+   * El botón principal va en el grafito, no en el rojo de OCC.
    *
    * El rojo de la marca es el mismo con el que aquí se dice «peligro» y «NO
    * APTO». Si el botón de guardar fuera rojo, el de dar de baja dejaría de
    * distinguirse de él, y ese es un error que solo se descubre cuando alguien
    * ya pulsó el que no era.
+   *
+   * Desde la spec 022 los tres son píldoras, como en egg.live (RF-24): el principal
+   * relleno de grafito y los otros dos transparentes, con un borde fino. El de
+   * peligro lleva el rojo de `Estado` en el texto: es un estado, no un adorno.
    */
   const paleta = {
     primario: {
       fondo: Panel.accion,
       fondoActivo: Panel.accionPresionada,
       texto: Panel.sobreAccion,
-      borde: 'transparent',
+      borde: Panel.accion,
     },
     secundario: {
-      fondo: Colors.light.background,
+      fondo: 'transparent',
       fondoActivo: Panel.fondoHover,
-      texto: Panel.accion,
+      texto: Panel.texto,
       borde: Panel.borde,
     },
     peligro: {
-      fondo: Colors.light.background,
+      fondo: 'transparent',
       fondoActivo: Estado.noConformeFondo,
-      texto: Marca.critico,
+      texto: Estado.noConforme,
       borde: Panel.borde,
     },
   }[tono];
@@ -250,7 +257,6 @@ export function Boton({
           borderColor: paleta.borde,
           transitionDuration: `${Movimiento.rapido}ms`,
         },
-        tono === 'primario' && !deshabilitado && { boxShadow: Sombra.tarjeta },
         // Quien navega con el tabulador tiene que ver dónde está. Sin esto el
         // panel se puede recorrer sin ratón, pero a ciegas.
         enfocado && estilos.enfocado,
@@ -369,7 +375,7 @@ export function Campo({
           enfocado && !soloLectura && estilos.campoEnfocado,
           error ? estilos.campoEntradaMal : null,
         ]}
-        placeholderTextColor={Colors.light.textSecondary}
+        placeholderTextColor={Panel.textoApoyo}
       />
       {error ? <Text style={estilos.campoError}>{error}</Text> : null}
       {!error && ayuda ? <Text style={estilos.campoAyuda}>{ayuda}</Text> : null}
@@ -671,7 +677,7 @@ export function Selector({
                   }}
                   autoFocus
                   placeholder="Escriba para buscar"
-                  placeholderTextColor={Colors.light.textSecondary}
+                  placeholderTextColor={Panel.textoApoyo}
                   accessibilityLabel={`Buscar en ${etiqueta}`}
                   style={estilos.campoEntrada}
                 />
@@ -848,7 +854,14 @@ export function SelectorDeHora({
 export interface Columna<T> {
   clave: string;
   titulo: string;
+  /** El ancho preferido. Con sitio de sobra la columna mide esto, ni más ni menos. */
   ancho: number;
+  /**
+   * Hasta dónde puede encogerse cuando falta sitio (spec 022, RF-27). Sin él, el
+   * `EncogimientoColumna` de su ancho. Una columna que no debe partirse —la de los
+   * botones— lo declara igual a su `ancho`.
+   */
+  anchoMinimo?: number;
   pintar: (fila: T) => ReactNode;
   /**
    * El texto por el que se ordena esta columna (spec 015). Sin él, la columna no
@@ -888,6 +901,13 @@ export function Tabla<T extends { id: string }>({
   orden?: Orden;
   alOrdenar?: (clave: string) => void;
 }) {
+  // Lo mínimo que mide la tabla con todas las columnas encogidas: por debajo de
+  // esto, y solo por debajo, se desplaza dentro de su marco.
+  const minimo =
+    columnas.reduce((suma, c) => suma + anchoMinimoDeColumna(c.ancho, c.anchoMinimo), 0) +
+    Spacing.three * (columnas.length - 1) +
+    Spacing.three * 2;
+
   if (filas.length === 0) {
     return (
       <View style={estilos.tablaVacia}>
@@ -906,10 +926,11 @@ export function Tabla<T extends { id: string }>({
       horizontal
       showsHorizontalScrollIndicator={false}
       style={[estilos.tablaMarco, variante === 'desnuda' && estilos.tablaDesnuda]}
-      // Sin esto, las filas solo miden lo que suman sus columnas: la tabla que
-      // cabe de sobra dejaba la cabecera y las bandas cortadas a media tarjeta,
-      // con un vacío blanco a la derecha que parecía un error de carga.
-      contentContainerStyle={estilos.tablaContenido}
+      // El contenido mide lo que su marco (para que las columnas se encojan en vez
+      // de empujar) pero nunca menos que la tabla encogida del todo. Además, así la
+      // cabecera y las bandas llegan al borde de la tarjeta cuando sobra sitio: sin
+      // eso quedaban cortadas a media tarjeta, con un vacío que parecía un error.
+      contentContainerStyle={[estilos.tablaContenido, { minWidth: minimo }]}
     >
       <View style={estilos.tablaCuerpo}>
         <View style={estilos.tablaCabecera}>
@@ -918,12 +939,12 @@ export function Tabla<T extends { id: string }>({
               <TituloOrdenable
                 key={columna.clave}
                 titulo={columna.titulo}
-                ancho={columna.ancho}
+                estiloColumna={estiloDeColumna(columna)}
                 sentido={orden?.clave === columna.clave ? orden.sentido : null}
                 onPress={() => alOrdenar(columna.clave)}
               />
             ) : (
-              <Text key={columna.clave} style={[estilos.tablaTitulo, { width: columna.ancho }]}>
+              <Text key={columna.clave} style={[estilos.tablaTitulo, estiloDeColumna(columna)]}>
                 {columna.titulo}
               </Text>
             ),
@@ -932,7 +953,7 @@ export function Tabla<T extends { id: string }>({
         {filas.map((fila, indice) => (
           <Fila key={fila.id} alterna={indice % 2 === 1}>
             {columnas.map((columna) => (
-              <View key={columna.clave} style={{ width: columna.ancho }}>
+              <View key={columna.clave} style={estiloDeColumna(columna)}>
                 {columna.pintar(fila)}
               </View>
             ))}
@@ -941,6 +962,21 @@ export function Tabla<T extends { id: string }>({
       </View>
     </ScrollView>
   );
+}
+
+/**
+ * El ancho de una columna: parte de su `ancho`, se encoge hasta su mínimo y no
+ * crece (spec 022, RF-27). Que no crezca es a propósito: con sitio de sobra la
+ * tabla se ve igual que antes, con el aire a la derecha de la última columna.
+ * Cabecera y celdas usan el mismo estilo, así que siguen alineadas al encogerse.
+ */
+function estiloDeColumna(columna: { ancho: number; anchoMinimo?: number }): FlexStyle {
+  return {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: columna.ancho,
+    minWidth: anchoMinimoDeColumna(columna.ancho, columna.anchoMinimo),
+  };
 }
 
 /**
@@ -953,12 +989,12 @@ export function Tabla<T extends { id: string }>({
  */
 function TituloOrdenable({
   titulo,
-  ancho,
+  estiloColumna,
   sentido,
   onPress,
 }: {
   titulo: string;
-  ancho: number;
+  estiloColumna: FlexStyle;
   sentido: 'asc' | 'desc' | null;
   onPress: () => void;
 }) {
@@ -974,7 +1010,7 @@ function TituloOrdenable({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${titulo}, ${explicacion}`}
-      style={{ width: ancho }}
+      style={estiloColumna}
     >
       {({ hovered }) => (
         <Text
@@ -1014,13 +1050,15 @@ function Fila({ alterna, children }: { alterna: boolean; children: ReactNode }) 
 /** Texto normal dentro de una celda. */
 export function Celda({
   children,
-  lineas = 1,
+  lineas = 2,
 }: {
   children: ReactNode;
   /**
-   * Cuántos renglones puede ocupar antes de cortarse con «…». Uno por defecto, que
-   * es lo que mantiene las filas parejas. Más solo para texto que hay que leer
-   * entero —el motivo de una anulación—: cortado ahí, no dice nada.
+   * Cuántos renglones puede ocupar antes de cortarse con «…». Dos por defecto desde
+   * la spec 022: cuando la columna se encoge, el texto se parte en vez de
+   * esconderse tras los puntos. Con sitio de sobra cabe en uno, como siempre, y
+   * las filas siguen parejas. Más solo para texto que hay que leer entero —el
+   * motivo de una anulación—: cortado ahí, no dice nada.
    */
   lineas?: number;
 }) {
@@ -1140,7 +1178,7 @@ export function Cifra({
   tono?: 'neutro' | 'bueno' | 'atencion' | 'malo';
 }) {
   const color = {
-    neutro: Colors.light.text,
+    neutro: Panel.texto,
     bueno: Estado.conforme,
     atencion: Estado.atencion,
     malo: Estado.noConforme,
@@ -1367,8 +1405,33 @@ export function Confirmado({ mensaje }: { mensaje: string | null }) {
   return <Aviso tono="exito">{mensaje}</Aviso>;
 }
 
+/** El anillo de foco del panel: franja clara y aro grafito (spec 022). */
+const ANILLO_DE_FOCO = `0 0 0 2px ${Panel.superficie}, 0 0 0 ${2 + Grosor.marca}px ${Panel.foco}`;
+
+/**
+ * La superficie de todo lo que se apoya en el crema: tarjetas, formularios,
+ * tablas, cifras (spec 022, RF-25).
+ *
+ * Plana, como en egg.live: blanca, con un borde fino tenue y esquinas de 16. La
+ * sombra se queda para lo que **flota** —ventanas, listas abiertas—, que es donde
+ * dice algo; en cada tarjeta era ruido sobre el crema.
+ */
+const SUPERFICIE = {
+  borderRadius: Radio.lg,
+  borderCurve: 'continuous',
+  borderWidth: Grosor.linea,
+  borderColor: Panel.bordeSuave,
+  backgroundColor: Panel.superficie,
+} as const;
+
 const estilos = StyleSheet.create({
-  titulo: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
+  titulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.titulo,
+    fontWeight: '800',
+    letterSpacing: EspaciadoLetra.titulo,
+    color: Panel.texto,
+  },
 
   filaFormulario: {
     flexDirection: 'row',
@@ -1390,23 +1453,25 @@ const estilos = StyleSheet.create({
     minWidth: 190,
     gap: Spacing.one,
     padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: Panel.bordeSuave,
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
+    ...SUPERFICIE,
   },
+  /** Rótulo en mayúsculas, como las cabeceras de tabla (RF-23). */
   cifraTitulo: {
+    fontFamily: FuentePanel.rotulo,
     fontSize: TextoPanel.micro,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-    color: Colors.light.textSecondary,
+    fontWeight: '500',
+    letterSpacing: EspaciadoLetra.rotulo,
+    color: Panel.textoApoyo,
     // Deja los números alineados aunque un rótulo ocupe dos renglones.
     minHeight: 30,
   },
-  cifraValor: { fontSize: TextoPanel.cifra, fontWeight: '800' },
-  cifraPie: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  cifraValor: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cifra,
+    fontWeight: '800',
+    letterSpacing: EspaciadoLetra.titulo,
+  },
+  cifraPie: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 
   medidor: {
     flexGrow: 1,
@@ -1414,15 +1479,15 @@ const estilos = StyleSheet.create({
     minWidth: 280,
     gap: Spacing.two,
     padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: Panel.bordeSuave,
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
+    ...SUPERFICIE,
   },
   medidorCabecera: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
-  medidorValor: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
+  medidorValor: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.titulo,
+    fontWeight: '800',
+    color: Panel.texto,
+  },
   medidorCarril: {
     height: 10,
     borderRadius: Radio.pastilla,
@@ -1450,7 +1515,7 @@ const estilos = StyleSheet.create({
     maxHeight: '90%',
     borderRadius: Radio.lg,
     borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     boxShadow: Sombra.flotante,
     // Sin esto el cuerpo no se encoge y la ventana crece más que la pantalla.
     overflow: 'hidden',
@@ -1465,7 +1530,12 @@ const estilos = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Panel.bordeSuave,
   },
-  ventanaTitulo: { fontSize: TextoPanel.seccion, fontWeight: '800', color: Colors.light.text },
+  ventanaTitulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.seccion,
+    fontWeight: '800',
+    color: Panel.texto,
+  },
   ventanaCuerpo: { padding: Spacing.four, gap: Spacing.three },
 
   barra: {
@@ -1475,7 +1545,12 @@ const estilos = StyleSheet.create({
     flexWrap: 'wrap',
   },
   cuenta: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.one },
-  cuentaTexto: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary, fontWeight: '600' },
+  cuentaTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    color: Panel.textoApoyo,
+    fontWeight: '600',
+  },
 
   paginacion: {
     flexDirection: 'row',
@@ -1484,32 +1559,49 @@ const estilos = StyleSheet.create({
     gap: Spacing.three,
     paddingTop: Spacing.two,
   },
-  ayuda: { fontSize: TextoPanel.apoyo, lineHeight: 20, color: Colors.light.textSecondary },
+  ayuda: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    lineHeight: 20,
+    color: Panel.textoApoyo,
+  },
 
   aviso: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.two,
     padding: Spacing.three,
-    borderRadius: Radio.md,
+    borderRadius: Radio.lg,
     // Una franja de color a la izquierda: identifica el tono de un vistazo, sin
     // teñir el bloque entero.
-    borderLeftWidth: 3,
+    borderLeftWidth: Grosor.marca,
   },
-  avisoSimbolo: { fontSize: TextoPanel.cuerpo, fontWeight: '800', lineHeight: 21 },
-  avisoTexto: { flex: 1, fontSize: TextoPanel.cuerpo, lineHeight: 21, fontWeight: '600' },
+  avisoSimbolo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '800',
+    lineHeight: 21,
+  },
+  avisoTexto: {
+    flex: 1,
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
 
   confirmacion: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.two,
     padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderLeftWidth: 3,
+    borderRadius: Radio.lg,
+    borderLeftWidth: Grosor.marca,
     backgroundColor: Estado.atencionFondo,
     borderLeftColor: Estado.atencion,
   },
   confirmacionSimbolo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '800',
     lineHeight: 21,
@@ -1517,6 +1609,7 @@ const estilos = StyleSheet.create({
   },
   confirmacionCuerpo: { flex: 1, gap: Spacing.three },
   confirmacionTexto: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     lineHeight: 21,
     fontWeight: '600',
@@ -1529,46 +1622,66 @@ const estilos = StyleSheet.create({
     paddingVertical: Spacing.half,
     borderRadius: Radio.pastilla,
   },
-  etiquetaTexto: { fontSize: TextoPanel.micro, fontWeight: '800', letterSpacing: 0.3 },
+  etiquetaTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
 
+  /** La píldora (RF-24). Con el alto de un campo, para que alineen en una fila. */
   boton: {
+    minHeight: CampoPanel.alto,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    borderRadius: Radio.sm,
-    borderWidth: 1,
-    borderCurve: 'continuous',
+    borderRadius: Radio.pastilla,
+    borderWidth: Grosor.linea,
     alignItems: 'center',
     justifyContent: 'center',
   },
   botonInactivo: { opacity: 0.45 },
-  botonTexto: { fontSize: TextoPanel.cuerpo, fontWeight: '700' },
+  /**
+   * Space Grotesk en mayúsculas y espaciada, como los botones de egg.live (RF-23), y
+   * a su tamaño: 12. A 13 y con más relleno los botones crecían un 20 % y volvían a
+   * sacar las columnas de acciones de las tablas angostas.
+   */
+  botonTexto: {
+    fontFamily: FuentePanel.rotulo,
+    fontSize: TextoPanel.micro,
+    fontWeight: '500',
+    letterSpacing: EspaciadoLetra.rotulo,
+    textTransform: 'uppercase',
+  },
 
   campo: { gap: Spacing.one },
   campoLleno: { alignSelf: 'stretch' },
   campoRenglonEntero: { width: '100%' },
-  campoSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Colors.light.textSecondary },
+  campoSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Panel.textoApoyo },
   campoAreaDeTexto: {
     minHeight: CampoPanel.altoAreaDeTexto,
     // Sin esto el texto nace centrado en vertical, como en un campo de una línea.
     textAlignVertical: 'top',
   },
+  /** La etiqueta, siempre encima de su campo (RF-26). */
   campoEtiqueta: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.apoyo,
-    fontWeight: '700',
-    color: Colors.light.textSecondary,
+    fontWeight: '600',
+    color: Panel.texto,
   },
-  campoObligatorio: { color: Marca.critico },
+  campoObligatorio: { color: Estado.noConforme },
   campoEntrada: {
-    borderWidth: 1,
+    borderWidth: Grosor.linea,
     borderColor: Panel.borde,
-    borderRadius: Radio.sm,
+    borderRadius: Radio.md,
     borderCurve: 'continuous',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     minHeight: CampoPanel.alto,
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
-    color: Colors.light.text,
-    backgroundColor: Colors.light.background,
+    color: Panel.texto,
+    backgroundColor: Panel.superficie,
     transitionDuration: `${Movimiento.rapido}ms`,
     // El navegador dibuja su propio anillo de foco; aquí se dibuja uno con
     // los colores del proyecto, y dos anillos se ven mal.
@@ -1582,7 +1695,7 @@ const estilos = StyleSheet.create({
     gap: Spacing.two,
     paddingVertical: Spacing.one,
     paddingHorizontal: Spacing.two,
-    borderRadius: Radio.sm,
+    borderRadius: Radio.pastilla,
     borderWidth: 1,
     borderColor: 'transparent',
   },
@@ -1592,41 +1705,65 @@ const estilos = StyleSheet.create({
     borderRadius: Radio.sm / 2,
     borderWidth: 1,
     borderColor: Panel.borde,
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     alignItems: 'center',
     justifyContent: 'center',
   },
   casillaCajaMarcada: { backgroundColor: Panel.accion, borderColor: Panel.accion },
-  casillaMarca: { fontSize: TextoPanel.apoyo, fontWeight: '800', color: Panel.sobreAccion },
-  campoEnfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
+  casillaMarca: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    fontWeight: '800',
+    color: Panel.sobreAccion,
+  },
+  /**
+   * El foco del teclado: un aro grafito separado del borde por una franja clara
+   * (spec 022). Pegado al borde grafito del campo se fundía con él; con la franja
+   * se lee como un anillo aparte.
+   */
+  campoEnfocado: { borderColor: Panel.accion, boxShadow: ANILLO_DE_FOCO },
   /** El mismo anillo, para lo que se pulsa. */
-  enfocado: { borderColor: Panel.accion, boxShadow: `0 0 0 3px ${Panel.foco}` },
+  enfocado: { boxShadow: ANILLO_DE_FOCO },
   campoEntradaMal: { borderColor: Estado.noConforme },
-  campoError: { fontSize: TextoPanel.apoyo, color: Estado.noConforme, fontWeight: '600' },
+  campoError: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    color: Estado.noConforme,
+    fontWeight: '600',
+  },
   /** Los dos desplegables de una hora, alineados por abajo con el separador. */
   hora: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.one },
   horaSeparador: {
     // A la altura de los botones: debajo de la etiqueta, centrado en la caja.
     marginTop: Spacing.four + Spacing.one,
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '700',
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
-  campoAyuda: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  campoAyuda: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 
   selectorBoton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  selectorValor: { fontSize: TextoPanel.cuerpo, color: Colors.light.text },
-  selectorVacio: { fontSize: TextoPanel.cuerpo, color: Colors.light.textSecondary },
-  selectorFlecha: { fontSize: TextoPanel.micro, color: Colors.light.textSecondary },
+  selectorValor: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
+  selectorVacio: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.textoApoyo,
+  },
+  selectorFlecha: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Panel.textoApoyo,
+  },
   selectorLista: {
     // La posición y el alto los pone `colocarLista` al abrir.
     position: 'absolute',
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Panel.borde,
-    borderRadius: Radio.md,
+    borderRadius: Radio.lg,
     borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     boxShadow: Sombra.flotante,
   },
   selectorOpcion: {
@@ -1635,7 +1772,7 @@ const estilos = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Panel.bordeSuave,
   },
-  selectorOpcionElegida: { backgroundColor: Panel.accionSuave },
+  selectorOpcionElegida: { backgroundColor: Panel.acentoSuave },
   selectorOpcionFila: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   selectorOpcionTextos: { flex: 1 },
   selectorBuscador: {
@@ -1644,36 +1781,40 @@ const estilos = StyleSheet.create({
     borderBottomColor: Panel.bordeSuave,
   },
   selectorDesplazable: { flexShrink: 1 },
-  selectorMarca: { fontSize: TextoPanel.cuerpo, fontWeight: '800', color: Panel.accion },
-
-  tablaMarco: {
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
+  selectorMarca: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '800',
+    color: Panel.accion,
   },
+
+  tablaMarco: { ...SUPERFICIE },
   /** La misma tabla sin superficie propia: ya está dentro de una. */
-  tablaDesnuda: { backgroundColor: 'transparent', boxShadow: 'none', borderRadius: 0 },
-  tablaContenido: { minWidth: '100%' },
-  tablaCuerpo: { flexGrow: 1 },
+  tablaDesnuda: { backgroundColor: 'transparent', borderWidth: 0, borderRadius: 0 },
+  tablaContenido: { width: '100%' },
+  // `flex: 1` y no solo `flexGrow`: React Native pone `flexShrink: 0` por defecto,
+  // y con él el cuerpo medía lo que su contenido y las columnas nunca se encogían.
+  tablaCuerpo: { flex: 1 },
   tablaCabecera: {
     flexDirection: 'row',
     gap: Spacing.three,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     backgroundColor: Panel.fondoCabecera,
-    borderBottomWidth: 1,
-    borderBottomColor: Panel.borde,
+    borderBottomWidth: Grosor.linea,
+    borderBottomColor: Panel.bordeSuave,
   },
+  /** Space Grotesk en mayúsculas, como los botones y los grupos del menú (RF-23). */
   tablaTitulo: {
+    fontFamily: FuentePanel.rotulo,
     fontSize: TextoPanel.micro,
-    fontWeight: '800',
-    letterSpacing: 0.4,
+    fontWeight: '500',
+    letterSpacing: EspaciadoLetra.rotulo,
     textTransform: 'uppercase',
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
   /** La columna por la que se ordena, o la que está bajo el cursor. */
-  tablaTituloActivo: { color: Colors.light.text },
+  tablaTituloActivo: { color: Panel.texto, fontWeight: '700' },
   tablaFila: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1690,28 +1831,35 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     padding: Spacing.five,
-    borderRadius: Radio.md,
+    borderRadius: Radio.lg,
     borderCurve: 'continuous',
-    borderWidth: 1,
+    borderWidth: Grosor.linea,
     borderStyle: 'dashed',
     borderColor: Panel.borde,
     backgroundColor: Panel.fondoCabecera,
   },
-  vacioSimbolo: { fontSize: TextoPanel.titulo, color: Panel.borde, fontWeight: '800' },
+  vacioSimbolo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.titulo,
+    color: Panel.borde,
+    fontWeight: '800',
+  },
   vacioTexto: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     lineHeight: 21,
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
     textAlign: 'center',
     maxWidth: 460,
   },
-  celda: { fontSize: TextoPanel.cuerpo, color: Colors.light.text },
+  celda: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
 
   seccion: { gap: Spacing.two },
   seccionTitulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.seccion,
     fontWeight: '700',
-    color: Colors.light.text,
+    color: Panel.texto,
   },
   formulario: {
     flexDirection: 'row',
@@ -1719,10 +1867,7 @@ const estilos = StyleSheet.create({
     alignItems: 'flex-start',
     gap: Spacing.three,
     padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
+    ...SUPERFICIE,
   },
   grupoAcciones: {
     flexDirection: 'row',
@@ -1737,14 +1882,11 @@ const estilos = StyleSheet.create({
     gap: Spacing.two,
     paddingTop: Spacing.three,
     marginTop: Spacing.one,
-    borderTopWidth: 1,
+    borderTopWidth: Grosor.linea,
     borderTopColor: Panel.bordeSuave,
   },
   tarjeta: {
     padding: Spacing.three,
-    borderRadius: Radio.md,
-    borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.tarjeta,
+    ...SUPERFICIE,
   },
 });

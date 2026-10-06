@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState, type ReactNode, type RefObject } from
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
-  Colors,
+  FuentePanel,
   MaxContentWidthPanel,
   Panel,
   Spacing,
@@ -217,17 +217,18 @@ export function MarcoPantalla({
 }
 
 const estilos = StyleSheet.create({
-  // El lienzo es gris, no blanco: es lo que hace que las tarjetas y las tablas
-  // se lean como objetos apoyados encima en vez de como bloques flotando en un
-  // vacío del mismo color que ellos.
+  // El lienzo es crema, no blanco (spec 022): es lo que hace que las tarjetas y
+  // las tablas se lean como objetos apoyados encima en vez de como bloques
+  // flotando en un vacío del mismo color que ellos.
   pantalla: { flex: 1, backgroundColor: Panel.fondo },
   contenedor: { alignItems: 'center', padding: Spacing.four, paddingBottom: Spacing.six },
   columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.four },
   encabezado: { gap: Spacing.one, maxWidth: 720 },
   descripcion: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     lineHeight: 21,
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
   cargando: {
     flexDirection: 'row',

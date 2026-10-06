@@ -24,7 +24,7 @@
 import { useRef, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Spacing, TextoPanel } from '@/constants/theme';
+import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import {
   HORARIO_PROPUESTO,
   horasLegibles,
@@ -186,9 +186,10 @@ const ANCHO_NOMBRE_DIA = 130;
 const estilos = StyleSheet.create({
   editor: { width: '100%', gap: Spacing.three },
   titulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '800',
-    color: Colors.light.text,
+    color: Panel.texto,
   },
   dia: {
     flexDirection: 'row',
@@ -197,13 +198,19 @@ const estilos = StyleSheet.create({
     gap: Spacing.three,
   },
   nombreDia: {
+    fontFamily: FuentePanel.texto,
     width: ANCHO_NOMBRE_DIA,
     marginTop: Spacing.four + Spacing.one,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '700',
-    color: Colors.light.text,
+    color: Panel.texto,
   },
   tramo: { flexDirection: 'row', gap: Spacing.two },
   accionTramo: { marginTop: Spacing.four },
-  total: { fontSize: TextoPanel.cuerpo, fontWeight: '600', color: Colors.light.textSecondary },
+  total: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    fontWeight: '600',
+    color: Panel.textoApoyo,
+  },
 });

@@ -17,7 +17,7 @@ import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
-import { Colors, Panel } from '@/constants/theme';
+import { Panel } from '@/constants/theme';
 
 import PantallaCambiarClave from './pantalla-cambiar-clave';
 import PantallaIngreso from './pantalla-ingreso';
@@ -76,6 +76,6 @@ const estilos = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.fondo,
   },
 });

@@ -40,7 +40,7 @@
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Estado, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { CONDICIONES_CLIMA, ENSAYOS_DE_CALIDAD } from '@/shared/catalogos/bitacora';
 import {
   ACTIVIDADES_DEL_PRESUPUESTO,
@@ -991,15 +991,21 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
 const estilos = StyleSheet.create({
   encabezado: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three, alignItems: 'center' },
   textoOriginal: {
+    fontFamily: FuentePanel.texto,
     marginTop: Spacing.three,
     fontSize: TextoPanel.cuerpo,
     lineHeight: 22,
-    color: Colors.light.text,
+    color: Panel.texto,
   },
-  complemento: { marginTop: Spacing.two, fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  complemento: {
+    fontFamily: FuentePanel.texto,
+    marginTop: Spacing.two,
+    fontSize: TextoPanel.apoyo,
+    color: Panel.textoApoyo,
+  },
   tira: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
   foto: { gap: Spacing.one, alignItems: 'center' },
-  pieDeFoto: { fontSize: TextoPanel.apoyo, color: Colors.light.textSecondary },
+  pieDeFoto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
   miniatura: {
     width: 200,
     height: 150,
@@ -1009,5 +1015,5 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.fondoCabecera,
   },
   faltas: { width: '100%', gap: Spacing.one },
-  falta: { fontSize: TextoPanel.apoyo, color: Estado.noConforme },
+  falta: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Estado.noConforme },
 });

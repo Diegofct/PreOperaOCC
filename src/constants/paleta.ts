@@ -31,62 +31,105 @@ export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Captura = { papel: '#FFFFFF', tinta: '#0F172A', visor: '#000000' } as const;
 
+/**
+ * Los colores del panel de administración. Spec 022.
+ *
+ * Crema, grafito y el amarillo de la maquinaria de obra, con egg.live como
+ * referencia de estilo. Son **solo del panel**: la app del operador sigue con
+ * `Colors` y `Marca`, calibrados para leerse con guantes y bajo el sol, y la spec
+ * 022 la deja fuera (RF-34). Por eso el panel tiene aquí su propio texto y su
+ * propia superficie, en vez de leer `Colors.light`, que es del celular.
+ *
+ * El amarillo es el **único** acento (RF-20) y va siempre de fondo, con grafito
+ * encima: como color de letra sobre crema no llega ni a 2:1. El rojo, el verde y
+ * el ámbar siguen siendo de `Estado` y solo dicen estados (RF-21).
+ */
 export const Panel = {
-  /** Línea que separa filas y delimita campos. */
-  borde: '#D5D8DE',
-  /** Separación interna, más tenue: entre filas de una misma tabla. */
-  bordeSuave: '#E9EBEF',
-  /** Fondo de la fila de encabezados y de los bloques de formulario. */
-  fondoCabecera: '#F5F6F8',
-  /** El lienzo detrás de las tarjetas. Da profundidad sin sombras pesadas. */
-  fondo: '#F7F8FA',
-  /** Fila alterna de una tabla larga: el ojo no se salta de renglón. */
-  fondoAlterno: '#FBFCFD',
-  /** Fila bajo el cursor. Solo existe en escritorio: en el móvil no hay puntero. */
-  fondoHover: '#EEF3FA',
-  /** Anillo de foco del teclado. Navegar sin ratón tiene que verse. */
-  foco: '#93C5FD',
+  /* ── Texto y superficies ── */
+
+  /** El texto del panel. El grafito de egg, no el negro puro: cansa menos. */
+  texto: '#1B1B1B',
   /**
-   * El fondo oscurecido detrás de una ventana emergente. Oscurece sin ocultar:
-   * se sigue viendo de qué lista salió la ventana (spec 007, RF-25).
+   * Texto de apoyo: descripciones, etiquetas, celdas secundarias.
+   *
+   * Más oscuro que el `#8D877C` de egg a propósito: ese da 3,3:1 sobre el crema
+   * y no alcanza el 4,5:1 que exige la spec. Este conserva el tono cálido.
    */
-  telon: 'rgba(16, 24, 40, 0.45)',
+  textoApoyo: '#625C52',
+  /** Tarjetas, tablas, ventanas y campos: lo que se apoya sobre el crema. */
+  superficie: '#FFFFFF',
+  /** El lienzo crema detrás de las tarjetas. */
+  fondo: '#F7F5F2',
+  /** Fondo de la fila de encabezados y de los bloques de formulario. */
+  fondoCabecera: '#F0ECE8',
+  /** Fila alterna de una tabla larga: el ojo no se salta de renglón. */
+  fondoAlterno: '#FBFAF8',
+  /** Fila bajo el cursor. Solo existe en escritorio: en el móvil no hay puntero. */
+  fondoHover: '#EFEBE7',
+
+  /* ── Líneas ── */
+
+  /** Línea que separa filas y delimita campos. */
+  borde: '#D2D2D2',
+  /** Separación interna, más tenue: entre filas de una misma tabla. */
+  bordeSuave: '#E7E2DD',
+  /**
+   * Anillo de foco del teclado. Navegar sin ratón tiene que verse.
+   *
+   * Grafito y no amarillo: un anillo amarillo sobre crema no llega a 3:1 y se
+   * pierde justo cuando alguien lo está buscando.
+   */
+  foco: '#4C4B4B',
+  /**
+   * El fondo oscurecido detrás de una ventana emergente o del menú abierto
+   * encima. Oscurece sin ocultar: se sigue viendo de dónde salió (spec 007, RF-25).
+   */
+  telon: 'rgba(27, 27, 27, 0.45)',
+
+  /* ── Acciones y acento ── */
+
+  /**
+   * El color de las acciones: el botón principal es una píldora grafito.
+   *
+   * El rojo de la marca **no** se usa para acciones: en esta aplicación el rojo
+   * dice NO APTO, da de baja, anula. Si los botones fueran rojos, el rojo dejaría
+   * de alarmar justo donde tiene que hacerlo.
+   */
+  accion: '#1B1B1B',
+  accionPresionada: '#353434',
+  sobreAccion: '#FFFFFF',
+  /**
+   * El amarillo de maquinaria (RF-20). Marca lo activo —el módulo del menú— y
+   * nada más: si todo es amarillo, nada lo es.
+   */
+  acento: '#FFCD00',
+  /** El mismo amarillo, tenue: lo activo dentro de una columna, sin pastilla sólida. */
+  acentoSuave: '#FFF4C2',
+  /** Lo que va encima del amarillo. Siempre grafito: el blanco no se lee ahí. */
+  sobreAcento: '#1B1B1B',
+
+  /* ── La barra superior ── */
+
+  /** La píldora flotante de arriba (RF-15). */
+  barra: '#1B1B1B',
+  /** El nombre del sistema y los botones de la barra. */
+  textoBarra: '#F7F5F2',
+  /** El cargo, debajo o al lado del nombre: se lee, pero no compite. */
+  textoBarraApoyo: '#B5AFA5',
+  /** El borde fino de los botones de la barra: el `#4C4B4B` de egg sobre grafito. */
+  bordeBarra: '#4C4B4B',
+  /** Un botón de la barra bajo el cursor: el grafito un punto más claro. */
+  fondoBarraHover: '#353434',
 
   /* ── La marca de OCC ── */
 
   /**
-   * Obras Civiles Colombianas: rojo, gris y negro.
-   *
-   * El rojo **no se usa para acciones**, y esa es la decisión importante de
-   * todo este bloque. En esta aplicación el rojo ya significa otra cosa: un
-   * equipo NO APTO, un botón que da de baja, un preoperacional anulado. Si la
-   * barra y los botones principales fueran rojos, el rojo dejaría de alarmar
-   * justo donde tiene que hacerlo, y este sistema existe para que una máquina
-   * no salga a trabajar cuando no debe.
-   *
-   * Así que la identidad la carga el logotipo —que sí es rojo— y las acciones
-   * van en el grafito del propio logotipo. El rojo se queda reservado.
-   *
-   * Estos tokens son **solo del panel**. La app del operador conserva los
-   * suyos: su interfaz está calibrada para leerse con guantes y bajo el sol, y
-   * la spec 005 declara el móvil fuera de alcance.
+   * Obras Civiles Colombianas: rojo, gris y negro. Los carga el logotipo, que no
+   * cambia (spec 022, fuera de alcance); aquí quedan por si una pieza necesita
+   * citarlo, nunca para acciones ni estados.
    */
   marcaRojo: '#D0322C',
   marcaGris: '#A6A6A6',
-  /** El negro del logotipo. Es el color de las acciones del panel. */
-  accion: '#231F20',
-  accionPresionada: '#413C3D',
-  /**
-   * Fondo tenue del mismo grafito, para marcar lo activo **sin** una pastilla
-   * sólida: el índice de secciones del parte diario (spec 006).
-   *
-   * Decía «para el enlace activo de la barra» y no era cierto: la barra usa
-   * `accion` sólido, y con razón — entre siete enlaces, uno relleno se localiza
-   * de un vistazo. En una columna de nueve entradas el relleno sólido sería una
-   * hilera de manchas, así que ahí manda este.
-   */
-  accionSuave: '#F1F0F0',
-  sobreAccion: '#FFFFFF',
 } as const;
 
 export const Estado = {

@@ -32,7 +32,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Estado, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { Estado, FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { SERIE_DE_TAMICES, tamizPorId } from '@/shared/catalogos/tamices';
 import {
   ETIQUETA_ESTADO_ENSAYO,
@@ -83,7 +83,7 @@ const ESTILO_DE_IMPRESION = `
   html, body, body * { overflow: visible !important; }
   #${ID_DE_LA_HOJA}, #${ID_DE_LA_HOJA} * { visibility: visible !important; }
   #${ID_DE_LA_HOJA} { position: fixed !important; left: 0; top: 0; width: ${ANCHO_DE_HOJA}px; border: none !important; }
-  html, body { background: ${Colors.light.background} !important; }
+  html, body { background: ${Panel.superficie} !important; }
 }`;
 
 /** `YYYY-MM-DD` en la obra: la fecha de emisión es el día de la aprobación (RF-84). */
@@ -382,7 +382,7 @@ function Firma({
 const estilos = StyleSheet.create({
   hoja: {
     width: ANCHO_DE_HOJA,
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     padding: Spacing.two,
     gap: Spacing.two,
     borderWidth: 1,
@@ -390,6 +390,7 @@ const estilos = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   marca: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '800',
     color: Estado.noConforme,
@@ -410,17 +411,24 @@ const estilos = StyleSheet.create({
   celdaCodigo: { width: 170, borderLeftWidth: 1, borderLeftColor: Panel.borde, gap: Spacing.half },
   logo: { width: 60, height: 60 },
   titulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     fontWeight: '800',
     textAlign: 'center',
-    color: Colors.light.text,
+    color: Panel.texto,
   },
-  norma: { fontSize: TextoPanel.apoyo, fontWeight: '700', color: Colors.light.text },
-  dato: { fontSize: TextoPanel.micro, color: Colors.light.text },
-  obra: {
+  norma: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.apoyo,
     fontWeight: '700',
-    color: Colors.light.text,
+    color: Panel.texto,
+  },
+  dato: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.micro, color: Panel.texto },
+  obra: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    fontWeight: '700',
+    color: Panel.texto,
     textAlign: 'center',
   },
   rejilla: {
@@ -429,31 +437,47 @@ const estilos = StyleSheet.create({
     columnGap: Spacing.three,
     rowGap: Spacing.half,
   },
-  par: { fontSize: TextoPanel.micro, color: Colors.light.text, width: 210 },
+  par: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Panel.texto,
+    width: 210,
+  },
   parAncho: { width: 440 },
   parEstrecho: { width: 160 },
-  rotulo: { fontSize: TextoPanel.micro, fontWeight: '700', color: Colors.light.textSecondary },
+  rotulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    fontWeight: '700',
+    color: Panel.textoApoyo,
+  },
   tabla: { borderWidth: 1, borderColor: Panel.borde },
   fila: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: Panel.bordeSuave },
   filaCabecera: { backgroundColor: Panel.fondoCabecera },
   celda: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.micro,
-    color: Colors.light.text,
+    color: Panel.texto,
     paddingHorizontal: Spacing.one,
   },
-  cabecera: { fontWeight: '700', color: Colors.light.textSecondary },
+  cabecera: { fontWeight: '700', color: Panel.textoApoyo },
   cifra: { textAlign: 'right', fontVariant: ['tabular-nums'] },
   fuerte: { fontWeight: '700' },
   fuera: { fontWeight: '700', color: Estado.noConforme },
   veredicto: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, flexWrap: 'wrap' },
-  veredictoTexto: { fontSize: TextoPanel.seccion, fontWeight: '800', color: Estado.conforme },
+  veredictoTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.seccion,
+    fontWeight: '800',
+    color: Estado.conforme,
+  },
   malo: { color: Estado.noConforme },
-  texto: { fontSize: TextoPanel.micro, color: Colors.light.text },
+  texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.micro, color: Panel.texto },
   firmas: { flexDirection: 'row', gap: Spacing.four, marginTop: Spacing.two },
   firma: {
     flex: 1,
     borderTopWidth: 1,
-    borderTopColor: Colors.light.text,
+    borderTopColor: Panel.texto,
     paddingTop: Spacing.one,
     gap: Spacing.half,
   },
