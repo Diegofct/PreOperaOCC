@@ -21,10 +21,13 @@
  *
  * ── La geometría ──
  *
- * El índice se lleva `AnchoIndiceDeSecciones` y el marco se queda con
- * `AnchoContenidoConIndice`, que está **derivado** en el tema. De ahí sale el
- * presupuesto de anchos de tabla que comprueba `scripts/verificar-reglas.ts`: si
- * alguno de los dos cambia, el otro se mueve solo.
+ * El índice se lleva `AnchoIndiceDeSecciones` y el documento lo que quede. A dos
+ * columnas el contenido mide al menos `AnchoMinimoDosColumnas`, y de esos dos
+ * números sale el presupuesto de anchos de tabla que comprueba
+ * `scripts/verificar-reglas.ts`.
+ *
+ * Qué disposición toca se decide con el ancho del **contenido** —la ventana menos
+ * el menú lateral (spec 022)—, no con el de la ventana.
  */
 import { useRef, useState, type ReactNode } from 'react';
 import {
@@ -40,7 +43,7 @@ import {
 import {
   AnchoIndiceDeSecciones,
   AnchoMinimoDosColumnas,
-  Colors,
+  FuentePanel,
   Grosor,
   Movimiento,
   Panel,
@@ -49,6 +52,7 @@ import {
   Spacing,
   TextoPanel,
 } from '@/constants/theme';
+import { anchoDelContenido } from '@/shared/rules/menu';
 import {
   type EstadoDeSeccion,
   type IdDeSeccion,
@@ -56,6 +60,7 @@ import {
 } from '@/shared/rules/parte';
 
 import { Aviso } from './componentes';
+import { useMenu } from './estado-menu';
 
 /* ------------------------------------------------------------------------ */
 /* El índice                                                                 */
@@ -280,7 +285,8 @@ export function DisposicionConIndice({
   alMedir?: (y: number) => void;
 }) {
   const { width } = useWindowDimensions();
-  const estrecha = width > 0 && width < AnchoMinimoDosColumnas;
+  const { anchoReservado } = useMenu();
+  const estrecha = width > 0 && anchoDelContenido(width, anchoReservado) < AnchoMinimoDosColumnas;
 
   return (
     <View
@@ -382,22 +388,32 @@ const estilos = StyleSheet.create({
    * manchas. La barra de navegación sí usa el sólido, y con razón — ahí son
    * siete en fila y uno relleno se localiza de un vistazo.
    */
-  entradaActiva: { backgroundColor: Panel.accionSuave, borderLeftColor: Panel.accion },
+  entradaActiva: { backgroundColor: Panel.acentoSuave, borderLeftColor: Panel.accion },
   entradaEnfocada: { boxShadow: `0 0 0 ${Grosor.marca}px ${Panel.foco}` },
 
-  glifo: { fontSize: TextoPanel.micro, color: Colors.light.textSecondary, width: 12 },
-  glifoLleno: { color: Colors.light.text },
+  glifo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Panel.textoApoyo,
+    width: 12,
+  },
+  glifoLleno: { color: Panel.texto },
   entradaTitulo: {
+    fontFamily: FuentePanel.texto,
     flex: 1,
     fontSize: TextoPanel.apoyo,
     fontWeight: '600',
-    color: Colors.light.textSecondary,
+    color: Panel.textoApoyo,
   },
-  entradaTituloActiva: { color: Colors.light.text, fontWeight: '700' },
-  entradaDetalle: { fontSize: TextoPanel.micro, color: Colors.light.textSecondary },
+  entradaTituloActiva: { color: Panel.texto, fontWeight: '700' },
+  entradaDetalle: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Panel.textoApoyo,
+  },
 
   marco: {
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     borderRadius: Radio.md,
     borderCurve: 'continuous',
     boxShadow: Sombra.tarjeta,
@@ -414,7 +430,12 @@ const estilos = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.two,
   },
-  bandaTitulo: { fontSize: TextoPanel.seccion, fontWeight: '700', color: Colors.light.text },
+  bandaTitulo: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.seccion,
+    fontWeight: '700',
+    color: Panel.texto,
+  },
   bandaAccion: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   bandaCuerpo: { paddingHorizontal: Spacing.four, gap: Spacing.two },
 

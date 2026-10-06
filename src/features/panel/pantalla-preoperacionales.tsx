@@ -18,7 +18,7 @@
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Estado, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { fechaDeJornada, type Periodo, sumarDias } from '@/shared/rules/jornada';
 
 import { api } from './cliente-api';
@@ -394,14 +394,29 @@ const estilos = StyleSheet.create({
   dias: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
   /** El filtro de máquina: por encima de la tabla, por debajo del periodo. */
   fecha: { flex: 1, alignItems: 'center' },
-  fechaTexto: { fontSize: TextoPanel.seccion, fontWeight: '700', color: Colors.light.text },
-  fechaAyuda: { fontSize: TextoPanel.cuerpo, color: Estado.info, fontWeight: '600' },
+  fechaTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.seccion,
+    fontWeight: '700',
+    color: Panel.texto,
+  },
+  fechaAyuda: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Estado.info,
+    fontWeight: '600',
+  },
   nota: {
     padding: Spacing.three,
     borderRadius: Radio.md,
-    backgroundColor: Colors.light.backgroundElement,
+    backgroundColor: Panel.fondoCabecera,
   },
-  notaTexto: { fontSize: TextoPanel.cuerpo, lineHeight: 22, color: Colors.light.textSecondary },
+  notaTexto: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    lineHeight: 22,
+    color: Panel.textoApoyo,
+  },
 });
 
 export { ETIQUETA_RESULTADO };

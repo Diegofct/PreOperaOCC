@@ -19,7 +19,7 @@
  */
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Colors, Estado, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import type { FranjaGranulometrica } from '@/shared/catalogos/franjas-granulometricas';
 import { SERIE_DE_TAMICES, type IdTamiz } from '@/shared/catalogos/tamices';
 import {
@@ -156,7 +156,7 @@ const estilos = StyleSheet.create({
     borderColor: Panel.borde,
     borderRadius: Radio.sm,
     overflow: 'hidden',
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
     alignSelf: 'flex-start',
   },
   fila: {
@@ -170,24 +170,40 @@ const estilos = StyleSheet.create({
   },
   filaAlterna: { backgroundColor: Panel.fondoAlterno },
   cabecera: { backgroundColor: Panel.fondoCabecera, paddingVertical: Spacing.two },
-  encabezado: { fontSize: TextoPanel.micro, fontWeight: '700', color: Colors.light.textSecondary },
-  texto: { fontSize: TextoPanel.cuerpo, color: Colors.light.text },
+  encabezado: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    fontWeight: '700',
+    color: Panel.textoApoyo,
+  },
+  texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   cifra: { textAlign: 'right', fontVariant: ['tabular-nums'] },
   fuerte: { fontWeight: '700' },
   casilla: {
+    fontFamily: FuentePanel.texto,
     borderWidth: 1,
     borderColor: Panel.borde,
     borderRadius: Radio.sm,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
     fontSize: TextoPanel.cuerpo,
-    color: Colors.light.text,
+    color: Panel.texto,
     textAlign: 'right',
     fontVariant: ['tabular-nums'],
-    backgroundColor: Colors.light.background,
+    backgroundColor: Panel.superficie,
   },
-  casillaSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Colors.light.textSecondary },
+  casillaSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Panel.textoApoyo },
   casillaMal: { borderColor: Estado.noConforme },
-  error: { fontSize: TextoPanel.micro, color: Estado.noConforme, fontWeight: '600' },
-  fuera: { fontSize: TextoPanel.apoyo, color: Estado.noConforme, fontWeight: '700' },
+  error: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Estado.noConforme,
+    fontWeight: '600',
+  },
+  fuera: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    color: Estado.noConforme,
+    fontWeight: '700',
+  },
 });

@@ -26,7 +26,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, G, Line, Polygon, Polyline, Rect, Text as TextoSvg } from 'react-native-svg';
 
-import { Estado, Fonts, Marca, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { Estado, FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import type { FranjaGranulometrica } from '@/shared/catalogos/franjas-granulometricas';
 import { TAMICES_CON_ABERTURA } from '@/shared/catalogos/tamices';
 import type { PosicionEnFranja, ResultadoGranulometria } from '@/shared/rules/granulometria';
@@ -38,7 +38,9 @@ const MM_MAX = 100;
 const MARGEN = { izquierda: 52, derecha: 16, arriba: 12, abajo: 44 };
 
 const COLOR = {
-  ensayo: Marca.primario,
+  // Grafito y no el azul de la app del celular (spec 022): es el dato principal
+  // y se lee sobre blanco; los límites van en ámbar y azul, y discontinuos.
+  ensayo: Panel.texto,
   inferior: Estado.atencion,
   superior: Estado.info,
   fuera: Estado.noConforme,
@@ -132,7 +134,7 @@ export function CurvaGranulometrica({
     <View style={{ width: ancho }}>
       {/* La fuente va en el grupo: el texto de un SVG no hereda la del panel y saldría con serifa. */}
       <Svg width={ancho} height={alto} accessibilityLabel={descripcion}>
-        <G fontFamily={Fonts?.sans}>
+        <G fontFamily={FuentePanel.texto}>
           <Rect
             x={MARGEN.izquierda}
             y={MARGEN.arriba}
@@ -325,12 +327,14 @@ const estilos = StyleSheet.create({
     gap: Spacing.one,
   },
   vacioTitulo: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,
     color: Estado.na,
     fontWeight: '600',
     textAlign: 'center',
   },
   vacioDetalle: {
+    fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.apoyo,
     color: Estado.na,
     textAlign: 'center',
@@ -343,5 +347,5 @@ const estilos = StyleSheet.create({
     paddingTop: Spacing.one,
   },
   elemento: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  etiqueta: { fontSize: TextoPanel.apoyo, color: Estado.na },
+  etiqueta: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Estado.na },
 });

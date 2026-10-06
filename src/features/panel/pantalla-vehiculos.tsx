@@ -186,6 +186,9 @@ export default function PantallaVehiculos() {
       clave: 'acciones',
       titulo: '',
       ancho: 130,
+      // Los botones se apilan, pero no se parten: la columna no baja del más ancho
+      // (spec 022, RF-27). «Dar de baja», el botón más ancho de la columna, mide 117.
+      anchoMinimo: 120,
       pintar: (v) => (
         <Acciones>
           <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(v)} />

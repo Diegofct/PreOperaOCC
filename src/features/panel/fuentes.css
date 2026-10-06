@@ -1,0 +1,78 @@
+/*
+ * Las tipografías del panel. Spec 022, RF-22, RF-23 y RF-33.
+ *
+ * Plus Jakarta Sans para títulos y textos; Space Grotesk, en mayúsculas, para los
+ * botones, los títulos de los grupos del menú y las cabeceras de tabla. Las dos
+ * con licencia OFL, que permite llevarlas dentro de la aplicación (las licencias
+ * van al lado de los archivos, en `public/fuentes/`).
+ *
+ * Por qué `@font-face` y no `useFonts` de expo-font: `useFonts` registra una
+ * familia por archivo y sin peso, así que cada `fontWeight` del panel tendría que
+ * volverse un nombre de familia distinto. Aquí un solo nombre lleva todos sus
+ * pesos y `fontWeight` sigue funcionando.
+ *
+ * Pesos estáticos y no la fuente variable: un `@font-face` variable sin rango de
+ * pesos hace que el navegador sintetice la negrita, y se ve borrosa.
+ *
+ * Las URL apuntan a `/fuentes/`, que Expo sirve desde `public/`. Nada de Google
+ * Fonts por enlace: sin internet el panel se quedaría sin letra (RF-33). Una
+ * prueba en `verificar-reglas.ts` lo vigila.
+ *
+ * Solo lo importa el layout del panel: el celular no lo carga (RF-34).
+ */
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fuentes/PlusJakartaSans-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fuentes/PlusJakartaSans-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fuentes/PlusJakartaSans-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fuentes/PlusJakartaSans-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  src: url('/fuentes/PlusJakartaSans-ExtraBold.ttf') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/fuentes/SpaceGrotesk-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/fuentes/SpaceGrotesk-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}

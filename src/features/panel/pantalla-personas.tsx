@@ -267,6 +267,9 @@ export default function PantallaPersonas() {
       clave: 'obra',
       titulo: 'Obra',
       ancho: 180,
+      // La que cede cuando falta sitio (spec 022, RF-27): el nombre de una obra se
+      // lee bien en dos renglones, y así la columna de botones conserva su ancho.
+      anchoMinimo: 88,
       pintar: (p) => <Celda>{p.obraNombre ?? '—'}</Celda>,
       ordenar: ORDEN_DE_COLUMNA.obra,
     },
@@ -274,6 +277,9 @@ export default function PantallaPersonas() {
       clave: 'acciones',
       titulo: '',
       ancho: 230,
+      // Los botones se apilan, pero no se parten: la columna no baja del más ancho
+      // (spec 022, RF-27). «Cambiar mi contraseña», el botón más ancho de la columna, mide 198.
+      anchoMinimo: 200,
       pintar: (p) => {
         // La fila de quien está mirando. Ver la cabecera del archivo: aquí no va
         // ninguna acción que pueda dejarle fuera de su propio panel.

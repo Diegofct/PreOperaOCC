@@ -15,15 +15,18 @@
  * Pide la actual aunque ya haya sesión abierta. Un computador de obra que
  * alguien dejó abierto no debería poder convertirse en una cuenta secuestrada
  * para siempre en dos clics.
+ *
+ * Usa la misma tarjeta que el ingreso (spec 022, RF-31).
  */
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { Colors, Panel, Radio, Sombra, Spacing, TextoPanel } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 
 import { Aviso, Boton, Campo } from './componentes';
 import { LONGITUD_MINIMA_CLAVE } from './contratos';
 import { useSesionPanel } from './sesion';
+import { TarjetaDeAcceso } from './tarjeta-de-acceso';
 
 export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () => void }) {
   const { cambiarClave, persona, salir } = useSesionPanel();
@@ -48,22 +51,18 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
   }
 
   return (
-    <View style={estilos.pantalla}>
-      <View style={estilos.tarjeta}>
-        <View style={estilos.encabezado}>
-          <Text style={estilos.titulo}>
-            {obligatorio ? 'Defina su contraseña' : 'Cambiar contraseña'}
-          </Text>
-          {obligatorio ? (
-            <Text style={estilos.subtitulo}>
-              Está entrando con una contraseña temporal. Elija una suya para continuar: nadie más
-              debería conocerla, ni siquiera quien se la entregó.
-            </Text>
-          ) : null}
-        </View>
+    <TarjetaDeAcceso
+      titulo={obligatorio ? 'Defina su contraseña' : 'Cambiar contraseña'}
+      subtitulo={
+        obligatorio
+          ? 'Está entrando con una contraseña temporal. Elija una suya para continuar: nadie ' +
+            'más debería conocerla, ni siquiera quien se la entregó.'
+          : undefined
+      }
+    >
+      {error ? <Aviso tono="error">{error}</Aviso> : null}
 
-        {error ? <Aviso tono="error">{error}</Aviso> : null}
-
+      <View style={estilos.campos}>
         <Campo
           etiqueta={obligatorio ? 'Contraseña temporal' : 'Contraseña actual'}
           obligatorio
@@ -89,7 +88,9 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
           onEnviar={enviar}
           error={noCoinciden ? 'No coincide con la anterior.' : undefined}
         />
+      </View>
 
+      <View style={estilos.botones}>
         <Boton
           titulo={ocupado ? 'Guardando…' : 'Guardar contraseña'}
           onPress={enviar}
@@ -104,33 +105,11 @@ export default function PantallaCambiarClave({ onCancelar }: { onCancelar?: () =
           <Boton titulo="Cancelar" tono="secundario" onPress={onCancelar} />
         ) : null}
       </View>
-    </View>
+    </TarjetaDeAcceso>
   );
 }
 
 const estilos = StyleSheet.create({
-  pantalla: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-    backgroundColor: Panel.fondo,
-  },
-  tarjeta: {
-    width: '100%',
-    maxWidth: 420,
-    gap: Spacing.three,
-    padding: Spacing.five,
-    borderRadius: Radio.lg,
-    borderCurve: 'continuous',
-    backgroundColor: Colors.light.background,
-    boxShadow: Sombra.flotante,
-  },
-  encabezado: { gap: Spacing.one },
-  titulo: { fontSize: TextoPanel.titulo, fontWeight: '800', color: Colors.light.text },
-  subtitulo: {
-    fontSize: TextoPanel.apoyo,
-    lineHeight: 19,
-    color: Colors.light.textSecondary,
-  },
+  campos: { gap: Spacing.three },
+  botones: { gap: Spacing.two },
 });

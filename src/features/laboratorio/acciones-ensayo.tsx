@@ -29,7 +29,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Spacing, TextoPanel } from '@/constants/theme';
+import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { transicionPermitida } from '@/shared/rules/granulometria';
 import { alcanza, type Rol } from '@/shared/rules/permisos';
 
@@ -346,6 +346,6 @@ const estilos = StyleSheet.create({
   barra: { gap: Spacing.two },
   firmas: { gap: Spacing.one },
   historia: { gap: Spacing.one, marginTop: Spacing.two },
-  linea: { fontSize: TextoPanel.cuerpo, color: Colors.light.text },
-  rotulo: { fontWeight: '700', color: Colors.light.textSecondary },
+  linea: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
+  rotulo: { fontWeight: '700', color: Panel.textoApoyo },
 });

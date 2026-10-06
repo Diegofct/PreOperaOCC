@@ -65,6 +65,7 @@ import {
   sinObraAsignada,
   modulosVisibles,
   puedeCambiarRol,
+  type Modulo,
   type Rol,
   TODOS_LOS_MODULOS,
 } from '../src/shared/rules/permisos';
@@ -134,10 +135,16 @@ import {
 } from '../src/shared/catalogos/presupuesto';
 import { Colors, Estado, Panel } from '../src/constants/paleta';
 import {
-  AnchoContenidoConIndice,
+  AnchoIndiceDeSecciones,
+  AnchoMenuAbierto,
+  AnchoMenuPlegado,
+  AnchoMinimoDosColumnas,
+  AnchoMinimoMenuFijo,
+  AnchoMinimoPanel,
   MaxContentWidthPanel,
   Spacing,
 } from '../src/constants/medidas';
+import { anchoMinimoDeColumna } from '../src/features/panel/columnas';
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
 import { conservarOrigen } from '../src/features/bitacoras/servidor/secciones';
 import {
@@ -170,7 +177,19 @@ import {
   type VehiculoConocido,
 } from '../src/shared/rules/whatsapp';
 import { colocarLista } from '../src/shared/rules/flotante';
-import { barraCabeEnUnRenglon } from '../src/shared/rules/barra';
+import {
+  anchoDelContenido,
+  GRUPOS_DEL_MENU,
+  gruposDelMenu,
+  regimenDelMenu,
+} from '../src/shared/rules/menu';
+import { moduloDeLaRuta } from '../src/features/panel/modulos';
+import {
+  CLAVE_PREFERENCIA_MENU,
+  guardarPreferencia,
+  leerPreferencia,
+  type Almacen,
+} from '../src/features/panel/preferencia-menu';
 import { cumplimientoDelDia } from '../src/shared/rules/cumplimiento';
 import {
   formatoPendiente,
@@ -2506,24 +2525,122 @@ prueba('una cuenta sin obra se detecta para todo el que no es gerencia', () => {
   assert.equal(sinObraAsignada('admin', null), false);
 });
 
-prueba('la barra de la gerencia con nueve módulos no cabe en un renglón', () => {
-  // Las medidas de Chrome del 2026-09-15: nueve enlaces que suman 884 más 8
-  // separaciones de 4, en 1232 de ancho útil. Con la marca de 229 y la cuenta de
-  // 160, el lado más ancho manda en los dos: 458 + 916 + 32 = 1406 > 1232.
-  const nueve = [67, 70, 88, 92, 115, 90, 141, 89, 132];
-  const base = { anchoDisponible: 1232, marca: 229, cuenta: 160, separacionEnlaces: 4, separacionLados: 16 };
-  assert.equal(barraCabeEnUnRenglon({ ...base, enlaces: nueve }), false);
-  // Los seis del residente sí caben: 458 + (634 + 5 × 4) + 32 = 1144.
-  assert.equal(barraCabeEnUnRenglon({ ...base, enlaces: [67, 115, 90, 141, 89, 132] }), true);
-  // El lado más ancho es el que manda, no la suma de los dos.
-  assert.equal(
-    barraCabeEnUnRenglon({ anchoDisponible: 100, marca: 30, cuenta: 10, enlaces: [20], separacionEnlaces: 0, separacionLados: 5 }),
-    true,
+/** Los grupos del menú de un rol, como pares título → módulos, fáciles de comparar. */
+function menuDe(rol: Rol, modulos = TODOS_LOS_MODULOS) {
+  return gruposDelMenu(modulosVisibles(rol, modulos)).map((g) => [g.titulo, g.modulos]);
+}
+
+prueba('el menú de la gerencia lleva los cuatro grupos y los once módulos (022/RF-3)', () => {
+  assert.deepEqual(menuDe('admin'), [
+    [null, ['inicio']],
+    ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales']],
+    ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
+    ['Administración', ['obras', 'personas', 'vehiculos', 'asignaciones']],
+  ]);
+});
+
+prueba('el residente ve «Administración» solo con Asignaciones (022/RF-2, RF-4)', () => {
+  assert.deepEqual(menuDe('supervisor'), [
+    [null, ['inicio']],
+    ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales']],
+    ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
+    ['Administración', ['asignaciones']],
+  ]);
+});
+
+prueba('los roles de un solo módulo ven un solo grupo, con su módulo (022/RF-4)', () => {
+  const esperado: [Rol, Modulo][] = [
+    ['almacenista', 'almacen'],
+    ['encargado_planta', 'cantera'],
+    ['laboratorista', 'laboratorio'],
+  ];
+  for (const [rol, modulo] of esperado) {
+    assert.deepEqual(menuDe(rol), [['Módulos de obra', [modulo]]], rol);
+  }
+});
+
+prueba('un módulo apagado en la obra no sale en el menú del residente (022/RF-2)', () => {
+  const grupo = menuDe('supervisor', { ...TODOS_LOS_MODULOS, cantera: false }).find(
+    ([titulo]) => titulo === 'Módulos de obra',
   );
-  assert.equal(
-    barraCabeEnUnRenglon({ anchoDisponible: 89, marca: 30, cuenta: 10, enlaces: [20], separacionEnlaces: 0, separacionLados: 5 }),
-    false,
-  );
+  assert.deepEqual(grupo, ['Módulos de obra', ['almacen', 'laboratorio']]);
+  // Con los tres apagados, el grupo entero desaparece con su título.
+  const nada = { almacen: false, cantera: false, laboratorio: false };
+  assert.ok(!menuDe('supervisor', nada).some(([titulo]) => titulo === 'Módulos de obra'));
+});
+
+prueba('todo módulo está en exactamente un grupo del menú (022/RF-3)', () => {
+  // Un módulo nuevo que nadie ponga en un grupo desaparecería del menú sin avisar.
+  const enGrupos = GRUPOS_DEL_MENU.flatMap((g) => g.modulos);
+  assert.equal(new Set(enGrupos).size, enGrupos.length, 'hay un módulo repetido');
+  assert.deepEqual([...enGrupos].sort(), [...MODULOS].sort());
+});
+
+prueba('el menú arranca abierto y se pliega solo en ventana angosta (022/RF-8, RF-11, RF-12)', () => {
+  assert.equal(regimenDelMenu({ ventana: AnchoMinimoMenuFijo, preferencia: null }), 'fijoAbierto');
+  assert.equal(regimenDelMenu({ ventana: 1920, preferencia: 'abierto' }), 'fijoAbierto');
+  assert.equal(regimenDelMenu({ ventana: AnchoMinimoMenuFijo, preferencia: 'plegado' }), 'fijoPlegado');
+  for (const preferencia of [null, 'abierto', 'plegado'] as const) {
+    assert.equal(regimenDelMenu({ ventana: AnchoMinimoMenuFijo - 1, preferencia }), 'riel', String(preferencia));
+  }
+});
+
+prueba('el ancho del contenido descuenta el menú, los márgenes y la barra (022/RNF)', () => {
+  // Los dos peores casos del plan: menú abierto a 1280 y en riel a 1024. Con la
+  // barra de desplazamiento de Windows (15 px, medida en Chrome) y no sin ella.
+  assert.equal(anchoDelContenido(1280, AnchoMenuAbierto), 968);
+  assert.equal(anchoDelContenido(1024, AnchoMenuPlegado), 888);
+  // En un monitor grande manda el tope de página.
+  assert.equal(anchoDelContenido(1920, AnchoMenuAbierto), MaxContentWidthPanel);
+});
+
+prueba('el módulo activo sale de la dirección, también en sus subpáginas (022/RF-6)', () => {
+  assert.equal(moduloDeLaRuta('/panel'), 'inicio');
+  assert.equal(moduloDeLaRuta('/panel/'), 'inicio');
+  assert.equal(moduloDeLaRuta('/panel/obras'), 'obras');
+  assert.equal(moduloDeLaRuta('/panel/whatsapp'), 'whatsapp');
+  // Antes se comparaba con igualdad y el informe de un ensayo no marcaba Laboratorio.
+  assert.equal(moduloDeLaRuta('/panel/laboratorio/abc'), 'laboratorio');
+  assert.equal(moduloDeLaRuta('/panel/laboratorio/abc/informe'), 'laboratorio');
+  // Un prefijo de texto no es una subpágina: «obrasx» no es Obras.
+  assert.equal(moduloDeLaRuta('/panel/obrasx'), null);
+  assert.equal(moduloDeLaRuta('/panel/desconocido'), null);
+  assert.equal(moduloDeLaRuta('/'), null);
+});
+
+prueba('la preferencia del menú se recuerda en el navegador (022/RF-11)', () => {
+  const datos = new Map<string, string>();
+  const almacen: Almacen = {
+    getItem: (clave) => datos.get(clave) ?? null,
+    setItem: (clave, valor) => void datos.set(clave, valor),
+  };
+  // Sin nada guardado: «sin preferencia», que el régimen lee como abierto (RF-8).
+  assert.equal(leerPreferencia(almacen), null);
+  assert.equal(guardarPreferencia(almacen, 'plegado'), true);
+  assert.equal(datos.get(CLAVE_PREFERENCIA_MENU), 'plegado');
+  assert.equal(leerPreferencia(almacen), 'plegado');
+  assert.equal(guardarPreferencia(almacen, 'abierto'), true);
+  assert.equal(leerPreferencia(almacen), 'abierto');
+  // Un valor que no es nuestro (otra versión, alguien que lo editó) no se cree.
+  datos.set(CLAVE_PREFERENCIA_MENU, 'medio');
+  assert.equal(leerPreferencia(almacen), null);
+});
+
+prueba('un navegador que no deja guardar no rompe el menú (022/RF-8, RF-11)', () => {
+  // Incógnito estricto o almacenamiento bloqueado: el acceso mismo lanza.
+  const bloqueado: Almacen = {
+    getItem: () => {
+      throw new Error('SecurityError');
+    },
+    setItem: () => {
+      throw new Error('QuotaExceededError');
+    },
+  };
+  assert.equal(leerPreferencia(bloqueado), null);
+  assert.equal(guardarPreferencia(bloqueado, 'plegado'), false);
+  // Y sin navegador (el servidor pinta la página sin `window`): igual que la primera vez.
+  assert.equal(leerPreferencia(null), null);
+  assert.equal(guardarPreferencia(null, 'plegado'), false);
 });
 
 prueba('cada rol entra por su módulo', () => {
@@ -3983,35 +4100,31 @@ prueba('la lista se recorta al espacio que tiene', () => {
   assert.equal(colocarLista({ ...PANTALLA, botonY: 700, botonAlto: 38, altoLista: 240 }).alto >= 0, true);
 });
 
-prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
-  // Spec 005 / RF-20. Cuando una tabla se pasa, la columna que queda fuera de
-  // la vista es siempre la última —la de los botones—, que es justo la que hay
-  // que pulsar. Y no se nota en un monitor grande: se nota en el portátil de la
-  // obra. Por eso se cuenta aquí y no se mira a ojo.
-  // Los números salen de los tokens, no de literales con un comentario al lado.
-  // Antes estaban escritos a mano porque `theme.ts` no es importable desde Node
-  // —abre con `global.css` y `react-native`—; desde la spec 006 las medidas
-  // viven en `medidas.ts`, que sí es puro. Un número escrito dos veces es un
-  // número que un día deja de coincidir sin que nadie se entere.
+prueba('ninguna tabla del panel se sale del ancho de la pantalla (005/RF-20, 022/RF-27)', () => {
+  // Cuando una tabla se pasa, la columna que queda fuera de la vista es siempre la
+  // última —la de los botones—, que es justo la que hay que pulsar. Y no se nota en
+  // un monitor grande: se nota en el portátil de la obra. Por eso se cuenta aquí.
+  //
+  // Desde la spec 022 las columnas se encogen hasta su mínimo, y lo que se cuenta es
+  // **la suma de los mínimos** contra el contenido más angosto que la spec promete:
+  // ventana de 1024 con el menú plegado y la barra de desplazamiento. A más ancho,
+  // las columnas vuelven a su ancho.
   const SEPARACION = Spacing.three;
   const MARGEN = Spacing.three * 2;
+  const suelo = anchoDelContenido(AnchoMinimoPanel, AnchoMenuPlegado);
+  assert.equal(suelo, 888);
 
   /**
-   * Cuánto ancho tiene de verdad cada pantalla.
-   *
-   * El parte diario tiene **menos**: desde la spec 006 lleva un índice a la
-   * izquierda, así que sus tablas viven dentro de un marco más estrecho y con su
-   * propio relleno. Sin esta distinción la prueba seguiría en verde mientras la
-   * tabla se sale de su marco — y eso no se nota en un monitor grande, se nota
-   * en el portátil de la obra.
+   * El parte diario tiene **menos**: lleva el índice a la izquierda mientras el
+   * contenido pase de `AnchoMinimoDosColumnas`, y sus tablas viven dentro de una
+   * banda con relleno (`Spacing.four` a cada lado). En el peor caso a dos columnas
+   * quedan 1000 − 220 − 24 − 48 = 708. Por debajo, el índice sube y le deja más.
    */
   const LIMITE_POR_ARCHIVO: Record<string, number> = {
-    // El relleno que se descuenta aquí es el de la **banda** (`Spacing.four` a
-    // cada lado), no el de la tabla: el de la tabla ya va dentro de `MARGEN`.
-    // Restar el equivocado deja el presupuesto 16 puntos largo, que es
-    // justamente lo que no se vería hasta tener la pantalla delante.
-    'pantalla-partes.tsx': AnchoContenidoConIndice - Spacing.four * 2,
+    'pantalla-partes.tsx':
+      AnchoMinimoDosColumnas - AnchoIndiceDeSecciones - Spacing.four - Spacing.four * 2,
   };
+  assert.equal(LIMITE_POR_ARCHIVO['pantalla-partes.tsx'], 708);
 
   // Con las subcarpetas (spec 021: `panel/whatsapp/`): una pantalla en una carpeta
   // propia no puede quedar fuera de la cuenta.
@@ -4025,17 +4138,36 @@ prueba('ninguna tabla del panel se sale del ancho de la pantalla', () => {
     const archivo = path.basename(ruta);
     const fuente = readFileSync(path.join(carpeta, ruta), 'utf8');
     for (const bloque of fuente.matchAll(/const columnas[^=]*=\s*\[(.*?)\n {2}\];/gs)) {
-      const anchos = [...bloque[1].matchAll(/ancho:\s*(\d+)/g)].map((m) => Number(m[1]));
-      if (anchos.length === 0) continue;
+      // Una columna por `clave:`; en cada una, su ancho y, si lo declara, su mínimo.
+      const minimos = bloque[1]
+        .split(/\bclave:/)
+        .slice(1)
+        .map((columna) => {
+          const ancho = /\bancho:\s*(\d+)/.exec(columna);
+          const minimo = /\banchoMinimo:\s*(\d+)/.exec(columna);
+          return ancho ? anchoMinimoDeColumna(Number(ancho[1]), minimo ? Number(minimo[1]) : undefined) : null;
+        })
+        .filter((m): m is number => m !== null);
+      if (minimos.length === 0) continue;
       tablas++;
       const gasto =
-        anchos.reduce((suma, a) => suma + a, 0) + SEPARACION * (anchos.length - 1) + MARGEN;
-      const limite = LIMITE_POR_ARCHIVO[archivo] ?? MaxContentWidthPanel;
-      assert.ok(gasto <= limite, `${archivo}: la tabla gasta ${gasto} de ${limite}`);
+        minimos.reduce((suma, a) => suma + a, 0) + SEPARACION * (minimos.length - 1) + MARGEN;
+      const limite: number = LIMITE_POR_ARCHIVO[archivo] ?? suelo;
+      assert.ok(gasto <= limite, `${archivo}: la tabla gasta ${gasto} de ${limite} ya encogida`);
     }
   }
 
   assert.ok(tablas >= 10, `se esperaban al menos 10 tablas y se encontraron ${tablas}`);
+});
+
+prueba('una columna se encoge hasta su mínimo y no más (022/RF-27)', () => {
+  // Sin mínimo propio, el 65 % de su ancho, redondeado.
+  assert.equal(anchoMinimoDeColumna(200), 130);
+  assert.equal(anchoMinimoDeColumna(101), 66);
+  // Una columna de botones que no debe encogerse lo declara igual a su ancho.
+  assert.equal(anchoMinimoDeColumna(180, 180), 180);
+  // Un mínimo mayor que el ancho no tiene sentido: manda el ancho.
+  assert.equal(anchoMinimoDeColumna(120, 300), 120);
 });
 
 /**
@@ -4081,6 +4213,142 @@ prueba('el texto del panel contrasta lo suficiente con su fondo', () => {
     const razon = contraste(texto, fondo);
     assert.ok(razon >= 4.5, `${que}: ${razon.toFixed(2)}:1, por debajo de 4.5:1`);
   }
+});
+
+prueba('las fuentes del panel viajan dentro de la aplicación (022/RF-22, RF-23, RF-33)', () => {
+  // Sin internet el panel tiene que seguir viéndose igual: los archivos están en el
+  // proyecto, con su licencia, y el CSS solo apunta a ellos.
+  const raiz = path.join(__dirname, '..');
+  const carpeta = path.join(raiz, 'public', 'fuentes');
+  const archivos = readdirSync(carpeta);
+  const pesos: [string, number][] = [
+    ['PlusJakartaSans-Regular.ttf', 400],
+    ['PlusJakartaSans-Medium.ttf', 500],
+    ['PlusJakartaSans-SemiBold.ttf', 600],
+    ['PlusJakartaSans-Bold.ttf', 700],
+    ['PlusJakartaSans-ExtraBold.ttf', 800],
+    ['SpaceGrotesk-Medium.ttf', 500],
+    ['SpaceGrotesk-Bold.ttf', 700],
+  ];
+  for (const [archivo] of pesos) assert.ok(archivos.includes(archivo), `falta ${archivo}`);
+  for (const licencia of ['OFL-PlusJakartaSans.txt', 'OFL-SpaceGrotesk.txt']) {
+    assert.ok(archivos.includes(licencia), `falta ${licencia}`);
+  }
+
+  const css = readFileSync(path.join(raiz, 'src', 'features', 'panel', 'fuentes.css'), 'utf8');
+  const caras = [...css.matchAll(/@font-face\s*\{(.*?)\}/gs)].map((m) => m[1]);
+  assert.equal(caras.length, pesos.length, 'un @font-face por archivo');
+  for (const [archivo, peso] of pesos) {
+    const cara = caras.find((c) => c.includes(`/fuentes/${archivo}`));
+    assert.ok(cara, `ningún @font-face carga ${archivo}`);
+    assert.match(cara, new RegExp(`font-weight:\\s*${peso};`), `${archivo} sin su peso ${peso}`);
+  }
+  // Ni una URL de afuera: Google Fonts por enlace rompería RF-33.
+  const urls = [...css.matchAll(/url\(\s*['"]?([^'")]+)/g)].map((m) => m[1]);
+  assert.ok(urls.length > 0);
+  for (const url of urls) assert.ok(url.startsWith('/fuentes/'), `URL ajena en fuentes.css: ${url}`);
+});
+
+/**
+ * Los archivos de pantalla del panel: lo que ve el navegador de la administración.
+ * El laboratorio (spec 018) solo lo usan el panel y su API; su carpeta `servidor/`
+ * no pinta nada y queda fuera.
+ */
+function archivosDelPanel(): string[] {
+  const raiz = path.join(__dirname, '..');
+  const recursivo = (carpeta: string) =>
+    (readdirSync(path.join(raiz, carpeta), { recursive: true }) as string[])
+      .filter((f) => f.endsWith('.tsx'))
+      .map((f) => path.posix.join(carpeta, f.split(path.sep).join('/')));
+  const laboratorio = readdirSync(path.join(raiz, 'src/features/laboratorio'))
+    .filter((f) => f.endsWith('.tsx'))
+    .map((f) => `src/features/laboratorio/${f}`);
+  return [...recursivo('src/features/panel'), ...recursivo('src/app/panel'), ...laboratorio];
+}
+
+/** Lo que le falta a un archivo del panel para estar del todo en el diseño nuevo. */
+function faltasDeDiseno(fuente: string): string[] {
+  const faltas: string[] = [];
+  // Los colores del celular: el panel tiene los suyos en `Panel` (022/RF-34).
+  if (/\bColors\.light\b/.test(fuente)) faltas.push('usa Colors.light');
+  if (/\bMarca\.\w/.test(fuente)) faltas.push('usa Marca');
+  // Todo objeto de estilo con tamaño de letra dice qué letra (022/RF-22, RF-23):
+  // sin `fontFamily`, React Native Web pinta la del sistema.
+  for (const objeto of fuente.matchAll(/\{[^{}]*\bfontSize\b[^{}]*\}/g)) {
+    if (!/\bfontFamily\b/.test(objeto[0])) {
+      const linea = fuente.slice(0, objeto.index).split('\n').length;
+      faltas.push(`fontSize sin fontFamily (línea ${linea})`);
+    }
+  }
+  return faltas;
+}
+
+prueba('el panel usa sus propios colores y sus propias letras (022/RF-20, RF-22, RF-34)', () => {
+  const raiz = path.join(__dirname, '..');
+  const archivos = archivosDelPanel();
+  assert.ok(archivos.length > 40, `se esperaban más de 40 archivos y hay ${archivos.length}`);
+  // Sin excepciones: el barrido de la spec 022 terminó en su tarea T15.
+  for (const archivo of archivos) {
+    assert.deepEqual(faltasDeDiseno(readFileSync(path.join(raiz, archivo), 'utf8')), [], archivo);
+  }
+});
+
+prueba('lo del panel no se cuela en el celular (022/RF-34)', () => {
+  // Las letras, el menú y la barra son del panel. Si algo fuera de él los importa,
+  // el celular cambia de aspecto sin que nadie lo haya pedido.
+  const raiz = path.join(__dirname, '..');
+  const propios = new Set(archivosDelPanel());
+  const todos = (readdirSync(path.join(raiz, 'src'), { recursive: true }) as string[])
+    .filter((f) => /\.tsx?$/.test(f))
+    .map((f) => path.posix.join('src', f.split(path.sep).join('/')))
+    .filter((f) => !propios.has(f) && !f.startsWith('src/features/panel/'));
+  assert.ok(todos.length > 50);
+  const soloDelPanel =
+    /from '[^']*(fuentes\.css|menu-lateral|barra-superior|estado-menu|tarjeta-de-acceso)'|import '[^']*fuentes\.css'/;
+  for (const archivo of todos) {
+    const fuente = readFileSync(path.join(raiz, archivo), 'utf8');
+    assert.ok(!soloDelPanel.test(fuente), `${archivo} importa algo que es solo del panel`);
+  }
+});
+
+prueba('la paleta nueva del panel contrasta lo suficiente (022/RNF)', () => {
+  // Crema, grafito y amarillo de maquinaria. El texto pide 4,5:1 sobre cada fondo
+  // donde puede caer; el amarillo solo va de fondo, con grafito encima.
+  const fondos: [string, string][] = [
+    ['el lienzo crema', Panel.fondo],
+    ['la superficie', Panel.superficie],
+    ['la cabecera', Panel.fondoCabecera],
+    ['la fila alterna', Panel.fondoAlterno],
+    ['la fila bajo el cursor', Panel.fondoHover],
+  ];
+  const pares: [string, string, string][] = [
+    ...fondos.flatMap(([donde, fondo]): [string, string, string][] => [
+      [`texto sobre ${donde}`, Panel.texto, fondo],
+      [`texto de apoyo sobre ${donde}`, Panel.textoApoyo, fondo],
+    ]),
+    ['botón principal', Panel.sobreAccion, Panel.accion],
+    ['botón principal presionado', Panel.sobreAccion, Panel.accionPresionada],
+    ['grafito sobre el amarillo', Panel.sobreAcento, Panel.acento],
+    ['grafito sobre el amarillo suave', Panel.sobreAcento, Panel.acentoSuave],
+    ['texto de la barra', Panel.textoBarra, Panel.barra],
+    ['texto de apoyo de la barra', Panel.textoBarraApoyo, Panel.barra],
+    ['botón de la barra bajo el cursor', Panel.textoBarra, Panel.fondoBarraHover],
+  ];
+  for (const [que, texto, fondo] of pares) {
+    const razon = contraste(texto, fondo);
+    assert.ok(razon >= 4.5, `${que}: ${razon.toFixed(2)}:1, por debajo de 4.5:1`);
+  }
+
+  // El anillo de foco no es texto: le basta 3:1 (WCAG 1.4.11), pero tiene que
+  // verse sobre los dos fondos donde caen los campos y los botones.
+  for (const [donde, fondo] of [['el lienzo', Panel.fondo], ['la superficie', Panel.superficie]]) {
+    const razon = contraste(Panel.foco, fondo);
+    assert.ok(razon >= 3, `foco sobre ${donde}: ${razon.toFixed(2)}:1, por debajo de 3:1`);
+  }
+
+  // Y la regla que no se ve en una tabla de pares: el amarillo **no** sirve de
+  // texto. Si alguien lo prueba sobre crema, esto le dice por qué no.
+  assert.ok(contraste(Panel.acento, Panel.fondo) < 4.5);
 });
 
 prueba('están los veintiún cargos, con slug y rótulo únicos', () => {
