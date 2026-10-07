@@ -21,6 +21,7 @@ import { firmarPeticion } from '../src/features/media/servidor/firma-s3';
 import { respuestaEnviada } from '../src/features/servidor/envios';
 import {
   conReintentoSiChoca,
+  cuerpoJson,
   duplicadoDe,
   MENSAJE_DE_CHOQUE,
   responder,
@@ -154,9 +155,13 @@ import {
 } from '../src/features/servidor/guardia-integracion';
 import {
   abscisaDeTexto,
+  cargoDeHoja,
   condicionDeClima,
   avisoDeReemplazo,
   conductorDelViaje,
+  posiblesCoincidencias,
+  rechazoDeRegistro,
+  usuarioDeLaBandeja,
   destinoDeCategoria,
   etiquetaDeCategoria,
   estadoInicialDeCategoria,
@@ -183,7 +188,7 @@ import {
   gruposDelMenu,
   regimenDelMenu,
 } from '../src/shared/rules/menu';
-import { moduloDeLaRuta } from '../src/features/panel/modulos';
+import { moduloDeLaRuta, tituloDeLaPestana } from '../src/features/panel/modulos';
 import {
   CLAVE_PREFERENCIA_MENU,
   guardarPreferencia,
@@ -223,7 +228,7 @@ import {
   type RetenidosDelEnsayo,
 } from '../src/shared/rules/granulometria';
 import { vehiculos } from '../src/db/servidor/esquema';
-import { alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
+import { alcanzaLaImagen, alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
 import type { PersonaEnSesion } from '../src/features/auth/servidor/sesion';
 import {
   debeRendirse,
@@ -277,20 +282,26 @@ import {
   rechazoDeBaja,
   rechazoDeCambioDeUnidad,
   rechazoDeSalida,
+  saldoDelReporte,
   totalesDelMaterial,
+  unidadDeTexto,
   validarMovimiento,
   type MovimientoRegistrado,
 } from '../src/shared/rules/almacen';
 import {
+  avisoDeValeRepetido,
   canteraDelParte,
   conductorElegible,
   DESTINO_OBRA,
+  faltaDeVale,
   filtrarViajes,
   formatearAbscisa,
+  mismoVale,
   OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
   validarAbscisa,
   validarViaje,
+  valeLimpio,
   volquetaElegible,
 } from '../src/shared/rules/cantera';
 import {
@@ -332,6 +343,8 @@ import {
   entregaDeWhatsapp,
   grupoAsociado,
   propuestaCorregida,
+  personasDesdeLaBandeja,
+  reporteCorregido,
   personaDelParte,
   personaEditada,
   sitioEditado,
@@ -2643,6 +2656,43 @@ prueba('un navegador que no deja guardar no rompe el menú (022/RF-8, RF-11)', (
   assert.equal(guardarPreferencia(null, 'plegado'), false);
 });
 
+prueba('una foto solo la ve quien alcanza la obra de su registro (defecto de media, 2026-10-06)', () => {
+  // Las fotos del parte diario cuelgan de `partes_de_obra`, y la ruta de imágenes las
+  // buscaba en la tabla vieja `bitacoras`: no las encontraba, quedaban «sin obra» y
+  // `alcanzaLaObra` deja pasar lo que no tiene obra. Un residente podía ver la foto
+  // del día de otra obra con solo tener su id.
+  const residenteA = sesionDe('supervisor', 'obra-a');
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-a' }), true);
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-b' }), false);
+  // El hueco: un dueño que no se encuentra **no** es «de todos».
+  assert.equal(alcanzaLaImagen(residenteA, { existe: false, obraId: null }), false);
+  // Un registro que sí existe y no lleva obra conserva la regla de siempre.
+  assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: null }), true);
+  // La gerencia ve todo, también lo huérfano: es quien tiene que poder revisarlo.
+  const gerencia = sesionDe('admin', null);
+  assert.equal(alcanzaLaImagen(gerencia, { existe: false, obraId: null }), true);
+  assert.equal(alcanzaLaImagen(gerencia, { existe: true, obraId: 'obra-b' }), true);
+});
+
+prueba('la pestaña dice en qué pantalla se está (defecto de títulos, 2026-10-06)', () => {
+  // Expo Router 57 no copia el título del `Stack` a la pestaña (`documentTitle` va
+  // apagado), así que los títulos declarados nunca se veían. Ahora salen de la ruta.
+  assert.equal(tituloDeLaPestana('/panel'), 'Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/whatsapp'), 'Reportes de WhatsApp · Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/cantera'), 'Control Cantera · Control de Obra OCC');
+  assert.equal(
+    tituloDeLaPestana('/panel/laboratorio/abc'),
+    'Ensayo de granulometría · Control de Obra OCC',
+  );
+  assert.equal(
+    tituloDeLaPestana('/panel/laboratorio/abc/informe'),
+    'Informe de granulometría · Control de Obra OCC',
+  );
+  // Una ruta que no es de ningún módulo queda con el nombre del sistema.
+  assert.equal(tituloDeLaPestana('/panel/desconocido'), 'Control de Obra OCC');
+});
+
 prueba('cada rol entra por su módulo', () => {
   // Spec 008 / RF-4.
   assert.equal(moduloDeEntrada('admin'), 'inicio');
@@ -4629,6 +4679,94 @@ prueba('una salida mayor que el stock se rechaza diciendo cuánto queda', () => 
   assert.equal(rechazoDeSalida(7000, 2550, 'bulto'), null);
 });
 
+prueba('la unidad escrita en un reporte se reconoce en la lista cerrada', () => {
+  // Spec 023 / RF-30. Lo escrito de varias formas cae en el mismo slug; lo que no es
+  // de la lista no se adivina.
+  const casos: [string, string | null][] = [
+    ['bulto', 'bulto'],
+    ['Bultos', 'bulto'],
+    ['Bto', 'bulto'],
+    ['btos.', 'bulto'],
+    ['kg', 'kilogramo'],
+    ['Kilos', 'kilogramo'],
+    ['toneladas', 'tonelada'],
+    ['ton', 'tonelada'],
+    ['mts', 'metro'],
+    ['metro lineal', 'metro'],
+    ['m2', 'metro_cuadrado'],
+    ['m²', 'metro_cuadrado'],
+    ['m3', 'metro_cubico'],
+    ['M³', 'metro_cubico'],
+    ['metros cúbicos', 'metro_cubico'],
+    ['litros', 'litro'],
+    ['galones', 'galon'],
+    ['gal', 'galon'],
+    ['und', 'unidad'],
+    ['Unidades', 'unidad'],
+    ['rollos', 'rollo'],
+    ['caja', 'caja'],
+    ['metro_cubico', 'metro_cubico'],
+    ['varillas', null],
+    ['', null],
+  ];
+  for (const [escrito, slug] of casos) assert.equal(unidadDeTexto(escrito), slug, escrito);
+  assert.equal(unidadDeTexto(null), null);
+});
+
+prueba('el saldo de un reporte de almacén cuenta sus ingresos del mismo día o de antes', () => {
+  // Spec 023 / RF-33 y RF-34. Cemento con 10 bultos en el almacén; la arena es nueva.
+  const stock = (clave: string) => (clave === 'cemento' ? 1000 : 0);
+  const unidad = (clave: string) => (clave === 'cemento' ? 'bulto' : 'metro_cubico');
+  const faltas = (
+    movimientos: { tipo: 'ingreso' | 'salida'; fecha: string; cantidad: number | null; material: string }[],
+  ) => saldoDelReporte(movimientos, stock, unidad).map((f) => `${f.renglon}: ${f.mensaje}`);
+
+  // Una salida que alcanza con el stock: nada que decir.
+  assert.deepEqual(faltas([{ tipo: 'salida', fecha: '2026-10-07', cantidad: 800, material: 'cemento' }]), []);
+  // La salida va antes que el ingreso en el reporte, pero el mismo día el ingreso cuenta.
+  assert.deepEqual(
+    faltas([
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 3000, material: 'cemento' },
+      { tipo: 'ingreso', fecha: '2026-10-07', cantidad: 2500, material: 'cemento' },
+    ]),
+    [],
+  );
+  // Un ingreso de un día posterior no alcanza para una salida anterior.
+  assert.deepEqual(
+    faltas([
+      { tipo: 'salida', fecha: '2026-10-06', cantidad: 3000, material: 'cemento' },
+      { tipo: 'ingreso', fecha: '2026-10-07', cantidad: 2500, material: 'cemento' },
+    ]),
+    ['0: No alcanza: quedan 10 bultos y la salida es de 30 bultos.'],
+  );
+  // Un material nuevo empieza en cero: sale solo lo que entra en el reporte.
+  assert.deepEqual(
+    faltas([
+      { tipo: 'ingreso', fecha: '2026-10-07', cantidad: 600, material: 'arena' },
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 400, material: 'arena' },
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 300, material: 'arena' },
+    ]),
+    ['2: No alcanza: quedan 2 m³ y la salida es de 3 m³.'],
+  );
+  // Dos salidas que juntas superan: la que se pasa es la segunda, y la primera no se toca.
+  assert.deepEqual(
+    faltas([
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 700, material: 'cemento' },
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 700, material: 'cemento' },
+    ]),
+    ['1: No alcanza: quedan 3 bultos y la salida es de 7 bultos.'],
+  );
+  // Lo que no se puede leer (cantidad o fecha) no entra en la cuenta: su falta la dice otra regla.
+  assert.deepEqual(
+    faltas([
+      { tipo: 'ingreso', fecha: '2026-10-07', cantidad: null, material: 'cemento' },
+      { tipo: 'salida', fecha: 'ayer', cantidad: 5000, material: 'cemento' },
+      { tipo: 'salida', fecha: '2026-10-07', cantidad: 1000, material: 'cemento' },
+    ]),
+    [],
+  );
+});
+
 prueba('anular un ingreso que ya salió se rechaza; anular una salida, no', () => {
   // Spec 009 / RF-26: con 70 en stock, anular el ingreso de 100 dejaría −30.
   const [ingreso, salida] = movimientosDeCemento();
@@ -4966,6 +5104,55 @@ prueba('un viaje con fecha futura, sin conductor o entre el mismo sitio se recha
     ).map((f) => f.campo),
     ['fecha', 'hora', 'materialId', 'vehiculoId', 'conductorId', 'origenId', 'destino'],
   );
+});
+
+prueba('el número de vale se guarda como se escribe, sin los espacios de los extremos', () => {
+  // Spec 023 / RF-42, RF-43 y RF-44.
+  assert.equal(valeLimpio('F-0458'), 'F-0458');
+  assert.equal(valeLimpio(' 0458 A '), '0458 A');
+  assert.equal(valeLimpio('12.345'), '12.345');
+  assert.equal(valeLimpio('V/0458#2'), 'V/0458#2');
+  assert.equal(valeLimpio('   '), null, 'solo espacios es no tener vale');
+  assert.equal(valeLimpio(''), null);
+  assert.equal(valeLimpio(null), null);
+  assert.equal(valeLimpio(undefined), null);
+});
+
+prueba('un vale de más de 30 caracteres se rechaza en su campo', () => {
+  // Spec 023 / RF-55. El largo se mide ya limpio: los espacios de los extremos no cuentan.
+  assert.equal(faltaDeVale('x'.repeat(30)), null);
+  assert.equal(faltaDeVale(` ${'x'.repeat(30)} `), null);
+  assert.equal(faltaDeVale('x'.repeat(31)), 'El número de vale va hasta 30 caracteres.');
+  assert.equal(faltaDeVale(null), null, 'sin vale no falta nada: es opcional (RF-42)');
+
+  const hoy = '2026-09-16';
+  assert.deepEqual(validarViaje({ ...viajeALaObra(), vale: 'F-0458' }, hoy), []);
+  assert.deepEqual(validarViaje({ ...viajeALaObra(), vale: null }, hoy), []);
+  assert.deepEqual(
+    validarViaje({ ...viajeALaObra(), vale: 'x'.repeat(31) }, hoy).map((f) => `${f.campo}: ${f.mensaje}`),
+    ['vale: El número de vale va hasta 30 caracteres.'],
+  );
+});
+
+prueba('un vale repetido en la obra se avisa sin distinguir mayúsculas', () => {
+  // Spec 023 / RF-45 y RF-56. Solo las mayúsculas no cuentan: el guion sí.
+  assert.equal(mismoVale('f-0458', 'F-0458'), true);
+  assert.equal(mismoVale(' F-0458', 'F-0458 '), true);
+  assert.equal(mismoVale('F-0458', 'F0458'), false);
+  assert.equal(mismoVale('0458 A', '0458A'), false);
+  assert.equal(mismoVale(null, null), false, 'dos viajes sin vale no son el mismo vale');
+
+  const viajes = [
+    { id: 'v1', vale: 'F-0458', anulado: true },
+    { id: 'v2', vale: null, anulado: false },
+    { id: 'v3', vale: 'f-0458', anulado: false },
+    { id: 'v4', vale: 'F0458', anulado: false },
+  ];
+  assert.equal(avisoDeValeRepetido('F-0458', viajes)?.id, 'v3', 'el anulado no cuenta');
+  assert.equal(avisoDeValeRepetido('F-0458', viajes, 'v3'), null, 'el propio viaje no se avisa a sí mismo');
+  assert.equal(avisoDeValeRepetido('F-9999', viajes), null);
+  assert.equal(avisoDeValeRepetido(null, viajes), null);
+  assert.equal(avisoDeValeRepetido('   ', viajes), null);
 });
 
 prueba('solo la volqueta operativa de la obra se ofrece para un viaje', () => {
@@ -5994,6 +6181,91 @@ prueba('un nombre que coincide con dos personas, o con ninguna, no se reconoce',
   assert.equal(reconocerPersona('', PERSONAS_DEL_REPORTE), null);
 });
 
+prueba('la hoja del archivo propone el cargo cuando es uno de la lista (023/RF-62)', () => {
+  // Las hojas del «Formato Horas Extras» del 5 de octubre.
+  const casos: [string | null, string | null][] = [
+    ['CONDUCTORES', 'conductor'],
+    ['OPERADORES', 'operador'],
+    ['CONTROLADORAS', 'controlador_vial'],
+    ['CONTROLADORAS y BOAL', 'controlador_vial'],
+    ['TOPOGRAFIA', 'topografo'],
+    ['Topógrafos', 'topografo'],
+    ['INGENIEROS', null],
+    ['OFICIO VARIOS', null],
+    ['OFICIO VARIOS (2)', null],
+    // El nombre de cualquier cargo de la lista, en singular o en plural.
+    ['Ayudantes', 'ayudante'],
+    ['Maestro de obra', 'maestro'],
+    ['SISO (SST)', 'siso'],
+    ['', null],
+    [null, null],
+  ];
+  for (const [hoja, cargo] of casos) assert.equal(cargoDeHoja(hoja), cargo, String(hoja));
+});
+
+prueba('la persona registrada desde la bandeja recibe un usuario interno válido (023/RF-64)', () => {
+  const id = '01a117b0-bafc-78e4-af4c-1746b7170113';
+  assert.equal(usuarioDeLaBandeja('José Ñúñez Pérez', id), 'wa.jose.nunez.perez.01a117');
+  // Cabe en el contrato de personas: 40 caracteres, minúsculas, cifras, punto, guion.
+  const largo = usuarioDeLaBandeja('María de los Ángeles Restrepo Villegas de la Torre', id);
+  assert.ok(largo.length <= 40, largo);
+  assert.match(largo, /^[a-z0-9._-]+$/);
+  assert.ok(largo.endsWith('.01a117'));
+  // Un nombre sin letras ni cifras no deja el usuario vacío.
+  assert.equal(usuarioDeLaBandeja('—', id), 'wa.persona.01a117');
+});
+
+prueba('solo se registra a la persona de un renglón que existe y está sin elegir (023/RF-57)', () => {
+  const reporte = reporteCompleto();
+  reporte.personal.push({ ...reporte.personal[0], usuarioId: null, escrito: 'Wilfer García' });
+  reporte.maquinaria[0] = { ...reporte.maquinaria[0], operadorId: null, operadorEscrito: 'el mono' };
+  assert.equal(rechazoDeRegistro(reporte, { seccion: 'personal', renglon: 1 }), null);
+  assert.equal(rechazoDeRegistro(reporte, { seccion: 'maquinaria', renglon: 0 }), null);
+  assert.equal(
+    rechazoDeRegistro(reporte, { seccion: 'personal', renglon: 0 }),
+    'Esa persona ya está elegida en el reporte.',
+  );
+  assert.equal(
+    rechazoDeRegistro(reporte, { seccion: 'personal', renglon: 9 }),
+    'Ese renglón no está en el reporte.',
+  );
+});
+
+prueba('el pedido de registrar personas exige nombre y un cargo de la lista (023/RF-60, RF-61)', () => {
+  const base = { version: 0, propuesta: reporteCompleto() };
+  const persona = { seccion: 'personal', renglon: 0, nombre: 'Wilfer García', cargo: 'conductor' };
+  assert.equal(personasDesdeLaBandeja.safeParse({ ...base, personas: [persona] }).success, true);
+  assert.equal(
+    personasDesdeLaBandeja.safeParse({ ...base, personas: [{ ...persona, cargo: null }] }).success,
+    true,
+    'sin definir',
+  );
+  assert.equal(personasDesdeLaBandeja.safeParse({ ...base, personas: [{ ...persona, nombre: '  ' }] }).success, false);
+  assert.equal(personasDesdeLaBandeja.safeParse({ ...base, personas: [{ ...persona, cargo: 'ingeniero' }] }).success, false);
+  assert.equal(personasDesdeLaBandeja.safeParse({ ...base, personas: [{ ...persona, seccion: 'ensayos' }] }).success, false);
+  assert.equal(personasDesdeLaBandeja.safeParse({ ...base, personas: [] }).success, false);
+});
+
+prueba('una persona nueva muestra antes las registradas con dos palabras en común (023/RF-65)', () => {
+  const personas = [
+    { id: 'olivero', nombreCompleto: 'Oscar Olivero Pérez' },
+    { id: 'velandia', nombreCompleto: 'Oscar Velandia' },
+    { id: 'avila', nombreCompleto: 'José de Ávila' },
+    { id: 'garcia', nombreCompleto: 'Wilfer García Ríos' },
+  ];
+  const ids = (nombre: string) => posiblesCoincidencias(nombre, personas).map((p) => p.id);
+  assert.deepEqual(ids('OSCAR OLIVERO'), ['olivero'], 'una sola palabra en común (Oscar) no basta');
+  assert.deepEqual(ids('JOSE DE LA CRUZ'), [], '«de» y «la» no cuentan como palabras');
+  assert.deepEqual(ids('WILFER GARCIA'), ['garcia'], 'sin tildes ni mayúsculas');
+  assert.deepEqual(ids('Pedro Pérez'), []);
+  assert.deepEqual(ids(''), []);
+  // Primero la que más se parece.
+  assert.deepEqual(
+    ids('Oscar Olivero Velandia'),
+    ['olivero', 'velandia'],
+  );
+});
+
 prueba('el conductor del viaje es el operador de esa volqueta en el reporte (RF-94)', () => {
   const maquinas = [
     { vehiculoId: 'llq375', operadorId: 'silfrido' },
@@ -6039,6 +6311,7 @@ function reporteCompleto(): ReporteDelDia {
         entrada: '07:00',
         salida: '18:00',
         observaciones: '',
+        hoja: null,
       },
     ],
     ensayos: [
@@ -6062,6 +6335,7 @@ function reporteCompleto(): ReporteDelDia {
         metros: 175,
         hora: '07:30',
         conductorId: 'silfrido',
+        vale: 'F-0458',
       },
       {
         vehiculoId: 'llq375',
@@ -6072,9 +6346,11 @@ function reporteCompleto(): ReporteDelDia {
         metros: 200,
         hora: '09:10',
         conductorId: 'silfrido',
+        vale: null,
       },
     ],
     notas: '',
+    almacen: [],
   };
 }
 
@@ -6168,6 +6444,144 @@ prueba('la fecha, el clima y el personal se validan como en la bitácora (RF-44,
   const horario = reporteCompleto();
   horario.personal[0] = { ...horario.personal[0], salida: null };
   assert.deepEqual(dondeFalta(horario), ['personal 0']);
+});
+
+/** Un reporte de almacén sin faltas: 100 bultos de cemento entran y 30 salen. */
+function reporteDeAlmacen(): ReporteDelDia {
+  const vacio = reporteCompleto();
+  return {
+    ...vacio,
+    fecha: '2026-10-05',
+    clima: [],
+    actividades: [],
+    maquinaria: [],
+    personal: [],
+    ensayos: [],
+    viajes: [],
+    almacen: [
+      {
+        tipo: 'ingreso',
+        materialId: 'cemento',
+        materialNuevo: null,
+        escrito: 'Cemento gris',
+        cantidad: 10000,
+        unidadEscrita: 'bultos',
+        unidad: 'bulto',
+        responsable: 'Jairo Pérez',
+        paraQue: '',
+        observacion: 'Remisión 4587',
+      },
+      {
+        tipo: 'salida',
+        materialId: 'cemento',
+        materialNuevo: null,
+        escrito: 'Cemento gris',
+        cantidad: 3000,
+        unidadEscrita: 'bultos',
+        unidad: 'bulto',
+        responsable: 'Oscar Mejía',
+        paraQue: 'Cuneta K1+170',
+        observacion: '',
+      },
+    ],
+  };
+}
+
+/** El almacén de la obra: cemento con 5 bultos y alambre en kilos sin stock. */
+const CONTEXTO_CON_ALMACEN: ContextoDelReporte = {
+  ...CONTEXTO_DEL_REPORTE,
+  almacen: {
+    materiales: [
+      { id: 'cemento', nombre: 'Cemento gris', unidad: 'bulto', stock: 500 },
+      { id: 'alambre', nombre: 'Alambre negro calibre 18', unidad: 'kilogramo', stock: 0 },
+    ],
+  },
+};
+
+const faltasDelAlmacen = (reporte: ReporteDelDia) =>
+  faltasDelReporte(reporte, CONTEXTO_CON_ALMACEN).map((f) => `${f.seccion} ${f.renglon ?? '-'}: ${f.mensaje}`);
+
+prueba('un reporte de almacén completo no tiene faltas (023/RF-26 a RF-34)', () => {
+  assert.deepEqual(faltasDelAlmacen(reporteDeAlmacen()), []);
+  // Con un material nuevo, bien registrado, tampoco.
+  const conNuevo = reporteDeAlmacen();
+  conNuevo.almacen.push(
+    {
+      ...conNuevo.almacen[0],
+      materialId: null,
+      materialNuevo: { nombre: 'Tubería PVC 4"', unidad: 'metro' },
+      escrito: 'Tubería PVC 4"',
+      cantidad: 1200,
+      unidadEscrita: 'mts',
+      unidad: 'metro',
+    },
+    {
+      ...conNuevo.almacen[1],
+      materialId: null,
+      materialNuevo: { nombre: 'tubería pvc 4"', unidad: 'metro' },
+      escrito: 'Tubería PVC 4"',
+      cantidad: 1200,
+      unidadEscrita: 'mts',
+      unidad: 'metro',
+    },
+  );
+  assert.deepEqual(faltasDelAlmacen(conNuevo), [], 'el mismo material nuevo en dos renglones es uno solo');
+});
+
+prueba('las faltas del almacén salen todas a la vez, cada una en su renglón (023/RF-26 a RF-36)', () => {
+  const reporte = reporteDeAlmacen();
+  const base = reporte.almacen[0];
+  reporte.almacen = [
+    // 0: no reconocido, sin elegir ni registrar (RF-27).
+    { ...base, materialId: null, escrito: 'Varilla 1/2' },
+    // 1: material nuevo con el nombre de uno que ya está (RF-29).
+    { ...base, materialId: null, materialNuevo: { nombre: 'CEMENTO GRIS', unidad: 'bulto' } },
+    // 2: material nuevo sin unidad (RF-28).
+    { ...base, materialId: null, materialNuevo: { nombre: 'Arena de río', unidad: null } },
+    // 3: la unidad del renglón no es la del material (RF-30).
+    { ...base, unidad: 'kilogramo', unidadEscrita: 'kg' },
+    // 4: la unidad escrita no se reconoció (RF-30).
+    { ...base, unidad: null, unidadEscrita: 'varillas' },
+    // 5: ingreso sin quién lo entregó (RF-31).
+    { ...base, responsable: '  ' },
+    // 6: salida sin quién la recibió ni para qué (RF-32).
+    { ...reporte.almacen[1], responsable: '', paraQue: '' },
+    // 7: cantidad ilegible.
+    { ...base, cantidad: null },
+    // 8: salida de alambre, que no tiene stock (RF-33).
+    { ...reporte.almacen[1], materialId: 'alambre', unidad: 'kilogramo', cantidad: 500 },
+  ];
+  assert.deepEqual(faltasDelAlmacen(reporte), [
+    'almacen 0: No se reconoció «Varilla 1/2» en el almacén de la obra: elíjalo de la lista, regístrelo como material nuevo o quite el renglón.',
+    'almacen 1: Ya hay un material «Cemento gris» en el almacén: elíjalo de la lista en vez de registrarlo de nuevo.',
+    'almacen 2: Elija la unidad del material nuevo.',
+    'almacen 3: «Cemento gris» se lleva en bultos y el renglón dice kg: corrija la cantidad o la unidad.',
+    'almacen 4: No se reconoció la unidad «varillas»: escriba la cantidad en bultos.',
+    'almacen 5: Escriba quién entregó el material.',
+    'almacen 6: Escriba para qué se usará lo que sale.',
+    'almacen 6: Escriba quién recibió el material.',
+    'almacen 7: Escriba la cantidad, con hasta dos decimales.',
+    'almacen 8: No alcanza: quedan 0 kg y la salida es de 5 kg.',
+  ]);
+});
+
+prueba('un reporte de almacén con fecha futura dice la fecha una sola vez (023/RF-36)', () => {
+  const futuro = reporteDeAlmacen();
+  futuro.fecha = '2026-10-06';
+  assert.deepEqual(
+    faltasDelReporte(futuro, CONTEXTO_CON_ALMACEN).map((f) => `${f.seccion} ${f.renglon ?? '-'}`),
+    ['fecha -'],
+  );
+});
+
+prueba('una salida que pasa del stock con el ingreso del mismo reporte sí alcanza (023/RF-33, RF-34)', () => {
+  // Hay 5 bultos; entran 100 y salen 30: alcanza. Sin el ingreso, no.
+  assert.deepEqual(faltasDelAlmacen(reporteDeAlmacen()), []);
+  const sinIngreso = reporteDeAlmacen();
+  sinIngreso.almacen = [sinIngreso.almacen[1]];
+  assert.deepEqual(faltasDelAlmacen(sinIngreso), [
+    'almacen 0: No alcanza: quedan 5 bultos y la salida es de 30 bultos.',
+  ]);
 });
 
 console.log('\nReportes de WhatsApp: categorías y mezcla con la bitácora\n');
@@ -6409,7 +6823,7 @@ prueba('la propuesta de la plantilla se lee sección por sección (RF-60 a RF-95
     ],
   );
   assert.deepEqual(reporte.personal, [
-    { usuarioId: 'silfrido', escrito: 'Silfrido Medina', entrada: '07:00', salida: '18:00', observaciones: '' },
+    { usuarioId: 'silfrido', escrito: 'Silfrido Medina', entrada: '07:00', salida: '18:00', observaciones: '', hoja: null },
   ]);
   // El ensayo: reconocido por su nombre, con horas, ubicación y observación (RF-37, RF-81).
   assert.deepEqual(reporte.ensayos[0], {
@@ -6432,6 +6846,7 @@ prueba('la propuesta de la plantilla se lee sección por sección (RF-60 a RF-95
     metros: 175,
     hora: '07:30',
     conductorId: 'silfrido',
+    vale: null,
   });
   assert.deepEqual(reporte.viajes[1], reporte.viajes[0]);
   // Sin destino escrito pero con abscisa de llegada, va a la obra; la volqueta sin
@@ -6473,6 +6888,154 @@ prueba('un incidente sin novedades lleva su resumen a las notas (RF-38)', () => 
     { diaDelMensaje: '2026-10-01', destino: 'reporte' },
   );
   assert.equal(reporte.reporte.notas, '');
+});
+
+prueba('un reporte de almacén es su propia categoría y no va a la bitácora (023/RF-18, RF-40)', () => {
+  assert.equal(destinoDeCategoria('reporte_almacen'), 'almacen');
+  assert.equal(etiquetaDeCategoria('reporte_almacen'), 'Reporte de almacén');
+  assert.equal(estadoInicialDeCategoria('reporte_almacen'), 'pendiente');
+});
+
+/** Los materiales del almacén de la obra de prueba. */
+const CATALOGOS_CON_ALMACEN = {
+  ...CATALOGOS_DE_PRUEBA,
+  materialesAlmacen: [
+    { id: 'cemento', nombre: 'Cemento gris' },
+    { id: 'alambre', nombre: 'Alambre negro para amarre calibre 18' },
+  ],
+};
+
+prueba('el reporte de almacén se lee en ingresos y salidas, con la fecha del encabezado (023/RF-19 a RF-21)', () => {
+  const { reporte, fechaSupuesta } = resolverPropuesta(
+    {
+      fecha_evento: '2026-10-07',
+      almacen: {
+        ingresos: [
+          {
+            material: 'cemento GRIS',
+            cantidad: 100,
+            unidad: 'Bultos',
+            entregado_por: 'Transportes El Roble – Jairo Pérez',
+            observacion: 'Remisión 4587',
+          },
+          { material: 'Tubería PVC 4"', cantidad: 2.5, unidad: 'mts', entregado_por: '' },
+        ],
+        salidas: [
+          {
+            material: 'Cemento gris',
+            cantidad: 30,
+            unidad: 'bulto',
+            recibido_por: 'Oscar Mejía',
+            para_que: 'Cuneta K1+170 a K1+300',
+          },
+        ],
+      },
+    },
+    CATALOGOS_CON_ALMACEN,
+    { diaDelMensaje: '2026-10-08', destino: 'almacen' },
+  );
+  assert.equal(reporte.fecha, '2026-10-07');
+  assert.equal(fechaSupuesta, false);
+  assert.deepEqual(reporte.almacen, [
+    {
+      tipo: 'ingreso',
+      materialId: 'cemento',
+      materialNuevo: null,
+      escrito: 'cemento GRIS',
+      cantidad: 10000,
+      unidadEscrita: 'Bultos',
+      unidad: 'bulto',
+      responsable: 'Transportes El Roble – Jairo Pérez',
+      paraQue: '',
+      observacion: 'Remisión 4587',
+    },
+    {
+      // No está en el almacén: queda sin elegir, para elegirlo, registrarlo o quitarlo (RF-27).
+      tipo: 'ingreso',
+      materialId: null,
+      materialNuevo: null,
+      escrito: 'Tubería PVC 4"',
+      cantidad: 250,
+      unidadEscrita: 'mts',
+      unidad: 'metro',
+      responsable: '',
+      paraQue: '',
+      observacion: '',
+    },
+    {
+      tipo: 'salida',
+      materialId: 'cemento',
+      materialNuevo: null,
+      escrito: 'Cemento gris',
+      cantidad: 3000,
+      unidadEscrita: 'bulto',
+      unidad: 'bulto',
+      responsable: 'Oscar Mejía',
+      paraQue: 'Cuneta K1+170 a K1+300',
+      observacion: '',
+    },
+  ]);
+  // Un nombre parecido no es el mismo material: solo el igual sin tildes ni mayúsculas (RF-26).
+  const parecido = resolverPropuesta(
+    { almacen: { ingresos: [{ material: 'Cemento', cantidad: 1, unidad: 'bulto' }] } },
+    CATALOGOS_CON_ALMACEN,
+    { diaDelMensaje: '2026-10-08', destino: 'almacen' },
+  );
+  assert.equal(parecido.reporte.almacen[0].materialId, null);
+  assert.equal(parecido.fechaSupuesta, true, 'sin encabezado, la fecha del mensaje (RF-21)');
+  // Un reporte diario no trae almacén.
+  assert.deepEqual(
+    resolverPropuesta(PROPUESTA_DE_LA_PLANTILLA, CATALOGOS_DE_PRUEBA, {
+      diaDelMensaje: '2026-10-02',
+      destino: 'reporte',
+    }).reporte.almacen,
+    [],
+  );
+});
+
+prueba('el vale de un viaje y la hoja de una persona se leen de la propuesta (023/RF-50, RF-62)', () => {
+  const { reporte } = resolverPropuesta(
+    {
+      fecha_evento: '2026-10-05',
+      viajes: [
+        { placa: 'LLQ 375', material: 'sub-base', origen: 'Fortune', destino: 'obra', abscisa_llegada: 'K1+175', hora: '7:30', vale: ' F-0458 ' },
+        { placa: 'LLQ 375', material: 'sub-base', origen: 'Fortune', hora: '9:00' },
+        // Un renglón con varios viajes no reparte un mismo vale entre todos.
+        { placa: 'LLQ 375', cantidad: 2, material: 'sub-base', origen: 'Fortune', hora: '10:00', vale: 'F-0460' },
+      ],
+      personal: [
+        { nombre: 'Silfrido Medina', entrada: '07:30', salida: '6:00Pm', cargo_hoja: 'CONDUCTORES' },
+        { nombre: 'Oscar Velandia', entrada: '07:30', salida: '18:00' },
+      ],
+    },
+    CATALOGOS_DE_PRUEBA,
+    { diaDelMensaje: '2026-10-06', destino: 'reporte' },
+  );
+  assert.deepEqual(
+    reporte.viajes.map((v) => v.vale),
+    ['F-0458', null, null, null],
+  );
+  assert.deepEqual(
+    reporte.personal.map((p) => [p.escrito, p.hoja, p.salida]),
+    [
+      ['Silfrido Medina', 'CONDUCTORES', '18:00'],
+      ['Oscar Velandia', null, '18:00'],
+    ],
+  );
+});
+
+prueba('una propuesta corregida antes de la spec 023 se lee sin almacén, vale ni hoja', () => {
+  // Las que ya estaban guardadas en la base no traen los campos nuevos.
+  const vieja = reporteCompleto() as unknown as Record<string, unknown>;
+  delete vieja.almacen;
+  const leida = reporteCorregido.parse({
+    ...vieja,
+    viajes: (vieja.viajes as Record<string, unknown>[]).map(({ vale: _vale, ...v }) => v),
+    personal: (vieja.personal as Record<string, unknown>[]).map(({ hoja: _hoja, ...p }) => p),
+  });
+  assert.deepEqual(leida.almacen, []);
+  assert.equal(leida.viajes[0].vale, null);
+  assert.equal(leida.personal[0].hoja, null);
 });
 
 prueba('un renglón con una cantidad absurda de viajes no pasa de 30', () => {
@@ -6908,6 +7471,30 @@ function choqueDePostgres(): Error {
 }
 
 async function verificarChoques() {
+  await pruebaAsync('un cuerpo que no es JSON responde 400 y no 500 (defecto, 2026-10-06)', async () => {
+    // `cuerpoJson` lo detectaba, pero lanzaba un error que `responder` no reconocía y
+    // salía como «Algo falló en el servidor»: un falso fallo en el registro de errores.
+    const esquema = { parse: (dato: unknown) => dato };
+    const peticion = (cuerpo: string) =>
+      new Request('http://localhost/api/prueba', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: cuerpo,
+      });
+
+    const mala = await responder(async () => {
+      await cuerpoJson(peticion('esto no es json'), esquema);
+      return Response.json({ ok: true });
+    });
+    assert.equal(mala.status, 400);
+    assert.equal(((await mala.json()) as { error: string }).error, 'El cuerpo de la petición no es JSON válido.');
+
+    // Y un cuerpo bueno sigue pasando.
+    const buena = await responder(async () => Response.json(await cuerpoJson(peticion('{"a":1}'), esquema)));
+    assert.equal(buena.status, 200);
+    assert.deepEqual(await buena.json(), { a: 1 });
+  });
+
   await pruebaAsync('un choque de dos salidas simultáneas se repite una vez', async () => {
     // El primer intento choca y no guardó nada; el segundo ve el stock nuevo.
     let intentos = 0;

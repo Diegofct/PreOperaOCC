@@ -17,6 +17,7 @@
 import type { Periodo } from '@/shared/rules/jornada';
 
 import type {
+  PersonasDesdeLaBandeja,
   Aprobacion,
   DetalleDePropuesta,
   GrupoFila,
@@ -83,12 +84,19 @@ import type { EstadoMensajeWhatsapp, ReporteDelDia } from '@/shared/rules/whatsa
 export class ErrorApi extends Error {
   readonly estado: number;
   readonly campos?: Record<string, string>;
+  /**
+   * El cuerpo entero de la respuesta, para los pocos casos en que un 4xx no es un
+   * fallo sino una pregunta: el vale repetido (spec 023, RF-45) trae el viaje con
+   * que choca, y la ventana lo usa para ofrecer «Guardar igual».
+   */
+  readonly cuerpo?: unknown;
 
-  constructor(mensaje: string, estado: number, campos?: Record<string, string>) {
+  constructor(mensaje: string, estado: number, campos?: Record<string, string>, cuerpo?: unknown) {
     super(mensaje);
     this.name = 'ErrorApi';
     this.estado = estado;
     this.campos = campos;
+    this.cuerpo = cuerpo;
     // Ver `@/features/servidor/configuracion`: heredar de `Error` rompe
     // `instanceof` si el empaquetador rebaja la clase a ES5.
     Object.setPrototypeOf(this, ErrorApi.prototype);
@@ -137,6 +145,7 @@ async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
       detalle?.error ?? `El servidor respondió ${respuesta.status}.`,
       respuesta.status,
       detalle?.campos,
+      cuerpo,
     );
   }
 
@@ -475,8 +484,18 @@ export const api = {
           version,
           propuesta,
         }),
+      /** Registra a las personas no reconocidas del reporte (spec 023, RF-57 a RF-68). */
+      registrarPersonas: (id: string, datos: PersonasDesdeLaBandeja) =>
+        panelEnviar<{
+          version: number;
+          personas: { seccion: 'personal' | 'maquinaria'; renglon: number; usuarioId: string }[];
+        }>(`/whatsapp/propuestas/${encodeURIComponent(id)}/personas`, 'POST', datos),
       aprobar: (id: string, datos: Aprobacion) =>
-        panelEnviar<{ parteId: string; fecha: string; viajes: number; soloViajes: boolean }>(
+        panelEnviar<
+          | { parteId: string; fecha: string; viajes: number; soloViajes: boolean }
+          // Un reporte de almacén: va al Almacén y no a la bitácora (spec 023, RF-40).
+          | { movimientos: number; materialesNuevos: number }
+        >(
           `/whatsapp/propuestas/${encodeURIComponent(id)}/aprobar`,
           'POST',
           datos,

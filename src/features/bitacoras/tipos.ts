@@ -290,6 +290,12 @@ export interface ViajeDelParte {
   /** Solo con destino obra. */
   pr: number | null;
   metros: number | null;
+  /**
+   * El número de vale, tal como se escribió (spec 023, RF-47, RF-48). `null` si el
+   * viaje no lo tiene, y **ausente** en las bitácoras cerradas antes de que existiera
+   * (RF-49): lo fijado no se reescribe.
+   */
+  vale?: string | null;
 }
 
 /** Un identificador nuevo para una fila de sección. */

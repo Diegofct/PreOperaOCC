@@ -13,7 +13,8 @@
  * 69,99999999 bultos. Así que dentro de las reglas toda cantidad es un **entero de
  * centésimas** —2,5 es 250— y solo se vuelve decimal al mostrarse o al guardarse.
  */
-import { abreviaturaDeUnidad } from '@/shared/catalogos/almacen';
+import { abreviaturaDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { normalizar } from '@/shared/rules/texto';
 
 /** Dos decimales, como la columna de la base; doce cifras enteras, como su tope. */
 const CANTIDAD = /^(-?)(\d{1,12})(?:[.,](\d{1,2}))?$/;
@@ -281,6 +282,107 @@ export function rechazoDeCambioDeUnidad(
     `${abreviaturaDeUnidad(unidadActual)}. Si la unidad estaba mal, dé de baja el material y ` +
     'regístrelo de nuevo.'
   );
+}
+
+/* ── Un reporte de almacén que llega por WhatsApp (spec 023) ───────────── */
+
+/**
+ * Cómo se escribe cada unidad en un reporte, ya sin tildes, mayúsculas, puntos ni
+ * espacios. Además del slug y del nombre de la lista, que se reconocen solos.
+ */
+const UNIDADES_ESCRITAS: Record<UnidadAlmacen, readonly string[]> = {
+  bulto: ['bultos', 'bto', 'btos', 'bul'],
+  kilogramo: ['kilogramos', 'kg', 'kgs', 'kilo', 'kilos'],
+  tonelada: ['toneladas', 't', 'ton', 'tons'],
+  metro: ['metros', 'm', 'mt', 'mts', 'ml', 'metrolineal', 'metroslineales'],
+  metro_cuadrado: ['metroscuadrados', 'm2', 'mt2', 'mts2'],
+  metro_cubico: ['metroscubicos', 'm3', 'mt3', 'mts3'],
+  litro: ['litros', 'l', 'lt', 'lts'],
+  galon: ['galones', 'gal', 'gl'],
+  unidad: ['unidades', 'und', 'unds', 'un', 'unid', 'u'],
+  rollo: ['rollos'],
+  caja: ['cajas', 'cj'],
+};
+
+const clave = (texto: string) =>
+  normalizar(texto.replace(/²/g, '2').replace(/³/g, '3')).replace(/[\s._-]/g, '');
+
+const UNIDAD_POR_ESCRITO = new Map<string, UnidadAlmacen>(
+  (Object.entries(UNIDADES_ESCRITAS) as [UnidadAlmacen, readonly string[]][]).flatMap(
+    ([id, escritas]) => [id, ...escritas].map((e) => [clave(e), id] as const),
+  ),
+);
+
+/**
+ * La unidad de la lista cerrada que dice lo escrito en un reporte —«Bto», «kg»,
+ * «m³», «metros cúbicos»—, o `null` si no es ninguna (spec 023, RF-30).
+ *
+ * No se adivina: «varillas» no es una unidad de la lista, y el residente la
+ * corrige en la bandeja. Tampoco se convierte entre unidades: eso lo prohíbe RF-30.
+ */
+export function unidadDeTexto(texto: string | null | undefined): UnidadAlmacen | null {
+  if (!texto) return null;
+  return UNIDAD_POR_ESCRITO.get(clave(texto)) ?? null;
+}
+
+/** Un renglón de un reporte de almacén, con lo que el saldo necesita. */
+export interface MovimientoDelReporteParaSaldo {
+  tipo: TipoMovimiento;
+  /** `YYYY-MM-DD`. */
+  fecha: string;
+  /** En centésimas; `null` si lo escrito no era una cantidad. */
+  cantidad: number | null;
+  /**
+   * Qué material es: el id del material del almacén, o una clave propia para uno
+   * nuevo. Dos renglones con la misma clave son el mismo material.
+   */
+  material: string;
+}
+
+/**
+ * Las salidas del reporte que no alcanzan, cada una con su renglón (spec 023,
+ * RF-33 y RF-34).
+ *
+ * Cada material parte de su stock de hoy (`stockDe`; uno nuevo, de cero) y los
+ * renglones se recorren **por fecha y, el mismo día, los ingresos primero**: un
+ * ingreso cuenta para las salidas de su mismo día o de después, aunque el reporte
+ * lo escriba debajo. Una salida que no alcanza no se descuenta, para que la
+ * siguiente se juzgue con lo que de verdad quedaría.
+ *
+ * Lo que no se puede leer —cantidad ilegible o no positiva, fecha mal escrita— no
+ * entra en la cuenta: esa falta la dice `validarMovimiento`, y contarla aquí
+ * repetiría el error con un saldo inventado.
+ */
+export function saldoDelReporte(
+  movimientos: readonly MovimientoDelReporteParaSaldo[],
+  stockDe: (material: string) => number,
+  unidadDe: (material: string) => string,
+): { renglon: number; mensaje: string }[] {
+  const legibles = movimientos
+    .map((m, renglon) => ({ ...m, renglon }))
+    .filter((m) => m.cantidad !== null && m.cantidad > 0 && FECHA.test(m.fecha));
+
+  const orden = [...legibles].sort(
+    (a, b) =>
+      a.fecha.localeCompare(b.fecha) ||
+      (a.tipo === b.tipo ? 0 : a.tipo === 'ingreso' ? -1 : 1) ||
+      a.renglon - b.renglon,
+  );
+
+  const saldos = new Map<string, number>();
+  const faltas: { renglon: number; mensaje: string }[] = [];
+  for (const m of orden) {
+    const saldo = saldos.get(m.material) ?? stockDe(m.material);
+    const cantidad = m.cantidad as number;
+    if (m.tipo === 'ingreso') {
+      saldos.set(m.material, saldo + cantidad);
+      continue;
+    }
+    const rechazo = rechazoDeSalida(saldo, cantidad, unidadDe(m.material));
+    if (rechazo) faltas.push({ renglon: m.renglon, mensaje: rechazo });
+    else saldos.set(m.material, saldo - cantidad);
+  }
+  return faltas.sort((a, b) => a.renglon - b.renglon);
 }
 
 /* ── Historial ──────────────────────────────────────────────────────────── */

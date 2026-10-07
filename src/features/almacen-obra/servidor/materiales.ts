@@ -136,6 +136,19 @@ export function filasDeMateriales(
   });
 }
 
+/**
+ * Los materiales vigentes de una obra con su unidad y su stock de hoy, en
+ * centésimas. Vacío si la obra no lleva almacén (017/RF-10). Lo usan la bandeja de
+ * WhatsApp y la aprobación de un reporte de almacén (spec 023, RF-26, RF-33).
+ */
+export async function materialesConStock(
+  obraId: string,
+): Promise<{ id: string; nombre: string; unidad: MaterialDeAlmacenFila['unidad']; stock: number }[]> {
+  const materiales = await leerMateriales(eq(almacenMateriales.obraId, obraId));
+  const filas = filasDeMateriales(materiales, await movimientosDe(materiales.map((m) => m.id)));
+  return filas.map(({ id, nombre, unidad, stock }) => ({ id, nombre, unidad, stock }));
+}
+
 /** Un solo material con sus totales, leyendo sus movimientos. */
 export async function filaDeMaterial(material: MaterialLeido): Promise<MaterialDeAlmacenFila> {
   return filasDeMateriales([material], await movimientosDe([material.id]))[0];

@@ -12,7 +12,7 @@
  * depende de sumar otros viajes. Si alguien da de baja un sitio en el mismo segundo
  * en que se registra un viaje, el viaje queda con ese sitio, que es lo que pasó.
  */
-import { and, desc, eq, gte, isNull, lte, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -69,6 +69,8 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
       destinoObra: canteraViajes.destinoObra,
       pr: canteraViajes.pr,
       metros: canteraViajes.metros,
+      // Spec 023, RF-46: nulo en los registrados sin vale y en los de antes (RF-49).
+      vale: canteraViajes.vale,
       creadoEn: canteraViajes.creadoEn,
       registradoPorNombre: registrador.nombreCompleto,
       anuladoEn: canteraViajes.anuladoEn,
@@ -129,6 +131,33 @@ export async function avisoDeBitacoraCerrada(
   return que === 'registro'
     ? `La bitácora del ${fecha} ya está cerrada: el viaje queda registrado aquí, pero la bitácora de ese día no cambia.`
     : `La bitácora del ${fecha} ya está cerrada: la anulación queda registrada aquí, pero la bitácora de ese día sigue mostrando el viaje.`;
+}
+
+/**
+ * Los viajes **vigentes** de la obra con ese número de vale, sin distinguir
+ * mayúsculas (spec 023, RF-45, RF-56). La consulta usa el índice
+ * `(obra_id, lower(vale))`; quién es el repetido lo decide `avisoDeValeRepetido`.
+ */
+export async function viajesConVale(obraId: string, vale: string) {
+  const filas = await baseServidor()
+    .select({
+      id: canteraViajes.id,
+      vale: canteraViajes.vale,
+      fecha: canteraViajes.fecha,
+      hora: canteraViajes.hora,
+      volqueta: vehiculos.codigoInterno,
+    })
+    .from(canteraViajes)
+    .innerJoin(vehiculos, eq(vehiculos.id, canteraViajes.vehiculoId))
+    .where(
+      and(
+        eq(canteraViajes.obraId, obraId),
+        isNull(canteraViajes.anuladoEn),
+        sql`lower(${canteraViajes.vale}) = lower(${vale})`,
+      ),
+    )
+    .orderBy(canteraViajes.fecha, canteraViajes.hora);
+  return filas.map((f) => ({ ...f, anulado: false }));
 }
 
 /**

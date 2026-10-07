@@ -53,7 +53,9 @@ export function viajesDelDiaEnSql(obra: SQL, fecha: SQL): SQL<ViajeDelParte[]> {
           'destino', d.nombre,
           'destinoObra', v.destino_obra,
           'pr', v.pr,
-          'metros', v.metros
+          'metros', v.metros,
+          -- Spec 023, RF-47 y RF-48: se ve en la sección y queda fijado al cerrar.
+          'vale', v.vale
         )
         order by v.hora, v.creado_en
       ),

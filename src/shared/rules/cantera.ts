@@ -64,6 +64,7 @@ export const MENSAJES_DE_VIAJE = {
   metrosFueraDeRango: 'Los metros van de 0 a 975, de 25 en 25.',
   abscisaSinObra: 'El PR y los metros solo se anotan cuando el destino es la obra.',
   mismoSitio: 'El origen y el destino no pueden ser el mismo sitio.',
+  valeLargo: 'El número de vale va hasta 30 caracteres.',
 } as const;
 
 export type CampoDeViaje =
@@ -75,7 +76,56 @@ export type CampoDeViaje =
   | 'origenId'
   | 'destino'
   | 'pr'
-  | 'metros';
+  | 'metros'
+  | 'vale';
+
+/* ── El número de vale (spec 023) ──────────────────────────────────────── */
+
+/** RF-55. Lo mismo exige el `check` de la base. */
+const LARGO_MAXIMO_DE_VALE = 30;
+
+/**
+ * El vale como se guarda: **tal como se escribió** —«F-0458», «0458 A», «12.345»—,
+ * sin más arreglo que quitar los espacios de los extremos (RF-43, RF-44). Vacío o
+ * solo espacios es no tener vale (RF-42).
+ *
+ * No se quitan guiones ni espacios de en medio: OCC pidió que el vale se acepte como
+ * se escriba, y «0458 A» y «0458A» pueden ser vales distintos.
+ */
+export function valeLimpio(texto: string | null | undefined): string | null {
+  const limpio = texto?.trim() ?? '';
+  return limpio === '' ? null : limpio;
+}
+
+/** Lo que falta en el vale, o `null`. Sin vale no falta nada: es opcional (RF-42, RF-55). */
+export function faltaDeVale(texto: string | null | undefined): string | null {
+  const vale = valeLimpio(texto);
+  return vale !== null && vale.length > LARGO_MAXIMO_DE_VALE ? MENSAJES_DE_VIAJE.valeLargo : null;
+}
+
+/**
+ * ¿Es el mismo vale? Solo las mayúsculas no cuentan (RF-56): «f-0458» es «F-0458»,
+ * pero «F0458» no. Dos viajes sin vale no comparten vale.
+ */
+export function mismoVale(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = valeLimpio(a);
+  const y = valeLimpio(b);
+  return x !== null && y !== null && x.toLowerCase() === y.toLowerCase();
+}
+
+/**
+ * El viaje vigente que ya tiene ese vale, para avisarlo antes de guardar, o `null`
+ * (RF-45). Es un aviso y no un rechazo: quien registra decide si lo guarda igual.
+ * `excepto` es el propio viaje, que no se avisa a sí mismo.
+ */
+export function avisoDeValeRepetido<V extends { id: string; vale: string | null; anulado: boolean }>(
+  vale: string | null | undefined,
+  viajes: readonly V[],
+  excepto?: string,
+): V | null {
+  if (valeLimpio(vale) === null) return null;
+  return viajes.find((v) => !v.anulado && v.id !== excepto && mismoVale(v.vale, vale)) ?? null;
+}
 
 /** Una falta, con el campo del formulario donde se pinta. */
 export interface FaltaDeViaje {
@@ -126,9 +176,11 @@ export interface ViajePorValidar {
   destino: string | null;
   pr: number | null;
   metros: number | null;
+  /** El número de vale, opcional (spec 023, RF-42). */
+  vale?: string | null;
 }
 
-const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const FECHA =/^\d{4}-\d{2}-\d{2}$/;
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
@@ -163,6 +215,9 @@ export function validarViaje(viaje: ViajePorValidar, hoy: string): FaltaDeViaje[
   if (!viaje.origenId) falta('origenId', MENSAJES_DE_VIAJE.sinOrigen);
 
   faltas.push(...faltasDelDestino(viaje));
+
+  const errorDeVale = faltaDeVale(viaje.vale);
+  if (errorDeVale) falta('vale', errorDeVale);
   return faltas;
 }
 

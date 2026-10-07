@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { bitacoras, media, preoperacionales } from '@/db/servidor/esquema';
+import { bitacoras, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
 import { leer } from '@/features/media/servidor/almacen';
-import { alcanzaLaObra, veTodasLasObras } from '@/features/servidor/alcance';
+import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
 import { noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
@@ -54,7 +54,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     // que no le tocan.
     if (fila.duenoTipo === 'whatsapp') {
       if (!(await alcanzaElMensaje(sesion, fila.duenoId))) return noEncontrado('esa imagen');
-    } else if (!alcanzaLaObra(sesion, await obraDeLaImagen(fila.duenoTipo, fila.duenoId))) {
+    } else if (!alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId))) {
       return noEncontrado('esa imagen');
     }
 
@@ -74,11 +74,19 @@ export async function GET(peticion: Request, { id }: { id: string }) {
   });
 }
 
-/** La obra del registro al que cuelga la imagen, para poder filtrar por alcance. */
-async function obraDeLaImagen(
+/**
+ * El registro al que cuelga la imagen —si existe— y su obra, para filtrar por alcance.
+ *
+ * `existe` importa tanto como la obra: un dueño que no aparece no es «de todos»
+ * (`alcanzaLaImagen`). Las fotos del día del **parte diario** (spec 004) cuelgan de
+ * `partes_de_obra` con tipo `bitacora`; antes de la spec 004 colgaban de `bitacoras`,
+ * así que se busca en las dos, primero en la nueva. Buscar solo en la vieja era el
+ * defecto corregido el 2026-10-06.
+ */
+async function duenoDeLaImagen(
   tipo: 'preoperacional' | 'bitacora' | 'documento',
   duenoId: string,
-): Promise<string | null> {
+): Promise<{ existe: boolean; obraId: string | null }> {
   const db = baseServidor();
 
   if (tipo === 'preoperacional') {
@@ -87,19 +95,27 @@ async function obraDeLaImagen(
       .from(preoperacionales)
       .where(eq(preoperacionales.id, duenoId))
       .limit(1);
-    return fila?.obraId ?? null;
+    return { existe: Boolean(fila), obraId: fila?.obraId ?? null };
   }
 
   if (tipo === 'bitacora') {
-    const [fila] = await db
+    const [parte] = await db
+      .select({ obraId: partesDeObra.obraId })
+      .from(partesDeObra)
+      .where(eq(partesDeObra.id, duenoId))
+      .limit(1);
+    if (parte) return { existe: true, obraId: parte.obraId };
+
+    const [vieja] = await db
       .select({ obraId: bitacoras.obraId })
       .from(bitacoras)
       .where(eq(bitacoras.id, duenoId))
       .limit(1);
-    return fila?.obraId ?? null;
+    return { existe: Boolean(vieja), obraId: vieja?.obraId ?? null };
   }
 
-  return null;
+  // Los documentos todavía no tienen dueño con obra: solo los ve la gerencia.
+  return { existe: false, obraId: null };
 }
 
 /**

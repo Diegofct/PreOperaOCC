@@ -18,7 +18,17 @@
 import { ENSAYOS_DE_CALIDAD, IDS_CLIMA, type CondicionClima } from '@/shared/catalogos/bitacora';
 import { actividadPorItem, CLAVE_OTRA_ACTIVIDAD } from '@/shared/catalogos/presupuesto';
 
-import { DESTINO_OBRA, validarViaje } from './cantera';
+import { abreviaturaDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { CARGOS, type Cargo } from '@/shared/catalogos/cargos';
+
+import {
+  aCentesimas,
+  saldoDelReporte,
+  unidadDeTexto,
+  validarMovimiento,
+  type TipoMovimiento,
+} from './almacen';
+import { DESTINO_OBRA, valeLimpio, validarViaje } from './cantera';
 import { mensajeDeFranja, mensajeDeHorario, validarFranjas, validarHorario } from './horas';
 import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
 import { faltasDeActividad, faltasDelEnsayo, type UbicacionPorValidar } from './parte';
@@ -211,6 +221,117 @@ export function reconocerPersona(
   return contenidas.length === 1 ? contenidas[0].id : null;
 }
 
+/**
+ * Cómo se llaman las hojas de los formatos de OCC que no dicen el nombre del cargo
+ * tal cual (spec 023, RF-62). Lo demás se reconoce por el nombre del cargo, en
+ * singular o en plural.
+ */
+const HOJAS_CONOCIDAS: Record<string, Cargo> = {
+  controladoras: 'controlador_vial',
+  controladores: 'controlador_vial',
+  topografia: 'topografo',
+};
+
+/**
+ * El cargo que propone la hoja del archivo de donde salió una persona: «CONDUCTORES»
+ * → Conductor, «CONTROLADORAS» → Controlador(a) Vial (spec 023, RF-62).
+ *
+ * Es solo una propuesta para registrarla, y se cambia en la bandeja. Lo que no es
+ * un cargo de la lista —«INGENIEROS», «OFICIO VARIOS»— es `null`: se elige o se deja
+ * «sin definir» (RF-61). Si el nombre entero no dice nada, se prueba con su primera
+ * palabra («CONTROLADORAS y BOAL»); el número de una hoja repetida («(2)») no cuenta.
+ */
+export function cargoDeHoja(hoja: string | null | undefined): Cargo | null {
+  if (!hoja) return null;
+  const escritas = palabras(hoja).filter((p) => !/^\d+$/.test(p));
+  if (escritas.length === 0) return null;
+
+  const segun = (texto: string): Cargo | null => {
+    if (HOJAS_CONOCIDAS[texto]) return HOJAS_CONOCIDAS[texto];
+    const cargo = CARGOS.find((c) => {
+      const nombre = palabras(c.nombre).join(' ');
+      return texto === nombre || texto === `${nombre}s` || texto === `${nombre}es`;
+    });
+    return cargo ? (cargo.id as Cargo) : null;
+  };
+  return segun(escritas.join(' ')) ?? (escritas.length > 1 ? segun(escritas[0]) : null);
+}
+
+/** Las palabras de un nombre que sirven para compararlo: sin «de», «la», «y»… */
+function palabrasDeNombre(texto: string): Set<string> {
+  return new Set(palabras(texto).filter((p) => p.length >= 3));
+}
+
+/**
+ * Las personas registradas que podrían ser la misma que el reporte nombra: las que
+ * comparten **dos o más palabras** de su nombre, sin contar las de menos de tres
+ * letras («de», «la»), sin tildes ni mayúsculas (spec 023, RF-65). La que más
+ * comparte va primero.
+ *
+ * Se muestran antes de registrar a alguien nuevo, para no tener dos veces a la
+ * misma persona escrita distinto. No eligen nada: eso lo hace quien revisa.
+ */
+export function posiblesCoincidencias<P extends PersonaConocida>(
+  nombre: string | null | undefined,
+  personas: readonly P[],
+): P[] {
+  if (!nombre) return [];
+  const escritas = palabrasDeNombre(nombre);
+  if (escritas.size < 2) return [];
+
+  return personas
+    .map((persona, orden) => {
+      let comunes = 0;
+      for (const p of palabrasDeNombre(persona.nombreCompleto)) if (escritas.has(p)) comunes++;
+      return { persona, comunes, orden };
+    })
+    .filter((c) => c.comunes >= 2)
+    .sort((a, b) => b.comunes - a.comunes || a.orden - b.orden)
+    .map((c) => c.persona);
+}
+
+/** El usuario de las personas cabe en 40 caracteres (contrato de Personas). */
+const LARGO_DEL_USUARIO = 40;
+
+/**
+ * El usuario interno de una persona registrada desde la bandeja (spec 023, RF-64):
+ * «wa.» + su nombre sin tildes ni mayúsculas + las seis primeras cifras de su id.
+ *
+ * La columna es obligatoria y única entre las personas vigentes, pero esta persona
+ * **no entra** con él: no tiene contraseña ni código de celular. El prefijo dice de
+ * dónde salió, y el pedazo de id evita que dos «Juan Pérez» choquen.
+ */
+export function usuarioDeLaBandeja(nombre: string, id: string): string {
+  const sufijo = `.${id.replace(/-/g, '').slice(0, 6)}`;
+  const cuerpo =
+    palabras(nombre)
+      .join('.')
+      .slice(0, LARGO_DEL_USUARIO - 'wa.'.length - sufijo.length)
+      .replace(/\.+$/, '') || 'persona';
+  return `wa.${cuerpo}${sufijo}`;
+}
+
+/** Dónde está, en el reporte, la persona que se pide registrar. */
+export interface RenglonDePersona {
+  /** `personal`, o `maquinaria` para el operador de una máquina. */
+  seccion: 'personal' | 'maquinaria';
+  renglon: number;
+}
+
+/**
+ * Por qué no se puede registrar a la persona de ese renglón, o `null` (spec 023,
+ * RF-57): el renglón tiene que existir y estar **sin persona elegida**. Registrar a
+ * alguien en un renglón que ya tiene persona crearía un duplicado de alguien que el
+ * sistema ya reconoció.
+ */
+export function rechazoDeRegistro(reporte: ReporteDelDia, pedido: RenglonDePersona): string | null {
+  const fila =
+    pedido.seccion === 'personal' ? reporte.personal[pedido.renglon] : reporte.maquinaria[pedido.renglon];
+  if (!fila) return 'Ese renglón no está en el reporte.';
+  const elegida = 'usuarioId' in fila ? fila.usuarioId : fila.operadorId;
+  return elegida ? 'Esa persona ya está elegida en el reporte.' : null;
+}
+
 /** Una máquina del reporte, ya reconocida o no. */
 export interface MaquinaReconocida {
   vehiculoId: string | null;
@@ -251,6 +372,36 @@ export interface ReporteDelDia {
   ensayos: EnsayoDelReporte[];
   viajes: ViajeDelReporte[];
   notas: string;
+  /**
+   * Los ingresos y salidas de un reporte de almacén (spec 023, RF-19, RF-20). Vacío
+   * en cualquier otra categoría. Su fecha es la del reporte (RF-21).
+   */
+  almacen: MovimientoDelReporte[];
+}
+
+/** Un ingreso o una salida de un reporte de almacén, como lo revisa el residente. */
+export interface MovimientoDelReporte {
+  tipo: TipoMovimiento;
+  /** El material del almacén de la obra, o `null` si no se reconoció (RF-26, RF-27). */
+  materialId: string | null;
+  /**
+   * El material que se registra al aprobar, si quien revisa eligió «registrarlo
+   * nuevo» (RF-27, RF-28). Excluye a `materialId`: o se elige uno, o se crea.
+   */
+  materialNuevo: { nombre: string; unidad: UnidadAlmacen | null } | null;
+  /** El material como lo escribió el reporte. */
+  escrito: string;
+  /** En centésimas; `null` si lo escrito no era una cantidad. */
+  cantidad: number | null;
+  unidadEscrita: string | null;
+  /** La unidad de la lista cerrada que dice lo escrito, o `null` (RF-30). */
+  unidad: UnidadAlmacen | null;
+  /** «Entregado por» en un ingreso, «Recibido por» en una salida (009/RF-40, RF-41). */
+  responsable: string;
+  /** Solo en las salidas (009/RF-13). */
+  paraQue: string;
+  /** Solo en los ingresos (009/RF-8). */
+  observacion: string;
 }
 
 export interface FranjaDelReporte {
@@ -294,6 +445,11 @@ export interface PersonaDelReporte {
   entrada: string | null;
   salida: string | null;
   observaciones: string;
+  /**
+   * La hoja del archivo de donde salió («CONDUCTORES»), o `null` (spec 023, RF-62):
+   * de ahí se propone el cargo si hay que registrar a la persona.
+   */
+  hoja: string | null;
 }
 
 export interface EnsayoDelReporte {
@@ -317,6 +473,8 @@ export interface ViajeDelReporte {
   metros: number | null;
   hora: string | null;
   conductorId: string | null;
+  /** El número de vale, tal como se escribió, o `null` (spec 023, RF-42, RF-50). */
+  vale: string | null;
 }
 
 /** Lo que el reporte necesita saber de fuera y la regla no puede leer sola. */
@@ -325,6 +483,14 @@ export interface ContextoDelReporte {
   hoy: string;
   /** En qué se mide cada equipo reconocido: horas de motor o kilómetros. */
   claseDeMedidor: (vehiculoId: string) => ClaseDeMedidor;
+  /**
+   * El almacén de la obra, para revisar un reporte de almacén (spec 023): sus
+   * materiales vigentes con su unidad y su stock de hoy, en centésimas. Ausente,
+   * es un almacén vacío.
+   */
+  almacen?: {
+    materiales: readonly { id: string; nombre: string; unidad: string; stock: number }[];
+  };
 }
 
 export type SeccionDelReporte =
@@ -334,7 +500,8 @@ export type SeccionDelReporte =
   | 'maquinaria'
   | 'personal'
   | 'ensayos'
-  | 'viajes';
+  | 'viajes'
+  | 'almacen';
 
 /**
  * Una falta, con dónde se pinta: la sección y el renglón (desde 0; `null` cuando
@@ -431,7 +598,7 @@ export function faltasDelReporte(
       falta(
         'maquinaria',
         i,
-        `No se reconoció al operador «${maquina.operadorEscrito.trim()}»: elíjalo de la lista o déjelo vacío.`,
+        `No se reconoció al operador «${maquina.operadorEscrito.trim()}»: elíjalo de la lista, regístrelo o déjelo vacío.`,
       );
     }
   });
@@ -443,7 +610,8 @@ export function faltasDelReporte(
       falta(
         'personal',
         i,
-        `No se reconoció a «${persona.escrito}»: elíjalo de la lista o quítelo del reporte.`,
+        // Spec 023, RF-57: además de elegirla o quitarla, se puede registrar.
+        `No se reconoció a «${persona.escrito}»: elíjalo de la lista, regístrelo o quítelo del reporte.`,
       );
     } else {
       if (personasVistas.has(persona.usuarioId)) {
@@ -478,7 +646,134 @@ export function faltasDelReporte(
     }
   });
 
+  for (const f of faltasDelAlmacen(reporte, contexto)) falta('almacen', f.renglon, f.mensaje);
+
   return faltas;
+}
+
+/**
+ * Dos renglones con el mismo material nuevo son un solo material (spec 023, plan):
+ * la misma clave aquí y en el servidor, que registra uno por clave.
+ */
+export function claveDeMaterialNuevo(nombre: string): string {
+  return `nuevo:${palabras(nombre).join(' ')}`;
+}
+
+/**
+ * Lo que impide aprobar los ingresos y salidas de un reporte de almacén, por
+ * renglón (spec 023, RF-26 a RF-34, RF-36).
+ *
+ * Las comprobaciones de cada movimiento son **las del módulo Almacén**
+ * (`validarMovimiento`, `rechazoDeSalida` dentro de `saldoDelReporte`, 009/RF-9 a
+ * RF-15 y RF-40 a RF-42): lo aprobado desde WhatsApp se tiene que poder registrar
+ * igual que a mano. Lo propio del reporte es reconocer el material, el material
+ * nuevo y la unidad escrita. La fecha es la del reporte: su falta ya la dijo la
+ * sección `fecha` y no se repite por renglón.
+ *
+ * Un renglón con el material o la unidad sin resolver no entra en el saldo: su
+ * cantidad no se sabe en qué medida está, y sumarla falsearía el stock de los demás.
+ */
+function faltasDelAlmacen(
+  reporte: ReporteDelDia,
+  contexto: ContextoDelReporte,
+): { renglon: number; mensaje: string }[] {
+  const materiales = contexto.almacen?.materiales ?? [];
+  const porId = new Map(materiales.map((m) => [m.id, m]));
+  const vigentePorNombre = new Map(materiales.map((m) => [palabras(m.nombre).join(' '), m]));
+  const unidadDeNuevo = new Map<string, string>();
+
+  const faltas: { renglon: number; mensaje: string }[] = [];
+  const paraElSaldo: { renglon: number; material: string; unidad: string }[] = [];
+
+  reporte.almacen.forEach((m, renglon) => {
+    const falta = (mensaje: string) => faltas.push({ renglon, mensaje });
+
+    // El material: uno del almacén, uno nuevo bien dicho, o nada (RF-26 a RF-29).
+    let material: { clave: string; nombre: string; unidad: string | null } | null = null;
+    if (m.materialId) {
+      const delAlmacen = porId.get(m.materialId);
+      if (!delAlmacen) falta('Ese material ya no está en el almacén de la obra: elija otro.');
+      else material = { clave: delAlmacen.id, nombre: delAlmacen.nombre, unidad: delAlmacen.unidad };
+    } else if (m.materialNuevo) {
+      const nombre = m.materialNuevo.nombre.trim();
+      const yaEsta = vigentePorNombre.get(palabras(nombre).join(' '));
+      if (nombre === '') {
+        falta('Escriba el nombre del material nuevo.');
+      } else if (yaEsta) {
+        falta(`Ya hay un material «${yaEsta.nombre}» en el almacén: elíjalo de la lista en vez de registrarlo de nuevo.`);
+      } else if (!m.materialNuevo.unidad) {
+        falta('Elija la unidad del material nuevo.');
+      } else {
+        const clave = claveDeMaterialNuevo(nombre);
+        const otraUnidad = unidadDeNuevo.get(clave);
+        if (otraUnidad && otraUnidad !== m.materialNuevo.unidad) {
+          falta('Este material nuevo tiene otra unidad en otro renglón del reporte: use la misma.');
+        } else {
+          unidadDeNuevo.set(clave, m.materialNuevo.unidad);
+          material = { clave, nombre, unidad: m.materialNuevo.unidad };
+        }
+      }
+    } else {
+      falta(
+        `No se reconoció «${m.escrito}» en el almacén de la obra: elíjalo de la lista, regístrelo como material nuevo o quite el renglón.`,
+      );
+    }
+
+    // La unidad del renglón tiene que ser la del material: no se convierte (RF-30).
+    let unidadBien = false;
+    if (material?.unidad) {
+      const enQueSeLleva = abreviaturaDeUnidad(material.unidad);
+      if (m.unidad === null) {
+        falta(
+          m.unidadEscrita
+            ? `No se reconoció la unidad «${m.unidadEscrita}»: escriba la cantidad en ${enQueSeLleva}.`
+            : `Falta la unidad: escriba la cantidad en ${enQueSeLleva}.`,
+        );
+      } else if (m.unidad !== material.unidad) {
+        falta(
+          `«${material.nombre}» se lleva en ${enQueSeLleva} y el renglón dice ${abreviaturaDeUnidad(m.unidad)}: corrija la cantidad o la unidad.`,
+        );
+      } else {
+        unidadBien = true;
+      }
+    }
+
+    // Lo del módulo Almacén: cantidad, para qué y quién (009/RF-9, RF-13, RF-40 a RF-42).
+    for (const f of validarMovimiento(
+      {
+        tipo: m.tipo,
+        fecha: reporte.fecha ?? '',
+        cantidad: m.cantidad,
+        paraQue: m.paraQue,
+        responsable: m.responsable,
+      },
+      contexto.hoy,
+    )) {
+      if (f.campo !== 'fecha') falta(f.mensaje);
+    }
+
+    if (material && unidadBien) {
+      paraElSaldo.push({ renglon, material: material.clave, unidad: material.unidad as string });
+    }
+  });
+
+  // El stock, con los ingresos del mismo reporte (RF-33, RF-34).
+  const unidadPorMaterial = new Map(paraElSaldo.map((p) => [p.material, p.unidad]));
+  const saldo = saldoDelReporte(
+    paraElSaldo.map((p) => {
+      const m = reporte.almacen[p.renglon];
+      return { tipo: m.tipo, fecha: reporte.fecha ?? '', cantidad: m.cantidad, material: p.material };
+    }),
+    (material) => porId.get(material)?.stock ?? 0,
+    (material) => unidadPorMaterial.get(material) ?? '',
+  );
+  for (const f of saldo) faltas.push({ renglon: paraElSaldo[f.renglon].renglon, mensaje: f.mensaje });
+
+  // Por renglón, y dentro de cada renglón en el orden en que se detectaron.
+  return faltas
+    .map((f, orden) => ({ ...f, orden }))
+    .sort((a, b) => a.renglon - b.renglon || a.orden - b.orden)
+    .map(({ renglon, mensaje }) => ({ renglon, mensaje }));
 }
 
 /* ── De la propuesta de la IA al reporte que revisa el residente ───────── */
@@ -514,6 +809,8 @@ export interface PropuestaLeible {
     entrada?: string | null;
     salida?: string | null;
     observacion?: string | null;
+    /** La hoja del archivo (spec 023). */
+    cargo_hoja?: string | null;
   }[];
   ensayos?: readonly {
     tipo?: string | null;
@@ -534,8 +831,27 @@ export interface PropuestaLeible {
     destino?: string | null;
     abscisa_llegada?: string | null;
     hora?: string | null;
+    /** Spec 023. */
+    vale?: string | null;
   }[];
   novedades?: readonly { descripcion?: string | null }[];
+  /** El reporte de almacén (spec 023). */
+  almacen?: {
+    ingresos?: readonly {
+      material?: string | null;
+      cantidad?: number | null;
+      unidad?: string | null;
+      entregado_por?: string | null;
+      observacion?: string | null;
+    }[];
+    salidas?: readonly {
+      material?: string | null;
+      cantidad?: number | null;
+      unidad?: string | null;
+      recibido_por?: string | null;
+      para_que?: string | null;
+    }[];
+  } | null;
 }
 
 /** Algo con nombre que se puede elegir: un sitio, un material, un ensayo. */
@@ -577,6 +893,33 @@ export interface CatalogosDeLaObra {
   personas: readonly PersonaConocida[];
   sitios: readonly OpcionConNombre[];
   materiales: readonly OpcionConNombre[];
+  /**
+   * Los materiales vigentes del almacén de la obra (spec 023, RF-26). Ausente o vacío
+   * en una obra sin almacén: nada se reconoce.
+   */
+  materialesAlmacen?: readonly OpcionConNombre[];
+}
+
+/**
+ * El material del almacén que nombra el reporte: **el de igual nombre**, sin tildes
+ * ni mayúsculas (spec 023, RF-26). A diferencia de los sitios y los materiales de
+ * cantera, no se busca uno parecido: «Cemento» no es «Cemento gris», y un ingreso
+ * apuntado al material equivocado deja mal el stock de dos.
+ */
+function reconocerMaterialDeAlmacen(
+  texto: string | null | undefined,
+  materiales: readonly OpcionConNombre[],
+): string | null {
+  if (!texto) return null;
+  const escrito = palabras(texto).join(' ');
+  if (escrito === '') return null;
+  const iguales = materiales.filter((m) => palabras(m.nombre).join(' ') === escrito);
+  return iguales.length === 1 ? iguales[0].id : null;
+}
+
+/** La cantidad de la IA, en centésimas; `null` si no es un número con hasta dos decimales. */
+function centesimasDeIa(valor: number | null | undefined): number | null {
+  return typeof valor === 'number' && Number.isFinite(valor) ? aCentesimas(valor) : null;
 }
 
 /** El reporte listo para revisar, y si su fecha se tomó del mensaje (RF-62). */
@@ -695,6 +1038,7 @@ export function resolverPropuesta(
     entrada: horaDeTexto(p.entrada),
     salida: horaDeTexto(p.salida),
     observaciones: textoLimpio(p.observacion),
+    hoja: textoLimpio(p.cargo_hoja) || null,
   }));
 
   const ensayos: EnsayoDelReporte[] = (propuesta.ensayos ?? []).map((e) => {
@@ -726,13 +1070,51 @@ export function resolverPropuesta(
       metros: vaALaObra ? (llegada?.metros ?? null) : null,
       hora: horaDeTexto(v.hora),
       conductorId: conductorDelViaje(vehiculoId, maquinaria),
+      vale: null,
     };
     const cantidad = Math.min(
       Math.max(1, Math.trunc(numeroONulo(v.cantidad) ?? 1)),
       VIAJES_MAXIMOS_POR_RENGLON,
     );
+    // El vale es de un viaje (spec 023, RF-50): en un renglón con varios no se sabe
+    // de cuál es, y repetirlo en todos inventaría vales. Se completa en la bandeja.
+    if (cantidad === 1) viaje.vale = valeLimpio(v.vale);
     return Array.from({ length: cantidad }, () => ({ ...viaje }));
   });
+
+  // El reporte de almacén (spec 023, RF-19 a RF-21, RF-26, RF-30). El material se
+  // reconoce o queda sin elegir; registrarlo nuevo lo decide quien revisa (RF-27).
+  const materialesAlmacen = catalogos.materialesAlmacen ?? [];
+  const movimiento = (
+    tipo: TipoMovimiento,
+    m: { material?: string | null; cantidad?: number | null; unidad?: string | null },
+    resto: { responsable: string; paraQue: string; observacion: string },
+  ): MovimientoDelReporte => ({
+    tipo,
+    materialId: reconocerMaterialDeAlmacen(m.material, materialesAlmacen),
+    materialNuevo: null,
+    escrito: textoLimpio(m.material),
+    cantidad: centesimasDeIa(m.cantidad),
+    unidadEscrita: textoLimpio(m.unidad) || null,
+    unidad: unidadDeTexto(m.unidad),
+    ...resto,
+  });
+  const almacen: MovimientoDelReporte[] = [
+    ...(propuesta.almacen?.ingresos ?? []).map((m) =>
+      movimiento('ingreso', m, {
+        responsable: textoLimpio(m.entregado_por),
+        paraQue: '',
+        observacion: textoLimpio(m.observacion),
+      }),
+    ),
+    ...(propuesta.almacen?.salidas ?? []).map((m) =>
+      movimiento('salida', m, {
+        responsable: textoLimpio(m.recibido_por),
+        paraQue: textoLimpio(m.para_que),
+        observacion: '',
+      }),
+    ),
+  ];
 
   const novedades = (propuesta.novedades ?? []).map((n) => textoLimpio(n.descripcion)).filter(Boolean);
   const notas =
@@ -752,6 +1134,7 @@ export function resolverPropuesta(
       ensayos,
       viajes,
       notas,
+      almacen,
     },
     fechaSupuesta: !fechaValida,
   };
@@ -839,6 +1222,7 @@ export const CATEGORIAS_DE_WHATSAPP = [
   'suministro_cantera',
   'incidente',
   'administrativo',
+  'reporte_almacen',
   'seguimiento',
   'ignorar',
 ] as const;
@@ -854,13 +1238,21 @@ export type CategoriaDeWhatsapp = (typeof CATEGORIAS_DE_WHATSAPP)[number];
  *  · `notas` — un incidente, una novedad de una máquina, un inicio de actividades
  *    o un asunto administrativo, a las notas (RF-38).
  *  · `cantera` — solo viajes (RF-39, RF-87).
+ *  · `almacen` — ingresos y salidas al módulo Almacén, sin tocar la bitácora (spec
+ *    023, RF-18, RF-40).
  *  · `ninguno` — se marca revisado sin crear nada (RF-49).
  *
  * Una categoría que la IA invente mañana va a `ninguno` y no a las notas: un
  * registro creado por una categoría que nadie decidió es justo lo que la
  * aprobación existe para evitar.
  */
-export type DestinoDeWhatsapp = 'reporte' | 'control_calidad' | 'notas' | 'cantera' | 'ninguno';
+export type DestinoDeWhatsapp =
+  | 'reporte'
+  | 'control_calidad'
+  | 'notas'
+  | 'cantera'
+  | 'almacen'
+  | 'ninguno';
 
 const DESTINOS: Record<CategoriaDeWhatsapp, DestinoDeWhatsapp> = {
   reporte_diario: 'reporte',
@@ -871,6 +1263,7 @@ const DESTINOS: Record<CategoriaDeWhatsapp, DestinoDeWhatsapp> = {
   incidente: 'notas',
   administrativo: 'notas',
   suministro_cantera: 'cantera',
+  reporte_almacen: 'almacen',
   seguimiento: 'ninguno',
   ignorar: 'ninguno',
 };
@@ -885,6 +1278,7 @@ const ETIQUETAS_DE_CATEGORIA: Record<CategoriaDeWhatsapp, string> = {
   suministro_cantera: 'Suministro o cantera',
   incidente: 'Incidente',
   administrativo: 'Administrativo',
+  reporte_almacen: 'Reporte de almacén',
   seguimiento: 'Seguimiento',
   ignorar: 'Ignorar',
 };

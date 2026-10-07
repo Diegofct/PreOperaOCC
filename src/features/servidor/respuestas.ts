@@ -57,6 +57,10 @@ export async function responder(cuerpo: () => Promise<Response>): Promise<Respon
   } catch (fallo) {
     if (fallo instanceof ZodError) return errorDeValidacion(fallo);
 
+    // La petición venía mal, no el servidor: es un 400 con su motivo. Antes salía
+    // como 500 y llenaba el registro de falsos fallos (defecto corregido el 2026-10-06).
+    if (fallo instanceof CuerpoNoJson) return errorDePeticion(fallo.message);
+
     // Un choque de dos escrituras simultáneas que el reintento no resolvió
     // (spec 009, RF-16). Es un choque de datos, no un fallo: se dice qué hacer.
     if (esChoqueDeSerializacion(fallo)) {
@@ -218,7 +222,22 @@ function codigoPostgres(fallo: unknown): string | null {
   return detallePostgres(fallo)?.code ?? null;
 }
 
-/** Lee y valida el cuerpo JSON de la petición. Lanza `ZodError` si no cuadra. */
+/**
+ * El cuerpo de la petición no se pudo leer como JSON. Una clase propia, y no un
+ * `SyntaxError` cualquiera, para que `responder` lo distinga de un fallo de código
+ * —que también puede ser un `SyntaxError`— y responda 400 en vez de 500.
+ */
+export class CuerpoNoJson extends Error {
+  constructor() {
+    super('El cuerpo de la petición no es JSON válido.');
+    this.name = 'CuerpoNoJson';
+  }
+}
+
+/**
+ * Lee y valida el cuerpo JSON de la petición. Lanza `CuerpoNoJson` si no es JSON
+ * y `ZodError` si no cuadra; `responder` convierte los dos en un 400.
+ */
 export async function cuerpoJson<T>(
   peticion: Request,
   esquema: { parse: (dato: unknown) => T },
@@ -227,7 +246,7 @@ export async function cuerpoJson<T>(
   try {
     crudo = await peticion.json();
   } catch {
-    throw new SyntaxError('El cuerpo de la petición no es JSON válido.');
+    throw new CuerpoNoJson();
   }
   return esquema.parse(crudo);
 }
