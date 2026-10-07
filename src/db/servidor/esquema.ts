@@ -43,6 +43,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 // Rutas relativas y no el alias `@/`: drizzle-kit empaqueta este archivo con
@@ -243,6 +244,15 @@ export const usuarios = pgTable(
      */
     obraId: text('obra_id').references(() => obras.id),
     activo: boolean('activo').notNull().default(true),
+    /**
+     * Quién la registró y desde qué mensaje, cuando se registró desde la bandeja de
+     * WhatsApp (spec 023, RF-68). Nulos en las registradas en Personas: ahí no se
+     * llevaba y no se inventa.
+     */
+    registradoPor: text('registrado_por').references((): AnyPgColumn => usuarios.id),
+    mensajeWhatsappId: text('mensaje_whatsapp_id').references(
+      (): AnyPgColumn => whatsappMensajes.id,
+    ),
     eliminadoEn: eliminadoEn(),
     creadoEn: creadoEn(),
     actualizadoEn: actualizadoEn(),
@@ -763,6 +773,14 @@ export const almacenMovimientos = pgTable(
      * `NOT NULL` obligaría a escribir en la evidencia un nombre que nadie dijo.
      */
     responsable: text('responsable'),
+    /**
+     * El reporte de WhatsApp del que salió, si se aprobó desde la bandeja (spec 023,
+     * RF-37 y RF-38). Nulo en lo registrado en el módulo; `registrado_por` es
+     * entonces quien aprobó.
+     */
+    mensajeWhatsappId: text('mensaje_whatsapp_id').references(
+      (): AnyPgColumn => whatsappMensajes.id,
+    ),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),
@@ -894,6 +912,13 @@ export const canteraViajes = pgTable(
     pr: integer('pr'),
     metros: integer('metros'),
     /**
+     * El número del vale de despacho de la cantera (spec 023, RF-41 a RF-45). Opcional,
+     * y **tal como se escribe** —«F-0458», «0458 A»—, solo sin espacios en los
+     * extremos. No es único: uno repetido se avisa y se deja guardar (RF-45); el
+     * índice de abajo es para encontrar el repetido, sin distinguir mayúsculas (RF-56).
+     */
+    vale: text('vale'),
+    /**
      * El mensaje de WhatsApp del que salió, si se aprobó desde la bandeja (spec
      * 021, RF-46 y RF-47). Nulo en lo registrado en el módulo. `registrado_por` es
      * entonces quien aprobó.
@@ -911,6 +936,15 @@ export const canteraViajes = pgTable(
     // Lo lee el listado por periodo, la sección de la bitácora de un día y el
     // cierre del parte, que fija los viajes de su obra y su fecha.
     index('ix_cantera_viaje_obra_fecha').on(t.obraId, t.fecha),
+    index('ix_cantera_viaje_vale')
+      .on(t.obraId, sql`lower(${t.vale})`)
+      .where(sql`${t.vale} is not null`),
+    // RF-44 y RF-55: ni vacío ni de más de 30. La regla ya lo exige; esto es para
+    // lo que llegue por fuera de ella.
+    check(
+      'ck_cantera_viaje_vale',
+      sql`${t.vale} is null or char_length(${t.vale}) between 1 and 30`,
+    ),
     check(
       'ck_cantera_viaje_destino',
       // `is not null` explícito: un `check` que da desconocido (por un nulo) se

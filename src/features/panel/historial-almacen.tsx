@@ -141,6 +141,8 @@ export function HistorialAlmacen({
         <>
           <Celda>{m.registradoPorNombre ?? '—'}</Celda>
           <Celda>{momento(m.registradoEn)}</Celda>
+          {/* Aprobado desde un reporte de WhatsApp (spec 023, RF-38), como en Control Cantera. */}
+          {m.desdeWhatsapp ? <Etiqueta tono="neutro">Desde WhatsApp</Etiqueta> : null}
         </>
       ),
     },

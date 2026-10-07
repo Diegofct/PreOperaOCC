@@ -48,14 +48,21 @@ import {
   etiquetaDeActividad,
   UNIDADES_DE_ACTIVIDAD,
 } from '@/shared/catalogos/presupuesto';
+import { UNIDADES_ALMACEN, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { CARGOS, type Cargo } from '@/shared/catalogos/cargos';
+import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/materiales';
+import { formatearCantidad, type TipoMovimiento } from '@/shared/rules/almacen';
 import { DESTINO_OBRA, OPCIONES_DE_METROS, OPCIONES_DE_PR } from '@/shared/rules/cantera';
 import { alcanza } from '@/shared/rules/permisos';
+import { normalizar } from '@/shared/rules/texto';
 import {
+  cargoDeHoja,
   etiquetaDeCategoria,
   type ActividadDelReporte,
   type EnsayoDelReporte,
   type FranjaDelReporte,
   type MaquinaDelReporte,
+  type MovimientoDelReporte,
   type PersonaDelReporte,
   type ReporteDelDia,
   type ViajeDelReporte,
@@ -68,6 +75,7 @@ import {
   Ayuda,
   Boton,
   Campo,
+  Casilla,
   Celda,
   Etiqueta,
   FilaDeFormulario,
@@ -80,6 +88,7 @@ import {
 } from '../componentes';
 import type { DetalleDePropuesta } from '../contratos';
 import { usePersona } from '../sesion';
+import { useAccionDeVentana } from '../usar-accion-de-ventana';
 
 type Falta = DetalleDePropuesta['faltas'][number];
 
@@ -177,6 +186,8 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   const [fotoDelDia, setFotoDelDia] = useState<string | null>(null);
   const [fotoPorActividad, setFotoPorActividad] = useState<Record<string, string>>({});
   const [descartando, setDescartando] = useState(false);
+  // Las personas que se van a registrar desde la bandeja (spec 023, RF-57, RF-66).
+  const [porRegistrar, setPorRegistrar] = useState<PorRegistrar[] | null>(null);
   const [motivo, setMotivo] = useState('');
   const [motivoIntentado, setMotivoIntentado] = useState(false);
 
@@ -281,7 +292,10 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   const imagenes = detalle.archivosDelMensaje.filter((a) => a.mime.startsWith('image/'));
   const opcionesDeFoto = imagenes.map((a, n) => ({ valor: a.id, etiqueta: `Foto ${n + 1}` }));
   const puedeDecidir = detalle.estado === 'pendiente' && alcanza(rol, 'whatsapp', 'aprobar');
-  const cerrada = detalle.bitacoraDelDia === 'cerrada';
+  // Spec 023: un reporte de almacén no va a la bitácora (RF-40): ni sus secciones ni
+  // sus fotos aplican, y su bitácora cerrada no impide aprobarlo.
+  const esAlmacen = detalle.destino === 'almacen';
+  const cerrada = !esAlmacen && detalle.bitacoraDelDia === 'cerrada';
   const viajesPorAprobar = reporte.viajes.length > 0 && !detalle.viajesAprobados;
   const reemplazos = [
     ...(detalle.reemplaza.maquinas.length > 0 ? [`las máquinas ${detalle.reemplaza.maquinas.join(', ')}`] : []),
@@ -301,10 +315,18 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         version,
         propuesta: reporte!,
         soloViajes,
-        fotos: soloViajes
-          ? { delDia: null, porActividad: {} }
-          : { delDia: fotoDelDia, porActividad: fotoPorActividad },
+        fotos:
+          soloViajes || esAlmacen
+            ? { delDia: null, porActividad: {} }
+            : { delDia: fotoDelDia, porActividad: fotoPorActividad },
       });
+      if ('movimientos' in hechoAsi) {
+        // Spec 023, RF-38: lo aprobado queda en el Almacén, marcado «desde WhatsApp».
+        setHecho(
+          `Aprobado: ${hechoAsi.movimientos === 1 ? 'se registró 1 movimiento' : `se registraron ${hechoAsi.movimientos} movimientos`} en el Almacén${hechoAsi.materialesNuevos > 0 ? `, con ${hechoAsi.materialesNuevos === 1 ? '1 material nuevo' : `${hechoAsi.materialesNuevos} materiales nuevos`}` : ''}.`,
+        );
+        return;
+      }
       setHecho(
         hechoAsi.soloViajes
           ? `Se ${hechoAsi.viajes === 1 ? 'registró 1 viaje' : `registraron ${hechoAsi.viajes} viajes`} en Control Cantera. El resto del reporte sigue pendiente hasta que la bitácora del ${hechoAsi.fecha} se pueda volver a abrir.`
@@ -351,6 +373,79 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
     }
   }
   const documentos = detalle.archivosDelMensaje.filter((a) => !a.mime.startsWith('image/'));
+
+  // ── Registrar a las personas que no están en el sistema (spec 023, RF-57 a RF-66) ──
+  const puedeRegistrar = editable && alcanza(rol, 'whatsapp', 'aprobar');
+  const personaPorRegistrar = (seccion: 'personal' | 'maquinaria', renglon: number): PorRegistrar | null => {
+    const nombre =
+      seccion === 'personal' ? reporte.personal[renglon].escrito : (reporte.maquinaria[renglon].operadorEscrito ?? '');
+    const elegida =
+      seccion === 'personal' ? reporte.personal[renglon].usuarioId : reporte.maquinaria[renglon].operadorId;
+    if (elegida || !nombre.trim()) return null;
+    return {
+      seccion,
+      renglon,
+      nombre: nombre.trim(),
+      // RF-62: el de la hoja del archivo; un operador de máquina, Operador.
+      cargo: seccion === 'personal' ? cargoDeHoja(reporte.personal[renglon].hoja) : 'operador',
+      incluir: true,
+      coincidencias: detalle.coincidencias[seccion][String(renglon)] ?? [],
+    };
+  };
+  const noReconocidas = [
+    ...reporte.personal.map((_, i) => personaPorRegistrar('personal', i)),
+    ...reporte.maquinaria.map((_, i) => personaPorRegistrar('maquinaria', i)),
+  ].filter((p): p is PorRegistrar => p !== null);
+
+  /** Las posibles coincidencias de un renglón, para elegir una antes de registrar (RF-65). */
+  function coincidenciasDe(seccion: 'personal' | 'maquinaria', renglon: number) {
+    const persona = puedeRegistrar ? personaPorRegistrar(seccion, renglon) : null;
+    if (!persona) return null;
+    return (
+      <View style={estilos.coincidencias}>
+        {persona.coincidencias.length > 0 ? (
+          <>
+            <Ayuda>¿Es alguna de estas personas de la obra?</Ayuda>
+            {persona.coincidencias.map((c) => (
+              <Boton
+                key={c.id}
+                titulo={`Es ${c.nombreCompleto}${c.cargo ? ` (${c.cargo})` : ''}`}
+                tono="secundario"
+                onPress={() =>
+                  seccion === 'personal'
+                    ? cambiarRenglon('personal', renglon, { usuarioId: c.id })
+                    : cambiarRenglon('maquinaria', renglon, { operadorId: c.id })
+                }
+              />
+            ))}
+          </>
+        ) : null}
+        <Boton
+          titulo={seccion === 'personal' ? 'Registrar persona' : 'Registrar operador'}
+          tono="secundario"
+          onPress={() => setPorRegistrar([persona])}
+        />
+      </View>
+    );
+  }
+
+  async function registrar(personas: PorRegistrar[]) {
+    const elegidas = personas.filter((p) => p.incluir);
+    if (elegidas.length === 0) return;
+    const registradas = await api.whatsapp.propuestas.registrarPersonas(id, {
+      version: detalle!.version,
+      // Lo que se ve, con lo cambiado sin guardar: queda guardado con las personas.
+      propuesta: reporte!,
+      personas: elegidas.map(({ seccion, renglon, nombre, cargo }) => ({ seccion, renglon, nombre, cargo })),
+    });
+    setPorRegistrar(null);
+    setHecho(
+      registradas.personas.length === 1
+        ? 'Se registró 1 persona en la obra, sin acceso al sistema. Ya está elegida en el reporte.'
+        : `Se registraron ${registradas.personas.length} personas en la obra, sin acceso al sistema. Ya están elegidas en el reporte.`,
+    );
+    setPulso((p) => p + 1);
+  }
 
   return (
     <>
@@ -442,6 +537,17 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         </FilaDeFormulario>
       </Seccion>
 
+      {esAlmacen ? (
+        /* ── Ingresos y salidas, al Almacén (spec 023, RF-19 a RF-34) ── */
+        <SeccionAlmacen
+          movimientos={reporte.almacen}
+          materiales={opciones.almacen}
+          editable={editable}
+          faltasDe={(renglon) => faltasDe('almacen', renglon)}
+          alCambiar={(almacen) => cambiar({ almacen })}
+        />
+      ) : (
+      <>
       {/* ── Clima (RF-66, RF-67) ── */}
       <Seccion titulo={`Clima (${reporte.clima.length})`}>
         <FaltasDelRenglon faltas={faltasDe('clima', null)} />
@@ -576,6 +682,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
             />
             {m.escrito && !m.vehiculoId ? null : m.escrito ? <Ayuda>{`En el reporte: ${m.escrito}`}</Ayuda> : null}
             <FaltasDelRenglon faltas={faltasDe('maquinaria', i)} />
+            {coincidenciasDe('maquinaria', i)}
           </FilaDeFormulario>
         ))}
         {reporte.maquinaria.length === 0 ? <Ayuda>El reporte no trae maquinaria con lecturas.</Ayuda> : null}
@@ -607,6 +714,16 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
 
       {/* ── Personal (RF-78 a RF-80) ── */}
       <Seccion titulo={`Personal (${reporte.personal.length})`}>
+        {puedeRegistrar && noReconocidas.length > 1 ? (
+          // Spec 023, RF-66: todas de una vez, con su cargo y la opción de excluir.
+          <Acciones>
+            <Boton
+              titulo={`Registrar todas las no reconocidas (${noReconocidas.length})`}
+              tono="secundario"
+              onPress={() => setPorRegistrar(noReconocidas)}
+            />
+          </Acciones>
+        ) : null}
         {reporte.personal.map((p: PersonaDelReporte, i) => (
           <FilaDeFormulario key={i} ultima={i === reporte.personal.length - 1}>
             <Selector
@@ -628,6 +745,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
             />
             {editable ? <Boton titulo="Quitar" tono="secundario" onPress={() => quitarRenglon('personal', i)} /> : null}
             <FaltasDelRenglon faltas={faltasDe('personal', i)} />
+            {coincidenciasDe('personal', i)}
           </FilaDeFormulario>
         ))}
         {reporte.personal.length === 0 ? <Ayuda>El reporte no trae personal.</Ayuda> : null}
@@ -640,7 +758,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                 cambiar({
                   personal: [
                     ...reporte.personal,
-                    { usuarioId: null, escrito: '', entrada: null, salida: null, observaciones: '' },
+                    { usuarioId: null, escrito: '', entrada: null, salida: null, observaciones: '', hoja: null },
                   ],
                 })
               }
@@ -844,8 +962,22 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                 />
               </>
             ) : null}
+            <Campo
+              // Spec 023, RF-50, RF-51: tal como está en el vale; opcional (RF-42).
+              etiqueta="N.º de vale"
+              valor={v.vale ?? ''}
+              onChange={(x) => cambiarRenglon('viajes', i, { vale: x === '' ? null : x })}
+              soloLectura={!editable}
+              ancho={160}
+            />
             {editable ? <Boton titulo="Quitar" tono="secundario" onPress={() => quitarRenglon('viajes', i)} /> : null}
             <FaltasDelRenglon faltas={faltasDe('viajes', i)} />
+            {/* RF-45: el vale repetido se avisa y no impide aprobar. */}
+            {detalle.avisosDeVale
+              .filter((a) => a.renglon === i)
+              .map((a) => (
+                <Ayuda key={a.mensaje}>{`⚠ ${a.mensaje} Se puede aprobar igual.`}</Ayuda>
+              ))}
           </FilaDeFormulario>
         ))}
         {reporte.viajes.length === 0 ? <Ayuda>El reporte no trae viajes.</Ayuda> : null}
@@ -867,6 +999,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                       metros: null,
                       hora: null,
                       conductorId: null,
+                      vale: null,
                     },
                   ],
                 })
@@ -930,6 +1063,21 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
           </Aviso>
         ) : null
       ) : null}
+      </>
+      )}
+
+      {/* ── Qué pasa al aprobar un reporte de almacén (spec 023, RF-25, RF-40) ── */}
+      {puedeDecidir && esAlmacen ? (
+        detalle.almacenActivo ? (
+          <Aviso tono="info">
+            {`Al aprobar se registrarán ${reporte.almacen.length === 1 ? '1 movimiento' : `${reporte.almacen.length} movimientos`} en el Almacén de la obra, con la fecha del reporte. No pasa nada a la bitácora.`}
+          </Aviso>
+        ) : (
+          <Aviso tono="error">
+            Esta obra no lleva Almacén: el reporte no se puede aprobar. Descártelo o pida que se active el módulo.
+          </Aviso>
+        )
+      ) : null}
 
       <Acciones>
         {editable ? (
@@ -940,7 +1088,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
             deshabilitado={guardando || decidiendo || !cambiado}
           />
         ) : null}
-        {puedeDecidir && !cerrada ? (
+        {puedeDecidir && !cerrada && (!esAlmacen || detalle.almacenActivo) ? (
           <Boton
             titulo={decidiendo ? 'Aprobando…' : 'Aprobar'}
             onPress={() => aprobar(false)}
@@ -961,6 +1109,14 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
           <Boton titulo="Devolver a la bandeja" tono="secundario" onPress={devolver} deshabilitado={decidiendo} />
         ) : null}
       </Acciones>
+
+      {porRegistrar ? (
+        <VentanaRegistrarPersonas
+          personas={porRegistrar}
+          onCerrar={() => setPorRegistrar(null)}
+          onRegistrar={registrar}
+        />
+      ) : null}
 
       {descartando ? (
         <Modal titulo="Descartar el reporte" onCerrar={() => setDescartando(false)}>
@@ -985,6 +1141,317 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         </Modal>
       ) : null}
     </>
+  );
+}
+
+/** Una persona del reporte que se va a registrar desde la bandeja (spec 023). */
+interface PorRegistrar {
+  seccion: 'personal' | 'maquinaria';
+  renglon: number;
+  nombre: string;
+  cargo: Cargo | null;
+  /** RF-66: se puede excluir a alguna antes de confirmar. */
+  incluir: boolean;
+  /** Las de la obra que se le parecen (RF-65). */
+  coincidencias: { id: string; nombreCompleto: string; cargo: string | null }[];
+}
+
+const OPCIONES_DE_CARGO = CARGOS.map((c) => ({ valor: c.id, etiqueta: c.nombre }));
+
+/**
+ * Registrar a una o a todas las personas no reconocidas del reporte (spec 023, RF-57
+ * a RF-66). Cada una con su nombre, propuesto con lo que trae el reporte (RF-60), y
+ * su cargo, propuesto por la hoja del archivo y cambiable o «sin definir» (RF-61,
+ * RF-62). Las que se parecen a alguien de la obra lo dicen antes de confirmar
+ * (RF-65): si es la misma, se cierra y se elige de la lista.
+ *
+ * Quedan en la obra y **sin acceso**: lo dice la ventana, para que nadie espere que
+ * la persona pueda entrar (RF-64).
+ */
+function VentanaRegistrarPersonas({
+  personas,
+  onCerrar,
+  onRegistrar,
+}: {
+  personas: PorRegistrar[];
+  onCerrar: () => void;
+  onRegistrar: (personas: PorRegistrar[]) => Promise<void>;
+}) {
+  const [filas, setFilas] = useState(personas);
+  const accion = useAccionDeVentana();
+  const elegidas = filas.filter((f) => f.incluir);
+  const sinNombre = elegidas.some((f) => !f.nombre.trim());
+
+  function cambiarFila(indice: number, cambio: Partial<PorRegistrar>) {
+    setFilas((antes) => antes.map((f, i) => (i === indice ? { ...f, ...cambio } : f)));
+  }
+
+  return (
+    <Modal
+      titulo={personas.length === 1 ? 'Registrar a la persona' : 'Registrar a las personas no reconocidas'}
+      onCerrar={onCerrar}
+    >
+      <Aviso tono="info">
+        Quedan registradas en la obra, sin acceso al panel ni al celular: el acceso lo da la gerencia
+        en Personas. Aunque después se descarte el reporte, siguen registradas.
+      </Aviso>
+      {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
+      {filas.map((f, i) => (
+        <FilaDeFormulario key={`${f.seccion}-${f.renglon}`} ultima={i === filas.length - 1}>
+          {filas.length > 1 ? (
+            <Casilla
+              etiqueta="Registrar"
+              marcada={f.incluir}
+              onChange={(incluir) => cambiarFila(i, { incluir })}
+            />
+          ) : null}
+          <Campo
+            etiqueta={f.seccion === 'personal' ? 'Nombre completo' : 'Nombre completo del operador'}
+            valor={f.nombre}
+            onChange={(nombre) => cambiarFila(i, { nombre })}
+            error={f.incluir && !f.nombre.trim() ? 'Escriba el nombre.' : undefined}
+            ancho={300}
+          />
+          <Selector
+            etiqueta="Cargo"
+            valor={f.cargo}
+            opciones={OPCIONES_DE_CARGO}
+            onChange={(v) => cambiarFila(i, { cargo: v as Cargo | null })}
+            vacio="Sin definir"
+            permiteVacio
+            ancho={240}
+          />
+          {f.coincidencias.length > 0 ? (
+            <Ayuda>
+              {`Ya hay en la obra: ${f.coincidencias.map((c) => `${c.nombreCompleto}${c.cargo ? ` (${c.cargo})` : ''}`).join(', ')}. Si es la misma persona, cierre esta ventana y elíjala en el reporte.`}
+            </Ayuda>
+          ) : null}
+        </FilaDeFormulario>
+      ))}
+      <Acciones>
+        <Boton
+          titulo={
+            accion.ejecutando
+              ? 'Registrando…'
+              : elegidas.length === 1
+                ? 'Registrar 1 persona'
+                : `Registrar ${elegidas.length} personas`
+          }
+          onPress={() => accion.ejecutar(() => onRegistrar(filas))}
+          deshabilitado={accion.ejecutando || elegidas.length === 0 || sinNombre}
+        />
+        <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} deshabilitado={accion.ejecutando} />
+      </Acciones>
+    </Modal>
+  );
+}
+
+/** El valor del selector de material que pide registrarlo nuevo (RF-27). */
+const MATERIAL_NUEVO = '__nuevo__';
+
+const OPCIONES_DE_UNIDAD_DE_ALMACEN = UNIDADES_ALMACEN.map((u) => ({ valor: u.id, etiqueta: u.nombre }));
+const OPCIONES_DE_NOMBRE_DE_OCC = [
+  { valor: CLAVE_OTRO_MATERIAL, etiqueta: 'Otro (escribir el nombre)' },
+  ...MATERIALES_DE_OCC.map((m) => ({ valor: m, etiqueta: m })),
+];
+const OPCIONES_DE_TIPO = [
+  { valor: 'ingreso', etiqueta: 'Ingreso' },
+  { valor: 'salida', etiqueta: 'Salida' },
+];
+
+/**
+ * Los ingresos y salidas de un reporte de almacén, editables (spec 023, RF-19 a
+ * RF-34). Un renglón por material; su fecha es la del reporte (RF-21).
+ *
+ * El material se elige del almacén de la obra o se registra nuevo ahí mismo, con su
+ * nombre de la lista de OCC o escrito con «Otro», y su unidad de la lista cerrada
+ * (RF-27, RF-28, 009/RF-31 a RF-34). Junto a cada salida se ve el stock que hay hoy
+ * (RF-33); si no alcanza, la falta la dice el servidor en su renglón, contando los
+ * ingresos del mismo reporte (RF-34).
+ *
+ * La cantidad se escribe en la unidad del material y viaja en centésimas, como la
+ * guarda el almacén.
+ */
+function SeccionAlmacen({
+  movimientos,
+  materiales,
+  editable,
+  faltasDe,
+  alCambiar,
+}: {
+  movimientos: MovimientoDelReporte[];
+  materiales: DetalleDePropuesta['opciones']['almacen'];
+  editable: boolean;
+  faltasDe: (renglon: number) => Falta[];
+  alCambiar: (movimientos: MovimientoDelReporte[]) => void;
+}) {
+  const opcionesDeMaterial = [
+    ...materiales.map((m) => ({
+      valor: m.id,
+      etiqueta: m.nombre,
+      detalle: `Hay ${formatearCantidad(m.stock, m.unidad)}`,
+    })),
+    { valor: MATERIAL_NUEVO, etiqueta: 'Registrar como material nuevo' },
+  ];
+  const porId = new Map(materiales.map((m) => [m.id, m]));
+
+  function cambiarRenglon(indice: number, cambio: Partial<MovimientoDelReporte>) {
+    alCambiar(movimientos.map((m, i) => (i === indice ? { ...m, ...cambio } : m)));
+  }
+
+  function elegirMaterial(indice: number, valor: string | null) {
+    const m = movimientos[indice];
+    if (valor === MATERIAL_NUEVO) {
+      // Se propone con lo que decía el reporte; quien revisa lo ajusta.
+      cambiarRenglon(indice, { materialId: null, materialNuevo: { nombre: m.escrito, unidad: m.unidad } });
+    } else {
+      cambiarRenglon(indice, { materialId: valor, materialNuevo: null });
+    }
+  }
+
+  function anadir(tipo: TipoMovimiento) {
+    alCambiar([
+      ...movimientos,
+      {
+        tipo,
+        materialId: null,
+        materialNuevo: null,
+        escrito: '',
+        cantidad: null,
+        unidadEscrita: null,
+        unidad: null,
+        responsable: '',
+        paraQue: '',
+        observacion: '',
+      },
+    ]);
+  }
+
+  return (
+    <Seccion titulo={`Almacén (${movimientos.length})`}>
+      {movimientos.length === 0 ? <Ayuda>El reporte no trae ingresos ni salidas.</Ayuda> : null}
+      {movimientos.map((m, i) => {
+        const material = m.materialId ? porId.get(m.materialId) : undefined;
+        const nombreDeLista = m.materialNuevo
+          ? (MATERIALES_DE_OCC.find((n) => normalizar(n) === normalizar(m.materialNuevo!.nombre)) ??
+            CLAVE_OTRO_MATERIAL)
+          : null;
+        return (
+          <FilaDeFormulario key={i} ultima={i === movimientos.length - 1}>
+            <Selector
+              etiqueta="Tipo"
+              valor={m.tipo}
+              opciones={OPCIONES_DE_TIPO}
+              onChange={(v) => v && cambiarRenglon(i, { tipo: v as TipoMovimiento })}
+              ancho={140}
+            />
+            <Selector
+              etiqueta="Material"
+              valor={m.materialId ?? (m.materialNuevo ? MATERIAL_NUEVO : null)}
+              opciones={opcionesDeMaterial}
+              onChange={(v) => elegirMaterial(i, v)}
+              vacio={m.escrito ? `«${m.escrito}»: elija el material` : 'Elija el material'}
+              ancho={320}
+            />
+            {m.materialNuevo ? (
+              <>
+                <Selector
+                  etiqueta="Nombre en la lista de OCC"
+                  valor={nombreDeLista}
+                  opciones={OPCIONES_DE_NOMBRE_DE_OCC}
+                  onChange={(v) =>
+                    cambiarRenglon(i, {
+                      materialNuevo: {
+                        ...m.materialNuevo!,
+                        // «Otro» deja escribir; un nombre de la lista lo pone tal cual.
+                        nombre: v === CLAVE_OTRO_MATERIAL || v === null ? '' : v,
+                      },
+                    })
+                  }
+                  ancho={320}
+                />
+                {nombreDeLista === CLAVE_OTRO_MATERIAL ? (
+                  <Campo
+                    etiqueta="Nombre del material nuevo"
+                    valor={m.materialNuevo.nombre}
+                    onChange={(v) => cambiarRenglon(i, { materialNuevo: { ...m.materialNuevo!, nombre: v } })}
+                    soloLectura={!editable}
+                    ancho={280}
+                  />
+                ) : null}
+                <Selector
+                  etiqueta="Unidad del material nuevo"
+                  valor={m.materialNuevo.unidad}
+                  opciones={OPCIONES_DE_UNIDAD_DE_ALMACEN}
+                  onChange={(v) =>
+                    cambiarRenglon(i, {
+                      materialNuevo: { ...m.materialNuevo!, unidad: v as UnidadAlmacen | null },
+                    })
+                  }
+                  vacio="Elija la unidad"
+                  ancho={200}
+                />
+              </>
+            ) : null}
+            <CampoNumero
+              etiqueta="Cantidad"
+              valor={m.cantidad === null ? null : m.cantidad / 100}
+              onChange={(n) => cambiarRenglon(i, { cantidad: n === null ? null : Math.round(n * 100) })}
+              editable={editable}
+            />
+            <Selector
+              etiqueta="Unidad"
+              valor={m.unidad}
+              opciones={OPCIONES_DE_UNIDAD_DE_ALMACEN}
+              onChange={(v) => cambiarRenglon(i, { unidad: v as UnidadAlmacen | null })}
+              vacio={m.unidadEscrita ? `«${m.unidadEscrita}»: elija la unidad` : 'Elija la unidad'}
+              ancho={200}
+            />
+            <Campo
+              etiqueta={m.tipo === 'ingreso' ? 'Entregado por' : 'Recibido por'}
+              valor={m.responsable}
+              onChange={(v) => cambiarRenglon(i, { responsable: v })}
+              soloLectura={!editable}
+              ancho={240}
+            />
+            {m.tipo === 'salida' ? (
+              <Campo
+                etiqueta="Para qué"
+                valor={m.paraQue}
+                onChange={(v) => cambiarRenglon(i, { paraQue: v })}
+                soloLectura={!editable}
+                ancho={280}
+              />
+            ) : (
+              <Campo
+                etiqueta="Observación"
+                valor={m.observacion}
+                onChange={(v) => cambiarRenglon(i, { observacion: v })}
+                soloLectura={!editable}
+                ancho={280}
+              />
+            )}
+            {editable ? (
+              <Boton
+                titulo="Quitar"
+                tono="secundario"
+                onPress={() => alCambiar(movimientos.filter((_, j) => j !== i))}
+              />
+            ) : null}
+            {m.tipo === 'salida' && material ? (
+              <Ayuda>{`Hoy hay ${formatearCantidad(material.stock, material.unidad)} de ${material.nombre} en el almacén.`}</Ayuda>
+            ) : null}
+            <FaltasDelRenglon faltas={faltasDe(i)} />
+          </FilaDeFormulario>
+        );
+      })}
+      {editable ? (
+        <Acciones>
+          <Boton titulo="Añadir ingreso" tono="secundario" onPress={() => anadir('ingreso')} />
+          <Boton titulo="Añadir salida" tono="secundario" onPress={() => anadir('salida')} />
+        </Acciones>
+      ) : null}
+    </Seccion>
   );
 }
 
@@ -1015,5 +1482,6 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.fondoCabecera,
   },
   faltas: { width: '100%', gap: Spacing.one },
+  coincidencias: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, alignItems: 'center' },
   falta: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Estado.noConforme },
 });

@@ -42,6 +42,7 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       // El nombre sale aunque la persona esté de baja: un movimiento antiguo sigue
       // diciendo quién lo hizo (caso límite de la spec).
       registradoPorNombre: usuarios.nombreCompleto,
+      mensajeWhatsappId: almacenMovimientos.mensajeWhatsappId,
       anuladoEn: almacenMovimientos.anuladoEn,
       anuladoPorNombre: anulador.nombreCompleto,
       motivoAnulacion: almacenMovimientos.motivoAnulacion,
@@ -65,6 +66,8 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       responsable: f.responsable,
       registradoEn: f.creadoEn.toISOString(),
       registradoPorNombre: f.registradoPorNombre,
+      // Spec 023, RF-38: aprobado desde un reporte de WhatsApp.
+      desdeWhatsapp: f.mensajeWhatsappId !== null,
       anulado: f.anuladoEn !== null,
       anuladoEn: f.anuladoEn?.toISOString() ?? null,
       anuladoPorNombre: f.anuladoPorNombre,

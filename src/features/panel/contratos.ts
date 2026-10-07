@@ -31,6 +31,7 @@ import {
   MENSAJES_DE_VIAJE,
   OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
+  valeLimpio,
   type CanteraDelParte,
 } from '@/shared/rules/cantera';
 import {
@@ -55,7 +56,7 @@ import {
   type HorarioDeObra,
 } from '@/shared/rules/horas';
 import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
-import type { ReporteDelDia } from '@/shared/rules/whatsapp';
+import type { DestinoDeWhatsapp, ReporteDelDia } from '@/shared/rules/whatsapp';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -1209,6 +1210,11 @@ export interface MovimientoDeAlmacenFila {
   registradoEn: string;
   /** El nombre de quien lo registró, aunque hoy esté de baja. */
   registradoPorNombre: string | null;
+  /**
+   * Se aprobó desde un reporte de WhatsApp (spec 023, RF-38); `registradoPorNombre`
+   * es entonces quien lo aprobó.
+   */
+  desdeWhatsapp: boolean;
   anulado: boolean;
   anuladoEn: string | null;
   anuladoPorNombre: string | null;
@@ -1316,6 +1322,18 @@ export const viajeNuevo = z
     destino: elegido(MENSAJES_DE_VIAJE.sinDestino),
     pr: parteDeAbscisa,
     metros: parteDeAbscisa,
+    /**
+     * El número de vale, opcional y tal como se escribe (spec 023, RF-42 a RF-44). El
+     * largo lo dice la regla (`validarViaje`), para que la falta salga en su campo; el
+     * tope de aquí es solo para no recibir un texto de cualquier tamaño.
+     */
+    vale: z
+      .string({ error: 'El número de vale va como texto.' })
+      .max(200, MENSAJES_DE_VIAJE.valeLargo)
+      .nullish()
+      .transform((v) => valeLimpio(v)),
+    /** Quien registra ya vio el aviso de vale repetido y lo guarda igual (RF-45). */
+    valeRepetidoConfirmado: z.boolean().default(false),
   })
   .superRefine((viaje, contexto) => {
     for (const falta of faltasDelDestino(viaje)) {
@@ -1369,6 +1387,8 @@ export interface ViajeFila {
   destinoObra: boolean;
   pr: number | null;
   metros: number | null;
+  /** El número de vale, o `null` si no lo tiene (spec 023, RF-46, RF-49). */
+  vale: string | null;
   /** ISO 8601. */
   registradoEn: string;
   registradoPorNombre: string | null;
@@ -1387,6 +1407,16 @@ export interface ViajeFila {
 export interface ViajeRegistrado {
   viaje: ViajeFila;
   aviso: string | null;
+}
+
+/**
+ * El 409 de un vale que ya está en otro viaje vigente de la obra (spec 023, RF-45):
+ * no es un rechazo, es una pregunta. Se vuelve a pedir con `valeRepetidoConfirmado`.
+ */
+export interface ValeRepetido {
+  error: string;
+  aviso: 'valeRepetido';
+  viajeRepetido: { id: string; fecha: string; hora: string; volqueta: string };
 }
 
 export interface ViajeAnulado {
@@ -1631,7 +1661,14 @@ export const propuestaDeIa = z.looseObject({
     }),
   ),
   personal: listaDeIa(
-    z.looseObject({ nombre: textoDeIa, entrada: textoDeIa, salida: textoDeIa, observacion: textoDeIa }),
+    z.looseObject({
+      nombre: textoDeIa,
+      entrada: textoDeIa,
+      salida: textoDeIa,
+      observacion: textoDeIa,
+      /** La hoja del archivo de donde salió la persona (spec 023, RF-62). */
+      cargo_hoja: textoDeIa,
+    }),
   ),
   ensayos: listaDeIa(
     z.looseObject({
@@ -1656,9 +1693,37 @@ export const propuestaDeIa = z.looseObject({
       destino: textoDeIa,
       abscisa_llegada: textoDeIa,
       hora: textoDeIa,
+      /** El número de vale, tal como lo leyó (spec 023, RF-50). */
+      vale: textoDeIa,
     }),
   ),
   novedades: listaDeIa(z.looseObject({ tipo: textoDeIa, descripcion: textoDeIa })),
+  /**
+   * El reporte de almacén (spec 023, RF-19, RF-20). Entra por el mismo esquema 2: es
+   * opcional, y una propuesta de antes no lo trae.
+   */
+  almacen: z
+    .looseObject({
+      ingresos: listaDeIa(
+        z.looseObject({
+          material: textoDeIa,
+          cantidad: numeroDeIa,
+          unidad: textoDeIa,
+          entregado_por: textoDeIa,
+          observacion: textoDeIa,
+        }),
+      ),
+      salidas: listaDeIa(
+        z.looseObject({
+          material: textoDeIa,
+          cantidad: numeroDeIa,
+          unidad: textoDeIa,
+          recibido_por: textoDeIa,
+          para_que: textoDeIa,
+        }),
+      ),
+    })
+    .nullish(),
 });
 
 export type PropuestaDeIa = z.infer<typeof propuestaDeIa>;
@@ -1756,6 +1821,8 @@ export const reporteCorregido = z.object({
         entrada: textoDeCorreccion(5),
         salida: textoDeCorreccion(5),
         observaciones: z.string().max(1000),
+        // Con valor por defecto: las propuestas corregidas antes de la spec 023 no lo traen.
+        hoja: textoDeCorreccion(100).default(null),
       }),
     )
     .max(80),
@@ -1783,10 +1850,35 @@ export const reporteCorregido = z.object({
         metros: z.number().int().nullable(),
         hora: textoDeCorreccion(5),
         conductorId: idDeElegido,
+        // Spec 023: el largo lo dice la regla del viaje al aprobar (`validarViaje`).
+        vale: textoDeCorreccion(200).default(null),
       }),
     )
     .max(200),
   notas: z.string().max(4000),
+  /** Spec 023. Vacío por defecto: lo corregido antes no lo trae. */
+  almacen: z
+    .array(
+      z.object({
+        tipo: z.enum(['ingreso', 'salida']),
+        materialId: idDeElegido,
+        materialNuevo: z
+          .object({
+            nombre: z.string().max(200),
+            unidad: z.enum(IDS_UNIDAD as [UnidadAlmacen, ...UnidadAlmacen[]]).nullable(),
+          })
+          .nullable(),
+        escrito: z.string().max(200),
+        cantidad: z.number().int().nullable(),
+        unidadEscrita: textoDeCorreccion(40),
+        unidad: z.enum(IDS_UNIDAD as [UnidadAlmacen, ...UnidadAlmacen[]]).nullable(),
+        responsable: z.string().max(200),
+        paraQue: z.string().max(500),
+        observacion: z.string().max(500),
+      }),
+    )
+    .max(60)
+    .default([]),
 }) satisfies z.ZodType<ReporteDelDia>;
 
 /** La versión que leyó quien corrige o decide (RF-29). */
@@ -1797,6 +1889,32 @@ export const propuestaCorregida = z.object({
   version: versionLeida,
   propuesta: reporteCorregido,
 });
+
+/**
+ * `POST /api/panel/whatsapp/propuestas/:id/personas` (spec 023, RF-57 a RF-68).
+ *
+ * Lleva la propuesta tal como se ve en pantalla, como una corrección: el servidor
+ * registra a las personas y la guarda con su `usuarioId` en cada renglón.
+ */
+export const personasDesdeLaBandeja = z.object({
+  version: versionLeida,
+  propuesta: reporteCorregido,
+  personas: z
+    .array(
+      z.object({
+        seccion: z.enum(['personal', 'maquinaria'], { error: 'Esa sección no tiene personas.' }),
+        renglon: z.number().int().min(0),
+        nombre: textoObligatorio(160, 'el nombre completo'),
+        // RF-61: de la lista cerrada, o «sin definir».
+        cargo: z
+          .enum(IDS_CARGO as [Cargo, ...Cargo[]], { error: 'Ese cargo no existe.' })
+          .nullable(),
+      }),
+    )
+    .min(1, 'No hay personas para registrar.')
+    .max(80),
+});
+export type PersonasDesdeLaBandeja = z.input<typeof personasDesdeLaBandeja>;
 
 /**
  * `POST /api/panel/whatsapp/propuestas/:id/aprobar` (RF-30 a RF-51, RF-96).
@@ -1874,7 +1992,7 @@ export interface DetalleDePropuesta extends PropuestaFila {
   /** El autor, con su nombre y cargo del sistema si se le reconoce (RF-21, RF-22). */
   autor: { usuarioId: string | null; nombre: string; cargo: string | null };
   /** El destino de su categoría (`destinoDeCategoria`). */
-  destino: 'reporte' | 'control_calidad' | 'notas' | 'cantera' | 'ninguno';
+  destino: DestinoDeWhatsapp;
   /** La corregida si alguien corrigió; si no, la de la IA leída contra los catálogos. */
   reporte: ReporteDelDia;
   corregida: boolean;
@@ -1886,6 +2004,22 @@ export interface DetalleDePropuesta extends PropuestaFila {
   archivosDelMensaje: ArchivoDeLaPropuesta[];
   bitacoraDelDia: EstadoDeLaBitacoraDelDia;
   canteraActiva: boolean;
+  /** Si la obra lleva Almacén: sin él no se aprueba un reporte de almacén (spec 023, RF-25). */
+  almacenActivo: boolean;
+  /**
+   * Por renglón, las personas registradas **de la obra** que podrían ser la que el
+   * reporte no reconoció, para mirarlas antes de registrar una nueva (spec 023,
+   * RF-65). Solo los renglones sin persona elegida; la clave es el número de renglón.
+   */
+  coincidencias: {
+    personal: Record<string, { id: string; nombreCompleto: string; cargo: string | null }[]>;
+    maquinaria: Record<string, { id: string; nombreCompleto: string; cargo: string | null }[]>;
+  };
+  /**
+   * Los viajes del reporte cuyo vale ya está en otro viaje vigente de la obra o en
+   * otro renglón del mismo reporte (spec 023, RF-45). Avisa; no impide aprobar.
+   */
+  avisosDeVale: { renglon: number; mensaje: string }[];
   /** Lo que la aprobación reemplazaría en la bitácora abierta del día (RF-89). */
   reemplaza: { maquinas: string[]; personas: string[]; clima: boolean };
   /** La propuesta de la IA tal como llegó, para comparar (RF-27). */
@@ -1900,6 +2034,11 @@ export interface DetalleDePropuesta extends PropuestaFila {
     equipos: { id: string; codigoInterno: string; placa: string | null }[];
     personas: { id: string; nombreCompleto: string; cargo: string | null }[];
     cantera: OpcionesDeCantera;
+    /**
+     * Los materiales vigentes del almacén de la obra, con su unidad y su stock de hoy
+     * en centésimas (spec 023, RF-26, RF-33). Vacío si la obra no lleva almacén.
+     */
+    almacen: { id: string; nombre: string; unidad: UnidadAlmacen; stock: number }[];
   };
 }
 

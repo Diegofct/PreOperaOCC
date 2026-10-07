@@ -70,32 +70,19 @@ import type { FilaDeControlDeCalidad, OrigenWhatsapp } from '@/features/bitacora
 import { filtroDeObraEstricto } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
-import { aHex } from '@/shared/cripto/formato-pbkdf2';
-import { DESTINO_OBRA } from '@/shared/rules/cantera';
+import { DESTINO_OBRA, valeLimpio } from '@/shared/rules/cantera';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
 import {
+  claveDeMaterialNuevo,
   destinoDeCategoria,
   faltasDelReporte,
   fusionarReporteEnParte,
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
 
+import { aprobarReporteDeAlmacen } from './almacen';
+import { idDeterminista } from './ids';
 import { obraDelMensaje } from './obra';
-
-/**
- * Un id fijo para la fila `renglon` de la `seccion` que crea este mensaje, con
- * forma de UUID (versión 5, a partir de SHA-256). El mismo mensaje da siempre los
- * mismos ids: es lo que vuelve seguro reintentar.
- */
-async function idDeterminista(mensajeId: string, seccion: string, renglon: number): Promise<string> {
-  const huella = aHex(
-    new Uint8Array(
-      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${mensajeId}|${seccion}|${renglon}`)),
-    ),
-  );
-  const variante = ((parseInt(huella[16], 16) & 0x3) | 0x8).toString(16);
-  return `${huella.slice(0, 8)}-${huella.slice(8, 12)}-5${huella.slice(13, 16)}-${variante}${huella.slice(17, 20)}-${huella.slice(20, 32)}`;
-}
 
 /** «HH:MM» en Colombia, para el encabezado de la nota. */
 function horaEnColombia(fecha: Date): string {
@@ -104,6 +91,8 @@ function horaEnColombia(fecha: Date): string {
 
 export type ResultadoDeAprobacion =
   | { parteId: string; fecha: string; viajes: number; soloViajes: boolean }
+  // Un reporte de almacén: no va a la bitácora (spec 023, RF-40).
+  | { movimientos: number; materialesNuevos: number }
   | Response;
 
 /** Las faltas, con la forma con que la pantalla las pinta por renglón (RF-64). */
@@ -141,6 +130,8 @@ async function registrarViajes(
         destinoObra: aLaObra,
         pr: aLaObra ? v.pr : null,
         metros: aLaObra ? v.metros : null,
+        // Spec 023, RF-50: tal como quedó en la propuesta, ya sin espacios en los extremos.
+        vale: valeLimpio(v.vale),
         mensajeWhatsappId: mensajeId,
         registradoPor: aprobadoPor,
       };
@@ -242,6 +233,7 @@ export async function aprobarPropuesta(
       viajesAprobadosEn: whatsappMensajes.viajesAprobadosEn,
       obraId: sql<string>`${obraDelMensaje}`,
       canteraActiva: obras.canteraActivo,
+      almacenActivo: obras.almacenActivo,
     })
     .from(whatsappMensajes)
     .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
@@ -252,6 +244,14 @@ export async function aprobarPropuesta(
 
   // Un reintento de una aprobación que ya terminó: se responde lo que quedó.
   if (mensaje.estado === 'aprobado' && mensaje.version === pedido.version + 1) {
+    if (destinoDeCategoria(mensaje.categoria) === 'almacen') {
+      const nuevos = new Set(
+        pedido.propuesta.almacen
+          .filter((m) => !m.materialId && m.materialNuevo)
+          .map((m) => claveDeMaterialNuevo(m.materialNuevo!.nombre)),
+      );
+      return { movimientos: pedido.propuesta.almacen.length, materialesNuevos: nuevos.size };
+    }
     return {
       parteId: mensaje.parteId ?? '',
       fecha: pedido.propuesta.fecha ?? '',
@@ -271,6 +271,12 @@ export async function aprobarPropuesta(
 
   const reporte = pedido.propuesta;
   const { soloViajes } = pedido;
+
+  // Spec 023: un reporte de almacén va al módulo Almacén y no a la bitácora (RF-40).
+  if (destinoDeCategoria(mensaje.categoria) === 'almacen') {
+    if (soloViajes) return errorDePeticion('Un reporte de almacén no tiene viajes por aprobar.', 400);
+    return aprobarReporteDeAlmacen(sesion, id, mensaje, reporte);
+  }
   // Los viajes que ya se aprobaron solos no se vuelven a registrar (RF-98).
   const viajesPendientes = reporte.viajes.length > 0 && !mensaje.viajesAprobadosEn;
   if (soloViajes && !viajesPendientes) {

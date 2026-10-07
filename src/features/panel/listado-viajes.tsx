@@ -133,7 +133,20 @@ export function ListadoDeViajes({
         </>
       ),
     },
-    { clave: 'volqueta', titulo: 'Volqueta', ancho: 95, pintar: (v) => <Celda>{v.volqueta}</Celda> },
+    {
+      // Spec 023, RF-46: el vale va debajo de la volqueta, tal como se escribió, y no
+      // en columna propia: con ella la tabla no cabe en la ventana más angosta que el
+      // panel promete (1024 con el menú plegado). Sin vale no se pinta nada (RF-49).
+      clave: 'volqueta',
+      titulo: 'Volqueta y vale',
+      ancho: 110,
+      pintar: (v) => (
+        <>
+          <Celda>{v.volqueta}</Celda>
+          {v.vale ? <Celda lineas={2}>{`Vale ${v.vale}`}</Celda> : null}
+        </>
+      ),
+    },
     {
       clave: 'conductor',
       titulo: 'Conductor',

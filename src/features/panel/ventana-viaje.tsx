@@ -19,6 +19,13 @@
  * intentar guardar. Lo que el servidor rechace bajo un campo se queda en la ventana.
  * Si la bitácora de ese día ya está cerrada, el viaje se guarda y la pantalla lo
  * avisa (RF-30): la ventana solo entrega el aviso.
+ *
+ * ── El número de vale (spec 023) ──
+ *
+ * Se escribe, opcional, tal como está en el vale (RF-41 a RF-44). Si ya está en otro
+ * viaje de la obra, el servidor no lo guarda y pregunta (RF-45): la ventana muestra
+ * con qué viaje choca y ofrece «Guardar igual». Cambiar el vale retira la pregunta,
+ * porque ya no es el mismo vale.
  */
 import { useState } from 'react';
 
@@ -33,7 +40,7 @@ import {
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada } from '@/shared/rules/jornada';
 
-import { api } from './cliente-api';
+import { api, ErrorApi } from './cliente-api';
 import {
   Acciones,
   AccionesFormulario,
@@ -45,7 +52,12 @@ import {
   Selector,
   SelectorDeHora,
 } from './componentes';
-import { ETIQUETA_TIPO_SITIO, type OpcionesDeCantera, type ViajeRegistrado } from './contratos';
+import {
+  ETIQUETA_TIPO_SITIO,
+  type OpcionesDeCantera,
+  type ValeRepetido,
+  type ViajeRegistrado,
+} from './contratos';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 /**
@@ -79,6 +91,13 @@ function queFaltaEnLaObra(opciones: OpcionesDeCantera): string | null {
   return `Para registrar un viaje falta ${faltan.join(', ')}.`;
 }
 
+/** El 409 de vale repetido, si es eso lo que respondió el servidor (RF-45). */
+function valeRepetidoDe(fallo: unknown): ValeRepetido | null {
+  if (!(fallo instanceof ErrorApi) || fallo.estado !== 409) return null;
+  const cuerpo = fallo.cuerpo as Partial<ValeRepetido> | null | undefined;
+  return cuerpo?.aviso === 'valeRepetido' ? (cuerpo as ValeRepetido) : null;
+}
+
 export function VentanaViaje({
   obraId,
   opciones,
@@ -105,6 +124,9 @@ export function VentanaViaje({
   const [destino, setDestino] = useState<string | null>(null);
   const [pr, setPr] = useState<number | null>(null);
   const [metros, setMetros] = useState<number | null>(null);
+  const [vale, setVale] = useState('');
+  /** La pregunta del servidor por un vale que ya está en otro viaje (RF-45). */
+  const [repetido, setRepetido] = useState<ValeRepetido | null>(null);
 
   const [intentado, setIntentado] = useState(false);
   /*
@@ -117,7 +139,7 @@ export function VentanaViaje({
   const accion = useAccionDeVentana();
 
   const aLaObra = destino === DESTINO_OBRA;
-  const viaje = { fecha, hora, materialId, vehiculoId, conductorId, origenId, destino, pr, metros };
+  const viaje = { fecha, hora, materialId, vehiculoId, conductorId, origenId, destino, pr, metros, vale };
   const faltas = validarViaje(viaje, fechaDeJornada());
   const faltaDe = (campo: CampoDeViaje) =>
     accion.campoConError(campo) ??
@@ -132,7 +154,13 @@ export function VentanaViaje({
     }
   }
 
-  async function guardar() {
+  function cambiarVale(valor: string) {
+    setVale(valor);
+    setRepetido(null);
+  }
+
+  /** `confirmado`: ya vio que el vale está en otro viaje y lo guarda igual (RF-45). */
+  async function guardar(confirmado = false) {
     setIntentado(true);
     accion.limpiar();
     if (faltas.length > 0) return;
@@ -141,20 +169,30 @@ export function VentanaViaje({
     // ventana (el aviso de la página queda detrás del telón). De eso se encarga
     // el hook; aquí solo queda qué hacer cuando sale bien.
     let registro: ViajeRegistrado | null = null;
+    let pregunta: ValeRepetido | null = null;
     const bien = await accion.ejecutar(async () => {
-      registro = await api.cantera.viajes.registrar({
-        obraId,
-        fecha,
-        hora,
-        materialId: materialId ?? '',
-        vehiculoId: vehiculoId ?? '',
-        conductorId: conductorId ?? '',
-        origenId: origenId ?? '',
-        destino: destino ?? '',
-        pr: aLaObra ? pr : null,
-        metros: aLaObra ? metros : null,
-      });
+      try {
+        registro = await api.cantera.viajes.registrar({
+          obraId,
+          fecha,
+          hora,
+          materialId: materialId ?? '',
+          vehiculoId: vehiculoId ?? '',
+          conductorId: conductorId ?? '',
+          origenId: origenId ?? '',
+          destino: destino ?? '',
+          pr: aLaObra ? pr : null,
+          metros: aLaObra ? metros : null,
+          vale,
+          valeRepetidoConfirmado: confirmado,
+        });
+      } catch (fallo) {
+        // El vale repetido no es un fallo de la ventana: es una pregunta.
+        pregunta = valeRepetidoDe(fallo);
+        if (!pregunta) throw fallo;
+      }
     });
+    setRepetido(pregunta);
     if (bien && registro) onRegistrado(registro);
   }
 
@@ -281,7 +319,17 @@ export function VentanaViaje({
                 />
               </>
             ) : null}
+            <Campo
+              etiqueta="N.º de vale"
+              valor={vale}
+              onChange={cambiarVale}
+              ayuda="Opcional. Como está escrito en el vale de la cantera."
+              error={faltaDe('vale')}
+              ancho={200}
+            />
           </Formulario>
+
+          {repetido ? <Aviso tono="info">{repetido.error}</Aviso> : null}
 
           {aLaObra && pr !== null && metros !== null ? (
             // RF-17: cómo va a quedar escrita la llegada, antes de guardar.
@@ -290,11 +338,19 @@ export function VentanaViaje({
 
           <AccionesFormulario>
             <Acciones>
-              <Boton
-                titulo={accion.ejecutando ? 'Guardando…' : 'Registrar viaje'}
-                onPress={guardar}
-                deshabilitado={accion.ejecutando}
-              />
+              {repetido ? (
+                <Boton
+                  titulo={accion.ejecutando ? 'Guardando…' : 'Guardar igual'}
+                  onPress={() => guardar(true)}
+                  deshabilitado={accion.ejecutando}
+                />
+              ) : (
+                <Boton
+                  titulo={accion.ejecutando ? 'Guardando…' : 'Registrar viaje'}
+                  onPress={() => guardar()}
+                  deshabilitado={accion.ejecutando}
+                />
+              )}
               <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
             </Acciones>
           </AccionesFormulario>

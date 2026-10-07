@@ -10,12 +10,13 @@ import {
   eleccionesAjenas,
   leerViajes,
   opcionesDeLaObra,
+  viajesConVale,
 } from '@/features/cantera/servidor/viajes';
-import { viajeNuevo } from '@/features/panel/contratos';
+import { viajeNuevo, type ValeRepetido } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
-import { DESTINO_OBRA, validarViaje } from '@/shared/rules/cantera';
+import { avisoDeValeRepetido, DESTINO_OBRA, validarViaje } from '@/shared/rules/cantera';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /**
@@ -26,7 +27,8 @@ import { fechaDeJornada } from '@/shared/rules/jornada';
  * aplican en la pantalla con `filtrarViajes` (RF-21), sobre lo que ya llegó.
  *
  * `POST` — registrar un viaje (RF-7 a RF-19, RF-34). No hay `PATCH` ni `DELETE`: un
- * viaje no se modifica ni se borra, se anula (RF-23).
+ * viaje no se modifica ni se borra, se anula (RF-23). Tampoco su número de vale
+ * (spec 023, RF-52).
  */
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -87,6 +89,25 @@ export async function POST(peticion: Request) {
     const ajenas = eleccionesAjenas(await opcionesDeLaObra(obraId), datos);
     if (ajenas.length > 0) return conCampos(ajenas);
 
+    // Spec 023, RF-45: un vale que ya está en otro viaje de la obra se pregunta antes
+    // de guardar. No es un rechazo: con `valeRepetidoConfirmado` se guarda igual.
+    if (datos.vale && !datos.valeRepetidoConfirmado) {
+      const repetido = avisoDeValeRepetido(datos.vale, await viajesConVale(obraId, datos.vale));
+      if (repetido) {
+        const cuerpo: ValeRepetido = {
+          error: `El vale ${repetido.vale} ya está en el viaje del ${repetido.fecha} a las ${repetido.hora} (${repetido.volqueta}). ¿Lo guarda igual?`,
+          aviso: 'valeRepetido',
+          viajeRepetido: {
+            id: repetido.id,
+            fecha: repetido.fecha,
+            hora: repetido.hora,
+            volqueta: repetido.volqueta,
+          },
+        };
+        return Response.json(cuerpo, { status: 409 });
+      }
+    }
+
     const id = uuidv7();
     const aLaObra = datos.destino === DESTINO_OBRA;
     await baseServidor()
@@ -105,6 +126,8 @@ export async function POST(peticion: Request) {
         // RF-15: con otro destino no se guarda abscisa (la regla ya la rechazó).
         pr: aLaObra ? datos.pr : null,
         metros: aLaObra ? datos.metros : null,
+        // Spec 023, RF-43: tal como se escribió, ya sin espacios en los extremos.
+        vale: datos.vale,
         // RF-22: quien registra es quien tiene la sesión.
         registradoPor: sesion.id,
       });

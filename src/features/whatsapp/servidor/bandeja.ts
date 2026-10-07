@@ -22,6 +22,7 @@ import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import {
+  canteraViajes,
   media,
   obras,
   partesDeObra,
@@ -31,19 +32,23 @@ import {
   whatsappGrupos,
   whatsappMensajes,
 } from '@/db/servidor/esquema';
+import { materialesConStock } from '@/features/almacen-obra/servidor/materiales';
 import { opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
-import type {
-  DetalleDePropuesta,
-  OpcionesDeCantera,
-  PropuestaFila,
+import {
+  reporteCorregido,
+  type DetalleDePropuesta,
+  type OpcionesDeCantera,
+  type PropuestaFila,
 } from '@/features/panel/contratos';
 import { filtroDeObraEstricto, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
+import { avisoDeValeRepetido } from '@/shared/rules/cantera';
 import { fechaDeJornada, medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
 import {
   destinoDeCategoria,
   faltasDelReporte,
+  posiblesCoincidencias,
   reconocerPersona,
   resolverPropuesta,
   type CatalogosDeLaObra,
@@ -128,15 +133,77 @@ export async function leerBandeja(
   return filas.map(aFila);
 }
 
+/**
+ * El aviso de cada viaje del reporte cuyo vale ya está en otro viaje vigente de la
+ * obra, o en un renglón anterior del mismo reporte (spec 023, RF-45, RF-56). Avisa
+ * y no impide aprobar. Los viajes que este mismo mensaje ya registró —al aprobar
+ * solo los viajes, 021/RF-96— no cuentan: son estos mismos.
+ */
+async function avisosDeValeDelReporte(
+  obraId: string,
+  mensajeId: string,
+  reporte: ReporteDelDia,
+): Promise<{ renglon: number; mensaje: string }[]> {
+  const vales = [...new Set(reporte.viajes.map((v) => v.vale?.trim().toLowerCase()).filter((v) => !!v))];
+  if (vales.length === 0) return [];
+
+  const enLaObra = await baseServidor()
+    .select({
+      id: canteraViajes.id,
+      vale: canteraViajes.vale,
+      fecha: canteraViajes.fecha,
+      hora: canteraViajes.hora,
+      volqueta: vehiculos.codigoInterno,
+    })
+    .from(canteraViajes)
+    .innerJoin(vehiculos, eq(vehiculos.id, canteraViajes.vehiculoId))
+    .where(
+      and(
+        eq(canteraViajes.obraId, obraId),
+        isNull(canteraViajes.anuladoEn),
+        sql`lower(${canteraViajes.vale}) in ${vales}`,
+        sql`${canteraViajes.mensajeWhatsappId} is distinct from ${mensajeId}`,
+      ),
+    );
+  const vigentes = enLaObra.map((v) => ({ ...v, anulado: false }));
+
+  return reporte.viajes.flatMap((viaje, renglon) => {
+    if (!viaje.vale) return [];
+    const otro = avisoDeValeRepetido(viaje.vale, vigentes);
+    if (otro) {
+      return [
+        {
+          renglon,
+          mensaje: `El vale ${otro.vale} ya está en el viaje del ${otro.fecha} a las ${otro.hora} (${otro.volqueta}).`,
+        },
+      ];
+    }
+    const anteriores = reporte.viajes
+      .slice(0, renglon)
+      .map((v, i) => ({ id: String(i), vale: v.vale, anulado: false }));
+    const enElReporte = avisoDeValeRepetido(viaje.vale, anteriores);
+    return enElReporte
+      ? [
+          {
+            renglon,
+            mensaje: `El vale ${viaje.vale} ya está en el viaje ${Number(enElReporte.id) + 1} de este mismo reporte.`,
+          },
+        ]
+      : [];
+  });
+}
+
 /** Los catálogos de la obra contra los que se lee una propuesta, y el medidor de cada equipo. */
 async function catalogosDeLaObra(obraId: string): Promise<{
   catalogos: CatalogosDeLaObra;
   claseDe: Map<string, ClaseDeMedidor>;
   cargoDe: Map<string, string | null>;
+  /** Las personas registradas en esta obra, para las posibles coincidencias (RF-65). */
+  personasDeLaObra: { id: string; nombreCompleto: string; cargo: string | null }[];
   opciones: DetalleDePropuesta['opciones'];
 }> {
   const db = baseServidor();
-  const [equipos, personas, cantera] = await Promise.all([
+  const [equipos, personas, cantera, almacen] = await Promise.all([
     db
       .select({
         id: vehiculos.id,
@@ -154,10 +221,16 @@ async function catalogosDeLaObra(obraId: string): Promise<{
         ),
       ),
     db
-      .select({ id: usuarios.id, nombreCompleto: usuarios.nombreCompleto, cargo: usuarios.cargo })
+      .select({
+        id: usuarios.id,
+        nombreCompleto: usuarios.nombreCompleto,
+        cargo: usuarios.cargo,
+        obraId: usuarios.obraId,
+      })
       .from(usuarios)
       .where(isNull(usuarios.eliminadoEn)),
     opcionesDeLaObra(obraId),
+    materialesConStock(obraId),
   ]);
 
   return {
@@ -167,10 +240,19 @@ async function catalogosDeLaObra(obraId: string): Promise<{
       personas,
       sitios: cantera.sitios,
       materiales: cantera.materiales,
+      materialesAlmacen: almacen,
     },
     claseDe: new Map(equipos.map((e) => [e.id, medidorDeClase(e.clase)])),
     cargoDe: new Map(personas.map((p) => [p.id, p.cargo])),
+    personasDeLaObra: personas
+      .filter((p) => p.obraId === obraId)
+      .map(({ id, nombreCompleto, cargo }) => ({
+        id,
+        nombreCompleto,
+        cargo: cargo ? nombreDeCargo(cargo) : null,
+      })),
     opciones: {
+      almacen,
       equipos: equipos
         .map(({ id, codigoInterno, placa }) => ({ id, codigoInterno, placa }))
         .sort((a, b) => a.codigoInterno.localeCompare(b.codigoInterno, 'es')),
@@ -204,6 +286,7 @@ export async function leerDetalle(
       propuestaIa: whatsappMensajes.propuestaIa,
       propuesta: whatsappMensajes.propuesta,
       canteraActiva: obras.canteraActivo,
+      almacenActivo: obras.almacenActivo,
     })
     .from(whatsappMensajes)
     .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
@@ -212,10 +295,14 @@ export async function leerDetalle(
     .limit(1);
   if (!fila) return null;
 
-  const { catalogos, claseDe, cargoDe, opciones } = await catalogosDeLaObra(fila.obraId);
+  const { catalogos, claseDe, cargoDe, personasDeLaObra, opciones } = await catalogosDeLaObra(
+    fila.obraId,
+  );
   const destino = destinoDeCategoria(fila.categoria);
+  // Lo corregido pasa otra vez por el contrato: las propuestas guardadas antes de la
+  // spec 023 no traen almacén, vale ni hoja, y el contrato les pone su vacío.
   const resuelto = fila.propuesta
-    ? { reporte: fila.propuesta as unknown as ReporteDelDia, fechaSupuesta: false }
+    ? { reporte: reporteCorregido.parse(fila.propuesta) as ReporteDelDia, fechaSupuesta: false }
     : resolverPropuesta(fila.propuestaIa as PropuestaLeible, catalogos, {
         diaDelMensaje: fechaDeJornada(fila.enviadoEn.getTime()),
         destino,
@@ -281,6 +368,24 @@ export async function leerDetalle(
         }
       : { maquinas: [], personas: [], clima: false };
 
+  // Spec 023, RF-65: las personas de la obra que se parecen a cada una no reconocida.
+  const coincidenciasDe = (filas: { reconocida: boolean; nombre: string | null }[]) =>
+    Object.fromEntries(
+      filas.flatMap((f, renglon) => {
+        if (f.reconocida || !f.nombre) return [];
+        const parecidas = posiblesCoincidencias(f.nombre, personasDeLaObra);
+        return parecidas.length > 0 ? [[String(renglon), parecidas]] : [];
+      }),
+    );
+  const coincidencias = {
+    personal: coincidenciasDe(reporte.personal.map((p) => ({ reconocida: !!p.usuarioId, nombre: p.escrito }))),
+    maquinaria: coincidenciasDe(
+      reporte.maquinaria.map((m) => ({ reconocida: !!m.operadorId, nombre: m.operadorEscrito })),
+    ),
+  };
+
+  const avisosDeVale = await avisosDeValeDelReporte(fila.obraId, id, reporte);
+
   const autorId = reconocerPersona(fila.autorNombre, catalogos.personas);
   const autor = catalogos.personas.find((p) => p.id === autorId);
   const cargoDelAutor = autor ? cargoDe.get(autor.id) : null;
@@ -298,14 +403,23 @@ export async function leerDetalle(
     reporte,
     corregida: fila.propuesta !== null,
     fechaSupuesta: resuelto.fechaSupuesta,
-    faltas: faltasDelReporte(reporte, {
-      hoy: fechaDeJornada(),
-      claseDeMedidor: (vehiculoId) => claseDe.get(vehiculoId) ?? 'horometro',
-    }),
+    // Solo lo pendiente tiene faltas: en lo ya decidido, comparar con los catálogos
+    // de hoy daría faltas falsas (un material que se registró al aprobar «ya existe»).
+    faltas:
+      fila.estado === 'pendiente'
+        ? faltasDelReporte(reporte, {
+            hoy: fechaDeJornada(),
+            claseDeMedidor: (vehiculoId) => claseDe.get(vehiculoId) ?? 'horometro',
+            almacen: { materiales: opciones.almacen },
+          })
+        : [],
     complementosDelMensaje: complementos.map((c) => ({ ...c, enviadoEn: c.enviadoEn.toISOString() })),
     archivosDelMensaje: archivos,
     bitacoraDelDia: !parte ? 'no_existe' : parte.cerradoEn ? 'cerrada' : 'abierta',
     canteraActiva: fila.canteraActiva,
+    almacenActivo: fila.almacenActivo,
+    coincidencias,
+    avisosDeVale,
     reemplaza,
     propuestaIa: fila.propuestaIa,
     opciones,

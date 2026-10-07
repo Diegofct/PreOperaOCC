@@ -739,10 +739,18 @@ function SeccionCantera({
   const columnasCantera: Columna<ViajeDelParte>[] = [
     { clave: "hora", titulo: "Hora", ancho: 70, pintar: (v) => <Celda>{v.hora}</Celda> },
     {
+      // Spec 023, RF-47: el vale debajo de la volqueta, como en Control Cantera (una
+      // columna propia no cabe en esta banda). Sin vale, o fijado antes de que
+      // existiera, no se pinta nada (RF-49).
       clave: "volqueta",
-      titulo: "Volqueta",
-      ancho: 90,
-      pintar: (v) => <Celda>{v.volqueta}</Celda>,
+      titulo: "Volqueta y vale",
+      ancho: 110,
+      pintar: (v) => (
+        <>
+          <Celda>{v.volqueta}</Celda>
+          {v.vale ? <Celda lineas={2}>{`Vale ${v.vale}`}</Celda> : null}
+        </>
+      ),
     },
     {
       clave: "conductor",
