@@ -25,6 +25,7 @@ import {
   Boton,
   Campo,
   Celda,
+  Etiqueta,
   Confirmacion,
   Confirmado,
   Formulario,
@@ -109,7 +110,17 @@ function SeccionSitios({
   }
 
   const columnasSitios: Columna<SitioDeCanteraFila>[] = [
-    { clave: 'nombre', titulo: 'Sitio', ancho: 320, pintar: (s) => <Celda>{s.nombre}</Celda> },
+    {
+      clave: 'nombre',
+      titulo: 'Sitio',
+      ancho: 320,
+      pintar: (s) => (
+        <>
+          <Celda>{s.nombre}</Celda>
+          {s.desdeWhatsapp ? <Etiqueta tono="neutro">Creado desde WhatsApp</Etiqueta> : null}
+        </>
+      ),
+    },
     {
       clave: 'tipo',
       titulo: 'Tipo',
@@ -245,7 +256,17 @@ function SeccionMateriales({
   }
 
   const columnasMateriales: Columna<MaterialDeCanteraFila>[] = [
-    { clave: 'nombre', titulo: 'Material', ancho: 460, pintar: (m) => <Celda>{m.nombre}</Celda> },
+    {
+      clave: 'nombre',
+      titulo: 'Material',
+      ancho: 460,
+      pintar: (m) => (
+        <>
+          <Celda>{m.nombre}</Celda>
+          {m.desdeWhatsapp ? <Etiqueta tono="neutro">Creado desde WhatsApp</Etiqueta> : null}
+        </>
+      ),
+    },
     { clave: 'obra', titulo: 'Obra', ancho: 220, pintar: (m) => <Celda>{m.obraNombre ?? '—'}</Celda> },
     {
       clave: 'acciones',

@@ -132,7 +132,12 @@ export default function PantallaVehiculos() {
       clave: 'codigo',
       titulo: 'Código',
       ancho: 105,
-      pintar: (v) => <Celda>{v.codigoInterno}</Celda>,
+      pintar: (v) => (
+        <>
+          <Celda>{v.codigoInterno}</Celda>
+          {v.desdeWhatsapp ? <Etiqueta tono="neutro">Desde WhatsApp</Etiqueta> : null}
+        </>
+      ),
     },
     { clave: 'tipo', titulo: 'Tipo', ancho: 145, pintar: (v) => <Celda>{v.tipoNombre}</Celda> },
     { clave: 'placa', titulo: 'Placa', ancho: 95, pintar: (v) => <Celda>{v.placa ?? '—'}</Celda> },

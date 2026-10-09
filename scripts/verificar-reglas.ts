@@ -159,6 +159,9 @@ import {
   condicionDeClima,
   avisoDeReemplazo,
   conductorDelViaje,
+  conductorPropuesto,
+  textoDelConductor,
+  type CaminoDelConductor,
   posiblesCoincidencias,
   rechazoDeRegistro,
   usuarioDeLaBandeja,
@@ -169,6 +172,9 @@ import {
   fusionarReporteEnParte,
   horaDeTexto,
   reconocerPersona,
+  candidatosDeVehiculo,
+  candidatosEnCantera,
+  reconocerEnCantera,
   reconocerPorNombre,
   reconocerVehiculo,
   rechazoDeArchivo,
@@ -181,6 +187,18 @@ import {
   type ReporteDelDia,
   type VehiculoConocido,
 } from '../src/shared/rules/whatsapp';
+import {
+  completarViaje,
+  decisionDePersona,
+  diaCompleto,
+  diaVencido,
+  placaDeLaMaquina,
+  placaRegistrable,
+  separarRenglones,
+  tipoDeReporte,
+  viajeRepetido,
+  viajesQueFaltan,
+} from '../src/shared/rules/whatsapp-automatico';
 import { colocarLista } from '../src/shared/rules/flotante';
 import {
   anchoDelContenido,
@@ -6160,6 +6178,48 @@ prueba('un equipo de otra obra, uno ambiguo o uno desconocido no se reconocen (R
   assert.equal(reconocerVehiculo('LLQ 375 y LLQ 376', EQUIPOS_DEL_REPORTE, 'obra-a'), null);
 });
 
+// Spec 021, cambio 2026-10-08: placas leídas de la foto de un vale.
+const VOLQUETAS_DE_LOS_VALES: VehiculoConocido[] = [
+  { id: 'tfo420', codigoInterno: 'VOL-MAG-05', placa: 'TFO420', obraId: 'obra-a' },
+  { id: 'llq377', codigoInterno: 'VOL-MAG-01', placa: 'LLQ377', obraId: 'obra-a' },
+  // Dos placas que solo se distinguen por un carácter de los que se confunden.
+  { id: 'abs123', codigoInterno: 'VOL-X1', placa: 'ABS123', obraId: 'obra-a' },
+  { id: 'ab5123', codigoInterno: 'VOL-X2', placa: 'AB5123', obraId: 'obra-a' },
+  { id: 'otra-obra', codigoInterno: 'VOL-Y1', placa: 'ZZB908', obraId: 'obra-b' },
+];
+
+prueba('una placa con un carácter mal leído se reconoce si queda una sola (021/RF-107)', () => {
+  assert.equal(reconocerVehiculo('TFO42O', VOLQUETAS_DE_LOS_VALES, 'obra-a'), 'tfo420');
+  assert.equal(reconocerVehiculo('TF0420', VOLQUETAS_DE_LOS_VALES, 'obra-a'), 'tfo420');
+  assert.equal(reconocerVehiculo('Volqueta TF0 42O', VOLQUETAS_DE_LOS_VALES, 'obra-a'), 'tfo420');
+  assert.equal(reconocerVehiculo('LLQ3TT', VOLQUETAS_DE_LOS_VALES, 'obra-a'), null);
+  // Una letra que no es de los pares no se corrige.
+  assert.equal(reconocerVehiculo('LLQ37T', VOLQUETAS_DE_LOS_VALES, 'obra-a'), null);
+  // La de otra obra sigue sin contar, aunque coincida con los pares.
+  assert.equal(reconocerVehiculo('2Z8908', VOLQUETAS_DE_LOS_VALES, 'obra-a'), null);
+});
+
+prueba('ninguno parecido y varios parecidos son distintos: solo con ninguno se crea (024/RF-30)', () => {
+  assert.deepEqual(candidatosDeVehiculo('XYZ987', VOLQUETAS_DE_LOS_VALES, 'obra-a'), []);
+  assert.deepEqual(candidatosDeVehiculo('A85I23', VOLQUETAS_DE_LOS_VALES, 'obra-a').sort(), ['ab5123', 'abs123']);
+  assert.deepEqual(candidatosDeVehiculo('TFO42O', VOLQUETAS_DE_LOS_VALES, 'obra-a'), ['tfo420']);
+  assert.deepEqual(candidatosEnCantera('Vía las Margaritas', [{ id: 'fortune', nombre: 'LA FORTUNE' }]), []);
+  assert.deepEqual(
+    candidatosEnCantera('subbase', [
+      { id: 'a', nombre: 'SUBBASE DE RIO' },
+      { id: 'b', nombre: 'SUBBASE MEZCLADA' },
+    ]).sort(),
+    ['a', 'b'],
+  );
+});
+
+prueba('si con los pares coinciden dos equipos, no se elige ninguno (021/RF-108)', () => {
+  assert.equal(reconocerVehiculo('A85I23', VOLQUETAS_DE_LOS_VALES, 'obra-a'), null);
+  // Lo escrito igual a una placa gana antes de comparar con los pares.
+  assert.equal(reconocerVehiculo('AB5123', VOLQUETAS_DE_LOS_VALES, 'obra-a'), 'ab5123');
+  assert.equal(reconocerVehiculo('ABS123', VOLQUETAS_DE_LOS_VALES, 'obra-a'), 'abs123');
+});
+
 const PERSONAS_DEL_REPORTE: PersonaConocida[] = [
   { id: 'silfrido', nombreCompleto: 'Silfrido Medina Pérez' },
   { id: 'diego-c', nombreCompleto: 'Diego Cardona' },
@@ -6279,6 +6339,189 @@ prueba('el conductor del viaje es el operador de esa volqueta en el reporte (RF-
   assert.equal(conductorDelViaje(null, maquinas), null);
 });
 
+// Spec 021, cambio 2026-10-08: el conductor de un vale suelto.
+const CONDUCTORES_DE_LOS_VALES: PersonaConocida[] = [
+  { id: 'yobani', nombreCompleto: 'Yobani Hernando Osorio Aguirre' },
+  { id: 'zuleta', nombreCompleto: 'Luis Fernando Zuleta Isaza' },
+  { id: 'wilfer', nombreCompleto: 'Wilfer Jose Cuello Garcia' },
+  { id: 'eddier', nombreCompleto: 'Eddier Alberto Quiceno Jacome' },
+];
+const CONTEXTO_DEL_CONDUCTOR = {
+  fecha: '2026-10-07',
+  maquinas: [{ vehiculoId: 'llq377', operadorId: 'yobani' }],
+  personas: CONDUCTORES_DE_LOS_VALES,
+  preoperacionales: [
+    { vehiculoId: 'tfo420', fecha: '2026-10-07', usuarioId: 'zuleta' },
+    // El de otro día no cuenta.
+    { vehiculoId: 'tfo420', fecha: '2026-10-06', usuarioId: 'eddier' },
+    // Dos personas distintas el mismo día: ese camino no sirve (RF-106).
+    { vehiculoId: 'llq379', fecha: '2026-10-07', usuarioId: 'wilfer' },
+    { vehiculoId: 'llq379', fecha: '2026-10-07', usuarioId: 'eddier' },
+  ],
+  ultimosViajes: [
+    { vehiculoId: 'llq379', conductorId: 'wilfer' },
+    { vehiculoId: 'tfo427', conductorId: 'eddier' },
+  ],
+};
+
+prueba('el conductor escrito en el viaje gana a los demás caminos (021/RF-104, RF-105)', () => {
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'tfo420', conductorEscrito: 'Fernando Zuleta' }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'zuleta', por: 'escrito' },
+  );
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'llq377', conductorEscrito: 'Wilfer García' }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'wilfer', por: 'escrito' },
+  );
+});
+
+prueba('sin nombre escrito, el conductor sale del reporte, el preoperacional o el último viaje (021/RF-105)', () => {
+  // El operador de esa volqueta en el mismo reporte (RF-94).
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'llq377', conductorEscrito: null }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'yobani', por: 'reporte' },
+  );
+  // Sin nombre escrito, el preoperacional de ese día.
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'tfo420', conductorEscrito: null }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'zuleta', por: 'preoperacional' },
+  );
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'tfo427', conductorEscrito: '' }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'eddier', por: 'ultimo_viaje' },
+  );
+});
+
+prueba('un nombre escrito que no se reconoce no se cambia por el de la volqueta (021/RF-112)', () => {
+  // TFO420 tiene preoperacional y TFO427 último viaje, pero el vale dice otro nombre.
+  assert.equal(
+    conductorPropuesto({ vehiculoId: 'tfo420', conductorEscrito: 'Fernando Osorio' }, CONTEXTO_DEL_CONDUCTOR),
+    null,
+  );
+  assert.equal(
+    conductorPropuesto({ vehiculoId: 'tfo427', conductorEscrito: 'Anderson Daza' }, CONTEXTO_DEL_CONDUCTOR),
+    null,
+  );
+  // El operador de esa volqueta en el mismo reporte sí cuenta: es lo que el reporte dice.
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'llq377', conductorEscrito: 'Yobany Osorio A.' }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'yobani', por: 'reporte' },
+  );
+});
+
+prueba('dos preoperacionales de personas distintas no deciden el conductor (021/RF-106)', () => {
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'llq379', conductorEscrito: null }, CONTEXTO_DEL_CONDUCTOR),
+    { conductorId: 'wilfer', por: 'ultimo_viaje' },
+  );
+  // Ningún camino: lo elige el residente (RF-95).
+  assert.equal(
+    conductorPropuesto({ vehiculoId: 'tay076', conductorEscrito: 'Anderson Daza' }, CONTEXTO_DEL_CONDUCTOR),
+    null,
+  );
+  assert.equal(conductorPropuesto({ vehiculoId: null, conductorEscrito: null }, CONTEXTO_DEL_CONDUCTOR), null);
+});
+
+prueba('la propuesta dice de dónde salió el conductor cuando no fue escrito (021/RF-109)', () => {
+  const viaje = (conductorPor: CaminoDelConductor | null, conductorEscrito: string | null, conductorId: string | null = 'x') =>
+    textoDelConductor({ conductorId, conductorPor, conductorEscrito });
+  assert.equal(viaje('escrito', 'Fernando Zuleta'), null);
+  assert.equal(
+    viaje('preoperacional', null),
+    'Conductor propuesto: quien hizo el preoperacional de esta volqueta ese día. Confírmelo.',
+  );
+  assert.equal(
+    viaje('reporte', null),
+    'Conductor propuesto: el operador de esta volqueta en el mismo reporte. Confírmelo.',
+  );
+  assert.equal(
+    viaje('ultimo_viaje', 'Anderson Daza'),
+    'Conductor propuesto: quien manejó el último viaje de esta volqueta. Confírmelo. El reporte decía «Anderson Daza».',
+  );
+  // Elegido por una persona, o sin conductor: no hay nada que explicar aquí.
+  assert.equal(viaje(null, 'Wilfer Osorio'), null);
+  assert.equal(viaje(null, null, null), null);
+});
+
+prueba('una persona dada de baja no se propone como conductor (021/RF-105)', () => {
+  // `personas` son las vigentes: quien hizo el preoperacional o el último viaje y ya no
+  // está no cuenta, y se pasa al camino siguiente.
+  const contexto = {
+    ...CONTEXTO_DEL_CONDUCTOR,
+    preoperacionales: [{ vehiculoId: 'tfo427', fecha: '2026-10-07', usuarioId: 'dado-de-baja' }],
+    ultimosViajes: [
+      { vehiculoId: 'tfo427', conductorId: 'eddier' },
+      { vehiculoId: 'tay076', conductorId: 'dado-de-baja' },
+    ],
+  };
+  assert.deepEqual(
+    conductorPropuesto({ vehiculoId: 'tfo427', conductorEscrito: null }, contexto),
+    { conductorId: 'eddier', por: 'ultimo_viaje' },
+  );
+  assert.equal(conductorPropuesto({ vehiculoId: 'tay076', conductorEscrito: null }, contexto), null);
+});
+
+prueba('la propuesta lleva el conductor escrito y de dónde salió (021/RF-104, RF-109)', () => {
+  const { reporte } = resolverPropuesta(
+    {
+      fecha_evento: '2026-10-07',
+      viajes: [
+        { placa: 'TFO420', conductor: 'Fernando Zuleta', material: 'Sub-base', origen: 'LA FORTUNE', hora: '08:05' },
+        { placa: 'LLQ379', material: 'Sub-base', origen: 'LA FORTUNE', hora: '09:00' },
+        { placa: 'TFO420', material: 'Sub-base', origen: 'LA FORTUNE', hora: '10:00' },
+      ],
+    },
+    {
+      obraId: 'obra-a',
+      vehiculos: [
+        ...VOLQUETAS_DE_LOS_VALES,
+        { id: 'llq379', codigoInterno: 'VOL-MAG-03', placa: 'LLQ379', obraId: 'obra-a' },
+      ],
+      personas: CONDUCTORES_DE_LOS_VALES,
+      sitios: [{ id: 'fortune', nombre: 'LA FORTUNE' }],
+      materiales: [{ id: 'subbase', nombre: 'SUBBASE' }],
+      preoperacionales: CONTEXTO_DEL_CONDUCTOR.preoperacionales,
+      ultimosViajes: CONTEXTO_DEL_CONDUCTOR.ultimosViajes,
+    },
+    { diaDelMensaje: '2026-10-07', destino: 'cantera' },
+  );
+  assert.deepEqual(
+    reporte.viajes.map((v) => [v.conductorId, v.conductorPor, v.conductorEscrito]),
+    [
+      ['zuleta', 'escrito', 'Fernando Zuleta'],
+      ['wilfer', 'ultimo_viaje', null],
+      ['zuleta', 'preoperacional', null],
+    ],
+  );
+});
+
+prueba('una propuesta corregida antes de este cambio se sigue leyendo (021/RF-104)', () => {
+  const corregida = reporteCorregido.parse({
+    fecha: '2026-10-05',
+    clima: [],
+    actividades: [],
+    maquinaria: [],
+    personal: [],
+    ensayos: [],
+    viajes: [
+      {
+        vehiculoId: 'tfo420',
+        materialId: 'subbase',
+        origenId: 'fortune',
+        destino: 'obra',
+        pr: null,
+        metros: null,
+        hora: '08:05',
+        conductorId: 'zuleta',
+      },
+    ],
+    notas: '',
+  });
+  assert.equal(corregida.viajes[0].conductorId, 'zuleta');
+  assert.equal(corregida.viajes[0].conductorEscrito, null);
+  assert.equal(corregida.viajes[0].conductorPor, null);
+});
+
 console.log('\nReportes de WhatsApp: qué impide aprobar\n');
 
 /** El reporte de la plantilla, ya reconocido y corregido: no le falta nada. */
@@ -6336,6 +6579,12 @@ function reporteCompleto(): ReporteDelDia {
         hora: '07:30',
         conductorId: 'silfrido',
         vale: 'F-0458',
+        conductorEscrito: null,
+        conductorPor: null,
+        placaEscrita: null,
+        materialEscrito: null,
+        origenEscrito: null,
+        destinoEscrito: null,
       },
       {
         vehiculoId: 'llq375',
@@ -6347,6 +6596,12 @@ function reporteCompleto(): ReporteDelDia {
         hora: '09:10',
         conductorId: 'silfrido',
         vale: null,
+        conductorEscrito: null,
+        conductorPor: null,
+        placaEscrita: null,
+        materialEscrito: null,
+        origenEscrito: null,
+        destinoEscrito: null,
       },
     ],
     notas: '',
@@ -6788,6 +7043,64 @@ prueba('un sitio, un material o un ensayo se reconocen por su nombre, y ambiguo 
   assert.equal(reconocerPorNombre('arena', CATALOGOS_DE_PRUEBA.materiales), null);
 });
 
+// Spec 021, cambio 2026-10-08: el catálogo de cantera de Consorcio Magdalena y lo que
+// escribieron en los vales del 7-oct.
+const SITIOS_DE_LOS_VALES = [
+  { id: 'fortune', nombre: 'LA FORTUNE' },
+  { id: 'porton', nombre: 'PORTON DE LA VEGA' },
+  { id: 'nare', nombre: 'Puerto Nare' },
+];
+const MATERIALES_DE_LOS_VALES = [
+  { id: 'subbase', nombre: 'SUBBASE' },
+  { id: 'subbase-rio', nombre: 'SUBBASE DE RIO' },
+  { id: 'filtro', nombre: 'PIEDRA FILTRO' },
+];
+
+prueba('el material de un viaje se reconoce sin espacios, guiones ni puntos (021/RF-110)', () => {
+  assert.equal(reconocerEnCantera('Sub-base', MATERIALES_DE_LOS_VALES), 'subbase');
+  assert.equal(reconocerEnCantera('Sub base', MATERIALES_DE_LOS_VALES), 'subbase');
+  assert.equal(reconocerEnCantera('SUBBASE', MATERIALES_DE_LOS_VALES), 'subbase');
+  assert.equal(reconocerEnCantera('Sub-base de río', MATERIALES_DE_LOS_VALES), 'subbase-rio');
+  assert.equal(reconocerEnCantera('piedra filtro', MATERIALES_DE_LOS_VALES), 'filtro');
+  assert.equal(reconocerEnCantera('Base granular', MATERIALES_DE_LOS_VALES), null);
+  assert.equal(reconocerEnCantera('', MATERIALES_DE_LOS_VALES), null);
+});
+
+prueba('un sitio se reconoce sin «cantera», «el», «la» ni «c.» (021/RF-111)', () => {
+  assert.equal(reconocerEnCantera('Cantera FORTUNE', SITIOS_DE_LOS_VALES), 'fortune');
+  assert.equal(reconocerEnCantera('Cantera la fortune', SITIOS_DE_LOS_VALES), 'fortune');
+  assert.equal(reconocerEnCantera('C. Fortune', SITIOS_DE_LOS_VALES), 'fortune');
+  assert.equal(reconocerEnCantera('Cantera el portón de la Vega', SITIOS_DE_LOS_VALES), 'porton');
+  assert.equal(reconocerEnCantera('Cantera Portón de la Vega', SITIOS_DE_LOS_VALES), 'porton');
+  assert.equal(reconocerEnCantera('cantera porton', SITIOS_DE_LOS_VALES), 'porton');
+  assert.equal(reconocerEnCantera('Vía las Margaritas', SITIOS_DE_LOS_VALES), null);
+  // «Cantera» sola no dice cuál.
+  assert.equal(reconocerEnCantera('Cantera', SITIOS_DE_LOS_VALES), null);
+});
+
+prueba('los viajes de un vale se leen con el catálogo de cantera (021/RF-110, RF-111)', () => {
+  const { reporte } = resolverPropuesta(
+    {
+      viajes: [
+        { placa: 'TFO42O', material: 'Sub-base', origen: 'Cantera FORTUNE', destino: 'Cantera el portón de la Vega', hora: '08:05' },
+      ],
+    },
+    {
+      obraId: 'obra-a',
+      vehiculos: VOLQUETAS_DE_LOS_VALES,
+      personas: [],
+      sitios: SITIOS_DE_LOS_VALES,
+      materiales: MATERIALES_DE_LOS_VALES,
+    },
+    { diaDelMensaje: '2026-10-07', destino: 'cantera' },
+  );
+  const [viaje] = reporte.viajes;
+  assert.equal(viaje.vehiculoId, 'tfo420');
+  assert.equal(viaje.materialId, 'subbase');
+  assert.equal(viaje.origenId, 'fortune');
+  assert.equal(viaje.destino, 'porton');
+});
+
 prueba('la propuesta de la plantilla se lee sección por sección (RF-60 a RF-95)', () => {
   const { reporte, fechaSupuesta } = resolverPropuesta(PROPUESTA_DE_LA_PLANTILLA, CATALOGOS_DE_PRUEBA, {
     diaDelMensaje: '2026-10-02',
@@ -6847,6 +7160,12 @@ prueba('la propuesta de la plantilla se lee sección por sección (RF-60 a RF-95
     hora: '07:30',
     conductorId: 'silfrido',
     vale: null,
+    conductorEscrito: null,
+    conductorPor: 'reporte',
+    placaEscrita: 'LLQ 375',
+    materialEscrito: 'sub-base',
+    origenEscrito: 'Fortune',
+    destinoEscrito: 'obra',
   });
   assert.deepEqual(reporte.viajes[1], reporte.viajes[0]);
   // Sin destino escrito pero con abscisa de llegada, va a la obra; la volqueta sin
@@ -7045,6 +7364,366 @@ prueba('un renglón con una cantidad absurda de viajes no pasa de 30', () => {
     { diaDelMensaje: '2026-10-01', destino: 'cantera' },
   );
   assert.equal(resuelto.reporte.viajes.length, 30);
+});
+
+console.log('\nWhatsApp, guardado automático: tipo de reporte y datos por defecto (spec 024)\n');
+
+/** Un reporte vacío, para armar casos con una sola sección. */
+function reporteVacio(): ReporteDelDia {
+  return {
+    fecha: '2026-10-07',
+    clima: [],
+    actividades: [],
+    maquinaria: [],
+    personal: [],
+    ensayos: [],
+    viajes: [],
+    notas: '',
+    almacen: [],
+  };
+}
+
+const PERSONA_DEL_ARCHIVO = {
+  usuarioId: null,
+  escrito: 'Yobani Osorio',
+  entrada: '06:00',
+  salida: '18:00',
+  observaciones: '',
+  hoja: 'CONDUCTORES',
+};
+
+prueba('una fecha que no existe en el calendario se toma como no leída (RF-21)', () => {
+  const leer = (fecha_evento: string) =>
+    resolverPropuesta({ fecha_evento }, { obraId: 'o', vehiculos: [], personas: [], sitios: [], materiales: [] }, {
+      diaDelMensaje: '2026-10-07',
+      destino: 'cantera',
+    });
+  assert.deepEqual(leer('2026-02-30'), { reporte: { ...leer('2026-10-07').reporte }, fechaSupuesta: true });
+  assert.equal(leer('2026-13-01').fechaSupuesta, true);
+  assert.equal(leer('2026-02-28').reporte.fecha, '2026-02-28');
+  assert.equal(leer('2026-02-28').fechaSupuesta, false);
+});
+
+prueba('cada mensaje cuenta como uno de los reportes que se esperan (RF-38)', () => {
+  const soloPersonal = { ...reporteVacio(), personal: [PERSONA_DEL_ARCHIVO] };
+  assert.equal(tipoDeReporte('reporte_diario', soloPersonal), 'personal');
+  // Con cualquier otra sección, es el reporte diario.
+  assert.equal(
+    tipoDeReporte('reporte_diario', { ...soloPersonal, notas: 'Sin novedad' }),
+    'reporte_diario',
+  );
+  assert.equal(tipoDeReporte('reporte_actividades', reporteVacio()), 'reporte_diario');
+  assert.equal(tipoDeReporte('laboratorio', reporteVacio()), 'control_calidad');
+  assert.equal(tipoDeReporte('inicio_actividades', reporteVacio()), 'inicio_actividades');
+  assert.equal(tipoDeReporte('suministro_cantera', reporteVacio()), 'viajes');
+  // Lo que no es ninguno de los esperados no cuenta para el día.
+  assert.equal(tipoDeReporte('incidente', reporteVacio()), null);
+  assert.equal(tipoDeReporte('reporte_almacen', reporteVacio()), null);
+  assert.equal(tipoDeReporte('ignorar', reporteVacio()), null);
+  assert.equal(tipoDeReporte(null, reporteVacio()), null);
+});
+
+const VIAJE_SIN_COMPLETAR = {
+  vehiculoId: 'tfo420',
+  materialId: 'subbase',
+  origenId: 'porton',
+  destino: null,
+  pr: null,
+  metros: null,
+  hora: null,
+  conductorId: 'zuleta',
+  vale: '0000557',
+  conductorEscrito: 'Fernando Zuleta',
+  conductorPor: 'escrito' as const,
+  placaEscrita: 'TFO420',
+  materialEscrito: 'SUBBASE',
+  origenEscrito: 'PORTON DE LA VEGA',
+  destinoEscrito: null,
+};
+
+// 7-oct-2026 a las 21:06 en Colombia (02:06 del 8-oct en UTC).
+const ENVIADO_EL_7_OCT = Date.parse('2026-10-08T02:06:00Z');
+
+prueba('un viaje sin hora toma la de la foto y, sin ella, la del mensaje en Colombia (RF-16)', () => {
+  assert.equal(completarViaje(VIAJE_SIN_COMPLETAR, { horaFoto: '13:47', enviadoEn: ENVIADO_EL_7_OCT }).hora, '13:47');
+  assert.equal(completarViaje(VIAJE_SIN_COMPLETAR, { horaFoto: '1:47 pm', enviadoEn: ENVIADO_EL_7_OCT }).hora, '13:47');
+  assert.equal(completarViaje(VIAJE_SIN_COMPLETAR, { horaFoto: null, enviadoEn: ENVIADO_EL_7_OCT }).hora, '21:06');
+  assert.equal(completarViaje(VIAJE_SIN_COMPLETAR, { horaFoto: 'borrosa', enviadoEn: ENVIADO_EL_7_OCT }).hora, '21:06');
+  // La hora que trae el viaje no se toca.
+  assert.equal(
+    completarViaje({ ...VIAJE_SIN_COMPLETAR, hora: '07:50' }, { horaFoto: '13:47', enviadoEn: ENVIADO_EL_7_OCT }).hora,
+    '07:50',
+  );
+});
+
+prueba('un viaje sin destino escrito va a la obra; uno escrito y no reconocido no (RF-17)', () => {
+  const contexto = { horaFoto: null, enviadoEn: ENVIADO_EL_7_OCT };
+  assert.equal(completarViaje(VIAJE_SIN_COMPLETAR, contexto).destino, DESTINO_OBRA);
+  // «Vía las Margaritas» no es un sitio de la obra: no se inventa que llegó a la obra.
+  assert.equal(
+    completarViaje({ ...VIAJE_SIN_COMPLETAR, destinoEscrito: 'Vía las Margaritas' }, contexto).destino,
+    null,
+  );
+  assert.equal(completarViaje({ ...VIAJE_SIN_COMPLETAR, destino: 'porton' }, contexto).destino, 'porton');
+});
+
+prueba('de una máquina del reporte se toma la placa colombiana que trae escrita (RF-30)', () => {
+  assert.equal(placaDeLaMaquina('Volqueta Foton LLQ 375'), 'LLQ375');
+  assert.equal(placaDeLaMaquina('Volqueta Kenworth TAY-076'), 'TAY076');
+  assert.equal(placaDeLaMaquina('camioneta lvv405'), 'LVV405');
+  // Sin placa (un serial de maquinaria amarilla), no hay con qué registrarla.
+  assert.equal(placaDeLaMaquina('Motoniveladora MC770191'), null);
+  assert.equal(placaDeLaMaquina('Recicladora Wirtgen WR 2000'), null);
+  assert.equal(placaDeLaMaquina(null), null);
+});
+
+prueba('una placa de menos de cinco letras y cifras no alcanza para registrar la volqueta (RF-31)', () => {
+  assert.equal(placaRegistrable('TFO420'), 'TFO420');
+  assert.equal(placaRegistrable('tfo 420'), 'TFO420');
+  assert.equal(placaRegistrable('LLQ-377'), 'LLQ377');
+  assert.equal(placaRegistrable('TFO4'), null);
+  assert.equal(placaRegistrable('TFO 4…'), null);
+  assert.equal(placaRegistrable(''), null);
+  assert.equal(placaRegistrable(null), null);
+});
+
+console.log('\nWhatsApp, guardado automático: viajes sin duplicar (spec 024)\n');
+
+// Los viajes vigentes ya guardados ese día en la obra.
+const GUARDADOS_DEL_DIA = [
+  { id: 'v-437', vale: '0000437', vehiculoId: 'llq377', hora: '07:41', anulado: false },
+  { id: 'v-sin-vale', vale: null, vehiculoId: 'tfo420', hora: '09:55', anulado: false },
+  { id: 'v-anulado', vale: '0000999', vehiculoId: 'tay076', hora: '10:00', anulado: true },
+];
+
+prueba('con número de vale, el viaje repetido es el que tiene ese vale (RF-11, RF-13)', () => {
+  // La IA leyó distinta la hora de la misma foto: sigue siendo el mismo viaje.
+  assert.equal(
+    viajeRepetido({ vale: '0000437', vehiculoId: 'llq377', hora: '19:41' }, GUARDADOS_DEL_DIA),
+    'v-437',
+  );
+  // Solo las mayúsculas no cuentan, como en Control Cantera (023/RF-56).
+  assert.equal(viajeRepetido({ vale: 'f-1', vehiculoId: 'x', hora: '08:00' }, [
+    { id: 'v-f1', vale: 'F-1', vehiculoId: 'y', hora: '15:00', anulado: false },
+  ]), 'v-f1');
+  // Otro vale de la misma volqueta a la misma hora es otro viaje.
+  assert.equal(viajeRepetido({ vale: '0000438', vehiculoId: 'llq377', hora: '07:41' }, GUARDADOS_DEL_DIA), null);
+  // Un anulado no cuenta.
+  assert.equal(viajeRepetido({ vale: '0000999', vehiculoId: 'tay076', hora: '10:00' }, GUARDADOS_DEL_DIA), null);
+});
+
+prueba('sin vale, es repetido el de la misma volqueta a 30 minutos o menos (RF-12)', () => {
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'tfo420', hora: '10:24' }, GUARDADOS_DEL_DIA), 'v-sin-vale');
+  assert.equal(viajeRepetido({ vale: '', vehiculoId: 'tfo420', hora: '09:25' }, GUARDADOS_DEL_DIA), 'v-sin-vale');
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'tfo420', hora: '10:26' }, GUARDADOS_DEL_DIA), null);
+  // También contra uno que sí tenía vale: el renglón del reporte diario y la foto del vale.
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'llq377', hora: '07:30' }, GUARDADOS_DEL_DIA), 'v-437');
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'llq379', hora: '07:41' }, GUARDADOS_DEL_DIA), null);
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'tay076', hora: '10:00' }, GUARDADOS_DEL_DIA), null);
+  // Sin volqueta o sin hora no hay con qué comparar.
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: null, hora: '09:55' }, GUARDADOS_DEL_DIA), null);
+  assert.equal(viajeRepetido({ vale: null, vehiculoId: 'tfo420', hora: null }, GUARDADOS_DEL_DIA), null);
+});
+
+prueba('de un renglón con varios viajes se guardan solo los que faltan (RF-14)', () => {
+  assert.equal(viajesQueFaltan(4, 3), 1);
+  assert.equal(viajesQueFaltan(4, 0), 4);
+  assert.equal(viajesQueFaltan(4, 4), 0);
+  assert.equal(viajesQueFaltan(2, 5), 0);
+});
+
+console.log('\nWhatsApp, guardado automático: personas que no se reconocen (spec 024)\n');
+
+const PERSONAS_DE_LA_OBRA = [
+  { id: 'eddier', nombreCompleto: 'Eddier Alberto Quiceno Jacome' },
+  { id: 'yobani', nombreCompleto: 'Yobani Hernando Osorio Aguirre' },
+  { id: 'diego-c', nombreCompleto: 'Diego Cardona Henao' },
+  { id: 'diego-r', nombreCompleto: 'Diego Ramírez Henao' },
+];
+
+prueba('una persona reconocida o con una sola parecida no se registra otra vez (RF-22, RF-23)', () => {
+  assert.deepEqual(decisionDePersona('Yobani Osorio', PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), {
+    tipo: 'reconocida',
+    usuarioId: 'yobani',
+  });
+  // «Quinceno» no es «Quiceno», pero comparte dos palabras con una sola persona.
+  assert.deepEqual(decisionDePersona('Eddier Alberto Quinceno', PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), {
+    tipo: 'coincidencia',
+    usuarioId: 'eddier',
+  });
+});
+
+prueba('con dos o más parecidas no se registra a nadie: se elige (RF-24)', () => {
+  // Dos palabras en común con dos personas.
+  assert.deepEqual(decisionDePersona('Diego Henao', PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), {
+    tipo: 'ambigua',
+    candidatos: ['diego-c', 'diego-r'],
+  });
+  // Una sola palabra que está en dos nombres tampoco se registra como alguien nuevo.
+  assert.deepEqual(decisionDePersona('Diego', PERSONAS_DE_LA_OBRA, { seccion: 'personal' }), {
+    tipo: 'ambigua',
+    candidatos: ['diego-c', 'diego-r'],
+  });
+});
+
+prueba('una persona sin parecidas se registra con el cargo que dice el reporte (RF-22, RF-25, RF-26)', () => {
+  // Comparte solo «Eddier»: es otra persona, y sale en «Creado automáticamente» (RF-36).
+  assert.deepEqual(decisionDePersona('Eddier Quinceno', PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), {
+    tipo: 'crear',
+    nombre: 'Eddier Quinceno',
+    cargo: 'conductor',
+  });
+  assert.deepEqual(decisionDePersona('  Anderson   Daza ', PERSONAS_DE_LA_OBRA, { seccion: 'maquinaria' }), {
+    tipo: 'crear',
+    nombre: 'Anderson Daza',
+    cargo: 'conductor',
+  });
+  assert.deepEqual(
+    decisionDePersona('Luz Marina Pérez', PERSONAS_DE_LA_OBRA, { seccion: 'personal', hoja: 'CONTROLADORAS' }),
+    { tipo: 'crear', nombre: 'Luz Marina Pérez', cargo: 'controlador_vial' },
+  );
+  // Una hoja que no es un cargo, o sin hoja: «sin definir».
+  assert.deepEqual(
+    decisionDePersona('Pedro Gómez', PERSONAS_DE_LA_OBRA, { seccion: 'personal', hoja: 'INGENIEROS' }),
+    { tipo: 'crear', nombre: 'Pedro Gómez', cargo: null },
+  );
+  assert.deepEqual(decisionDePersona('Pedro Gómez', PERSONAS_DE_LA_OBRA, { seccion: 'personal' }), {
+    tipo: 'crear',
+    nombre: 'Pedro Gómez',
+    cargo: null,
+  });
+  // Sin nombre no hay a quién registrar.
+  assert.equal(decisionDePersona('  ', PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), null);
+  assert.equal(decisionDePersona(null, PERSONAS_DE_LA_OBRA, { seccion: 'viajes' }), null);
+});
+
+console.log('\nWhatsApp, guardado automático: cuándo se arma la bitácora (spec 024)\n');
+
+const HORARIO_LUNES_A_SABADO = {
+  semana: [{ desde: '07:30', hasta: '17:00' }],
+  sabado: [{ desde: '07:30', hasta: '12:00' }],
+};
+const OSCAR = '280036280139944';
+const ESPERADOS_DE_LA_OBRA = [
+  { tipoReporte: 'reporte_diario' as const, autorId: OSCAR, autorNombre: 'ING Oscar Velandia' },
+  { tipoReporte: 'personal' as const, autorId: null, autorNombre: null },
+];
+
+prueba('el día está completo cuando llegó cada reporte esperado (RF-39, RF-43)', () => {
+  const dia = (recibidos: { tipoReporte: 'reporte_diario' | 'personal' | 'viajes'; autorId: string }[]) =>
+    diaCompleto({ esperados: ESPERADOS_DE_LA_OBRA, recibidos, horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-07' });
+
+  assert.deepEqual(dia([{ tipoReporte: 'personal', autorId: '213877006565409@lid' }]), {
+    completo: false,
+    faltan: [ESPERADOS_DE_LA_OBRA[0]],
+  });
+  // El reporte diario de otra persona no cuenta si se dijo quién lo manda (RF-39).
+  assert.equal(
+    dia([
+      { tipoReporte: 'personal', autorId: '213877006565409@lid' },
+      { tipoReporte: 'reporte_diario', autorId: '83618886111404@lid' },
+    ]).completo,
+    false,
+  );
+  // El autor se compara sin lo que va después de la arroba.
+  assert.deepEqual(
+    dia([
+      { tipoReporte: 'viajes', autorId: '213877006565409@lid' },
+      { tipoReporte: 'reporte_diario', autorId: `${OSCAR}@lid` },
+      { tipoReporte: 'personal', autorId: '66512316530855' },
+    ]),
+    { completo: true, faltan: [] },
+  );
+});
+
+prueba('sin lista, o en un día que la obra no trabaja, basta el primer mensaje (RF-40, RF-41)', () => {
+  const unMensaje = [{ tipoReporte: 'viajes' as const, autorId: '213877006565409@lid' }];
+  assert.deepEqual(
+    diaCompleto({ esperados: [], recibidos: unMensaje, horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-07' }),
+    { completo: true, faltan: [] },
+  );
+  // El 11-oct-2026 es domingo: la lista no aplica.
+  assert.deepEqual(
+    diaCompleto({ esperados: ESPERADOS_DE_LA_OBRA, recibidos: unMensaje, horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-11' }),
+    { completo: true, faltan: [] },
+  );
+  // Un sábado de una obra sin jornada de sábado, y un festivo (12-oct-2026), tampoco.
+  assert.equal(
+    diaCompleto({
+      esperados: ESPERADOS_DE_LA_OBRA,
+      recibidos: unMensaje,
+      horario: { ...HORARIO_LUNES_A_SABADO, sabado: [] },
+      fecha: '2026-10-10',
+    }).completo,
+    true,
+  );
+  assert.equal(
+    diaCompleto({ esperados: ESPERADOS_DE_LA_OBRA, recibidos: unMensaje, horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-12' }).completo,
+    true,
+  );
+  // Un sábado de una obra que sí trabaja sábados espera la lista.
+  assert.equal(
+    diaCompleto({ esperados: ESPERADOS_DE_LA_OBRA, recibidos: unMensaje, horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-10' }).completo,
+    false,
+  );
+  // Sin mensajes no hay bitácora que armar (RF-49).
+  assert.equal(
+    diaCompleto({ esperados: [], recibidos: [], horario: HORARIO_LUNES_A_SABADO, fecha: '2026-10-07' }).completo,
+    false,
+  );
+});
+
+prueba('la hora límite es el mediodía del día siguiente en Colombia (RF-46)', () => {
+  // 8-oct a las 11:59 y a las 12:00 en Colombia son 16:59 y 17:00 en UTC.
+  assert.equal(diaVencido('2026-10-07', Date.parse('2026-10-08T16:59:00Z')), false);
+  assert.equal(diaVencido('2026-10-07', Date.parse('2026-10-08T17:00:00Z')), true);
+  assert.equal(diaVencido('2026-10-07', Date.parse('2026-10-07T23:00:00Z')), false);
+  assert.equal(diaVencido('fecha mala', Date.parse('2026-10-08T17:00:00Z')), false);
+});
+
+prueba('un renglón que falta va a «No se pudo guardar» y el resto se guarda (RF-19, RF-20)', () => {
+  const reporte = {
+    ...reporteVacio(),
+    personal: [PERSONA_DEL_ARCHIVO, { ...PERSONA_DEL_ARCHIVO, escrito: 'Luz Pérez' }],
+    viajes: [VIAJE_SIN_COMPLETAR, { ...VIAJE_SIN_COMPLETAR, vale: '0000558' }],
+  };
+  const { guardable, excepciones } = separarRenglones(reporte, [
+    { seccion: 'viajes', renglon: 0, mensaje: 'Elija el origen.' },
+    { seccion: 'viajes', renglon: 0, mensaje: 'Falta la hora del viaje.' },
+    { seccion: 'personal', renglon: 1, mensaje: 'Elija la persona.' },
+  ]);
+  assert.deepEqual(guardable?.viajes.map((v) => v.vale), ['0000558']);
+  assert.deepEqual(guardable?.personal.map((p) => p.escrito), ['Yobani Osorio']);
+  assert.deepEqual(excepciones, [
+    { seccion: 'personal', renglon: 1, motivo: 'Elija la persona.', datos: reporte.personal[1] },
+    { seccion: 'viajes', renglon: 0, motivo: 'Elija el origen. Falta la hora del viaje.', datos: reporte.viajes[0] },
+  ]);
+});
+
+prueba('una falta de toda una sección la aparta entera, y sin fecha no se guarda nada (RF-19, RF-21)', () => {
+  const conClima = {
+    ...reporteVacio(),
+    clima: [
+      { condicion: 'soleado' as const, desde: '07:00', hasta: '12:00' },
+      { condicion: 'lloviendo' as const, desde: '11:00', hasta: '17:00' },
+    ],
+    personal: [PERSONA_DEL_ARCHIVO],
+  };
+  const porSeccion = separarRenglones(conClima, [{ seccion: 'clima', renglon: null, mensaje: 'Las franjas se cruzan.' }]);
+  assert.deepEqual(porSeccion.guardable?.clima, []);
+  assert.equal(porSeccion.guardable?.personal.length, 1);
+  assert.deepEqual(porSeccion.excepciones, [
+    { seccion: 'clima', renglon: null, motivo: 'Las franjas se cruzan.', datos: { renglones: conClima.clima } },
+  ]);
+
+  const sinFecha = separarRenglones(conClima, [{ seccion: 'fecha', renglon: null, mensaje: 'Falta el día del reporte.' }]);
+  assert.equal(sinFecha.guardable, null);
+  assert.deepEqual(sinFecha.excepciones, [
+    { seccion: 'fecha', renglon: null, motivo: 'Falta el día del reporte.', datos: null },
+  ]);
+
+  // Sin faltas, todo se guarda.
+  assert.deepEqual(separarRenglones(conClima, []), { guardable: conClima, excepciones: [] });
 });
 
 console.log('\nReportes de WhatsApp: archivos\n');

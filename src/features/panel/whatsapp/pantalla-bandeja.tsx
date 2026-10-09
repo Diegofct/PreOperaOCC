@@ -1,5 +1,11 @@
 /**
- * La bandeja de reportes de WhatsApp (spec 021, RF-10 a RF-25).
+ * El historial de los reportes de WhatsApp (spec 024, RF-58, RF-59; antes, la bandeja
+ * de la spec 021, RF-10 a RF-25).
+ *
+ * Desde la spec 024 el sistema guarda solo lo que llega: la lista abre en lo guardado y
+ * dice, de cada mensaje, dónde quedó —Control Cantera, Almacén o la bitácora de su
+ * día— con un botón que lleva ahí. Lo que espera a la bitácora, lo pendiente de
+ * procesar y lo aprobado a mano antes de la 024 siguen en el filtro.
  *
  * Lo que se reportó en los grupos de la obra, para revisarlo y pasarlo a la
  * bitácora. Arriba, solo para la gerencia, los grupos de WhatsApp con la obra a la
@@ -12,6 +18,7 @@
  * motivo de revisión cuando lo hay (RF-17 a RF-19)— para decidir qué abrir. El
  * detalle, con la corrección y la aprobación, va aparte (tareas T20 a T22).
  */
+import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { alcanza } from '@/shared/rules/permisos';
@@ -32,7 +39,11 @@ import {
 } from '../componentes';
 import type { GrupoFila, ObraFila, PropuestaFila } from '../contratos';
 import { MarcoPantalla, useListado } from '../marco';
+import { CreadoAutomaticamente } from './creado-automaticamente';
+import { EstadoDelDia } from './estado-del-dia';
+import { NoSePudoGuardar } from './no-se-pudo-guardar';
 import { DetalleDeReporte } from './propuesta-reporte';
+import { ReportesEsperados } from './reportes-esperados';
 import { usePersona } from '../sesion';
 
 /** Día y hora en la obra, corto: «3 oct, 07:30 p. m.». */
@@ -48,17 +59,97 @@ function momento(iso: string | null): string {
 }
 
 const ESTADOS: { valor: EstadoMensajeWhatsapp; etiqueta: string }[] = [
-  { valor: 'pendiente', etiqueta: 'Pendientes' },
+  { valor: 'guardado', etiqueta: 'Guardados' },
+  { valor: 'en_espera', etiqueta: 'En espera de la bitácora' },
+  { valor: 'pendiente', etiqueta: 'Sin procesar' },
   { valor: 'ignorado', etiqueta: 'Ignorados' },
-  { valor: 'aprobado', etiqueta: 'Aprobados' },
+  { valor: 'aprobado', etiqueta: 'Aprobados a mano' },
   { valor: 'descartado', etiqueta: 'Descartados' },
 ];
+
+/** Las pestañas del módulo (spec 024, RF-55 a RF-64). Las siguientes llegan con sus tareas. */
+const PESTANAS = [
+  { valor: 'historial', titulo: 'Historial' },
+  { valor: 'dias', titulo: 'Estado del día' },
+  { valor: 'excepciones', titulo: 'No se pudo guardar' },
+  { valor: 'creados', titulo: 'Creado automáticamente' },
+  { valor: 'esperados', titulo: 'Reportes esperados' },
+] as const;
+
+type Pestana = (typeof PESTANAS)[number]['valor'];
+
+/** «1 viaje», «3 viajes». */
+function cuenta(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
+/** Adónde lleva el botón de un mensaje del historial (RF-59). */
+interface Enlace {
+  titulo: string;
+  ruta: '/panel/bitacoras' | '/panel/cantera' | '/panel/almacen';
+  params: Record<string, string>;
+}
+
+/**
+ * Dónde quedó un mensaje, en renglones cortos, y adónde lleva su botón (spec 024,
+ * RF-58, RF-59). Sale del resultado que el sistema dejó al guardarlo.
+ */
+function dondeQuedo(p: PropuestaFila): { renglones: string[]; enlace: Enlace | null } {
+  const r = p.resultado ?? {};
+  const viajes = r.guardados?.length ?? 0;
+  const extra = [
+    r.repetidos ? cuenta(r.repetidos, 'ya estaba guardado', 'ya estaban guardados') : null,
+    r.apartados ? `${cuenta(r.apartados, 'renglón', 'renglones')} en «No se pudo guardar»` : null,
+  ].filter((x): x is string => !!x);
+  const delDia = { obraId: p.obraId, ...(p.fechaHecho ? { fecha: p.fechaHecho } : {}) };
+
+  switch (p.estado) {
+    case 'en_espera':
+      return {
+        renglones: [
+          `Espera la bitácora del ${p.fechaHecho ?? 'día'}`,
+          ...(viajes ? [`${cuenta(viajes, 'viaje', 'viajes')} ya en Control Cantera`] : []),
+          ...extra,
+        ],
+        enlace: viajes ? { titulo: 'Ver viajes', ruta: '/panel/cantera', params: delDia } : null,
+      };
+    case 'guardado':
+      if (r.modulo === 'cantera') {
+        return {
+          renglones: [`Control Cantera: ${cuenta(viajes, 'viaje', 'viajes')}`, ...extra],
+          enlace: viajes ? { titulo: 'Ver viajes', ruta: '/panel/cantera', params: delDia } : null,
+        };
+      }
+      if (r.modulo === 'almacen') {
+        return {
+          renglones: [`Almacén: ${cuenta(viajes, 'movimiento', 'movimientos')}`, ...extra],
+          enlace: viajes ? { titulo: 'Ver almacén', ruta: '/panel/almacen', params: { obraId: p.obraId } } : null,
+        };
+      }
+      return {
+        renglones: [
+          r.parteId ? `Bitácora del ${p.fechaHecho ?? 'día'}` : 'No llegó a la bitácora',
+          ...(viajes ? [`${cuenta(viajes, 'viaje', 'viajes')} en Control Cantera`] : []),
+          ...extra,
+        ],
+        enlace: r.parteId ? { titulo: 'Ver bitácora', ruta: '/panel/bitacoras', params: delDia } : null,
+      };
+    case 'aprobado':
+      return { renglones: ['Aprobado a mano (antes del guardado automático)'], enlace: null };
+    case 'pendiente':
+      return { renglones: ['Todavía no se procesa'], enlace: null };
+    default:
+      return { renglones: ['—'], enlace: null };
+  }
+}
 
 const TONO_DEL_ESTADO: Record<EstadoMensajeWhatsapp, 'neutro' | 'atencion' | 'malo' | 'bueno'> = {
   pendiente: 'atencion',
   ignorado: 'neutro',
   aprobado: 'bueno',
   descartado: 'malo',
+  en_espera: 'atencion',
+  guardado: 'bueno',
 };
 
 const NOMBRE_DEL_ESTADO: Record<EstadoMensajeWhatsapp, string> = {
@@ -66,6 +157,8 @@ const NOMBRE_DEL_ESTADO: Record<EstadoMensajeWhatsapp, string> = {
   ignorado: 'Ignorado',
   aprobado: 'Aprobado',
   descartado: 'Descartado',
+  en_espera: 'En espera de la bitácora',
+  guardado: 'Guardado',
 };
 
 export default function PantallaBandeja() {
@@ -73,7 +166,8 @@ export default function PantallaBandeja() {
   // La gerencia ve todas las obras: asocia grupos y puede filtrar por obra (RF-9, RF-14).
   const esGerencia = alcanza(rol, 'obras', 'listar');
 
-  const [estado, setEstado] = useState<EstadoMensajeWhatsapp>('pendiente');
+  const [pestana, setPestana] = useState<Pestana>('historial');
+  const [estado, setEstado] = useState<EstadoMensajeWhatsapp>('guardado');
   const [obraId, setObraId] = useState<string | null>(null);
   // El reporte abierto. Al volver, la bandeja se vuelve a pedir: pudo cambiar.
   const [abierta, setAbierta] = useState<string | null>(null);
@@ -98,21 +192,17 @@ export default function PantallaBandeja() {
       pintar: (p) => <Celda lineas={2}>{momento(p.enviadoEn)}</Celda>,
     },
     {
-      clave: 'grupo',
-      titulo: 'Grupo y obra',
-      ancho: 180,
+      // Spec 024: el grupo se lee en el detalle; aquí, quién y de qué obra, para que
+      // quepa «Dónde quedó» sin pasar del ancho de la pantalla (spec 022).
+      clave: 'autor',
+      titulo: 'Autor y obra',
+      ancho: 150,
       pintar: (p) => (
         <>
-          <Celda lineas={2}>{p.grupoNombre}</Celda>
+          <Celda lineas={2}>{p.autorNombre ?? 'Sin nombre'}</Celda>
           <Celda>{p.obraNombre}</Celda>
         </>
       ),
-    },
-    {
-      clave: 'autor',
-      titulo: 'Autor',
-      ancho: 130,
-      pintar: (p) => <Celda lineas={2}>{p.autorNombre ?? 'Sin nombre'}</Celda>,
     },
     {
       clave: 'categoria',
@@ -147,15 +237,32 @@ export default function PantallaBandeja() {
       ),
     },
     {
-      clave: 'estado',
-      titulo: 'Estado',
-      ancho: 110,
-      pintar: (p) => (
-        <>
-          <Etiqueta tono={TONO_DEL_ESTADO[p.estado]}>{NOMBRE_DEL_ESTADO[p.estado]}</Etiqueta>
-          {p.viajesAprobados ? <Celda lineas={2}>Viajes ya registrados</Celda> : null}
-        </>
-      ),
+      // Spec 024, RF-58, RF-59: el estado, qué se guardó, dónde, y un botón que lleva ahí.
+      clave: 'donde',
+      titulo: 'Estado y dónde quedó',
+      ancho: 210,
+      anchoMinimo: 170,
+      pintar: (p) => {
+        const { renglones, enlace } = dondeQuedo(p);
+        return (
+          <>
+            <Etiqueta tono={TONO_DEL_ESTADO[p.estado]}>{NOMBRE_DEL_ESTADO[p.estado]}</Etiqueta>
+            {p.viajesAprobados ? <Celda lineas={2}>Viajes ya registrados</Celda> : null}
+            {renglones.map((r) => (
+              <Celda key={r} lineas={2}>
+                {r}
+              </Celda>
+            ))}
+            {enlace ? (
+              <Boton
+                titulo={enlace.titulo}
+                tono="secundario"
+                onPress={() => router.push({ pathname: enlace.ruta, params: enlace.params })}
+              />
+            ) : null}
+          </>
+        );
+      },
     },
     {
       clave: 'abrir',
@@ -180,7 +287,7 @@ export default function PantallaBandeja() {
       modulo="whatsapp"
       exigeObra
       titulo="Reportes de WhatsApp"
-      descripcion="Lo que se reportó en los grupos de la obra. Revíselo, corríjalo si hace falta y apruébelo para pasarlo a la bitácora."
+      descripcion="Lo que se reportó en los grupos de la obra se guarda solo en su módulo. Aquí se ve qué se guardó y dónde."
       error={propuestas.error}
       cargando={propuestas.cargando}
     >
@@ -198,13 +305,30 @@ export default function PantallaBandeja() {
       ) : null}
 
       {abierta ? null : (
-      <Seccion titulo="Bandeja">
+        <Acciones>
+          {PESTANAS.map((p) => (
+            <Boton
+              key={p.valor}
+              titulo={p.titulo}
+              tono={pestana === p.valor ? 'primario' : 'secundario'}
+              onPress={() => setPestana(p.valor)}
+            />
+          ))}
+        </Acciones>
+      )}
+      {!abierta && pestana === 'dias' ? <EstadoDelDia opcionesDeObra={opcionesDeObra} /> : null}
+      {!abierta && pestana === 'excepciones' ? <NoSePudoGuardar opcionesDeObra={opcionesDeObra} /> : null}
+      {!abierta && pestana === 'creados' ? <CreadoAutomaticamente opcionesDeObra={opcionesDeObra} /> : null}
+      {!abierta && pestana === 'esperados' ? <ReportesEsperados opcionesDeObra={opcionesDeObra} /> : null}
+
+      {abierta || pestana !== 'historial' ? null : (
+      <Seccion titulo="Historial">
         <Acciones>
           <Selector
             etiqueta="Estado"
             valor={estado}
             opciones={ESTADOS.map((e) => ({ valor: e.valor, etiqueta: e.etiqueta }))}
-            onChange={(v) => setEstado((v as EstadoMensajeWhatsapp | null) ?? 'pendiente')}
+            onChange={(v) => setEstado((v as EstadoMensajeWhatsapp | null) ?? 'guardado')}
             ancho={200}
           />
           {esGerencia ? (
@@ -222,11 +346,7 @@ export default function PantallaBandeja() {
         <Tabla
           columnas={columnas}
           filas={propuestas.datos}
-          vacio={
-            estado === 'pendiente'
-              ? 'No hay reportes pendientes de revisar.'
-              : `No hay reportes ${ESTADOS.find((e) => e.valor === estado)!.etiqueta.toLowerCase()}.`
-          }
+          vacio={`No hay reportes en «${ESTADOS.find((e) => e.valor === estado)!.etiqueta}».`}
         />
       </Seccion>
       )}

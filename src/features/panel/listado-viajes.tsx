@@ -70,22 +70,28 @@ export function ListadoDeViajes({
   obraId,
   puedeAnular,
   version,
+  fecha,
 }: {
   obraId: string | null;
   puedeAnular: boolean;
   /** Sube al registrar un viaje, para volver a pedir el periodo. */
   version: number;
+  /** Un día para abrir el listado en él (spec 024, RF-59: desde el historial de WhatsApp). */
+  fecha?: string;
 }) {
   const hoy = fechaDeJornada();
-  const [desde, setDesde] = useState(restarDias(hoy, 6));
-  const [hasta, setHasta] = useState(hoy);
+  const delEnlace = fecha && FECHA.test(fecha) ? fecha : null;
+  const [desde, setDesde] = useState(delEnlace ?? restarDias(hoy, 6));
+  const [hasta, setHasta] = useState(delEnlace ?? hoy);
   const desdeMal = !FECHA.test(desde.trim());
   const hastaMal = !FECHA.test(hasta.trim());
 
   // Se pide el periodo solo cuando las dos fechas se pueden leer: mientras se
   // escribe «2026-09-1» no tiene sentido preguntar al servidor. Se decide al
   // escribir, no en un efecto: así cada tecla no dispara un segundo render.
-  const [periodo, setPeriodo] = useState({ desde: restarDias(hoy, 6), hasta: hoy });
+  const [periodo, setPeriodo] = useState(
+    delEnlace ? { desde: delEnlace, hasta: delEnlace } : { desde: restarDias(hoy, 6), hasta: hoy },
+  );
   function cambiarPeriodo(nuevoDesde: string, nuevoHasta: string) {
     setDesde(nuevoDesde);
     setHasta(nuevoHasta);

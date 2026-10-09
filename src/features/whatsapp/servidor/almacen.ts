@@ -35,7 +35,6 @@ import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { baseServidor, baseServidorSerializable } from '@/db/servidor/cliente';
 import { almacenMateriales, whatsappMensajes } from '@/db/servidor/esquema';
 import { materialesConStock } from '@/features/almacen-obra/servidor/materiales';
-import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { conReintentoSiChoca, errorDePeticion } from '@/features/servidor/respuestas';
 import { aDecimal } from '@/shared/rules/almacen';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -47,6 +46,7 @@ import {
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
 
+import type { Actor } from './actor';
 import { idDeterminista } from './ids';
 
 export interface AlmacenAprobado {
@@ -67,7 +67,7 @@ function respuestaDeFaltas(faltas: FaltaDelReporte[], estado = 400) {
 }
 
 /** Las faltas del reporte que tocan al almacén: la fecha y sus renglones. */
-async function faltasDelAlmacen(reporte: ReporteDelDia, obraId: string) {
+export async function faltasDelAlmacen(reporte: ReporteDelDia, obraId: string) {
   const materiales = await materialesConStock(obraId);
   return faltasDelReporte(reporte, {
     hoy: fechaDeJornada(),
@@ -98,18 +98,21 @@ export async function escribirReporteDeAlmacen(datos: {
   obraId: string;
   aprobadoPor: string;
   reporte: ReporteDelDia;
+  /** De dónde salen los ids, si no del mensaje (spec 024: un renglón completado aparte). */
+  claveDeIds?: string;
 }): Promise<{ resultado: ResultadoDeEscribir; movimientos: number; materialesNuevos: number }> {
   const { mensajeId, obraId, aprobadoPor, reporte } = datos;
+  const clave = datos.claveDeIds ?? mensajeId;
   const fecha = reporte.fecha!;
 
   // Los materiales nuevos, uno por clave (dos renglones del mismo son uno).
   const nuevos = new Map<string, { id: string; nombre: string; unidad: string }>();
   for (const m of reporte.almacen) {
     if (m.materialId || !m.materialNuevo) continue;
-    const clave = claveDeMaterialNuevo(m.materialNuevo.nombre);
-    if (nuevos.has(clave)) continue;
-    nuevos.set(clave, {
-      id: await idDeterminista(mensajeId, 'material', clave),
+    const claveDelMaterial = claveDeMaterialNuevo(m.materialNuevo.nombre);
+    if (nuevos.has(claveDelMaterial)) continue;
+    nuevos.set(claveDelMaterial, {
+      id: await idDeterminista(clave, 'material', claveDelMaterial),
       nombre: m.materialNuevo.nombre.trim(),
       unidad: m.materialNuevo.unidad!,
     });
@@ -118,7 +121,7 @@ export async function escribirReporteDeAlmacen(datos: {
   // Los movimientos, con su material ya resuelto y su id fijo.
   const movimientos = await Promise.all(
     reporte.almacen.map(async (m, renglon) => ({
-      id: await idDeterminista(mensajeId, 'almacen', renglon),
+      id: await idDeterminista(clave, 'almacen', renglon),
       materialId: m.materialId ?? nuevos.get(claveDeMaterialNuevo(m.materialNuevo!.nombre))!.id,
       tipo: m.tipo,
       cantidad: aDecimal(m.cantidad!),
@@ -235,7 +238,8 @@ export async function escribirReporteDeAlmacen(datos: {
  * escribe y se marca.
  */
 export async function aprobarReporteDeAlmacen(
-  sesion: PersonaEnSesion,
+  // Quien aprueba, o el sistema (spec 024, RF-3, RF-10).
+  actor: Actor,
   id: string,
   mensaje: { obraId: string; almacenActivo: boolean; version: number },
   reporte: ReporteDelDia,
@@ -259,7 +263,7 @@ export async function aprobarReporteDeAlmacen(
   const escrito = await escribirReporteDeAlmacen({
     mensajeId: id,
     obraId: mensaje.obraId,
-    aprobadoPor: sesion.id,
+    aprobadoPor: actor.id,
     reporte,
   });
 
@@ -291,7 +295,7 @@ export async function aprobarReporteDeAlmacen(
       estado: 'aprobado',
       propuesta: reporte as unknown as Record<string, unknown>,
       parteId: null,
-      aprobadoPor: sesion.id,
+      aprobadoPor: actor.id,
       aprobadoEn: new Date(),
       obraDecididaId: mensaje.obraId,
       version: sql`${whatsappMensajes.version} + 1`,

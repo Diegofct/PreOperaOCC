@@ -40,6 +40,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -71,6 +72,12 @@ import type {
 } from '../../shared/rules/granulometria';
 import { ROLES } from '../../shared/rules/permisos';
 import { ESTADOS_MENSAJE_WHATSAPP } from '../../shared/rules/whatsapp';
+import {
+  ESTADOS_DE_EXCEPCION,
+  ESTADOS_DEL_DIA,
+  TIPOS_CREADOS,
+  TIPOS_DE_REPORTE,
+} from '../../shared/rules/whatsapp-automatico';
 import type {
   PlantillaChecklist,
   RespuestaItem,
@@ -149,6 +156,12 @@ export const estadoEnsayo = pgEnum('estado_ensayo', ESTADOS_ENSAYO);
 
 /** Dónde está un mensaje en la bandeja de WhatsApp (spec 021). Ver `rules/whatsapp`. */
 export const estadoMensajeWhatsapp = pgEnum('estado_mensaje_whatsapp', ESTADOS_MENSAJE_WHATSAPP);
+
+/** Spec 024: las listas cerradas del guardado automático. Ver `rules/whatsapp-automatico`. */
+export const tipoReporteWhatsapp = pgEnum('tipo_reporte_whatsapp', TIPOS_DE_REPORTE);
+export const estadoDiaWhatsapp = pgEnum('estado_dia_whatsapp', ESTADOS_DEL_DIA);
+export const estadoExcepcionWhatsapp = pgEnum('estado_excepcion_whatsapp', ESTADOS_DE_EXCEPCION);
+export const tipoCreadoWhatsapp = pgEnum('tipo_creado_whatsapp', TIPOS_CREADOS);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -1186,9 +1199,23 @@ export const whatsappMensajes = pgTable(
     recibidoEn: timestamp('recibido_en', { withTimezone: true, mode: 'date' })
       .notNull()
       .default(sql`now()`),
+    /*
+     * Spec 024: el guardado automático. `fecha_hecho` y `tipo_reporte` dicen a qué día
+     * y a qué reporte esperado cuenta el mensaje (RF-5, RF-38); `resultado`, qué se
+     * guardó y dónde, para el historial (RF-58, RF-59). `intentos` y `error_proceso`
+     * dejan ver un mensaje que falla una y otra vez en vez de reintentarlo para siempre.
+     */
+    fechaHecho: date('fecha_hecho', { mode: 'string' }),
+    tipoReporte: tipoReporteWhatsapp('tipo_reporte'),
+    procesadoEn: timestamp('procesado_en', { withTimezone: true, mode: 'date' }),
+    intentos: integer('intentos').notNull().default(0),
+    errorProceso: text('error_proceso'),
+    resultado: jsonb('resultado').$type<Record<string, unknown>>(),
     actualizadoEn: actualizadoEn(),
   },
   (t) => [
+    // Spec 024: los mensajes en espera de un día, y los pendientes del pulso.
+    index('ix_whatsapp_mensaje_dia').on(t.fechaHecho, t.estado),
     // La bandeja: los de un grupo, en un estado, por fecha (RF-16, RF-24).
     index('ix_whatsapp_mensaje_bandeja').on(t.grupoId, t.estado, t.enviadoEn),
     // Las fotos y respuestas que cuelgan de un reporte (RF-20).
@@ -1208,6 +1235,122 @@ export const whatsappMensajes = pgTable(
     check('ck_whatsapp_mensaje_version', sql`${t.version} >= 0`),
     // El historial de aprobados y descartados de una obra (RF-24, RF-13).
     index('ix_whatsapp_mensaje_obra_decidida').on(t.obraDecididaId),
+  ],
+);
+
+/**
+ * Los reportes que la bitácora de cada día de una obra espera (spec 024, RF-37 a
+ * RF-42). Sin filas, la bitácora se arma con el primer mensaje del día (RF-41).
+ * `autor_id` es el `lid` de WhatsApp de quien lo manda, o nulo si vale cualquiera
+ * (RF-39). Se quita con baja lógica, como todo.
+ */
+export const whatsappReportesEsperados = pgTable(
+  'whatsapp_reportes_esperados',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    tipoReporte: tipoReporteWhatsapp('tipo_reporte').notNull(),
+    autorId: text('autor_id'),
+    autorNombre: text('autor_nombre'),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    eliminadoEn: eliminadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_whatsapp_esperado')
+      .on(t.obraId, t.tipoReporte, sql`coalesce(${t.autorId}, '')`)
+      .where(sql`eliminado_en is null`),
+  ],
+);
+
+/**
+ * En qué va la bitácora de un día armada desde WhatsApp (spec 024, RF-43 a RF-57).
+ * Una fila por obra y día con mensajes. Cerrada no se guarda aquí: se lee de la
+ * bitácora, que es la que manda (RF-56).
+ */
+export const whatsappDias = pgTable(
+  'whatsapp_dias',
+  {
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    estado: estadoDiaWhatsapp('estado').notNull().default('en_espera'),
+    /** Los reportes esperados que no llegaron, si se armó incompleta (RF-47). */
+    faltaron: jsonb('faltaron').$type<{ tipoReporte: string; autorNombre: string | null }[]>(),
+    parteId: text('parte_id').references(() => partesDeObra.id),
+    armadaEn: timestamp('armada_en', { withTimezone: true, mode: 'date' }),
+    /** Quién pulsó «Guardar con lo que hay» (RF-48); nulo si la armó el sistema. */
+    armadaPor: text('armada_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+  },
+  (t) => [primaryKey({ columns: [t.obraId, t.fecha] })],
+);
+
+/**
+ * Un renglón de un mensaje que no se pudo guardar solo (spec 024, RF-19, RF-60 a
+ * RF-63). El id es fijo —mensaje, sección y renglón—, así que procesar otra vez el
+ * mensaje no lo duplica. `datos` es el renglón como quedó, para completarlo.
+ */
+export const whatsappExcepciones = pgTable(
+  'whatsapp_excepciones',
+  {
+    id: text('id').primaryKey(),
+    mensajeId: text('mensaje_id')
+      .notNull()
+      .references(() => whatsappMensajes.id),
+    seccion: text('seccion').notNull(),
+    renglon: integer('renglon'),
+    motivo: text('motivo').notNull(),
+    datos: jsonb('datos').$type<Record<string, unknown>>(),
+    estado: estadoExcepcionWhatsapp('estado').notNull().default('pendiente'),
+    resueltaPor: text('resuelta_por').references(() => usuarios.id),
+    resueltaEn: timestamp('resuelta_en', { withTimezone: true, mode: 'date' }),
+    motivoDescarte: text('motivo_descarte'),
+    creadoEn: creadoEn(),
+  },
+  (t) => [
+    index('ix_whatsapp_excepcion_mensaje').on(t.mensajeId),
+    index('ix_whatsapp_excepcion_estado').on(t.estado),
+    check(
+      'ck_whatsapp_excepcion_descarte',
+      // Descartar exige motivo (RF-63), como en la bandeja (021/RF-55).
+      sql`${t.estado} <> 'descartada'
+       or (${t.motivoDescarte} is not null and length(trim(${t.motivoDescarte})) > 0)`,
+    ),
+  ],
+);
+
+/**
+ * La marca «creado desde WhatsApp» (spec 024, RF-32 a RF-36): una fila por persona,
+ * volqueta, material o sitio que el sistema registró solo. En una tabla aparte y no
+ * en una columna de cada una, porque «revisado» y «unido a» harían falta en las
+ * cinco (decisión del plan).
+ */
+export const whatsappCreados = pgTable(
+  'whatsapp_creados',
+  {
+    tipo: tipoCreadoWhatsapp('tipo').notNull(),
+    registroId: text('registro_id').notNull(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    mensajeId: text('mensaje_id')
+      .notNull()
+      .references(() => whatsappMensajes.id),
+    creadoEn: creadoEn(),
+    revisadoPor: text('revisado_por').references(() => usuarios.id),
+    revisadoEn: timestamp('revisado_en', { withTimezone: true, mode: 'date' }),
+    /** El registro con el que se unió (RF-36); el creado queda dado de baja. */
+    unidoA: text('unido_a'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tipo, t.registroId] }),
+    index('ix_whatsapp_creado_obra').on(t.obraId, t.revisadoEn),
   ],
 );
 

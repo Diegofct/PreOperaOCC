@@ -155,35 +155,77 @@ function compacto(texto: string): string {
 const LARGO_MINIMO_PARA_BUSCAR_DENTRO = 4;
 
 /**
+ * Los caracteres que se confunden al leer una placa en una foto, llevados a uno
+ * solo (cambio 2026-10-08, RF-107): O y 0, I y 1, S y 5, B y 8, Z y 2. Sobre un
+ * texto ya `compacto`, en minúsculas.
+ */
+const PARES_QUE_SE_CONFUNDEN: Record<string, string> = { o: '0', i: '1', s: '5', b: '8', z: '2' };
+
+function sinConfusiones(compactado: string): string {
+  return compactado.replace(/[oisbz]/g, (c) => PARES_QUE_SE_CONFUNDEN[c]);
+}
+
+/**
  * El equipo de la obra que nombra el reporte, por su placa o su código interno
  * (RF-70). «Volqueta Foton LLQ 375» reconoce la placa `LLQ375`.
  *
  * Primero se busca lo escrito igual a una placa o un código; si no, una placa o
- * un código contenidos en lo escrito. Solo cuentan los equipos de la obra —o sin
- * obra, como en la bitácora—. **Dos candidatos es ninguno**: elegir uno sería
- * apuntarle horas a una máquina que quizá no trabajó, y el residente lo elige de
- * la lista (RF-71).
+ * un código contenidos en lo escrito. Si tampoco, lo mismo tomando como iguales
+ * los caracteres que se confunden al leer una foto (RF-107): «TFO42O» reconoce
+ * `TFO420`. Solo cuentan los equipos de la obra —o sin obra, como en la
+ * bitácora—. **Dos candidatos es ninguno**, en cualquiera de los pasos: elegir
+ * uno sería apuntarle horas a una máquina que quizá no trabajó, y el residente lo
+ * elige de la lista (RF-71, RF-108).
  */
 export function reconocerVehiculo(
   texto: string | null | undefined,
   vehiculos: readonly VehiculoConocido[],
   obraId: string,
 ): string | null {
-  if (!texto) return null;
+  const candidatos = candidatosDeVehiculo(texto, vehiculos, obraId);
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
+
+/**
+ * Los equipos de la obra que pueden ser lo escrito, del primer paso de
+ * `reconocerVehiculo` que encuentra alguno. Vacío es «no se parece a ninguno», y
+ * solo entonces se puede registrar una volqueta nueva (spec 024, RF-30); dos o más es
+ * «puede ser cualquiera», y se elige (RF-108).
+ */
+export function candidatosDeVehiculo(
+  texto: string | null | undefined,
+  vehiculos: readonly VehiculoConocido[],
+  obraId: string,
+): string[] {
+  if (!texto) return [];
   const escrito = compacto(texto);
-  if (escrito === '') return null;
+  if (escrito === '') return [];
 
   const deLaObra = vehiculos.filter((v) => v.obraId === null || v.obraId === obraId);
   const clavesDe = (v: VehiculoConocido) =>
     [v.placa, v.codigoInterno].filter((c): c is string => !!c).map(compacto);
 
+  const ids = (lista: VehiculoConocido[]) => lista.map((v) => v.id);
+
   const iguales = deLaObra.filter((v) => clavesDe(v).includes(escrito));
-  if (iguales.length > 0) return iguales.length === 1 ? iguales[0].id : null;
+  if (iguales.length > 0) return ids(iguales);
 
   const contenidos = deLaObra.filter((v) =>
     clavesDe(v).some((c) => c.length >= LARGO_MINIMO_PARA_BUSCAR_DENTRO && escrito.includes(c)),
   );
-  return contenidos.length === 1 ? contenidos[0].id : null;
+  if (contenidos.length > 0) return ids(contenidos);
+
+  // Con los caracteres que se confunden al leer una foto (RF-107, RF-108).
+  const leido = sinConfusiones(escrito);
+  const clavesLeidasDe = (v: VehiculoConocido) => clavesDe(v).map(sinConfusiones);
+  const igualesLeidos = deLaObra.filter((v) => clavesLeidasDe(v).includes(leido));
+  if (igualesLeidos.length > 0) return ids(igualesLeidos);
+
+  return ids(
+    deLaObra.filter((v) =>
+      clavesLeidasDe(v).some((c) => c.length >= LARGO_MINIMO_PARA_BUSCAR_DENTRO && leido.includes(c)),
+    ),
+  );
 }
 
 function palabras(texto: string): string[] {
@@ -354,6 +396,95 @@ export function conductorDelViaje(
   return maquinas.find((m) => m.vehiculoId === vehiculoId && m.operadorId)?.operadorId ?? null;
 }
 
+const ORIGEN_DEL_CONDUCTOR: Record<Exclude<CaminoDelConductor, 'escrito'>, string> = {
+  reporte: 'el operador de esta volqueta en el mismo reporte',
+  preoperacional: 'quien hizo el preoperacional de esta volqueta ese día',
+  ultimo_viaje: 'quien manejó el último viaje de esta volqueta',
+};
+
+/**
+ * Lo que la propuesta dice del conductor de un viaje cuando no salió del nombre
+ * escrito, para que quien revisa lo confirme (cambio 2026-10-08, RF-109), o `null`.
+ * Si el reporte traía un nombre que no se reconoció, se dice también.
+ */
+export function textoDelConductor(
+  viaje: Pick<ViajeDelReporte, 'conductorId' | 'conductorPor' | 'conductorEscrito'>,
+): string | null {
+  if (!viaje.conductorId || !viaje.conductorPor || viaje.conductorPor === 'escrito') return null;
+  const decia = viaje.conductorEscrito ? ` El reporte decía «${viaje.conductorEscrito}».` : '';
+  return `Conductor propuesto: ${ORIGEN_DEL_CONDUCTOR[viaje.conductorPor]}. Confírmelo.${decia}`;
+}
+
+/** Quién hizo el preoperacional de una volqueta un día (spec 013). */
+export interface PreoperacionalDelDia {
+  vehiculoId: string;
+  /** `YYYY-MM-DD` en Colombia. */
+  fecha: string;
+  usuarioId: string;
+}
+
+/** Quién condujo el último viaje vigente de una volqueta en la obra. */
+export interface UltimoViajeDeVolqueta {
+  vehiculoId: string;
+  conductorId: string;
+}
+
+/**
+ * El conductor que se propone para un viaje, y por qué camino salió (cambio
+ * 2026-10-08, RF-104 a RF-106). El primero que dé uno:
+ *
+ *  1. el nombre escrito en el viaje, reconocido como cualquier persona (RF-104);
+ *  2. el operador de esa volqueta en el mismo reporte (RF-94);
+ *  3. quien hizo el preoperacional de esa volqueta el día del viaje, si fue **una
+ *     sola persona**: con dos, no se sabe cuál manejó (RF-106);
+ *  4. quien condujo el último viaje vigente de esa volqueta en la obra.
+ *
+ * `null` si ninguno: lo elige el residente (RF-95). Un nombre escrito que no se
+ * reconoce no se cambia por el de la volqueta (RF-112): solo cuenta el operador del
+ * mismo reporte, y si no, `null`, para que se reconozca por parecido o se registre
+ * (024/RF-18).
+ */
+export function conductorPropuesto(
+  viaje: { vehiculoId: string | null; conductorEscrito: string | null },
+  contexto: {
+    /** El día del viaje, `YYYY-MM-DD`; sin él no se mira el preoperacional. */
+    fecha: string | null;
+    maquinas: readonly MaquinaReconocida[];
+    personas: readonly PersonaConocida[];
+    preoperacionales?: readonly PreoperacionalDelDia[];
+    ultimosViajes?: readonly UltimoViajeDeVolqueta[];
+  },
+): { conductorId: string; por: CaminoDelConductor } | null {
+  const escrito = reconocerPersona(viaje.conductorEscrito, contexto.personas);
+  if (escrito) return { conductorId: escrito, por: 'escrito' };
+
+  const { vehiculoId } = viaje;
+  if (!vehiculoId) return null;
+
+  const delReporte = conductorDelViaje(vehiculoId, contexto.maquinas);
+  if (delReporte) return { conductorId: delReporte, por: 'reporte' };
+  if (viaje.conductorEscrito?.trim()) return null;
+
+  // `personas` son las vigentes: quien ya está dado de baja no maneja, y se pasa al
+  // camino siguiente en vez de proponer a alguien que no se puede elegir.
+  const vigente = (id: string) => contexto.personas.some((p) => p.id === id);
+
+  if (contexto.fecha) {
+    const quienes = new Set(
+      (contexto.preoperacionales ?? [])
+        .filter((p) => p.vehiculoId === vehiculoId && p.fecha === contexto.fecha)
+        .map((p) => p.usuarioId),
+    );
+    const [unico] = [...quienes];
+    if (quienes.size === 1 && vigente(unico)) return { conductorId: unico, por: 'preoperacional' };
+  }
+
+  const ultimo = (contexto.ultimosViajes ?? []).find((u) => u.vehiculoId === vehiculoId);
+  return ultimo && vigente(ultimo.conductorId)
+    ? { conductorId: ultimo.conductorId, por: 'ultimo_viaje' }
+    : null;
+}
+
 /* ── El reporte diario, listo para aprobar ─────────────────────────────── */
 
 /**
@@ -475,7 +606,36 @@ export interface ViajeDelReporte {
   conductorId: string | null;
   /** El número de vale, tal como se escribió, o `null` (spec 023, RF-42, RF-50). */
   vale: string | null;
+  /** El conductor como lo escribió el reporte, o `null` (cambio 2026-10-08, RF-104). */
+  conductorEscrito: string | null;
+  /**
+   * Por qué camino se propuso el conductor (RF-105, RF-109), o `null` si no se
+   * propuso o lo eligió una persona.
+   */
+  conductorPor: CaminoDelConductor | null;
+  /**
+   * La placa, el material, el origen y el destino como los escribió el reporte, o
+   * `null` (spec 024). Dicen qué crear cuando no se reconoce (RF-28 a RF-30) y si
+   * un destino vacío es que no lo dijo o que no se reconoció (RF-17).
+   */
+  placaEscrita: string | null;
+  materialEscrito: string | null;
+  origenEscrito: string | null;
+  destinoEscrito: string | null;
 }
+
+/**
+ * De dónde sale el conductor que se propone para un viaje (cambio 2026-10-08,
+ * RF-105), en el orden en que se prueba.
+ */
+export type CaminoDelConductor = 'escrito' | 'reporte' | 'preoperacional' | 'ultimo_viaje';
+
+export const CAMINOS_DEL_CONDUCTOR: readonly CaminoDelConductor[] = [
+  'escrito',
+  'reporte',
+  'preoperacional',
+  'ultimo_viaje',
+];
 
 /** Lo que el reporte necesita saber de fuera y la regla no puede leer sola. */
 export interface ContextoDelReporte {
@@ -786,6 +946,8 @@ function faltasDelAlmacen(
  */
 export interface PropuestaLeible {
   fecha_evento?: string | null;
+  /** La hora de la marca de agua de la foto, `HH:MM` (spec 024, RF-16). */
+  hora_foto?: string | null;
   resumen?: string | null;
   clima?: readonly { condicion?: string | null; desde?: string | null; hasta?: string | null }[];
   actividades?: readonly {
@@ -833,6 +995,8 @@ export interface PropuestaLeible {
     hora?: string | null;
     /** Spec 023. */
     vale?: string | null;
+    /** Cambio de la 021 del 2026-10-08 (RF-104). */
+    conductor?: string | null;
   }[];
   novedades?: readonly { descripcion?: string | null }[];
   /** El reporte de almacén (spec 023). */
@@ -886,6 +1050,75 @@ export function reconocerPorNombre(
   return parecidos.length === 1 ? parecidos[0].id : null;
 }
 
+/**
+ * Las palabras que no distinguen un sitio de cantera de otro: «Cantera FORTUNE»,
+ * «C. Fortune» y «LA FORTUNE» son el mismo (cambio 2026-10-08, RF-111).
+ */
+const PALABRAS_VACIAS_DE_CANTERA = new Set(['cantera', 'el', 'la', 'c']);
+
+/** Un nombre de cantera comparable: sin palabras vacías, espacios, guiones ni puntos. */
+function compactoDeCantera(texto: string): string {
+  return palabras(texto)
+    .filter((p) => !PALABRAS_VACIAS_DE_CANTERA.has(p))
+    .join('');
+}
+
+/**
+ * El material o el sitio de Control Cantera que nombra un viaje (cambio
+ * 2026-10-08, RF-110, RF-111). Primero como cualquier nombre (`reconocerPorNombre`);
+ * si no da, sin espacios, guiones ni puntos y sin «cantera», «el», «la» ni «c.»:
+ * «Sub-base» es «SUBBASE» y «Cantera FORTUNE» es «LA FORTUNE». Ahí también gana el
+ * igual, después el único contenido —de cuatro letras o más—, y **dos candidatos es
+ * ninguno**.
+ */
+export function reconocerEnCantera(
+  texto: string | null | undefined,
+  opciones: readonly OpcionConNombre[],
+): string | null {
+  const candidatos = candidatosEnCantera(texto, opciones);
+  return candidatos.length === 1 ? candidatos[0] : null;
+}
+
+/**
+ * Los materiales o sitios de cantera que pueden ser lo escrito, del primer paso de
+ * `reconocerEnCantera` que encuentra alguno. Vacío es «no se parece a ninguno», y solo
+ * entonces se registra uno nuevo (spec 024, RF-28, RF-29).
+ */
+export function candidatosEnCantera(
+  texto: string | null | undefined,
+  opciones: readonly OpcionConNombre[],
+): string[] {
+  if (!texto) return [];
+  const escrito = palabras(texto).join(' ');
+  if (escrito === '') return [];
+  const ids = (lista: readonly OpcionConNombre[]) => lista.map((o) => o.id);
+
+  // Primero como cualquier nombre (`reconocerPorNombre`): igual, o contenido.
+  const nombreDe = (o: OpcionConNombre) => palabras(o.nombre).join(' ');
+  const iguales = opciones.filter((o) => nombreDe(o) === escrito);
+  if (iguales.length > 0) return ids(iguales);
+  const parecidos = opciones.filter((o) => {
+    const nombre = nombreDe(o);
+    return nombre.includes(escrito) || escrito.includes(nombre);
+  });
+  if (parecidos.length === 1) return ids(parecidos);
+
+  // Si no dio uno solo, sin espacios, guiones, puntos ni palabras vacías (RF-110, RF-111).
+  const compactado = compactoDeCantera(texto);
+  if (compactado.length < LARGO_MINIMO_PARA_BUSCAR_DENTRO) return ids(parecidos);
+  const compactoDe = (o: OpcionConNombre) => compactoDeCantera(o.nombre);
+  const igualesCompactos = opciones.filter((o) => compactoDe(o) === compactado);
+  if (igualesCompactos.length > 0) return ids(igualesCompactos);
+  const parecidosCompactos = opciones.filter((o) => {
+    const nombre = compactoDe(o);
+    return (
+      nombre.length >= LARGO_MINIMO_PARA_BUSCAR_DENTRO &&
+      (nombre.includes(compactado) || compactado.includes(nombre))
+    );
+  });
+  return ids(parecidosCompactos.length > 0 ? parecidosCompactos : parecidos);
+}
+
 /** Lo que hace falta de la obra para leer una propuesta. */
 export interface CatalogosDeLaObra {
   obraId: string;
@@ -898,6 +1131,13 @@ export interface CatalogosDeLaObra {
    * en una obra sin almacén: nada se reconoce.
    */
   materialesAlmacen?: readonly OpcionConNombre[];
+  /**
+   * Los preoperacionales de las volquetas de la obra en los días del reporte y el
+   * conductor del último viaje vigente de cada una (cambio 2026-10-08, RF-105).
+   * Ausentes, esos caminos no proponen a nadie.
+   */
+  preoperacionales?: readonly PreoperacionalDelDia[];
+  ultimosViajes?: readonly UltimoViajeDeVolqueta[];
 }
 
 /**
@@ -971,8 +1211,8 @@ function observacionDelEnsayo(ensayo: NonNullable<PropuestaLeible['ensayos']>[nu
  *  · Cada ítem de pago de una actividad es una actividad de la bitácora (RF-31),
  *    con las abscisas en la descripción y las medidas de la actividad (RF-34).
  *  · Las máquinas sin lecturas no entran: ese día no trabajaron (RF-69).
- *  · El conductor de un viaje es el operador de esa volqueta en el mismo reporte
- *    (RF-94), y un renglón con «4 viajes» son cuatro viajes (RF-87).
+ *  · El conductor de un viaje sale del primer camino de `conductorPropuesto`
+ *    (RF-94, RF-104 a RF-106), y un renglón con «4 viajes» son cuatro viajes (RF-87).
  *  · Las novedades van a las notas (RF-38); un mensaje de notas sin novedades
  *    lleva su resumen.
  *
@@ -985,7 +1225,13 @@ export function resolverPropuesta(
   contexto: { diaDelMensaje: string; destino: DestinoDeWhatsapp },
 ): ReporteResuelto {
   const fechaEscrita = textoLimpio(propuesta.fecha_evento);
-  const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(fechaEscrita);
+  // Con la forma de una fecha y que exista en el calendario: «2026-02-30» no (spec 024).
+  const enCalendario = new Date(`${fechaEscrita}T00:00:00Z`);
+  const fechaValida =
+    /^\d{4}-\d{2}-\d{2}$/.test(fechaEscrita) &&
+    !Number.isNaN(enCalendario.getTime()) &&
+    enCalendario.toISOString().slice(0, 10) === fechaEscrita;
+  const fecha = fechaValida ? fechaEscrita : contexto.diaDelMensaje;
 
   const clima: FranjaDelReporte[] = (propuesta.clima ?? []).map((franja) => ({
     condicion: condicionDeClima(franja.condicion),
@@ -1063,15 +1309,33 @@ export function resolverPropuesta(
       normalizar(destinoEscrito).includes('obra') || (!destinoEscrito && llegada !== null);
     const viaje: ViajeDelReporte = {
       vehiculoId,
-      materialId: reconocerPorNombre(v.material, catalogos.materiales),
-      origenId: reconocerPorNombre(v.origen, catalogos.sitios),
-      destino: vaALaObra ? DESTINO_OBRA : reconocerPorNombre(destinoEscrito, catalogos.sitios),
+      materialId: reconocerEnCantera(v.material, catalogos.materiales),
+      origenId: reconocerEnCantera(v.origen, catalogos.sitios),
+      destino: vaALaObra ? DESTINO_OBRA : reconocerEnCantera(destinoEscrito, catalogos.sitios),
       pr: vaALaObra ? (llegada?.pr ?? null) : null,
       metros: vaALaObra ? (llegada?.metros ?? null) : null,
       hora: horaDeTexto(v.hora),
-      conductorId: conductorDelViaje(vehiculoId, maquinaria),
+      conductorId: null,
       vale: null,
+      conductorEscrito: textoLimpio(v.conductor) || null,
+      conductorPor: null,
+      placaEscrita: textoLimpio(v.placa) || null,
+      materialEscrito: textoLimpio(v.material) || null,
+      origenEscrito: textoLimpio(v.origen) || null,
+      destinoEscrito: destinoEscrito || null,
     };
+    // El conductor por el primer camino que lo dé (cambio 2026-10-08, RF-105).
+    const propuesto = conductorPropuesto(viaje, {
+      fecha,
+      maquinas: maquinaria,
+      personas: catalogos.personas,
+      preoperacionales: catalogos.preoperacionales,
+      ultimosViajes: catalogos.ultimosViajes,
+    });
+    if (propuesto) {
+      viaje.conductorId = propuesto.conductorId;
+      viaje.conductorPor = propuesto.por;
+    }
     const cantidad = Math.min(
       Math.max(1, Math.trunc(numeroONulo(v.cantidad) ?? 1)),
       VIAJES_MAXIMOS_POR_RENGLON,
@@ -1126,7 +1390,7 @@ export function resolverPropuesta(
 
   return {
     reporte: {
-      fecha: fechaValida ? fechaEscrita : contexto.diaDelMensaje,
+      fecha,
       clima,
       actividades,
       maquinaria,
@@ -1207,8 +1471,22 @@ export function rechazoDeArchivo(
  *    filtro y se puede devolver a pendiente (RF-23 a RF-25, RF-90).
  *  · `aprobado` — ya creó sus registros (RF-30 a RF-48).
  *  · `descartado` — con motivo, quién y cuándo (RF-54 a RF-56).
+ *
+ * Desde la spec 024, el sistema guarda solo y `pendiente` es «todavía sin procesar»:
+ *
+ *  · `en_espera` — va a la bitácora y espera a que el día tenga sus reportes (024/RF-5).
+ *  · `guardado` — el sistema ya lo guardó en su módulo (024/RF-1 a RF-4, RF-43).
+ *
+ * `aprobado` queda para lo que aprobó una persona antes de la 024 (024/RF-69).
  */
-export const ESTADOS_MENSAJE_WHATSAPP = ['pendiente', 'ignorado', 'aprobado', 'descartado'] as const;
+export const ESTADOS_MENSAJE_WHATSAPP = [
+  'pendiente',
+  'ignorado',
+  'aprobado',
+  'descartado',
+  'en_espera',
+  'guardado',
+] as const;
 
 export type EstadoMensajeWhatsapp = (typeof ESTADOS_MENSAJE_WHATSAPP)[number];
 

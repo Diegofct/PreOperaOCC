@@ -32,7 +32,7 @@
  * La fecha por defecto la decide el servidor, no este navegador: quien mira el
  * panel puede estar en otra ciudad y la bitácora es de la jornada de la obra.
  */
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -305,8 +305,12 @@ export default function PantallaPartes() {
   const rol = persona?.rol ?? "operador";
   const esGerencia = alcanza(rol, "obras", "escribir");
 
-  const [fecha, setFecha] = useState(fechaDeJornada());
-  const [obraId, setObraId] = useState<string | null>(null);
+  // Spec 024, RF-59: el historial de WhatsApp abre la bitácora de un día y una obra.
+  const enlace = useLocalSearchParams<{ fecha?: string; obraId?: string }>();
+  const [fecha, setFecha] = useState(
+    enlace.fecha && /^\d{4}-\d{2}-\d{2}$/.test(enlace.fecha) ? enlace.fecha : fechaDeJornada(),
+  );
+  const [obraId, setObraId] = useState<string | null>(enlace.obraId ?? null);
 
   const dia = useListado<DiaDeObra>(
     useCallback(async () => [await api.partes.delDia(fecha)], [fecha]),

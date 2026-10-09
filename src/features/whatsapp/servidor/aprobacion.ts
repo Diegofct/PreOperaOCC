@@ -77,9 +77,11 @@ import {
   destinoDeCategoria,
   faltasDelReporte,
   fusionarReporteEnParte,
+  type EstadoMensajeWhatsapp,
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
 
+import type { Actor } from './actor';
 import { aprobarReporteDeAlmacen } from './almacen';
 import { idDeterminista } from './ids';
 import { obraDelMensaje } from './obra';
@@ -105,20 +107,27 @@ function respuestaDeFaltas(faltas: { seccion: string; renglon: number | null; me
 
 /**
  * Los viajes del reporte, a Control Cantera, con ids fijos (RF-39, RF-46, RF-82,
- * RF-94). `registrado_por` es quien aprueba; el mensaje queda como origen.
+ * RF-94). `registrado_por` es el actor —quien aprueba, o el sistema (024/RF-10)—; el
+ * mensaje queda como origen. El reporte tiene que venir ya validado.
  */
-async function registrarViajes(
+export async function guardarViajes(
   mensajeId: string,
   reporte: ReporteDelDia,
   obraId: string,
-  aprobadoPor: string,
+  actor: Actor,
+  /**
+   * El renglón de cada viaje en el reporte original, si se guardan solo algunos (spec
+   * 024): el id sale de él, así que un reintento da los mismos ids aunque cambie cuáles
+   * se guardan, y un renglón completado después no choca con otro.
+   */
+  renglones?: readonly number[],
 ): Promise<number> {
   if (reporte.viajes.length === 0) return 0;
   const filas = await Promise.all(
     reporte.viajes.map(async (v, i) => {
       const aLaObra = v.destino === DESTINO_OBRA;
       return {
-        id: await idDeterminista(mensajeId, 'viajes', i),
+        id: await idDeterminista(mensajeId, 'viajes', renglones?.[i] ?? i),
         obraId,
         fecha: reporte.fecha!,
         hora: v.hora!,
@@ -133,7 +142,7 @@ async function registrarViajes(
         // Spec 023, RF-50: tal como quedó en la propuesta, ya sin espacios en los extremos.
         vale: valeLimpio(v.vale),
         mensajeWhatsappId: mensajeId,
-        registradoPor: aprobadoPor,
+        registradoPor: actor.id,
       };
     }),
   );
@@ -142,13 +151,13 @@ async function registrarViajes(
 }
 
 /** Las fotos elegidas: la del día y, por renglón de actividad, la de cada una. */
-interface FotosElegidas {
+export interface FotosElegidas {
   delDia: string | null;
   porActividad: Record<string, string>;
 }
 
 /** Un archivo del mensaje que puede pasar a la bitácora. */
-interface FotoDelMensaje {
+export interface FotoDelMensaje {
   id: string;
   mime: string;
   bytes: number | null;
@@ -162,7 +171,7 @@ interface FotoDelMensaje {
  * actividad elegida tiene que existir en el reporte. Devuelve las fotos o las
  * faltas.
  */
-async function fotosElegidas(
+export async function fotosElegidas(
   mensajeId: string,
   fotos: FotosElegidas,
   actividades: number,
@@ -207,6 +216,296 @@ async function fotosElegidas(
     }
   }
   return faltas.length > 0 ? faltas : porId;
+}
+
+/**
+ * Las secciones del reporte, a la bitácora del día del hecho (RF-30 a RF-42, RF-50,
+ * RF-51; 024/RF-44, RF-50). El reporte tiene que venir ya validado. Abre la bitácora
+ * si no existe, a nombre del actor; la mezcla con lo que ya tiene en un solo `UPDATE`
+ * condicionado; y pone las fotos elegidas. Con la bitácora cerrada no escribe nada y
+ * responde el 409 que la pantalla sabe leer.
+ */
+export async function guardarEnBitacora(datos: {
+  mensajeId: string;
+  reporte: ReporteDelDia;
+  obraId: string;
+  actor: Actor;
+  autorNombre: string | null;
+  enviadoEn: Date;
+  /** Las fotos ya comprobadas por `fotosElegidas`. */
+  fotos: Map<string, FotoDelMensaje>;
+  fotosElegidas: FotosElegidas;
+  /** Si el reporte trae viajes sin aprobar: con la bitácora cerrada se ofrecen aparte. */
+  viajesPendientes: boolean;
+  /**
+   * De dónde salen los ids de las filas, si no del mensaje: un renglón completado en «No
+   * se pudo guardar» (spec 024, RF-61) no puede chocar con los que el mensaje ya llevó.
+   */
+  claveDeIds?: string;
+}): Promise<{ parteId: string } | Response> {
+  const db = baseServidor();
+  const { mensajeId, reporte, obraId, actor, autorNombre, enviadoEn, fotos, fotosElegidas, viajesPendientes } = datos;
+  const id = datos.claveDeIds ?? mensajeId;
+  const fecha = reporte.fecha!;
+
+  // 2. Las filas, con las mismas validaciones del formulario (RF-59) y sus ids fijos.
+  const ahora = new Date();
+  const origen: OrigenWhatsapp = {
+    mensajeId,
+    aprobadoPor: actor.id,
+    aprobadoEn: ahora.toISOString(),
+  };
+  const conOrigen = async <T extends { id: string }>(filas: T[], seccion: string) =>
+    Promise.all(
+      filas.map(async (fila, i) => ({ ...fila, id: await idDeterminista(id, seccion, i), origen })),
+    );
+
+  const maquinaria = await maquinariaDelParte(
+    reporte.maquinaria.map((m) => ({
+      vehiculoId: m.vehiculoId!,
+      medidorInicial: m.medidorInicial,
+      medidorFinal: m.medidorFinal,
+      observaciones: m.observaciones,
+      operadorId: m.operadorId,
+    })),
+    obraId,
+  );
+  if ('error' in maquinaria) return errorDePeticion(maquinaria.error, 400);
+
+  const personal = await personalDelParte(
+    reporte.personal.map((p) => ({
+      usuarioId: p.usuarioId!,
+      entrada: p.entrada!,
+      salida: p.salida!,
+      observaciones: p.observaciones,
+    })),
+  );
+  if ('error' in personal) return errorDePeticion(personal.error, 400);
+
+  const actividades = actividadesDelParte(
+    await Promise.all(
+      reporte.actividades.map(async (a, i) => ({
+        id: await idDeterminista(id, 'actividades', i),
+        clave: a.clave!,
+        texto: a.texto ?? null,
+        unidad: a.unidad ?? null,
+        cantidad: a.cantidad ?? null,
+        descripcion: a.descripcion ?? '',
+        observaciones: '',
+        longitud: a.longitud ?? null,
+        ancho: a.ancho ?? null,
+        alto: a.alto ?? null,
+        area: null,
+        volumen: null,
+      })),
+    ),
+    [],
+  );
+  if ('error' in actividades) return errorDePeticion(actividades.error, 400);
+
+  const clima = climaDelParte(
+    reporte.clima.map((f) => ({ condicion: f.condicion!, desde: f.desde!, hasta: f.hasta! })),
+  );
+  if ('error' in clima) return errorDePeticion(clima.error, 400);
+
+  const laboratorio = laboratorioDelParte(
+    await Promise.all(
+      reporte.ensayos.map(async (e, i) => ({
+        id: await idDeterminista(id, 'ensayos', i),
+        ensayo: e.ensayo,
+        observacion: e.observacion,
+        horaInicio: e.horaInicio,
+        horaFin: e.horaFin,
+        responsable: e.responsable,
+        ubicacion: e.ubicacion,
+      })),
+    ),
+    [],
+  );
+  if ('error' in laboratorio) return errorDePeticion(laboratorio.error, 400);
+
+  const notaDelReporte = reporte.notas.trim()
+    ? `WhatsApp — ${autorNombre ?? 'Sin nombre'}, ${horaEnColombia(enviadoEn)}: ${reporte.notas.trim()}`
+    : '';
+
+  const delReporte = {
+    maquinaria: await conOrigen(maquinaria.filas, 'maquinaria'),
+    personal: await conOrigen(personal.filas, 'personal'),
+    actividades: actividades.filas.map((a) => ({ ...a, origen })),
+    clima: await conOrigen(clima.filas, 'clima'),
+    laboratorio: laboratorio.filas.map((e) => ({ ...e, origen }) as FilaDeControlDeCalidad),
+    notas: notaDelReporte,
+  };
+
+  // 3. La bitácora del día: se abre si no existe (RF-40), y se escribe de una vez.
+  let parteId: string | null = null;
+  {
+    for (let intento = 0; intento < 2 && !parteId; intento++) {
+      await db
+        .insert(partesDeObra)
+        .values({ id: uuidv7(), obraId, usuarioId: actor.id, fecha })
+        .onConflictDoNothing({
+          target: [partesDeObra.obraId, partesDeObra.fecha],
+          where: isNull(partesDeObra.anuladoEn),
+        });
+
+      const [parte] = await db
+        .select({
+          id: partesDeObra.id,
+          maquinaria: partesDeObra.maquinaria,
+          personal: partesDeObra.personal,
+          actividades: partesDeObra.actividades,
+          clima: partesDeObra.clima,
+          laboratorio: partesDeObra.laboratorio,
+          notas: partesDeObra.notas,
+          cerradoEn: partesDeObra.cerradoEn,
+          // Como texto y no como `Date`: Postgres guarda microsegundos y un `Date`
+          // solo milisegundos, así que comparar el `Date` leído nunca coincidiría.
+          marca: sql<string>`${partesDeObra.actualizadoEn}::text`,
+        })
+        .from(partesDeObra)
+        .where(
+          and(
+            eq(partesDeObra.obraId, obraId),
+            eq(partesDeObra.fecha, fecha),
+            isNull(partesDeObra.anuladoEn),
+          ),
+        )
+        .limit(1);
+      if (!parte) return errorDePeticion('No se pudo abrir la bitácora de ese día.', 500);
+
+      // RF-41, RF-42: lo que va a una bitácora cerrada no se aprueba. Los viajes sí,
+      // aparte (RF-43, RF-96): la respuesta lo dice para que la pantalla lo ofrezca.
+      if (parte.cerradoEn) {
+        return Response.json(
+          {
+            error: `La bitácora del ${fecha} ya está cerrada. Para incluir este reporte hay que anularla con un motivo y abrir otra.`,
+            puedeAprobarSoloViajes: viajesPendientes,
+          },
+          { status: 409 },
+        );
+      }
+
+      const fusion = fusionarReporteEnParte(parte, delReporte);
+      const [escrita] = await db
+        .update(partesDeObra)
+        .set({
+          maquinaria: fusion.maquinaria,
+          personal: fusion.personal,
+          actividades: fusion.actividades,
+          clima: fusion.clima,
+          laboratorio: fusion.laboratorio,
+          notas: fusion.notas,
+        })
+        .where(
+          and(
+            eq(partesDeObra.id, parte.id),
+            isNull(partesDeObra.cerradoEn),
+            sql`${partesDeObra.actualizadoEn} = ${parte.marca}::timestamptz`,
+          ),
+        )
+        .returning({ id: partesDeObra.id });
+      if (escrita) parteId = escrita.id;
+    }
+    if (!parteId) {
+      return errorDePeticion(
+        'Alguien guardó la bitácora de ese día mientras se aprobaba. Vuelva a intentarlo.',
+        409,
+      );
+    }
+  }
+
+  // Las fotos elegidas, a la bitácora: otra fila de `media` sobre el mismo objeto
+  // de R2 (RF-50, RF-51). La del día, solo si la bitácora no tiene una.
+  if (parteId && fotos.size > 0) {
+    const yaHayDelDia = fotosElegidas.delDia
+      ? (
+          await db
+            .select({ id: media.id })
+            .from(media)
+            .where(
+              and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, parteId), isNull(media.itemKey)),
+            )
+            .limit(1)
+        ).length > 0
+      : true;
+    const elegidas = [
+      ...(fotosElegidas.delDia && !yaHayDelDia
+        ? [{ fotoId: fotosElegidas.delDia, itemKey: null as string | null, clave: 'dia' }]
+        : []),
+      ...(await Promise.all(
+        Object.entries(fotosElegidas.porActividad).map(async ([renglon, fotoId]) => ({
+          fotoId,
+          itemKey: await idDeterminista(id, 'actividades', Number(renglon)),
+          clave: `actividad-${renglon}`,
+        })),
+      )),
+    ];
+    if (elegidas.length > 0) {
+      await db
+        .insert(media)
+        .values(
+          await Promise.all(
+            elegidas.map(async (e) => {
+              const foto = fotos.get(e.fotoId)!;
+              return {
+                id: await idDeterminista(id, `foto-${e.clave}`, 0),
+                duenoTipo: 'bitacora' as const,
+                duenoId: parteId!,
+                proposito: 'evidencia' as const,
+                itemKey: e.itemKey,
+                mime: foto.mime,
+                bytes: foto.bytes,
+                sha256: foto.sha256,
+                // El mismo objeto: no se copia ni se vuelve a subir.
+                claveR2: foto.claveR2,
+                subidoEn: ahora,
+              };
+            }),
+          ),
+        )
+        .onConflictDoNothing({ target: media.id });
+    }
+  }
+
+  return { parteId: parteId! };
+}
+
+/**
+ * El mensaje, decidido: con lo que quedó, la bitácora a la que fue, quién y cuándo, y
+ * la obra donde se decidió (RF-13, RF-46). `aprobado` si lo aprobó una persona;
+ * `guardado` si lo guardó el sistema solo (024/RF-1). Condicionado al estado y la
+ * versión de los que se partió: si otro se adelantó, no escribe y devuelve `false`.
+ */
+export async function marcarMensaje(datos: {
+  mensajeId: string;
+  reporte: ReporteDelDia;
+  parteId: string | null;
+  obraId: string;
+  actor: Actor;
+  estado: 'aprobado' | 'guardado';
+  desde: { estado: EstadoMensajeWhatsapp; version: number };
+}): Promise<boolean> {
+  const [marcado] = await baseServidor()
+    .update(whatsappMensajes)
+    .set({
+      estado: datos.estado,
+      propuesta: datos.reporte as unknown as Record<string, unknown>,
+      parteId: datos.parteId,
+      aprobadoPor: datos.actor.id,
+      aprobadoEn: new Date(),
+      obraDecididaId: datos.obraId,
+      version: sql`${whatsappMensajes.version} + 1`,
+    })
+    .where(
+      and(
+        eq(whatsappMensajes.id, datos.mensajeId),
+        eq(whatsappMensajes.estado, datos.desde.estado),
+        eq(whatsappMensajes.version, datos.desde.version),
+      ),
+    )
+    .returning({ id: whatsappMensajes.id });
+  return !!marcado;
 }
 
 /** Aprueba la propuesta tal como la corrigió el residente. */
@@ -347,7 +646,7 @@ export async function aprobarPropuesta(
         400,
       );
     }
-    const viajes = await registrarViajes(id, reporte, obraId, sesion.id);
+    const viajes = await guardarViajes(id, reporte, obraId, sesion);
     const [marcado] = await db
       .update(whatsappMensajes)
       .set({
@@ -373,250 +672,38 @@ export async function aprobarPropuesta(
   // revisado sin crear nada (RF-49).
   const creaRegistros = destino !== 'ninguno';
 
-  // 2. Las filas, con las mismas validaciones del formulario (RF-59) y sus ids fijos.
-  const ahora = new Date();
-  const origen: OrigenWhatsapp = {
-    mensajeId: id,
-    aprobadoPor: sesion.id,
-    aprobadoEn: ahora.toISOString(),
-  };
-  const conOrigen = async <T extends { id: string }>(filas: T[], seccion: string) =>
-    Promise.all(
-      filas.map(async (fila, i) => ({ ...fila, id: await idDeterminista(id, seccion, i), origen })),
-    );
-
-  const maquinaria = await maquinariaDelParte(
-    reporte.maquinaria.map((m) => ({
-      vehiculoId: m.vehiculoId!,
-      medidorInicial: m.medidorInicial,
-      medidorFinal: m.medidorFinal,
-      observaciones: m.observaciones,
-      operadorId: m.operadorId,
-    })),
-    obraId,
-  );
-  if ('error' in maquinaria) return errorDePeticion(maquinaria.error, 400);
-
-  const personal = await personalDelParte(
-    reporte.personal.map((p) => ({
-      usuarioId: p.usuarioId!,
-      entrada: p.entrada!,
-      salida: p.salida!,
-      observaciones: p.observaciones,
-    })),
-  );
-  if ('error' in personal) return errorDePeticion(personal.error, 400);
-
-  const actividades = actividadesDelParte(
-    await Promise.all(
-      reporte.actividades.map(async (a, i) => ({
-        id: await idDeterminista(id, 'actividades', i),
-        clave: a.clave!,
-        texto: a.texto ?? null,
-        unidad: a.unidad ?? null,
-        cantidad: a.cantidad ?? null,
-        descripcion: a.descripcion ?? '',
-        observaciones: '',
-        longitud: a.longitud ?? null,
-        ancho: a.ancho ?? null,
-        alto: a.alto ?? null,
-        area: null,
-        volumen: null,
-      })),
-    ),
-    [],
-  );
-  if ('error' in actividades) return errorDePeticion(actividades.error, 400);
-
-  const clima = climaDelParte(
-    reporte.clima.map((f) => ({ condicion: f.condicion!, desde: f.desde!, hasta: f.hasta! })),
-  );
-  if ('error' in clima) return errorDePeticion(clima.error, 400);
-
-  const laboratorio = laboratorioDelParte(
-    await Promise.all(
-      reporte.ensayos.map(async (e, i) => ({
-        id: await idDeterminista(id, 'ensayos', i),
-        ensayo: e.ensayo,
-        observacion: e.observacion,
-        horaInicio: e.horaInicio,
-        horaFin: e.horaFin,
-        responsable: e.responsable,
-        ubicacion: e.ubicacion,
-      })),
-    ),
-    [],
-  );
-  if ('error' in laboratorio) return errorDePeticion(laboratorio.error, 400);
-
-  const notaDelReporte = reporte.notas.trim()
-    ? `WhatsApp — ${mensaje.autorNombre ?? 'Sin nombre'}, ${horaEnColombia(mensaje.enviadoEn)}: ${reporte.notas.trim()}`
-    : '';
-
-  const delReporte = {
-    maquinaria: await conOrigen(maquinaria.filas, 'maquinaria'),
-    personal: await conOrigen(personal.filas, 'personal'),
-    actividades: actividades.filas.map((a) => ({ ...a, origen })),
-    clima: await conOrigen(clima.filas, 'clima'),
-    laboratorio: laboratorio.filas.map((e) => ({ ...e, origen }) as FilaDeControlDeCalidad),
-    notas: notaDelReporte,
-  };
-
-  // 3. La bitácora del día: se abre si no existe (RF-40), y se escribe de una vez.
+  // 2 y 3. Las filas y la bitácora del día (RF-30 a RF-42, RF-50, RF-51).
   let parteId: string | null = null;
   if (creaRegistros) {
-    for (let intento = 0; intento < 2 && !parteId; intento++) {
-      await db
-        .insert(partesDeObra)
-        .values({ id: uuidv7(), obraId, usuarioId: sesion.id, fecha })
-        .onConflictDoNothing({
-          target: [partesDeObra.obraId, partesDeObra.fecha],
-          where: isNull(partesDeObra.anuladoEn),
-        });
-
-      const [parte] = await db
-        .select({
-          id: partesDeObra.id,
-          maquinaria: partesDeObra.maquinaria,
-          personal: partesDeObra.personal,
-          actividades: partesDeObra.actividades,
-          clima: partesDeObra.clima,
-          laboratorio: partesDeObra.laboratorio,
-          notas: partesDeObra.notas,
-          cerradoEn: partesDeObra.cerradoEn,
-          // Como texto y no como `Date`: Postgres guarda microsegundos y un `Date`
-          // solo milisegundos, así que comparar el `Date` leído nunca coincidiría.
-          marca: sql<string>`${partesDeObra.actualizadoEn}::text`,
-        })
-        .from(partesDeObra)
-        .where(
-          and(
-            eq(partesDeObra.obraId, obraId),
-            eq(partesDeObra.fecha, fecha),
-            isNull(partesDeObra.anuladoEn),
-          ),
-        )
-        .limit(1);
-      if (!parte) return errorDePeticion('No se pudo abrir la bitácora de ese día.', 500);
-
-      // RF-41, RF-42: lo que va a una bitácora cerrada no se aprueba. Los viajes sí,
-      // aparte (RF-43, RF-96): la respuesta lo dice para que la pantalla lo ofrezca.
-      if (parte.cerradoEn) {
-        return Response.json(
-          {
-            error: `La bitácora del ${fecha} ya está cerrada. Para incluir este reporte hay que anularla con un motivo y abrir otra.`,
-            puedeAprobarSoloViajes: viajesPendientes,
-          },
-          { status: 409 },
-        );
-      }
-
-      const fusion = fusionarReporteEnParte(parte, delReporte);
-      const [escrita] = await db
-        .update(partesDeObra)
-        .set({
-          maquinaria: fusion.maquinaria,
-          personal: fusion.personal,
-          actividades: fusion.actividades,
-          clima: fusion.clima,
-          laboratorio: fusion.laboratorio,
-          notas: fusion.notas,
-        })
-        .where(
-          and(
-            eq(partesDeObra.id, parte.id),
-            isNull(partesDeObra.cerradoEn),
-            sql`${partesDeObra.actualizadoEn} = ${parte.marca}::timestamptz`,
-          ),
-        )
-        .returning({ id: partesDeObra.id });
-      if (escrita) parteId = escrita.id;
-    }
-    if (!parteId) {
-      return errorDePeticion(
-        'Alguien guardó la bitácora de ese día mientras se aprobaba. Vuelva a intentarlo.',
-        409,
-      );
-    }
-  }
-
-  // Las fotos elegidas, a la bitácora: otra fila de `media` sobre el mismo objeto
-  // de R2 (RF-50, RF-51). La del día, solo si la bitácora no tiene una.
-  if (parteId && fotos.size > 0) {
-    const yaHayDelDia = pedido.fotos.delDia
-      ? (
-          await db
-            .select({ id: media.id })
-            .from(media)
-            .where(
-              and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, parteId), isNull(media.itemKey)),
-            )
-            .limit(1)
-        ).length > 0
-      : true;
-    const elegidas = [
-      ...(pedido.fotos.delDia && !yaHayDelDia
-        ? [{ fotoId: pedido.fotos.delDia, itemKey: null as string | null, clave: 'dia' }]
-        : []),
-      ...(await Promise.all(
-        Object.entries(pedido.fotos.porActividad).map(async ([renglon, fotoId]) => ({
-          fotoId,
-          itemKey: await idDeterminista(id, 'actividades', Number(renglon)),
-          clave: `actividad-${renglon}`,
-        })),
-      )),
-    ];
-    if (elegidas.length > 0) {
-      await db
-        .insert(media)
-        .values(
-          await Promise.all(
-            elegidas.map(async (e) => {
-              const foto = fotos.get(e.fotoId)!;
-              return {
-                id: await idDeterminista(id, `foto-${e.clave}`, 0),
-                duenoTipo: 'bitacora' as const,
-                duenoId: parteId!,
-                proposito: 'evidencia' as const,
-                itemKey: e.itemKey,
-                mime: foto.mime,
-                bytes: foto.bytes,
-                sha256: foto.sha256,
-                // El mismo objeto: no se copia ni se vuelve a subir.
-                claveR2: foto.claveR2,
-                subidoEn: ahora,
-              };
-            }),
-          ),
-        )
-        .onConflictDoNothing({ target: media.id });
-    }
+    const enBitacora = await guardarEnBitacora({
+      mensajeId: id,
+      reporte,
+      obraId,
+      actor: sesion,
+      autorNombre: mensaje.autorNombre,
+      enviadoEn: mensaje.enviadoEn,
+      fotos,
+      fotosElegidas: pedido.fotos,
+      viajesPendientes,
+    });
+    if (enBitacora instanceof Response) return enBitacora;
+    parteId = enBitacora.parteId;
   }
 
   // Los viajes, después de la bitácora y antes de marcar el mensaje: si algo se
   // corta aquí, el reintento los encuentra por su id y no los duplica.
-  const viajes = viajesPendientes ? await registrarViajes(id, reporte, obraId, sesion.id) : 0;
+  const viajes = viajesPendientes ? await guardarViajes(id, reporte, obraId, sesion) : 0;
 
   // 4. El mensaje, aprobado, con la obra donde se decidió (RF-13, RF-46).
-  const [aprobado] = await db
-    .update(whatsappMensajes)
-    .set({
-      estado: 'aprobado',
-      propuesta: reporte as unknown as Record<string, unknown>,
-      parteId,
-      aprobadoPor: sesion.id,
-      aprobadoEn: ahora,
-      obraDecididaId: obraId,
-      version: sql`${whatsappMensajes.version} + 1`,
-    })
-    .where(
-      and(
-        eq(whatsappMensajes.id, id),
-        eq(whatsappMensajes.estado, 'pendiente'),
-        eq(whatsappMensajes.version, pedido.version),
-      ),
-    )
-    .returning({ id: whatsappMensajes.id });
+  const aprobado = await marcarMensaje({
+    mensajeId: id,
+    reporte,
+    parteId,
+    obraId,
+    actor: sesion,
+    estado: 'aprobado',
+    desde: { estado: 'pendiente', version: pedido.version },
+  });
   if (!aprobado) {
     return errorDePeticion(
       'Otra persona decidió sobre esta propuesta al mismo tiempo. Vuelva a abrirla.',

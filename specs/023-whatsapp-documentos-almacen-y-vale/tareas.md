@@ -146,13 +146,13 @@ Las tareas T19 a T22 son del repo de la integración (`C:\dev\n8n-evolutionapi`)
 
 ### Cierre
 
-- [ ] T21. Despliegue a producción, con la aprobación del usuario: migración 0020, imagen del
+- [x] T21. Despliegue a producción, con la aprobación del usuario: migración 0020, imagen del
       panel, compose y workflow de n8n en el VPS, y reclasificar el Excel del 5 de octubre.
       (Todos)
       Hecho cuando: la migración está aplicada en producción, el panel sirve la imagen nueva, el
       workflow corre con el lector, y el «Formato Horas Extras» aparece en la bandeja de producción
       como reporte del 2026-10-05 con su personal.
-- [ ] T22. Validación final: recorrido RF por RF de la spec + demo manual (pasos 1 a 7). (Todos)
+- [x] T22. Validación final: recorrido RF por RF de la spec + demo manual (pasos 1 a 7). (Todos)
       Hecho cuando: cada RF tiene su comprobación con resultado en `validacion.md`, los tres
       comandos están en verde y la spec queda marcada como Cumplida.
 
@@ -389,3 +389,30 @@ Las tareas T19 a T22 son del repo de la integración (`C:\dev\n8n-evolutionapi`)
   número, la instrucción de la IA dice que «sin vale», «no», «—» o vacío es un viaje sin vale
   (workflow regenerado). `plantilla_reporte_almacen.md` queda como versión 1 (ya no borrador),
   con la aclaración de que el nombre del material tiene que ser igual.
+- **T21 (2026-10-07)**, con la aprobación del usuario y su commit `583aaf1`: (1) migración 0020
+  en producción con `scripts/migrar-produccion.ts` (base `preoperaocc`; las cuatro columnas
+  comprobadas); (2) `preoperaocc:ultima` (0f856a0f4902) etiquetada `preoperaocc:anterior`; (3)
+  imagen construida en el PC (0f84ca1c0a4a), transferida y encendida con `up -d`: healthy;
+  LicitApp, el panel y `/panel` en 200; `POST …/propuestas/x/personas` sin sesión → 401
+  «Necesita ingresar.» (la ruta nueva existe); sin errores en los registros. (4) n8n del VPS:
+  respaldos en `/opt/occ-whatsapp/respaldos/` (`clasificar_antes_023.json`,
+  `compose_antes_023.yaml`, `clasificar_023.json`); importado el flujo nuevo con el id
+  `Vl6IHIswaAivlGOq` (importar lo despublica), `publish:workflow`, compose con `zlib` y
+  `docker compose up -d --no-deps n8n`; Evolution siguió arriba sin reiniciar; los tres flujos
+  activos. (5) Se volvieron a clasificar el **Excel del 5 de octubre** (AC341D45…) y el **Word de
+  SST** (3EB0F8DE…): clasificados a las 16:06 y entregados a las 16:10; en la bandeja de
+  producción quedaron reemplazados y pendientes: el Excel como `reporte_diario` del 2026-10-05 con
+  37 personas, y el Word como administrativo con su contenido. Pasos y vuelta atrás anotados en
+  `C:\dev\n8n-evolutionapi\DESPLIEGUE_VPS.md`.
+- **T22 (2026-10-07)**: `validacion.md` con los 68 RF. Para no dar nada por supuesto se probaron
+  además: RF-8 (Excel de 12 hojas → recortado y avisado), RF-14 y RF-15 (con la IA en el n8n del
+  PC, mensaje PRUEBA-023-T22-1: persona repetida una vez y fechas distintas a revisión), RF-25
+  (Almacén apagado → 400; mensaje PRUEBA-023-T22-2 queda pendiente; el módulo se volvió a
+  encender) y RF-67 (PRUEBA-023-T15-1 descartado y sus 3 personas siguen). **La validación
+  encontró un incumplimiento**: el requisito no funcional «10 hojas de 500 filas se leen
+  completas» no se cumplía con el límite de 150 000 caracteres (solo 4 hojas); se subió a 400 000
+  en `lector_archivos.js`, se regeneró el flujo y se desplegó en el VPS (respaldo
+  `respaldos/clasificar_023a.json`; como el compose no cambió, hizo falta `docker compose restart
+  n8n`, anotado en `DESPLIEGUE_VPS.md`); las ejecuciones de las 16:30 salieron bien. Los tres
+  comandos en verde (402), `expo export` sin secretos. Queda pendiente de demo manual el reporte
+  de almacén de 30 renglones. **Spec marcada como Cumplida.**

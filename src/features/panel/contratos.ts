@@ -56,7 +56,19 @@ import {
   type HorarioDeObra,
 } from '@/shared/rules/horas';
 import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
-import type { DestinoDeWhatsapp, ReporteDelDia } from '@/shared/rules/whatsapp';
+import {
+  TIPOS_DE_REPORTE,
+  type EstadoDelDia,
+  type TipoCreado,
+  type TipoDeReporte,
+} from '@/shared/rules/whatsapp-automatico';
+import {
+  CAMINOS_DEL_CONDUCTOR,
+  type CaminoDelConductor,
+  type DestinoDeWhatsapp,
+  type EstadoMensajeWhatsapp,
+  type ReporteDelDia,
+} from '@/shared/rules/whatsapp';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -257,6 +269,8 @@ export const personaEditada = z.object({
 export type PersonaNueva = z.input<typeof personaNueva>;
 
 export interface PersonaFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   usuario: string;
   nombreCompleto: string;
@@ -307,6 +321,8 @@ export const vehiculoEditado = vehiculoNuevo.partial();
 export type VehiculoNuevo = z.input<typeof vehiculoNuevo>;
 
 export interface VehiculoFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   codigoInterno: string;
   placa: string | null;
@@ -1343,6 +1359,8 @@ export const viajeNuevo = z
 export type ViajeNuevo = z.input<typeof viajeNuevo>;
 
 export interface SitioDeCanteraFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   obraId: string;
   obraNombre: string | null;
@@ -1351,6 +1369,8 @@ export interface SitioDeCanteraFila {
 }
 
 export interface MaterialDeCanteraFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   obraId: string;
   obraNombre: string | null;
@@ -1625,6 +1645,8 @@ export const propuestaDeIa = z.looseObject({
   categoria: z.string().trim().min(1, 'Falta la categoría.').max(60),
   resumen: textoDeIa,
   fecha_evento: textoDeIa,
+  /** La hora de la marca de agua de la foto (spec 024, RF-16). */
+  hora_foto: textoDeIa,
   complementa_a: textoDeIa,
   confianza: textoDeIa,
   requiere_revision: z.boolean().nullish(),
@@ -1695,6 +1717,8 @@ export const propuestaDeIa = z.looseObject({
       hora: textoDeIa,
       /** El número de vale, tal como lo leyó (spec 023, RF-50). */
       vale: textoDeIa,
+      /** El conductor, como lo leyó (cambio de la 021 del 2026-10-08, RF-104). */
+      conductor: textoDeIa,
     }),
   ),
   novedades: listaDeIa(z.looseObject({ tipo: textoDeIa, descripcion: textoDeIa })),
@@ -1852,6 +1876,14 @@ export const reporteCorregido = z.object({
         conductorId: idDeElegido,
         // Spec 023: el largo lo dice la regla del viaje al aprobar (`validarViaje`).
         vale: textoDeCorreccion(200).default(null),
+        // Cambio de la 021 del 2026-10-08: lo corregido antes no los trae.
+        conductorEscrito: textoDeCorreccion(200).default(null),
+        conductorPor: z.enum(CAMINOS_DEL_CONDUCTOR as [CaminoDelConductor, ...CaminoDelConductor[]]).nullable().default(null),
+        // Spec 024: lo escrito en el reporte; lo corregido antes no lo trae.
+        placaEscrita: textoDeCorreccion(200).default(null),
+        materialEscrito: textoDeCorreccion(200).default(null),
+        origenEscrito: textoDeCorreccion(200).default(null),
+        destinoEscrito: textoDeCorreccion(200).default(null),
       }),
     )
     .max(200),
@@ -1968,11 +2000,26 @@ export interface PropuestaFila {
   categoria: string | null;
   resumen: string | null;
   motivoRevision: string | null;
-  estado: 'pendiente' | 'ignorado' | 'aprobado' | 'descartado';
+  estado: EstadoMensajeWhatsapp;
   /** Fotos y documentos, los suyos y los de los mensajes que lo complementan. */
   archivos: number;
   complementos: number;
   viajesAprobados: boolean;
+  /** Spec 024: el día al que fue, y qué se guardó y dónde (RF-58, RF-59). */
+  fechaHecho: string | null;
+  resultado: ResultadoDelMensaje | null;
+}
+
+/** Lo que el sistema guardó de un mensaje, para el historial (spec 024, RF-58, RF-59). */
+export interface ResultadoDelMensaje {
+  modulo?: 'cantera' | 'almacen' | 'bitacora';
+  /** Los ids de los viajes o movimientos guardados. */
+  guardados?: string[];
+  repetidos?: number;
+  apartados?: number;
+  creados?: number;
+  /** La bitácora a la que fue, si fue a una. */
+  parteId?: string | null;
 }
 
 /** Un archivo del mensaje o de sus complementos, servido por `/api/panel/media/:id`. */
@@ -1989,6 +2036,12 @@ export type EstadoDeLaBitacoraDelDia = 'no_existe' | 'abierta' | 'cerrada';
 export interface DetalleDePropuesta extends PropuestaFila {
   texto: string | null;
   version: number;
+  /**
+   * Spec 024: el sistema guarda solo lo que llega, y la propuesta ya no se corrige, se
+   * aprueba ni se descarta aquí (RF-70). Con el guardado automático apagado —la vuelta
+   * atrás— la bandeja vuelve a funcionar como en la 021.
+   */
+  guardadoAutomatico: boolean;
   /** El autor, con su nombre y cargo del sistema si se le reconoce (RF-21, RF-22). */
   autor: { usuarioId: string | null; nombre: string; cargo: string | null };
   /** El destino de su categoría (`destinoDeCategoria`). */
@@ -2041,6 +2094,120 @@ export interface DetalleDePropuesta extends PropuestaFila {
     almacen: { id: string; nombre: string; unidad: UnidadAlmacen; stock: number }[];
   };
 }
+
+/*
+ * ── El guardado automático (spec 024) ──
+ */
+
+/** Un reporte que la bitácora de una obra espera cada día (RF-37 a RF-39). */
+export interface ReporteEsperadoFila {
+  tipoReporte: TipoDeReporte;
+  /** El `lid` de WhatsApp de quien lo manda, o `null` si vale cualquiera (RF-39). */
+  autorId: string | null;
+  autorNombre: string | null;
+}
+
+/** `GET /api/panel/whatsapp/esperados?obraId=` (RF-37, RF-42). */
+export interface ReportesEsperadosDeLaObra {
+  obraId: string;
+  esperados: ReporteEsperadoFila[];
+  /** Quiénes han escrito en los grupos de la obra, para elegir el autor (RF-39). */
+  autores: { autorId: string; autorNombre: string | null }[];
+}
+
+/** `PUT /api/panel/whatsapp/esperados`: la lista entera de la obra, que reemplaza a la anterior. */
+export const reportesEsperadosPedido = z.object({
+  obraId: z.string({ error: 'Elija la obra.' }).trim().min(1, 'Elija la obra.').max(64),
+  esperados: z
+    .array(
+      z.object({
+        tipoReporte: z.enum(TIPOS_DE_REPORTE, { error: 'Ese reporte no se puede esperar.' }),
+        autorId: z.string().trim().max(200).nullable().default(null),
+        autorNombre: z.string().trim().max(200).nullable().default(null),
+      }),
+    )
+    .max(20, 'Son demasiados reportes para un día.'),
+});
+
+/** Un reporte esperado de un día: recibido o pendiente, de quién y a qué hora (RF-55). */
+export interface ReporteDelDiaFila extends ReporteEsperadoFila {
+  recibido: boolean;
+  recibidoDe: string | null;
+  /** ISO; `null` si no ha llegado. */
+  recibidoEn: string | null;
+}
+
+/** El estado de la bitácora de un día armada desde WhatsApp (RF-55 a RF-57). */
+export interface DiaDeWhatsapp {
+  obraId: string;
+  obraNombre: string;
+  fecha: string;
+  /** `cerrada` sale de la bitácora; lo demás, del armado (RF-56). */
+  estado: EstadoDelDia | 'cerrada';
+  parteId: string | null;
+  reportes: ReporteDelDiaFila[];
+  /** Los mensajes que todavía esperan a la bitácora. */
+  enEspera: number;
+}
+
+/** Un renglón de «No se pudo guardar», con su mensaje (spec 024, RF-60). */
+export interface ExcepcionFila {
+  id: string;
+  mensajeId: string;
+  obraId: string;
+  obraNombre: string;
+  autorNombre: string | null;
+  enviadoEn: string;
+  categoria: string | null;
+  resumen: string | null;
+  /** El día al que iba, si se supo. */
+  fecha: string | null;
+  seccion: string;
+  /** `null`: la sección o el mensaje entero. */
+  renglon: number | null;
+  motivo: string;
+  datos: unknown;
+  estado: 'pendiente' | 'guardada' | 'descartada';
+}
+
+/**
+ * `POST /api/panel/whatsapp/excepciones/:id/guardar` (RF-61): el renglón completado,
+ * como quedó en pantalla, y el día si hay que decirlo. Lo del mensaje entero va sin
+ * `datos`: es reintentar.
+ */
+export const excepcionGuardada = z.object({
+  datos: z.unknown().optional(),
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha va como AAAA-MM-DD.')
+    .optional(),
+});
+
+/** `POST /api/panel/whatsapp/excepciones/:id/descartar` (RF-63): con motivo. */
+export const excepcionDescartada = z.object({
+  motivo: textoObligatorio(500, 'el motivo'),
+});
+
+/** Un registro creado automáticamente, para la lista (RF-33). */
+export interface CreadoFila {
+  tipo: TipoCreado;
+  registroId: string;
+  obraId: string;
+  obraNombre: string;
+  /** Cómo se llama: el nombre, o el código y la placa. */
+  nombre: string;
+  detalle: string | null;
+  mensajeId: string;
+  autorDelMensaje: string | null;
+  creadoEn: string;
+  revisadoEn: string | null;
+  unidoA: string | null;
+}
+
+/** `POST /api/panel/whatsapp/creados/:tipo/:id/unir` (RF-36): con qué registro es el mismo. */
+export const creadoUnido = z.object({
+  conRegistroId: textoObligatorio(64, 'el registro con el que se une'),
+});
 
 /** `PATCH /api/panel/whatsapp/grupos/:id` (RF-8, RF-9, RF-13). */
 export const grupoAsociado = z.object({

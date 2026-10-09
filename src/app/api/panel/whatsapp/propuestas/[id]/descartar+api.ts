@@ -1,6 +1,6 @@
 import { descarte } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
+import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { descartarPropuesta } from '@/features/whatsapp/servidor/decisiones';
 import { idDeLaRuta } from '@/features/whatsapp/servidor/obra';
 
@@ -15,6 +15,10 @@ export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
     const sesion = await requerirPermiso(peticion, 'whatsapp', 'aprobar');
     if (sesion instanceof Response) return sesion;
+    // Spec 024, RF-70: con el guardado automático, la bandeja ya no decide nada.
+    if (process.env.WHATSAPP_GUARDADO_AUTOMATICO === '1') {
+      return errorDePeticion('El sistema guarda solo lo que llega por WhatsApp: esta propuesta ya no se decide aquí.', 409);
+    }
 
     const pedido = await cuerpoJson(peticion, descarte);
     const resultado = await descartarPropuesta(sesion, idDeLaRuta(id), pedido);

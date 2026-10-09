@@ -1,6 +1,6 @@
 # Spec 023 — WhatsApp: documentos, almacén y número de vale
 
-> Estado: Aprobada · Fecha: 2026-10-07 · Aprobada: 2026-10-07
+> Estado: **Cumplida** (2026-10-07) · Fecha: 2026-10-07 · Aprobada: 2026-10-07
 
 ## Contexto y objetivo
 

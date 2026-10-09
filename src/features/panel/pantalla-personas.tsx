@@ -236,7 +236,12 @@ export default function PantallaPersonas() {
       clave: 'nombre',
       titulo: 'Nombre completo',
       ancho: 210,
-      pintar: (p) => <Celda>{p.nombreCompleto}</Celda>,
+      pintar: (p) => (
+        <>
+          <Celda>{p.nombreCompleto}</Celda>
+          {p.desdeWhatsapp ? <Etiqueta tono="neutro">Creado desde WhatsApp</Etiqueta> : null}
+        </>
+      ),
       ordenar: ORDEN_DE_COLUMNA.nombre,
     },
     {

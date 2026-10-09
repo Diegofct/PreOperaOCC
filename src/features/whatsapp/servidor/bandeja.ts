@@ -18,7 +18,7 @@
  *
  * Solo servidor.
  */
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import {
@@ -26,37 +26,28 @@ import {
   media,
   obras,
   partesDeObra,
-  tiposVehiculo,
-  usuarios,
   vehiculos,
   whatsappGrupos,
   whatsappMensajes,
 } from '@/db/servidor/esquema';
-import { materialesConStock } from '@/features/almacen-obra/servidor/materiales';
-import { opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
-import {
-  reporteCorregido,
-  type DetalleDePropuesta,
-  type OpcionesDeCantera,
-  type PropuestaFila,
-} from '@/features/panel/contratos';
+import { reporteCorregido, type DetalleDePropuesta, type PropuestaFila } from '@/features/panel/contratos';
 import { filtroDeObraEstricto, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { avisoDeValeRepetido } from '@/shared/rules/cantera';
-import { fechaDeJornada, medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
   destinoDeCategoria,
   faltasDelReporte,
   posiblesCoincidencias,
   reconocerPersona,
   resolverPropuesta,
-  type CatalogosDeLaObra,
   type EstadoMensajeWhatsapp,
   type PropuestaLeible,
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
 
+import { catalogosDeLaObra } from './catalogos';
 import { obraDelMensaje } from './obra';
 
 /** Más de esto en un estado ya no es una bandeja: es un atraso que se pagina. */
@@ -83,6 +74,8 @@ const COLUMNAS_DE_LA_FILA = {
   complementos: sql<number>`(
     select count(*)::int from whatsapp_mensajes c where c.complementa_a = ${whatsappMensajes.id})`,
   viajesAprobados: sql<boolean>`${whatsappMensajes.viajesAprobadosEn} is not null`,
+  fechaHecho: whatsappMensajes.fechaHecho,
+  resultado: whatsappMensajes.resultado,
 };
 
 function aFila(fila: {
@@ -99,8 +92,14 @@ function aFila(fila: {
   archivos: number;
   complementos: number;
   viajesAprobados: boolean;
+  fechaHecho: string | null;
+  resultado: Record<string, unknown> | null;
 }): PropuestaFila {
-  return { ...fila, enviadoEn: fila.enviadoEn.toISOString() };
+  return {
+    ...fila,
+    enviadoEn: fila.enviadoEn.toISOString(),
+    resultado: fila.resultado as PropuestaFila['resultado'],
+  };
 }
 
 /**
@@ -193,81 +192,6 @@ async function avisosDeValeDelReporte(
   });
 }
 
-/** Los catálogos de la obra contra los que se lee una propuesta, y el medidor de cada equipo. */
-async function catalogosDeLaObra(obraId: string): Promise<{
-  catalogos: CatalogosDeLaObra;
-  claseDe: Map<string, ClaseDeMedidor>;
-  cargoDe: Map<string, string | null>;
-  /** Las personas registradas en esta obra, para las posibles coincidencias (RF-65). */
-  personasDeLaObra: { id: string; nombreCompleto: string; cargo: string | null }[];
-  opciones: DetalleDePropuesta['opciones'];
-}> {
-  const db = baseServidor();
-  const [equipos, personas, cantera, almacen] = await Promise.all([
-    db
-      .select({
-        id: vehiculos.id,
-        codigoInterno: vehiculos.codigoInterno,
-        placa: vehiculos.placa,
-        obraId: vehiculos.obraId,
-        clase: tiposVehiculo.claseMedidor,
-      })
-      .from(vehiculos)
-      .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
-      .where(
-        and(
-          isNull(vehiculos.eliminadoEn),
-          or(eq(vehiculos.obraId, obraId), isNull(vehiculos.obraId)),
-        ),
-      ),
-    db
-      .select({
-        id: usuarios.id,
-        nombreCompleto: usuarios.nombreCompleto,
-        cargo: usuarios.cargo,
-        obraId: usuarios.obraId,
-      })
-      .from(usuarios)
-      .where(isNull(usuarios.eliminadoEn)),
-    opcionesDeLaObra(obraId),
-    materialesConStock(obraId),
-  ]);
-
-  return {
-    catalogos: {
-      obraId,
-      vehiculos: equipos,
-      personas,
-      sitios: cantera.sitios,
-      materiales: cantera.materiales,
-      materialesAlmacen: almacen,
-    },
-    claseDe: new Map(equipos.map((e) => [e.id, medidorDeClase(e.clase)])),
-    cargoDe: new Map(personas.map((p) => [p.id, p.cargo])),
-    personasDeLaObra: personas
-      .filter((p) => p.obraId === obraId)
-      .map(({ id, nombreCompleto, cargo }) => ({
-        id,
-        nombreCompleto,
-        cargo: cargo ? nombreDeCargo(cargo) : null,
-      })),
-    opciones: {
-      almacen,
-      equipos: equipos
-        .map(({ id, codigoInterno, placa }) => ({ id, codigoInterno, placa }))
-        .sort((a, b) => a.codigoInterno.localeCompare(b.codigoInterno, 'es')),
-      personas: personas
-        .map(({ id, nombreCompleto, cargo }) => ({
-          id,
-          nombreCompleto,
-          cargo: cargo ? nombreDeCargo(cargo) : null,
-        }))
-        .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es')),
-      cantera: cantera satisfies OpcionesDeCantera,
-    },
-  };
-}
-
 /**
  * El detalle de un mensaje, con su propuesta lista para revisar. `null` si no
  * existe o no está al alcance: «no existe» y no «no puede», como en el resto del
@@ -276,6 +200,8 @@ async function catalogosDeLaObra(obraId: string): Promise<{
 export async function leerDetalle(
   sesion: PersonaEnSesion,
   id: string,
+  // Lo dice la ruta, que es la que lee el entorno (spec 024, RF-70).
+  guardadoAutomatico = false,
 ): Promise<DetalleDePropuesta | null> {
   const db = baseServidor();
   const [fila] = await db
@@ -295,8 +221,13 @@ export async function leerDetalle(
     .limit(1);
   if (!fila) return null;
 
+  // El día del hecho que dice la IA y el del mensaje: los dos pueden importar para el
+  // preoperacional de una volqueta (cambio de la 021 del 2026-10-08, RF-105).
+  const diaDelMensaje = fechaDeJornada(fila.enviadoEn.getTime());
+  const fechaDeLaIa = (fila.propuestaIa as PropuestaLeible).fecha_evento?.trim() ?? '';
   const { catalogos, claseDe, cargoDe, personasDeLaObra, opciones } = await catalogosDeLaObra(
     fila.obraId,
+    [diaDelMensaje, fechaDeLaIa],
   );
   const destino = destinoDeCategoria(fila.categoria);
   // Lo corregido pasa otra vez por el contrato: las propuestas guardadas antes de la
@@ -304,7 +235,7 @@ export async function leerDetalle(
   const resuelto = fila.propuesta
     ? { reporte: reporteCorregido.parse(fila.propuesta) as ReporteDelDia, fechaSupuesta: false }
     : resolverPropuesta(fila.propuestaIa as PropuestaLeible, catalogos, {
-        diaDelMensaje: fechaDeJornada(fila.enviadoEn.getTime()),
+        diaDelMensaje,
         destino,
       });
   const { reporte } = resuelto;
@@ -394,6 +325,7 @@ export async function leerDetalle(
     ...aFila(fila),
     texto: fila.texto,
     version: fila.version,
+    guardadoAutomatico,
     autor: {
       usuarioId: autor?.id ?? null,
       nombre: autor?.nombreCompleto ?? fila.autorNombre ?? 'Sin nombre',

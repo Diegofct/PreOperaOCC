@@ -65,6 +65,7 @@ import {
   type MovimientoDelReporte,
   type PersonaDelReporte,
   type ReporteDelDia,
+  textoDelConductor,
   type ViajeDelReporte,
 } from '@/shared/rules/whatsapp';
 
@@ -108,7 +109,7 @@ function momento(iso: string): string {
  * «6,4» pasaría por «6,» y se convertiría en «6» antes de terminar. Hacia fuera
  * entrega el número, o `null` si está vacío o no se puede leer.
  */
-function CampoNumero({
+export function CampoNumero({
   etiqueta,
   valor,
   onChange,
@@ -148,7 +149,7 @@ function CampoNumero({
 }
 
 /** Las faltas de un renglón, en su sitio (RF-64). */
-function FaltasDelRenglon({ faltas }: { faltas: Falta[] }) {
+export function FaltasDelRenglon({ faltas }: { faltas: Falta[] }) {
   if (faltas.length === 0) return null;
   return (
     <View style={estilos.faltas}>
@@ -161,13 +162,13 @@ function FaltasDelRenglon({ faltas }: { faltas: Falta[] }) {
   );
 }
 
-const OPCIONES_DE_ACTIVIDAD = [
+export const OPCIONES_DE_ACTIVIDAD = [
   { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: 'Otra actividad' },
   ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({ valor: a.item, etiqueta: etiquetaDeActividad(a) })),
 ];
 const OPCIONES_DE_UNIDAD = UNIDADES_DE_ACTIVIDAD.map((u) => ({ valor: u.id, etiqueta: u.etiqueta }));
-const OPCIONES_DE_CLIMA = CONDICIONES_CLIMA.map((c) => ({ valor: c.id, etiqueta: c.nombre }));
-const OPCIONES_DE_ENSAYO = ENSAYOS_DE_CALIDAD.map((e) => ({ valor: e.id, etiqueta: e.nombre }));
+export const OPCIONES_DE_CLIMA = CONDICIONES_CLIMA.map((c) => ({ valor: c.id, etiqueta: c.nombre }));
+export const OPCIONES_DE_ENSAYO = ENSAYOS_DE_CALIDAD.map((e) => ({ valor: e.id, etiqueta: e.nombre }));
 const OPCIONES_DE_UBICACION = [
   { valor: 'pr', etiqueta: 'En la vía (PR)' },
   { valor: 'lugar', etiqueta: 'Otro lugar' },
@@ -219,13 +220,15 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
       <Seccion titulo="Reporte">
         {error ? <Aviso tono="error">{error}</Aviso> : <Ayuda>Cargando el reporte…</Ayuda>}
         <Acciones>
-          <Boton titulo="Volver a la bandeja" tono="secundario" onPress={alVolver} />
+          <Boton titulo="Volver al historial" tono="secundario" onPress={alVolver} />
         </Acciones>
       </Seccion>
     );
   }
 
-  const editable = detalle.estado === 'pendiente' && alcanza(rol, 'whatsapp', 'escribir');
+  // Spec 024, RF-70: con el guardado automático, nada se corrige ni se decide aquí.
+  const manual = !detalle.guardadoAutomatico;
+  const editable = manual && detalle.estado === 'pendiente' && alcanza(rol, 'whatsapp', 'escribir');
   const faltasDe = (seccion: string, renglon: number | null) =>
     detalle.faltas.filter((f) => f.seccion === seccion && f.renglon === renglon);
 
@@ -291,7 +294,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
 
   const imagenes = detalle.archivosDelMensaje.filter((a) => a.mime.startsWith('image/'));
   const opcionesDeFoto = imagenes.map((a, n) => ({ valor: a.id, etiqueta: `Foto ${n + 1}` }));
-  const puedeDecidir = detalle.estado === 'pendiente' && alcanza(rol, 'whatsapp', 'aprobar');
+  const puedeDecidir = manual && detalle.estado === 'pendiente' && alcanza(rol, 'whatsapp', 'aprobar');
   // Spec 023: un reporte de almacén no va a la bitácora (RF-40): ni sus secciones ni
   // sus fotos aplican, y su bitácora cerrada no impide aprobarlo.
   const esAlmacen = detalle.destino === 'almacen';
@@ -450,7 +453,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   return (
     <>
       <Acciones>
-        <Boton titulo="← Volver a la bandeja" tono="secundario" onPress={alVolver} />
+        <Boton titulo="← Volver al historial" tono="secundario" onPress={alVolver} />
       </Acciones>
 
       {/* ── El mensaje tal como llegó (RF-17 a RF-22) ── */}
@@ -907,8 +910,9 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
               etiqueta="Conductor"
               valor={v.conductorId}
               opciones={opcionesDeConductor}
-              onChange={(x) => cambiarRenglon('viajes', i, { conductorId: x })}
-              vacio="Elija el conductor"
+              // Elegido por una persona: ya no es una propuesta (RF-109).
+              onChange={(x) => cambiarRenglon('viajes', i, { conductorId: x, conductorPor: null })}
+              vacio={v.conductorEscrito && !v.conductorId ? `«${v.conductorEscrito}»: elija el conductor` : 'Elija el conductor'}
               ancho={260}
             />
             <SelectorDeHora etiqueta="Hora" valor={v.hora ?? ''} onChange={(x) => cambiarRenglon('viajes', i, { hora: x || null })} />
@@ -971,6 +975,8 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
               ancho={160}
             />
             {editable ? <Boton titulo="Quitar" tono="secundario" onPress={() => quitarRenglon('viajes', i)} /> : null}
+            {/* Cambio de la 021 del 2026-10-08, RF-109: de dónde salió el conductor. */}
+            {textoDelConductor(v) ? <Ayuda>{textoDelConductor(v)}</Ayuda> : null}
             <FaltasDelRenglon faltas={faltasDe('viajes', i)} />
             {/* RF-45: el vale repetido se avisa y no impide aprobar. */}
             {detalle.avisosDeVale
@@ -1000,6 +1006,12 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                       hora: null,
                       conductorId: null,
                       vale: null,
+                      conductorEscrito: null,
+                      conductorPor: null,
+                      placaEscrita: null,
+                      materialEscrito: null,
+                      origenEscrito: null,
+                      destinoEscrito: null,
                     },
                   ],
                 })
@@ -1079,6 +1091,12 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         )
       ) : null}
 
+      {detalle.guardadoAutomatico && detalle.estado === 'pendiente' ? (
+        <Aviso tono="info">
+          El sistema guarda solo lo que llega por WhatsApp: este mensaje se procesa en el próximo pulso. Lo que no pueda
+          guardar aparecerá en «No se pudo guardar».
+        </Aviso>
+      ) : null}
       <Acciones>
         {editable ? (
           <Boton
@@ -1105,7 +1123,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         {puedeDecidir ? (
           <Boton titulo="Descartar" tono="peligro" onPress={() => setDescartando(true)} deshabilitado={decidiendo} />
         ) : null}
-        {detalle.estado === 'ignorado' && alcanza(rol, 'whatsapp', 'escribir') ? (
+        {manual && detalle.estado === 'ignorado' && alcanza(rol, 'whatsapp', 'escribir') ? (
           <Boton titulo="Devolver a la bandeja" tono="secundario" onPress={devolver} deshabilitado={decidiendo} />
         ) : null}
       </Acciones>

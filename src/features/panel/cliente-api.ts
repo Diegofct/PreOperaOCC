@@ -19,6 +19,11 @@ import type { Periodo } from '@/shared/rules/jornada';
 import type {
   PersonasDesdeLaBandeja,
   Aprobacion,
+  ReporteEsperadoFila,
+  ReportesEsperadosDeLaObra,
+  ExcepcionFila,
+  CreadoFila,
+  DiaDeWhatsapp,
   DetalleDePropuesta,
   GrupoFila,
   PropuestaFila,
@@ -511,6 +516,67 @@ export const api = {
           `/whatsapp/propuestas/${encodeURIComponent(id)}/devolver`,
           'POST',
           { version },
+        ),
+    },
+    /** «Creado automáticamente»: revisar y unir (spec 024, RF-33 a RF-36). */
+    creados: {
+      listar: (obraId?: string | null) =>
+        panel<{ creados: CreadoFila[] }>(
+          `/whatsapp/creados${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`,
+        ).then((r) => r.creados),
+      revisado: (tipo: string, id: string) =>
+        panelEnviar<{ revisado: true }>(
+          `/whatsapp/creados/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/revisado`,
+          'POST',
+          {},
+        ),
+      unir: (tipo: string, id: string, conRegistroId: string) =>
+        panelEnviar<{ viajes: number; bitacoras: number; movimientos: number; sinTocar: number }>(
+          `/whatsapp/creados/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/unir`,
+          'POST',
+          { conRegistroId },
+        ),
+    },
+    /** «No se pudo guardar»: completar o descartar (spec 024, RF-60 a RF-63). */
+    excepciones: {
+      listar: (estado: 'pendiente' | 'guardada' | 'descartada', obraId?: string | null) => {
+        const parametros = new URLSearchParams({ estado });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<{ excepciones: ExcepcionFila[] }>(`/whatsapp/excepciones?${parametros.toString()}`).then(
+          (r) => r.excepciones,
+        );
+      },
+      guardar: (id: string, datos?: unknown, fecha?: string) =>
+        panelEnviar<{ guardado: string }>(`/whatsapp/excepciones/${encodeURIComponent(id)}/guardar`, 'POST', {
+          ...(datos === undefined ? {} : { datos }),
+          ...(fecha ? { fecha } : {}),
+        }),
+      descartar: (id: string, motivo: string) =>
+        panelEnviar<{ descartado: true }>(`/whatsapp/excepciones/${encodeURIComponent(id)}/descartar`, 'POST', {
+          motivo,
+        }),
+    },
+    /** Los reportes que la bitácora de cada día de una obra espera (spec 024, RF-37 a RF-42). */
+    esperados: {
+      leer: (obraId: string | null) =>
+        panel<ReportesEsperadosDeLaObra>(
+          `/whatsapp/esperados${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`,
+        ),
+      guardar: (obraId: string, esperados: ReporteEsperadoFila[]) =>
+        panelEnviar<ReportesEsperadosDeLaObra>('/whatsapp/esperados', 'PUT', { obraId, esperados }),
+    },
+    /** El estado de la bitácora de cada día y «Guardar con lo que hay» (spec 024, RF-48, RF-55). */
+    dias: {
+      listar: (filtro: { obraId?: string | null; desde: string; hasta: string }) => {
+        const parametros = new URLSearchParams({ desde: filtro.desde, hasta: filtro.hasta });
+        if (filtro.obraId) parametros.set('obraId', filtro.obraId);
+        return panel<{ dias: DiaDeWhatsapp[] }>(`/whatsapp/dias?${parametros.toString()}`).then((r) => r.dias);
+      },
+      armar: (obraId: string, fecha: string) =>
+        panelEnviar<{ parteId: string | null; llevados: number }>(
+          `/whatsapp/dias/${encodeURIComponent(obraId)}/${encodeURIComponent(fecha)}/armar`,
+          'POST',
+          {},
         ),
     },
   },
