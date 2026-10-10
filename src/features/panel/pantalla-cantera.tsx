@@ -16,6 +16,8 @@
  */
 import { useCallback, useState } from 'react';
 
+import { useLocalSearchParams } from 'expo-router';
+
 import { formatearAbscisa } from '@/shared/rules/cantera';
 import { alcanza } from '@/shared/rules/permisos';
 
@@ -47,7 +49,9 @@ export default function PantallaCantera() {
   );
   // Solo las que llevan control de cantera (spec 017, RF-10).
   const obrasConCantera = obras.datos.filter((o) => o.canteraActivo);
-  const [obraElegida, setObraElegida] = useState<string | null>(null);
+  // Spec 024, RF-59: el historial de WhatsApp abre los viajes de un día y una obra.
+  const enlace = useLocalSearchParams<{ fecha?: string; obraId?: string }>();
+  const [obraElegida, setObraElegida] = useState<string | null>(enlace.obraId ?? null);
 
   /**
    * Sube cada vez que cambian los sitios o los materiales, para que el formulario de
@@ -140,6 +144,8 @@ function SeccionViajes({
   puedeAnular: boolean;
   versionDeCatalogos: number;
 }) {
+  // El día del enlace del historial de WhatsApp, si se llegó por él (spec 024, RF-59).
+  const { fecha: fechaDelEnlace } = useLocalSearchParams<{ fecha?: string }>();
   const opciones = useListado<OpcionesDeCantera>(
     useCallback(
       () =>
@@ -201,6 +207,7 @@ function SeccionViajes({
         obraId={obraId}
         puedeAnular={puedeAnular}
         version={registrados}
+        fecha={fechaDelEnlace}
       />
     </Seccion>
   );

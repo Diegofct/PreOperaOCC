@@ -60,6 +60,8 @@ const ETIQUETA_DEL_ESTADO: Record<EstadoMensajeWhatsapp, string> = {
   ignorado: 'ignorada',
   aprobado: 'aprobada',
   descartado: 'descartada',
+  en_espera: 'en espera de la bitácora',
+  guardado: 'guardada',
 };
 
 /**

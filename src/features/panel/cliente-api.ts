@@ -14,11 +14,17 @@
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
  */
+import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
 import type {
   PersonasDesdeLaBandeja,
   Aprobacion,
+  ReporteEsperadoFila,
+  ReportesEsperadosDeLaObra,
+  ExcepcionFila,
+  CreadoFila,
+  DiaDeWhatsapp,
   DetalleDePropuesta,
   GrupoFila,
   PropuestaFila,
@@ -470,8 +476,9 @@ export const api = {
         panelEnviar<GrupoFila>(`/whatsapp/grupos/${encodeURIComponent(id)}`, 'PATCH', { obraId }),
     },
     propuestas: {
-      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null) => {
-        const parametros = new URLSearchParams({ estado });
+      /** Con el rango de días del reporte (spec 025, RF-45); sin él, la última semana. */
+      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
         return panel<{ propuestas: PropuestaFila[] }>(
           `/whatsapp/propuestas?${parametros.toString()}`,
@@ -511,6 +518,72 @@ export const api = {
           `/whatsapp/propuestas/${encodeURIComponent(id)}/devolver`,
           'POST',
           { version },
+        ),
+    },
+    /** «Creado automáticamente»: revisar y unir (spec 024, RF-33 a RF-36). */
+    creados: {
+      /** Con lo que quedó sin revisar antes de «Desde» (spec 025, RF-47). */
+      listar: (obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ ...rango });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<{ creados: CreadoFila[]; anterioresSinRevisar: number }>(
+          `/whatsapp/creados?${parametros.toString()}`,
+        );
+      },
+      revisado: (tipo: string, id: string) =>
+        panelEnviar<{ revisado: true }>(
+          `/whatsapp/creados/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/revisado`,
+          'POST',
+          {},
+        ),
+      unir: (tipo: string, id: string, conRegistroId: string) =>
+        panelEnviar<{ viajes: number; bitacoras: number; movimientos: number; sinTocar: number }>(
+          `/whatsapp/creados/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/unir`,
+          'POST',
+          { conRegistroId },
+        ),
+    },
+    /** «No se pudo guardar»: completar o descartar (spec 024, RF-60 a RF-63). */
+    excepciones: {
+      /** Con los pendientes anteriores a «Desde» (spec 025, RF-46). */
+      listar: (estado: 'pendiente' | 'guardada' | 'descartada', obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ estado, ...rango });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<{ excepciones: ExcepcionFila[]; anterioresPendientes: number }>(
+          `/whatsapp/excepciones?${parametros.toString()}`,
+        );
+      },
+      guardar: (id: string, datos?: unknown, fecha?: string) =>
+        panelEnviar<{ guardado: string }>(`/whatsapp/excepciones/${encodeURIComponent(id)}/guardar`, 'POST', {
+          ...(datos === undefined ? {} : { datos }),
+          ...(fecha ? { fecha } : {}),
+        }),
+      descartar: (id: string, motivo: string) =>
+        panelEnviar<{ descartado: true }>(`/whatsapp/excepciones/${encodeURIComponent(id)}/descartar`, 'POST', {
+          motivo,
+        }),
+    },
+    /** Los reportes que la bitácora de cada día de una obra espera (spec 024, RF-37 a RF-42). */
+    esperados: {
+      leer: (obraId: string | null) =>
+        panel<ReportesEsperadosDeLaObra>(
+          `/whatsapp/esperados${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`,
+        ),
+      guardar: (obraId: string, esperados: ReporteEsperadoFila[]) =>
+        panelEnviar<ReportesEsperadosDeLaObra>('/whatsapp/esperados', 'PUT', { obraId, esperados }),
+    },
+    /** El estado de la bitácora de cada día y «Guardar con lo que hay» (spec 024, RF-48, RF-55). */
+    dias: {
+      listar: (filtro: { obraId?: string | null; desde: string; hasta: string }) => {
+        const parametros = new URLSearchParams({ desde: filtro.desde, hasta: filtro.hasta });
+        if (filtro.obraId) parametros.set('obraId', filtro.obraId);
+        return panel<{ dias: DiaDeWhatsapp[] }>(`/whatsapp/dias?${parametros.toString()}`).then((r) => r.dias);
+      },
+      armar: (obraId: string, fecha: string) =>
+        panelEnviar<{ parteId: string | null; llevados: number }>(
+          `/whatsapp/dias/${encodeURIComponent(obraId)}/${encodeURIComponent(fecha)}/armar`,
+          'POST',
+          {},
         ),
     },
   },

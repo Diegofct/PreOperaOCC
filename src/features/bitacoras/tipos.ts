@@ -16,6 +16,8 @@
  */
 import { uuidv7 } from 'uuidv7';
 
+import type { NovedadDePersonal } from '@/shared/catalogos/bitacora';
+
 import { nombreDeActividad } from './actividades';
 
 /**
@@ -152,6 +154,17 @@ export interface PersonaDelParte {
    * cerrar. Ausente en los partes anteriores, que se leen como sin observaciones.
    */
   observaciones?: string;
+  /**
+   * Las horas tal como las reporta la obra (spec 025, RF-1 a RF-5): «L: 13, ED: 3,
+   * EN: 1». Las laboradas son el total del día, con las extra incluidas. Mientras
+   * haya laboradas, mandan sobre el cálculo con el horario de la obra (RF-14).
+   * Ausentes en los partes anteriores, y en los que solo traen entrada y salida.
+   */
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  /** Incapacitado, permiso… (spec 025, RF-18). Ausente o `null`: sin novedad. */
+  novedad?: NovedadDePersonal | null;
   /** Spec 021, RF-46. */
   origen?: OrigenWhatsapp;
 }
@@ -235,12 +248,32 @@ export interface EnsayoDelParte {
   horaFin?: string;
   responsable?: string;
   ubicacion?: UbicacionDelEnsayo;
+  /**
+   * Edad de la muestra, resultado y si cumple, en casillas propias (spec 025, RF-34
+   * a RF-36). Ausentes en los ensayos anteriores, que los llevan dentro de la
+   * observación (RF-44).
+   */
+  edadDias?: number | null;
+  resultado?: number | null;
+  /** «MPa», «%»… tal como se escribió. */
+  unidad?: string | null;
+  cumple?: 'si' | 'no' | null;
   /** Spec 021, RF-46. */
   origen?: OrigenWhatsapp;
 }
 
-/** En la vía, a la altura de un PR, u otro lugar escrito (RF-87). Nunca las dos. */
-export type UbicacionDelEnsayo = { pr: number; metros: number } | { lugar: string };
+/** Una abscisa de la vía: PR y metros. */
+export interface Abscisa {
+  pr: number;
+  metros: number;
+}
+
+/**
+ * En la vía, a la altura de un PR; en un tramo, de una abscisa a otra (spec 025,
+ * RF-31, en el orden en que se escribió, RF-33); u otro lugar escrito (RF-87). Una
+ * sola de las tres.
+ */
+export type UbicacionDelEnsayo = Abscisa | { desde: Abscisa; hasta: Abscisa } | { lugar: string };
 
 /**
  * Un ensayo guardado antes del 2026-09-22: todo ensayo nuevo lleva sus horas.

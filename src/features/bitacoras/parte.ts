@@ -24,7 +24,7 @@ import {
   type MaterialDelParte,
   type PersonaDelParte,
 } from './tipos';
-import { ENSAYOS_DE_CALIDAD, nombreDeClima } from '@/shared/catalogos/bitacora';
+import { ENSAYOS_DE_CALIDAD, nombreDeClima, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import {
   actividadPorItem,
@@ -49,6 +49,11 @@ export interface MaquinaPedida {
   observaciones?: string | null;
   /** Quién la operó (spec 021, RF-73). El nombre no lo dice el navegador. */
   operadorId?: string | null;
+  /**
+   * El medidor que dice el reporte de WhatsApp («km» u «h»), si no es el del tipo de
+   * equipo (spec 026, RF-16). El formulario no lo manda: ahí manda el tipo.
+   */
+  claseMedidor?: ClaseDeMedidor | null;
 }
 
 /**
@@ -80,9 +85,14 @@ export function construirMaquina(
 
 export interface PersonaPedida {
   usuarioId: string;
-  entrada: string;
-  salida: string;
+  /** Opcionales desde la spec 025 (RF-6): basta con las horas laboradas o la novedad. */
+  entrada?: string | null;
+  salida?: string | null;
   observaciones?: string;
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  novedad?: NovedadDePersonal | null;
 }
 
 export function construirPersona(
@@ -97,9 +107,19 @@ export function construirPersona(
     // Se guarda el rótulo y no el slug: es lo que se va a leer, y el catálogo
     // de cargos puede cambiar de nombre sin avisar a los partes viejos.
     cargo: cargo ? nombreDeCargo(cargo) : null,
-    entrada: pedida.entrada,
-    salida: pedida.salida,
+    entrada: pedida.entrada || null,
+    salida: pedida.salida || null,
     observaciones: pedida.observaciones?.trim() ?? '',
+    // Solo si hay: una persona con entrada y salida se guarda como antes de la 025.
+    // Con laboradas, las extra que no se escribieron son 0 (RF-12).
+    ...(typeof pedida.horasLaboradas === 'number'
+      ? {
+          horasLaboradas: pedida.horasLaboradas,
+          extraDiurnas: pedida.extraDiurnas ?? 0,
+          extraNocturnas: pedida.extraNocturnas ?? 0,
+        }
+      : {}),
+    ...(pedida.novedad ? { novedad: pedida.novedad } : {}),
   };
 }
 
@@ -208,6 +228,11 @@ export interface EnsayoPedido {
   horaFin?: string | null;
   responsable?: string | null;
   ubicacion?: UbicacionPorValidar | null;
+  /** Spec 025, RF-34 a RF-36. */
+  edadDias?: number | null;
+  resultado?: number | null;
+  unidad?: string | null;
+  cumple?: 'si' | 'no' | null;
 }
 
 /**
@@ -241,21 +266,33 @@ export function construirEnsayo(
     id: pedido.id ?? uuidv7(),
     ensayo: ensayo.id,
     nombre: ensayo.nombre,
-    observacion: pedido.observacion!.trim(),
+    // Puede faltar si hay resultado o «cumple» (spec 025, RF-38).
+    observacion: pedido.observacion?.trim() ?? '',
   };
   if (vuelveComoAnterior(pedido, guardado)) return base;
 
   const ubicacion = pedido.ubicacion!;
+  const texto = (v: string | null | undefined) => (v?.trim() ? v.trim() : null);
   return {
     ...base,
     horaInicio: pedido.horaInicio!,
-    horaFin: pedido.horaFin!,
+    // Opcional desde la spec 025 (RF-29): ausente si no se escribió.
+    ...(pedido.horaFin ? { horaFin: pedido.horaFin } : {}),
     responsable: pedido.responsable!.trim(),
     // Se copia solo la forma elegida: un PR que viniera junto al lugar no se guarda.
     ubicacion:
       'lugar' in ubicacion
         ? { lugar: ubicacion.lugar!.trim() }
-        : { pr: ubicacion.pr!, metros: ubicacion.metros! },
+        : 'desde' in ubicacion
+          ? {
+              desde: { pr: ubicacion.desde.pr!, metros: ubicacion.desde.metros! },
+              hasta: { pr: ubicacion.hasta.pr!, metros: ubicacion.hasta.metros! },
+            }
+          : { pr: ubicacion.pr!, metros: ubicacion.metros! },
+    edadDias: pedido.edadDias ?? null,
+    resultado: pedido.resultado ?? null,
+    unidad: texto(pedido.unidad),
+    cumple: pedido.cumple ?? null,
   };
 }
 

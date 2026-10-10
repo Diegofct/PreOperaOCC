@@ -32,7 +32,7 @@
  * La fecha por defecto la decide el servidor, no este navegador: quien mira el
  * panel puede estar en otra ciudad y la bitácora es de la jornada de la obra.
  */
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
@@ -42,17 +42,20 @@ import { EtiquetaDeEstado, EtiquetaDeVeredicto } from "@/features/laboratorio/et
 import type { GranulometriaDelParte } from "@/features/laboratorio/tipos";
 import {
   formatearAbscisa,
-  OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
 } from "@/shared/rules/cantera";
 import {
   CONDICIONES_CLIMA,
   ENSAYOS_DE_CALIDAD,
+  NOVEDADES_DE_PERSONAL,
+  nombreDeNovedad,
+  type NovedadDePersonal,
 } from "@/shared/catalogos/bitacora";
 import {
-  desglosarJornada,
   describirHorarioDelDia,
+  horasDeLaPersona,
   horasLegibles,
+  horasNoCuadran,
   MAXIMO_MINUTOS_EXTRA_POR_DIA,
   validarFranjas,
   mensajeDeFranja,
@@ -124,6 +127,7 @@ import {
 import type {
   ActividadDelParteFila,
   BitacoraFila,
+  EnsayoDelParteFila,
   FilaDeControlDeCalidadFila,
   MaterialDelParteFila,
   CanteraDelParteFila,
@@ -246,7 +250,39 @@ type FilaPersona = {
   salida: string;
   /** Lo que explica sus horas ese día (spec 016, RF-26). Opcional. */
   observaciones: string;
+  /** Las horas como las reporta la obra, como se escriben (spec 025, RF-1 a RF-3). */
+  horasLaboradas: string;
+  extraDiurnas: string;
+  extraNocturnas: string;
+  /** Spec 025, RF-18. */
+  novedad: NovedadDePersonal | null;
 };
+
+/** Una fila de personal vacía: en blanco a propósito (ver «Añadir persona»). */
+function personaEnBlanco(usuarioId: string): FilaPersona {
+  return {
+    usuarioId,
+    entrada: "",
+    salida: "",
+    observaciones: "",
+    horasLaboradas: "",
+    extraDiurnas: "",
+    extraNocturnas: "",
+    novedad: null,
+  };
+}
+
+/** Unas horas tal como se escriben: «8», «8.5» u «8,5». */
+function horasDeCampo(texto: string): number | null {
+  return aNumero(texto.replace(",", "."));
+}
+
+/** Unas horas guardadas, para escribirlas en su campo. */
+function campoDeHoras(horas: number | null | undefined): string {
+  return typeof horas === "number" ? String(horas) : "";
+}
+
+const OPCIONES_DE_NOVEDAD = NOVEDADES_DE_PERSONAL.map((n) => ({ valor: n.id, etiqueta: n.nombre }));
 type FilaActividad = {
   /**
    * Nace en el navegador al pulsar «Añadir actividad», no al guardar: es a lo
@@ -283,11 +319,20 @@ type FilaControlDeCalidad = {
   horaInicio: string;
   horaFin: string;
   responsable: string;
-  /** Qué forma de ubicación se está llenando; solo esa viaja (RF-87). */
-  tipoUbicacion: "pr" | "lugar";
+  /** Qué forma de ubicación se está llenando; solo esa viaja (RF-87; tramo, 025/RF-31). */
+  tipoUbicacion: "pr" | "tramo" | "lugar";
   pr: number | null;
-  metros: number | null;
+  /** Escritos: cualquier valor de 0 a 999 (025/RF-32). */
+  metros: string;
+  /** El fin del tramo (025/RF-31). */
+  prHasta: number | null;
+  metrosHasta: string;
   lugar: string;
+  /** Edad, resultado, unidad y si cumple (025/RF-34 a RF-36), como se escriben. */
+  edadDias: string;
+  resultado: string;
+  unidad: string;
+  cumple: "si" | "no" | null;
   /**
    * Guardado antes del 2026-09-22, sin horas, responsable ni ubicación (RF-89): se
    * sigue editando su ensayo y su observación, sin pedirle lo que no tiene.
@@ -305,8 +350,12 @@ export default function PantallaPartes() {
   const rol = persona?.rol ?? "operador";
   const esGerencia = alcanza(rol, "obras", "escribir");
 
-  const [fecha, setFecha] = useState(fechaDeJornada());
-  const [obraId, setObraId] = useState<string | null>(null);
+  // Spec 024, RF-59: el historial de WhatsApp abre la bitácora de un día y una obra.
+  const enlace = useLocalSearchParams<{ fecha?: string; obraId?: string }>();
+  const [fecha, setFecha] = useState(
+    enlace.fecha && /^\d{4}-\d{2}-\d{2}$/.test(enlace.fecha) ? enlace.fecha : fechaDeJornada(),
+  );
+  const [obraId, setObraId] = useState<string | null>(enlace.obraId ?? null);
 
   const dia = useListado<DiaDeObra>(
     useCallback(async () => [await api.partes.delDia(fecha)], [fecha]),
@@ -1175,6 +1224,11 @@ function SeccionPersonal({
       salida: p.salida ?? "",
       // Ausentes en los partes anteriores a la spec 016: se leen vacías (RF-29).
       observaciones: p.observaciones ?? "",
+      // Ausentes en los partes anteriores a la spec 025 (RF-60).
+      horasLaboradas: campoDeHoras(p.horasLaboradas),
+      extraDiurnas: campoDeHoras(p.extraDiurnas),
+      extraNocturnas: campoDeHoras(p.extraNocturnas),
+      novedad: p.novedad ?? null,
     })),
   );
   const [guardando, setGuardando] = useState(false);
@@ -1182,7 +1236,7 @@ function SeccionPersonal({
   const usados = new Set(filas.map((f) => f.usuarioId));
   const libres = personas.filter((p) => !usados.has(p.id));
 
-  function cambiar(indice: number, campo: keyof FilaPersona, valor: string) {
+  function cambiar<C extends keyof FilaPersona>(indice: number, campo: C, valor: FilaPersona[C]) {
     setFilas(
       filas.map((f, i) => (i === indice ? { ...f, [campo]: valor } : f)),
     );
@@ -1197,6 +1251,10 @@ function SeccionPersonal({
           entrada: f.entrada,
           salida: f.salida,
           observaciones: f.observaciones,
+          horasLaboradas: horasDeCampo(f.horasLaboradas),
+          extraDiurnas: horasDeCampo(f.extraDiurnas),
+          extraNocturnas: horasDeCampo(f.extraNocturnas),
+          novedad: f.novedad,
         })),
       });
       alFallar(null);
@@ -1231,12 +1289,22 @@ function SeccionPersonal({
         <>
           {filas.map((fila, indice) => {
             const quien = personas.find((p) => p.id === fila.usuarioId);
-            const desglose = desglosarJornada(
-              parte.fecha,
-              fila.entrada || null,
-              fila.salida || null,
-              parte.horario,
-            );
+            const conHoras = {
+              entrada: fila.entrada || null,
+              salida: fila.salida || null,
+              horasLaboradas: horasDeCampo(fila.horasLaboradas),
+              extraDiurnas: horasDeCampo(fila.extraDiurnas),
+              extraNocturnas: horasDeCampo(fila.extraNocturnas),
+              novedad: fila.novedad,
+            };
+            // Lo reportado manda; si no hay, el cálculo con el horario (025/RF-14, RF-15).
+            const horas = horasDeLaPersona(parte.fecha, conHoras, parte.horario);
+            const desglose = horas?.fuente === "calculadas" ? horas : null;
+            const noCuadra = horasNoCuadran(parte.fecha, conHoras, parte.horario);
+            // Las casillas de la 025 solo se ven si se puede escribir o si traen algo:
+            // una bitácora cerrada antes se ve como se guardó (RF-60).
+            const verHoras =
+              editable || Boolean(fila.horasLaboradas || fila.extraDiurnas || fila.extraNocturnas);
 
             return (
               <FilaDeFormulario
@@ -1264,6 +1332,65 @@ function SeccionPersonal({
                   valor={fila.salida}
                   onChange={(v) => cambiar(indice, "salida", v)}
                 />
+                {verHoras ? (
+                  <>
+                    <Campo
+                      etiqueta="Laboradas (L)"
+                      valor={fila.horasLaboradas}
+                      onChange={(v) => cambiar(indice, "horasLaboradas", v)}
+                      soloNumeros
+                      ancho={110}
+                    />
+                    <Campo
+                      etiqueta="Extra diurnas (ED)"
+                      valor={fila.extraDiurnas}
+                      onChange={(v) => cambiar(indice, "extraDiurnas", v)}
+                      soloNumeros
+                      ancho={130}
+                    />
+                    <Campo
+                      etiqueta="Extra nocturnas (EN)"
+                      valor={fila.extraNocturnas}
+                      onChange={(v) => cambiar(indice, "extraNocturnas", v)}
+                      soloNumeros
+                      ancho={140}
+                    />
+                  </>
+                ) : null}
+                {editable || fila.novedad ? (
+                  <Selector
+                    etiqueta="Novedad"
+                    valor={fila.novedad}
+                    opciones={OPCIONES_DE_NOVEDAD}
+                    onChange={(v) => cambiar(indice, "novedad", (v as NovedadDePersonal | null) ?? null)}
+                    permiteVacio
+                    vacio="Sin novedad"
+                    ancho={170}
+                  />
+                ) : null}
+                {horas?.fuente === "reportadas" ? (
+                  <View style={estilos.desglose}>
+                    {/* Tal como se reportaron (RF-13): las laboradas ya traen las extra. */}
+                    <Text style={estilos.apoyo}>
+                      {`${horasLegibles(horas.trabajados)} laboradas (reportadas)`}
+                    </Text>
+                    {horas.extraDiurna > 0 ? (
+                      <Etiqueta tono="atencion">
+                        {horasLegibles(horas.extraDiurna)} extra diurnas
+                      </Etiqueta>
+                    ) : null}
+                    {horas.extraNocturna > 0 ? (
+                      <Etiqueta tono="atencion">
+                        {horasLegibles(horas.extraNocturna)} extra nocturnas
+                      </Etiqueta>
+                    ) : null}
+                  </View>
+                ) : null}
+                {fila.novedad ? (
+                  <View style={estilos.desglose}>
+                    <Etiqueta tono="atencion">{nombreDeNovedad(fila.novedad)}</Etiqueta>
+                  </View>
+                ) : null}
                 {desglose ? (
                   <View style={estilos.desglose}>
                     {/* Trabajadas y ordinarias siempre; las demás solo si hay:
@@ -1293,6 +1420,15 @@ function SeccionPersonal({
                     ) : null}
                   </View>
                 ) : null}
+                {/* Avisa y no impide (025/RF-16). */}
+                {noCuadra ? (
+                  <View style={estilos.avisoEnRenglon}>
+                    <Aviso tono="info">
+                      {"Las horas reportadas no cuadran con la entrada y la salida según el horario de la obra. " +
+                        "Mandan las reportadas; se puede guardar y cerrar igual."}
+                    </Aviso>
+                  </View>
+                ) : null}
                 {/* A diferencia de la de la máquina, no hace falta para cerrar
                     (RF-27): casi siempre no hay nada que explicar. Se sigue
                     viendo con la bitácora cerrada o anulada (RF-28). */}
@@ -1308,10 +1444,10 @@ function SeccionPersonal({
                   }
                 />
                 {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
-                {desglose?.masDeDosExtra ? (
+                {horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA ? (
                   <View style={estilos.avisoEnRenglon}>
                     <Aviso tono="info">
-                      {`${horasLegibles(desglose.extra)} extra en el día: pasa de las ` +
+                      {`${horasLegibles(horas.extra)} extra en el día: pasa de las ` +
                         `${MAXIMO_MINUTOS_EXTRA_POR_DIA / 60} que permite la ley. ` +
                         "Se puede guardar igual."}
                     </Aviso>
@@ -1350,10 +1486,7 @@ function SeccionPersonal({
               // puesto el día que a alguien se le olvide cambiarlo, y nadie
               // distingue después lo escrito de lo que vino solo.
               v &&
-              setFilas([
-                ...filas,
-                { usuarioId: v, entrada: "", salida: "", observaciones: "" },
-              ])
+              setFilas([...filas, personaEnBlanco(v)])
             }
             vacio="Elija una persona"
             ancho={280}
@@ -1895,31 +2028,105 @@ const ENSAYO_EN_BLANCO: Omit<FilaControlDeCalidad, "id" | "heredado"> = {
   responsable: "",
   tipoUbicacion: "pr",
   pr: null,
-  metros: null,
+  metros: "",
+  prHasta: null,
+  metrosHasta: "",
   lugar: "",
+  edadDias: "",
+  resultado: "",
+  unidad: "",
+  cumple: null,
   anterior: false,
 };
 
 const OPCIONES_DE_UBICACION = [
   { valor: "pr", etiqueta: "PR y metros" },
+  { valor: "tramo", etiqueta: "Tramo (de … a …)" },
   { valor: "lugar", etiqueta: "Otro lugar" },
 ];
+
+const OPCIONES_DE_PR_DEL_ENSAYO = OPCIONES_DE_PR.map((n) => ({ valor: String(n), etiqueta: `PR ${n}` }));
+
+const OPCIONES_DE_CUMPLE = [
+  { valor: "si", etiqueta: "Cumple" },
+  { valor: "no", etiqueta: "No cumple" },
+];
+
+/** Unos metros escritos: un entero, o `null` si está vacío o no es un número. */
+function metrosDeCampo(texto: string): number | null {
+  const valor = aNumero(texto);
+  return valor === null ? null : valor;
+}
+
+/** «PR 1 + 300 a PR 1 + 170», en el orden en que se escribió (025/RF-33). */
+function describirUbicacion(ubicacion: NonNullable<EnsayoDelParteFila["ubicacion"]>): string {
+  if ("lugar" in ubicacion) return ubicacion.lugar;
+  if ("desde" in ubicacion) {
+    return `${formatearAbscisa(ubicacion.desde.pr, ubicacion.desde.metros)} a ${formatearAbscisa(ubicacion.hasta.pr, ubicacion.hasta.metros)}`;
+  }
+  return formatearAbscisa(ubicacion.pr, ubicacion.metros);
+}
+
+/** «28 días · 2.98 MPa · No cumple», o vacío si el ensayo no los trae (025/RF-37, RF-44). */
+function resultadoDelEnsayo(fila: EnsayoDelParteFila): string {
+  const partes: string[] = [];
+  if (typeof fila.edadDias === "number") partes.push(`${fila.edadDias} días`);
+  if (typeof fila.resultado === "number") partes.push(`${fila.resultado}${fila.unidad ? ` ${fila.unidad}` : ""}`);
+  if (fila.cumple === "si") partes.push("Cumple");
+  if (fila.cumple === "no") partes.push("No cumple");
+  return partes.join(" · ");
+}
 
 /** «10:00 a 11:00 · PR 5 + 050», o «—» en un ensayo anterior o un material (RF-89). */
 function cuandoYDonde(fila: FilaDeControlDeCalidadFila): string {
   if ("material" in fila || !fila.horaInicio || !fila.ubicacion) return "—";
-  const donde =
-    "lugar" in fila.ubicacion
-      ? fila.ubicacion.lugar
-      : formatearAbscisa(fila.ubicacion.pr, fila.ubicacion.metros);
-  return `${fila.horaInicio} a ${fila.horaFin} · ${donde}`;
+  // Sin hora de fin desde la spec 025 (RF-29): solo la de inicio.
+  const cuando = fila.horaFin ? `${fila.horaInicio} a ${fila.horaFin}` : fila.horaInicio;
+  return `${cuando} · ${describirUbicacion(fila.ubicacion)}`;
 }
 
 /** La ubicación que viaja: solo la forma elegida, nunca las dos (RF-87). */
 function ubicacionDe(fila: FilaControlDeCalidad): UbicacionPorValidar {
-  return fila.tipoUbicacion === "lugar"
-    ? { lugar: fila.lugar }
-    : { pr: fila.pr, metros: fila.metros };
+  if (fila.tipoUbicacion === "lugar") return { lugar: fila.lugar };
+  if (fila.tipoUbicacion === "tramo") {
+    return {
+      desde: { pr: fila.pr, metros: metrosDeCampo(fila.metros) },
+      hasta: { pr: fila.prHasta, metros: metrosDeCampo(fila.metrosHasta) },
+    };
+  }
+  return { pr: fila.pr, metros: metrosDeCampo(fila.metros) };
+}
+
+/** La ubicación ya validada, con sus números: lo que viaja al servidor. */
+function ubicacionGuardable(u: UbicacionPorValidar): NonNullable<EnsayoDelParteFila["ubicacion"]> {
+  if ("lugar" in u) return { lugar: u.lugar ?? "" };
+  if ("desde" in u) {
+    return {
+      desde: { pr: u.desde.pr!, metros: u.desde.metros! },
+      hasta: { pr: u.hasta.pr!, metros: u.hasta.metros! },
+    };
+  }
+  return { pr: u.pr!, metros: u.metros! };
+}
+
+/** La ubicación guardada, repartida en los campos del formulario. */
+function camposDeUbicacion(
+  ubicacion: EnsayoDelParteFila["ubicacion"],
+): Pick<FilaControlDeCalidad, "tipoUbicacion" | "pr" | "metros" | "prHasta" | "metrosHasta" | "lugar"> {
+  const vacia = { pr: null, metros: "", prHasta: null, metrosHasta: "", lugar: "" };
+  if (!ubicacion) return { ...vacia, tipoUbicacion: "pr" };
+  if ("lugar" in ubicacion) return { ...vacia, tipoUbicacion: "lugar", lugar: ubicacion.lugar };
+  if ("desde" in ubicacion) {
+    return {
+      ...vacia,
+      tipoUbicacion: "tramo",
+      pr: ubicacion.desde.pr,
+      metros: String(ubicacion.desde.metros),
+      prHasta: ubicacion.hasta.pr,
+      metrosHasta: String(ubicacion.hasta.metros),
+    };
+  }
+  return { ...vacia, tipoUbicacion: "pr", pr: ubicacion.pr, metros: String(ubicacion.metros) };
 }
 
 function SeccionLaboratorio({
@@ -1949,10 +2156,11 @@ function SeccionLaboratorio({
             horaInicio: fila.horaInicio ?? "",
             horaFin: fila.horaFin ?? "",
             responsable: fila.responsable ?? "",
-            tipoUbicacion: fila.ubicacion && "lugar" in fila.ubicacion ? "lugar" : "pr",
-            pr: fila.ubicacion && "pr" in fila.ubicacion ? fila.ubicacion.pr : null,
-            metros: fila.ubicacion && "metros" in fila.ubicacion ? fila.ubicacion.metros : null,
-            lugar: fila.ubicacion && "lugar" in fila.ubicacion ? fila.ubicacion.lugar : "",
+            ...camposDeUbicacion(fila.ubicacion),
+            edadDias: typeof fila.edadDias === "number" ? String(fila.edadDias) : "",
+            resultado: typeof fila.resultado === "number" ? String(fila.resultado) : "",
+            unidad: fila.unidad ?? "",
+            cumple: fila.cumple ?? null,
             // Por la forma, como el servidor: todo ensayo nuevo lleva sus horas.
             anterior: fila.horaInicio === undefined,
             heredado: null,
@@ -1984,6 +2192,8 @@ function SeccionLaboratorio({
       horaFin: fila.horaFin,
       responsable: fila.responsable,
       ubicacion: ubicacionDe(fila),
+      resultado: aNumero(fila.resultado.replace(",", ".")),
+      cumple: fila.cumple,
     });
     for (const falta of reglas) {
       if (fila.anterior && falta.campo !== "observacion") continue;
@@ -2016,10 +2226,11 @@ function SeccionLaboratorio({
                 horaFin: f.horaFin,
                 responsable: f.responsable,
                 // Ya validada arriba: si faltara el PR o los metros no se llega aquí.
-                ubicacion:
-                  f.tipoUbicacion === "lugar"
-                    ? { lugar: f.lugar }
-                    : { pr: f.pr!, metros: f.metros! },
+                ubicacion: ubicacionGuardable(ubicacionDe(f)),
+                edadDias: aNumero(f.edadDias),
+                resultado: aNumero(f.resultado.replace(",", ".")),
+                unidad: f.unidad.trim() || null,
+                cumple: f.cumple,
               },
         ),
       });
@@ -2065,10 +2276,14 @@ function SeccionLaboratorio({
     },
     {
       clave: "detalle",
-      titulo: "Observación o cantidad",
+      titulo: "Resultado, observación o cantidad",
       ancho: 200,
       pintar: (f) => (
-        <Celda lineas={6}>{"material" in f ? `${f.cantidad} ${f.unidad}` : f.observacion}</Celda>
+        <Celda lineas={6}>
+          {"material" in f
+            ? `${f.cantidad} ${f.unidad}`
+            : [resultadoDelEnsayo(f), f.observacion].filter(Boolean).join(". ") || "—"}
+        </Celda>
       ),
     },
   ];
@@ -2157,12 +2372,12 @@ function SeccionLaboratorio({
                       error={faltas.horaInicio}
                       obligatorio
                     />
+                    {/* Opcional desde la spec 025 (RF-29). */}
                     <SelectorDeHora
                       etiqueta="Fin"
                       valor={fila.horaFin}
                       onChange={(v) => cambiar(indice, "horaFin", v)}
                       error={faltas.horaFin}
-                      obligatorio
                     />
                     <Campo
                       etiqueta="Responsable"
@@ -2176,35 +2391,56 @@ function SeccionLaboratorio({
                       etiqueta="Ubicación"
                       valor={fila.tipoUbicacion}
                       opciones={OPCIONES_DE_UBICACION}
-                      onChange={(v) => cambiar(indice, "tipoUbicacion", v === "lugar" ? "lugar" : "pr")}
+                      onChange={(v) =>
+                        cambiar(indice, "tipoUbicacion", v === "lugar" || v === "tramo" ? v : "pr")
+                      }
                       obligatorio
                       ancho={200}
                     />
-                    {fila.tipoUbicacion === "pr" ? (
+                    {fila.tipoUbicacion !== "lugar" ? (
                       <>
                         <Selector
-                          etiqueta="PR"
+                          etiqueta={fila.tipoUbicacion === "tramo" ? "PR inicial" : "PR"}
                           valor={fila.pr === null ? null : String(fila.pr)}
-                          opciones={OPCIONES_DE_PR.map((n) => ({ valor: String(n), etiqueta: `PR ${n}` }))}
+                          opciones={OPCIONES_DE_PR_DEL_ENSAYO}
                           onChange={(v) => cambiar(indice, "pr", v === null ? null : Number(v))}
                           vacio="Elija el PR"
                           error={faltas.pr}
                           obligatorio
-                          ancho={170}
+                          ancho={150}
                         />
-                        <Selector
-                          etiqueta="Metros"
-                          valor={fila.metros === null ? null : String(fila.metros)}
-                          opciones={OPCIONES_DE_METROS.map((n) => ({
-                            valor: String(n),
-                            etiqueta: `+ ${String(n).padStart(3, "0")}`,
-                          }))}
-                          onChange={(v) => cambiar(indice, "metros", v === null ? null : Number(v))}
-                          vacio="Elija los metros"
+                        {/* Cualquier valor de 0 a 999, no de 25 en 25 (025/RF-32). */}
+                        <Campo
+                          etiqueta={fila.tipoUbicacion === "tramo" ? "Metros iniciales" : "Metros"}
+                          valor={fila.metros}
+                          onChange={(v) => cambiar(indice, "metros", v)}
+                          soloNumeros
                           error={faltas.metros}
                           obligatorio
-                          ancho={170}
+                          ancho={130}
                         />
+                        {fila.tipoUbicacion === "tramo" ? (
+                          <>
+                            <Selector
+                              etiqueta="PR final"
+                              valor={fila.prHasta === null ? null : String(fila.prHasta)}
+                              opciones={OPCIONES_DE_PR_DEL_ENSAYO}
+                              onChange={(v) => cambiar(indice, "prHasta", v === null ? null : Number(v))}
+                              vacio="Elija el PR"
+                              error={faltas.tramo}
+                              obligatorio
+                              ancho={150}
+                            />
+                            <Campo
+                              etiqueta="Metros finales"
+                              valor={fila.metrosHasta}
+                              onChange={(v) => cambiar(indice, "metrosHasta", v)}
+                              soloNumeros
+                              obligatorio
+                              ancho={130}
+                            />
+                          </>
+                        ) : null}
                       </>
                     ) : (
                       <Campo
@@ -2219,14 +2455,53 @@ function SeccionLaboratorio({
                     )}
                   </>
                 )}
-                {/* Obligatoria: si no hay nada que anotar, «Sin observaciones» (RF-72). */}
+                {fila.anterior ? null : (
+                  <>
+                    {/* En casillas propias (025/RF-34 a RF-36). */}
+                    <Campo
+                      etiqueta="Edad (días)"
+                      valor={fila.edadDias}
+                      onChange={(v) => cambiar(indice, "edadDias", v)}
+                      soloNumeros
+                      ancho={110}
+                    />
+                    <Campo
+                      etiqueta="Resultado"
+                      valor={fila.resultado}
+                      onChange={(v) => cambiar(indice, "resultado", v)}
+                      soloNumeros
+                      ancho={110}
+                    />
+                    <Campo
+                      etiqueta="Unidad"
+                      valor={fila.unidad}
+                      onChange={(v) => cambiar(indice, "unidad", v)}
+                      ayuda="MPa, %…"
+                      ancho={100}
+                    />
+                    <Selector
+                      etiqueta="¿Cumple?"
+                      valor={fila.cumple}
+                      opciones={OPCIONES_DE_CUMPLE}
+                      onChange={(v) => cambiar(indice, "cumple", v === "si" || v === "no" ? v : null)}
+                      permiteVacio
+                      vacio="No se sabe"
+                      ancho={150}
+                    />
+                  </>
+                )}
+                {/* Si no hay resultado ni «cumple», obligatoria: «Sin observaciones» si no
+                    hay nada que anotar (RF-72; 025/RF-38, RF-39). */}
                 <Campo
                   etiqueta="Observación"
                   valor={fila.observacion}
                   onChange={(v) => cambiar(indice, "observacion", v)}
-                  ayuda={faltas.observacion ? undefined : "Si no hay nada que anotar, escriba «Sin observaciones»."}
+                  ayuda={
+                    faltas.observacion
+                      ? undefined
+                      : "Opcional si hay resultado o se dice si cumple. Si no, escriba «Sin observaciones»."
+                  }
                   error={faltas.observacion}
-                  obligatorio
                   multilinea
                 />
                 {quitar}

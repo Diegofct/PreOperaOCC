@@ -25,6 +25,13 @@ import { whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
 export const obraDelMensaje: SQL<string | null> = sql<string | null>`coalesce(${whatsappMensajes.obraDecididaId}, ${whatsappGrupos.obraId})`;
 
 /**
+ * El día del reporte de un mensaje, como expresión SQL: el del hecho, o el día en
+ * que se envió, en la obra, si no tiene (spec 025, RF-48). Lo usan el historial, «No
+ * se pudo guardar» y sus filtros de fechas, para que los tres cuenten igual.
+ */
+export const diaDelMensaje: SQL<string> = sql<string>`coalesce(${whatsappMensajes.fechaHecho}, (${whatsappMensajes.enviadoEn} at time zone 'America/Bogota')::date)`;
+
+/**
  * El id de un grupo o un mensaje tal como llega en la ruta, decodificado.
  *
  * El de un grupo lleva arroba (`…@g.us`), y el navegador y n8n la mandan como

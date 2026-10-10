@@ -29,7 +29,6 @@ import {
 import {
   faltasDelDestino,
   MENSAJES_DE_VIAJE,
-  OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
   valeLimpio,
   type CanteraDelParte,
@@ -39,8 +38,14 @@ import {
   IDS_UNIDAD_DE_ACTIVIDAD,
   type UnidadDeActividad,
 } from '@/shared/catalogos/presupuesto';
-import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
-import type { OrigenWhatsapp, ViajeDelParte } from '@/features/bitacoras/tipos';
+import {
+  faltaObservacionDelEnsayo,
+  faltasDeActividad,
+  MENSAJES_DE_ENSAYO,
+  METROS_MAXIMOS_DEL_ENSAYO,
+} from '@/shared/rules/parte';
+import { IDS_DE_NOVEDAD, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
+import type { OrigenWhatsapp, UbicacionDelEnsayo, ViajeDelParte } from '@/features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '@/features/laboratorio/tipos';
 import type {
   EstadoVisibleEnsayo,
@@ -56,7 +61,19 @@ import {
   type HorarioDeObra,
 } from '@/shared/rules/horas';
 import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
-import type { DestinoDeWhatsapp, ReporteDelDia } from '@/shared/rules/whatsapp';
+import {
+  TIPOS_DE_REPORTE,
+  type EstadoDelDia,
+  type TipoCreado,
+  type TipoDeReporte,
+} from '@/shared/rules/whatsapp-automatico';
+import {
+  CAMINOS_DEL_CONDUCTOR,
+  type CaminoDelConductor,
+  type DestinoDeWhatsapp,
+  type EstadoMensajeWhatsapp,
+  type ReporteDelDia,
+} from '@/shared/rules/whatsapp';
 
 /** Texto opcional de formulario: lo vacío es ausencia, no cadena vacía. */
 const textoOpcional = (max: number) =>
@@ -257,6 +274,8 @@ export const personaEditada = z.object({
 export type PersonaNueva = z.input<typeof personaNueva>;
 
 export interface PersonaFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   usuario: string;
   nombreCompleto: string;
@@ -307,6 +326,8 @@ export const vehiculoEditado = vehiculoNuevo.partial();
 export type VehiculoNuevo = z.input<typeof vehiculoNuevo>;
 
 export interface VehiculoFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   codigoInterno: string;
   placa: string | null;
@@ -319,6 +340,8 @@ export interface VehiculoFila {
   obraNombre: string | null;
   odometroKm: number | null;
   horometroH: number | null;
+  /** ISO 8601, o `null` si nunca se registró una lectura (spec 026, RF-21). */
+  medidorActualizadoEn?: string | null;
   estado: EstadoVehiculo;
   /** Llantas puestas a las que les queda 30% de vida o menos. Ver spec 003. */
   llantasPorCambiar: number;
@@ -739,12 +762,25 @@ export const maquinaDelParte = z.object({
   operadorId: idOpcional,
 });
 
+/** Unas horas del parte: un número, o nada. Si valen lo decide la regla (spec 025, RF-4). */
+const horasDelParte = z.number().finite().nullish();
+
+/**
+ * Una persona del parte. Desde la spec 025 basta con las horas laboradas, la entrada
+ * y la salida, o la novedad (RF-6, RF-7, RF-19): qué combinación vale lo decide
+ * `validarPersonaDelParte` en el servidor, la misma regla que el cierre.
+ */
 export const personaDelParte = z.object({
   usuarioId: textoObligatorio(64, 'la persona'),
-  entrada: horaDelDia,
-  salida: horaDelDia,
+  // Vacía es «no se escribió»: la pantalla manda "" cuando la casilla está en blanco.
+  entrada: z.union([horaDelDia, z.literal('')]).nullish().transform((v) => v || null),
+  salida: z.union([horaDelDia, z.literal('')]).nullish().transform((v) => v || null),
   /** Lo que explica sus horas: llegó tarde, salió a cita médica (spec 016, RF-26). Opcional. */
   observaciones: textoOpcional(1000).transform((v) => v ?? ''),
+  horasLaboradas: horasDelParte,
+  extraDiurnas: horasDelParte,
+  extraNocturnas: horasDelParte,
+  novedad: z.enum(IDS_DE_NOVEDAD).nullish(),
 });
 
 export const actividadDelParte = z.object({
@@ -839,15 +875,22 @@ const horaDelEnsayo = z
  * un lugar escrito. Estrictas las dos: una ubicación con PR **y** lugar no es
  * ninguna de las dos formas y se rechaza, en vez de guardar una y perder la otra.
  */
+const abscisaDelEnsayo = z
+  .object({
+    pr: z.number().refine((v) => OPCIONES_DE_PR.includes(v), MENSAJES_DE_VIAJE.prFueraDeRango),
+    // Cualquiera de 0 a 999, no de 25 en 25 (spec 025, RF-32).
+    metros: z
+      .number()
+      .int(MENSAJES_DE_ENSAYO.metrosDelEnsayo)
+      .min(0, MENSAJES_DE_ENSAYO.metrosDelEnsayo)
+      .max(METROS_MAXIMOS_DEL_ENSAYO, MENSAJES_DE_ENSAYO.metrosDelEnsayo),
+  })
+  .strict();
+
 const ubicacionDelEnsayo = z.union([
-  z
-    .object({
-      pr: z.number().refine((v) => OPCIONES_DE_PR.includes(v), MENSAJES_DE_VIAJE.prFueraDeRango),
-      metros: z
-        .number()
-        .refine((v) => OPCIONES_DE_METROS.includes(v), MENSAJES_DE_VIAJE.metrosFueraDeRango),
-    })
-    .strict(),
+  abscisaDelEnsayo,
+  // Un tramo, en el orden en que se escribió (spec 025, RF-31, RF-33).
+  z.object({ desde: abscisaDelEnsayo, hasta: abscisaDelEnsayo }).strict(),
   z.object({ lugar: z.string().trim().max(160) }).strict(),
 ]);
 
@@ -869,6 +912,11 @@ export const ensayoDelParte = z
     horaFin: horaDelEnsayo,
     responsable: z.string().trim().max(120).nullish(),
     ubicacion: ubicacionDelEnsayo.nullish(),
+    // Spec 025, RF-34 a RF-36.
+    edadDias: z.number().int().min(0).max(3650).nullish(),
+    resultado: z.number().finite().nullish(),
+    unidad: z.string().trim().max(20).nullish(),
+    cumple: z.enum(['si', 'no']).nullish(),
   })
   .superRefine((fila, contexto) => {
     if (!fila.ensayo) {
@@ -877,7 +925,9 @@ export const ensayoDelParte = z
       }
       return;
     }
-    const falta = faltaObservacionDelEnsayo(fila.observacion);
+    // Con resultado o «cumple», la observación no hace falta (spec 025, RF-38).
+    const conResultado = typeof fila.resultado === 'number' || Boolean(fila.cumple);
+    const falta = conResultado ? null : faltaObservacionDelEnsayo(fila.observacion);
     if (falta) contexto.addIssue({ code: 'custom', path: ['observacion'], message: falta });
   });
 
@@ -926,6 +976,11 @@ export interface PersonaDelParteFila {
   salida: string | null;
   /** Ausente en los partes anteriores a la spec 016 (RF-29). */
   observaciones?: string;
+  /** Spec 025, RF-1 a RF-3 y RF-18. Ausentes en lo anterior y en lo que trae entrada y salida. */
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  novedad?: NovedadDePersonal | null;
 }
 
 export interface ActividadDelParteFila {
@@ -977,7 +1032,12 @@ export interface EnsayoDelParteFila {
   horaInicio?: string;
   horaFin?: string;
   responsable?: string;
-  ubicacion?: { pr: number; metros: number } | { lugar: string };
+  ubicacion?: UbicacionDelEnsayo;
+  /** Spec 025, RF-34 a RF-36. Ausentes en los ensayos anteriores (RF-44). */
+  edadDias?: number | null;
+  resultado?: number | null;
+  unidad?: string | null;
+  cumple?: 'si' | 'no' | null;
 }
 
 /**
@@ -1343,6 +1403,8 @@ export const viajeNuevo = z
 export type ViajeNuevo = z.input<typeof viajeNuevo>;
 
 export interface SitioDeCanteraFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   obraId: string;
   obraNombre: string | null;
@@ -1351,6 +1413,8 @@ export interface SitioDeCanteraFila {
 }
 
 export interface MaterialDeCanteraFila {
+  /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
+  desdeWhatsapp?: boolean;
   id: string;
   obraId: string;
   obraNombre: string | null;
@@ -1619,12 +1683,15 @@ export interface GranulometriaDelParteFila {
  */
 const textoDeIa = z.string().nullish();
 const numeroDeIa = z.number().nullish();
+const numeroOTextoDeIa = z.union([z.number(), z.string()]).nullish();
 const listaDeIa = <T extends z.ZodType>(fila: T) => z.array(fila).max(200).default([]);
 
 export const propuestaDeIa = z.looseObject({
   categoria: z.string().trim().min(1, 'Falta la categoría.').max(60),
   resumen: textoDeIa,
   fecha_evento: textoDeIa,
+  /** La hora de la marca de agua de la foto (spec 024, RF-16). */
+  hora_foto: textoDeIa,
   complementa_a: textoDeIa,
   confianza: textoDeIa,
   requiere_revision: z.boolean().nullish(),
@@ -1658,6 +1725,10 @@ export const propuestaDeIa = z.looseObject({
       medidor_inicial: numeroDeIa,
       medidor_final: numeroDeIa,
       observacion: textoDeIa,
+      /** Spec 026, RF-9, RF-16. */
+      unidad_medidor: textoDeIa,
+      tipo_equipo: textoDeIa,
+      marca: textoDeIa,
     }),
   ),
   personal: listaDeIa(
@@ -1668,6 +1739,14 @@ export const propuestaDeIa = z.looseObject({
       observacion: textoDeIa,
       /** La hoja del archivo de donde salió la persona (spec 023, RF-62). */
       cargo_hoja: textoDeIa,
+      /**
+       * Las horas como las reporta la obra y la novedad (spec 025, RF-23, RF-24).
+       * Número o texto: una entrega no se rechaza entera por un «8» entre comillas.
+       */
+      horas_laboradas: numeroOTextoDeIa,
+      extra_diurnas: numeroOTextoDeIa,
+      extra_nocturnas: numeroOTextoDeIa,
+      novedad: textoDeIa,
     }),
   ),
   ensayos: listaDeIa(
@@ -1677,10 +1756,12 @@ export const propuestaDeIa = z.looseObject({
       hora_fin: textoDeIa,
       responsable: textoDeIa,
       ubicacion: textoDeIa,
-      resultado: z.union([z.number(), z.string()]).nullish(),
+      resultado: numeroOTextoDeIa,
       unidad: textoDeIa,
       cumple: textoDeIa,
       observacion: textoDeIa,
+      /** Spec 025, RF-42. */
+      edad_dias: numeroOTextoDeIa,
     }),
   ),
   viajes: listaDeIa(
@@ -1695,6 +1776,8 @@ export const propuestaDeIa = z.looseObject({
       hora: textoDeIa,
       /** El número de vale, tal como lo leyó (spec 023, RF-50). */
       vale: textoDeIa,
+      /** El conductor, como lo leyó (cambio de la 021 del 2026-10-08, RF-104). */
+      conductor: textoDeIa,
     }),
   ),
   novedades: listaDeIa(z.looseObject({ tipo: textoDeIa, descripcion: textoDeIa })),
@@ -1769,8 +1852,11 @@ const idDeElegido = z.string().trim().max(64).nullable();
 const textoDeCorreccion = (max: number) => z.string().max(max).nullable();
 const numeroDeCorreccion = z.number().finite().nullable();
 
+const abscisaCorregida = z.object({ pr: z.number().int().nullable(), metros: z.number().int().nullable() });
 const ubicacionCorregida = z.union([
-  z.object({ pr: z.number().int().nullable(), metros: z.number().int().nullable() }),
+  // Spec 025, RF-31: un tramo. Primero: un objeto con «desde» no es una abscisa.
+  z.object({ desde: abscisaCorregida, hasta: abscisaCorregida }),
+  abscisaCorregida,
   z.object({ lugar: textoDeCorreccion(200) }),
 ]);
 
@@ -1810,6 +1896,11 @@ export const reporteCorregido = z.object({
         medidorInicial: numeroDeCorreccion,
         medidorFinal: numeroDeCorreccion,
         observaciones: z.string().max(1000),
+        // Spec 026: opcionales, lo de antes no los trae.
+        unidad: z.enum(['odometro', 'horometro']).nullish(),
+        conflicto: z.boolean().optional(),
+        tipoId: textoDeCorreccion(60).optional(),
+        marcaEscrita: textoDeCorreccion(100).optional(),
       }),
     )
     .max(40),
@@ -1823,6 +1914,11 @@ export const reporteCorregido = z.object({
         observaciones: z.string().max(1000),
         // Con valor por defecto: las propuestas corregidas antes de la spec 023 no lo traen.
         hoja: textoDeCorreccion(100).default(null),
+        // Spec 025, RF-23 a RF-27: opcionales, lo de antes no los trae.
+        horasLaboradas: numeroDeCorreccion.optional(),
+        extraDiurnas: numeroDeCorreccion.optional(),
+        extraNocturnas: numeroDeCorreccion.optional(),
+        novedad: z.enum(IDS_DE_NOVEDAD).nullish(),
       }),
     )
     .max(80),
@@ -1836,6 +1932,11 @@ export const reporteCorregido = z.object({
         responsable: textoDeCorreccion(200),
         ubicacion: ubicacionCorregida.nullable(),
         observacion: textoDeCorreccion(1000),
+        // Spec 025, RF-42: opcionales, lo de antes no los trae.
+        edadDias: numeroDeCorreccion.optional(),
+        resultado: numeroDeCorreccion.optional(),
+        unidad: textoDeCorreccion(20).optional(),
+        cumple: z.enum(['si', 'no']).nullish(),
       }),
     )
     .max(40),
@@ -1852,6 +1953,14 @@ export const reporteCorregido = z.object({
         conductorId: idDeElegido,
         // Spec 023: el largo lo dice la regla del viaje al aprobar (`validarViaje`).
         vale: textoDeCorreccion(200).default(null),
+        // Cambio de la 021 del 2026-10-08: lo corregido antes no los trae.
+        conductorEscrito: textoDeCorreccion(200).default(null),
+        conductorPor: z.enum(CAMINOS_DEL_CONDUCTOR as [CaminoDelConductor, ...CaminoDelConductor[]]).nullable().default(null),
+        // Spec 024: lo escrito en el reporte; lo corregido antes no lo trae.
+        placaEscrita: textoDeCorreccion(200).default(null),
+        materialEscrito: textoDeCorreccion(200).default(null),
+        origenEscrito: textoDeCorreccion(200).default(null),
+        destinoEscrito: textoDeCorreccion(200).default(null),
       }),
     )
     .max(200),
@@ -1968,11 +2077,26 @@ export interface PropuestaFila {
   categoria: string | null;
   resumen: string | null;
   motivoRevision: string | null;
-  estado: 'pendiente' | 'ignorado' | 'aprobado' | 'descartado';
+  estado: EstadoMensajeWhatsapp;
   /** Fotos y documentos, los suyos y los de los mensajes que lo complementan. */
   archivos: number;
   complementos: number;
   viajesAprobados: boolean;
+  /** Spec 024: el día al que fue, y qué se guardó y dónde (RF-58, RF-59). */
+  fechaHecho: string | null;
+  resultado: ResultadoDelMensaje | null;
+}
+
+/** Lo que el sistema guardó de un mensaje, para el historial (spec 024, RF-58, RF-59). */
+export interface ResultadoDelMensaje {
+  modulo?: 'cantera' | 'almacen' | 'bitacora';
+  /** Los ids de los viajes o movimientos guardados. */
+  guardados?: string[];
+  repetidos?: number;
+  apartados?: number;
+  creados?: number;
+  /** La bitácora a la que fue, si fue a una. */
+  parteId?: string | null;
 }
 
 /** Un archivo del mensaje o de sus complementos, servido por `/api/panel/media/:id`. */
@@ -1989,6 +2113,12 @@ export type EstadoDeLaBitacoraDelDia = 'no_existe' | 'abierta' | 'cerrada';
 export interface DetalleDePropuesta extends PropuestaFila {
   texto: string | null;
   version: number;
+  /**
+   * Spec 024: el sistema guarda solo lo que llega, y la propuesta ya no se corrige, se
+   * aprueba ni se descarta aquí (RF-70). Con el guardado automático apagado —la vuelta
+   * atrás— la bandeja vuelve a funcionar como en la 021.
+   */
+  guardadoAutomatico: boolean;
   /** El autor, con su nombre y cargo del sistema si se le reconoce (RF-21, RF-22). */
   autor: { usuarioId: string | null; nombre: string; cargo: string | null };
   /** El destino de su categoría (`destinoDeCategoria`). */
@@ -2041,6 +2171,120 @@ export interface DetalleDePropuesta extends PropuestaFila {
     almacen: { id: string; nombre: string; unidad: UnidadAlmacen; stock: number }[];
   };
 }
+
+/*
+ * ── El guardado automático (spec 024) ──
+ */
+
+/** Un reporte que la bitácora de una obra espera cada día (RF-37 a RF-39). */
+export interface ReporteEsperadoFila {
+  tipoReporte: TipoDeReporte;
+  /** El `lid` de WhatsApp de quien lo manda, o `null` si vale cualquiera (RF-39). */
+  autorId: string | null;
+  autorNombre: string | null;
+}
+
+/** `GET /api/panel/whatsapp/esperados?obraId=` (RF-37, RF-42). */
+export interface ReportesEsperadosDeLaObra {
+  obraId: string;
+  esperados: ReporteEsperadoFila[];
+  /** Quiénes han escrito en los grupos de la obra, para elegir el autor (RF-39). */
+  autores: { autorId: string; autorNombre: string | null }[];
+}
+
+/** `PUT /api/panel/whatsapp/esperados`: la lista entera de la obra, que reemplaza a la anterior. */
+export const reportesEsperadosPedido = z.object({
+  obraId: z.string({ error: 'Elija la obra.' }).trim().min(1, 'Elija la obra.').max(64),
+  esperados: z
+    .array(
+      z.object({
+        tipoReporte: z.enum(TIPOS_DE_REPORTE, { error: 'Ese reporte no se puede esperar.' }),
+        autorId: z.string().trim().max(200).nullable().default(null),
+        autorNombre: z.string().trim().max(200).nullable().default(null),
+      }),
+    )
+    .max(20, 'Son demasiados reportes para un día.'),
+});
+
+/** Un reporte esperado de un día: recibido o pendiente, de quién y a qué hora (RF-55). */
+export interface ReporteDelDiaFila extends ReporteEsperadoFila {
+  recibido: boolean;
+  recibidoDe: string | null;
+  /** ISO; `null` si no ha llegado. */
+  recibidoEn: string | null;
+}
+
+/** El estado de la bitácora de un día armada desde WhatsApp (RF-55 a RF-57). */
+export interface DiaDeWhatsapp {
+  obraId: string;
+  obraNombre: string;
+  fecha: string;
+  /** `cerrada` sale de la bitácora; lo demás, del armado (RF-56). */
+  estado: EstadoDelDia | 'cerrada';
+  parteId: string | null;
+  reportes: ReporteDelDiaFila[];
+  /** Los mensajes que todavía esperan a la bitácora. */
+  enEspera: number;
+}
+
+/** Un renglón de «No se pudo guardar», con su mensaje (spec 024, RF-60). */
+export interface ExcepcionFila {
+  id: string;
+  mensajeId: string;
+  obraId: string;
+  obraNombre: string;
+  autorNombre: string | null;
+  enviadoEn: string;
+  categoria: string | null;
+  resumen: string | null;
+  /** El día al que iba, si se supo. */
+  fecha: string | null;
+  seccion: string;
+  /** `null`: la sección o el mensaje entero. */
+  renglon: number | null;
+  motivo: string;
+  datos: unknown;
+  estado: 'pendiente' | 'guardada' | 'descartada';
+}
+
+/**
+ * `POST /api/panel/whatsapp/excepciones/:id/guardar` (RF-61): el renglón completado,
+ * como quedó en pantalla, y el día si hay que decirlo. Lo del mensaje entero va sin
+ * `datos`: es reintentar.
+ */
+export const excepcionGuardada = z.object({
+  datos: z.unknown().optional(),
+  fecha: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha va como AAAA-MM-DD.')
+    .optional(),
+});
+
+/** `POST /api/panel/whatsapp/excepciones/:id/descartar` (RF-63): con motivo. */
+export const excepcionDescartada = z.object({
+  motivo: textoObligatorio(500, 'el motivo'),
+});
+
+/** Un registro creado automáticamente, para la lista (RF-33). */
+export interface CreadoFila {
+  tipo: TipoCreado;
+  registroId: string;
+  obraId: string;
+  obraNombre: string;
+  /** Cómo se llama: el nombre, o el código y la placa. */
+  nombre: string;
+  detalle: string | null;
+  mensajeId: string;
+  autorDelMensaje: string | null;
+  creadoEn: string;
+  revisadoEn: string | null;
+  unidoA: string | null;
+}
+
+/** `POST /api/panel/whatsapp/creados/:tipo/:id/unir` (RF-36): con qué registro es el mismo. */
+export const creadoUnido = z.object({
+  conRegistroId: textoObligatorio(64, 'el registro con el que se une'),
+});
 
 /** `PATCH /api/panel/whatsapp/grupos/:id` (RF-8, RF-9, RF-13). */
 export const grupoAsociado = z.object({

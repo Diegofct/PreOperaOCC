@@ -24,6 +24,7 @@ import {
   Aviso,
   Boton,
   Campo,
+  CampoDeFecha,
   Celda,
   Etiqueta,
   Formulario,
@@ -32,9 +33,11 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from './componentes';
 import type { ViajeFila } from './contratos';
 import { useListado } from './marco';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -70,22 +73,28 @@ export function ListadoDeViajes({
   obraId,
   puedeAnular,
   version,
+  fecha,
 }: {
   obraId: string | null;
   puedeAnular: boolean;
   /** Sube al registrar un viaje, para volver a pedir el periodo. */
   version: number;
+  /** Un día para abrir el listado en él (spec 024, RF-59: desde el historial de WhatsApp). */
+  fecha?: string;
 }) {
   const hoy = fechaDeJornada();
-  const [desde, setDesde] = useState(restarDias(hoy, 6));
-  const [hasta, setHasta] = useState(hoy);
+  const delEnlace = fecha && FECHA.test(fecha) ? fecha : null;
+  const [desde, setDesde] = useState(delEnlace ?? restarDias(hoy, 6));
+  const [hasta, setHasta] = useState(delEnlace ?? hoy);
   const desdeMal = !FECHA.test(desde.trim());
   const hastaMal = !FECHA.test(hasta.trim());
 
   // Se pide el periodo solo cuando las dos fechas se pueden leer: mientras se
   // escribe «2026-09-1» no tiene sentido preguntar al servidor. Se decide al
   // escribir, no en un efecto: así cada tecla no dispara un segundo render.
-  const [periodo, setPeriodo] = useState({ desde: restarDias(hoy, 6), hasta: hoy });
+  const [periodo, setPeriodo] = useState(
+    delEnlace ? { desde: delEnlace, hasta: delEnlace } : { desde: restarDias(hoy, 6), hasta: hoy },
+  );
   function cambiarPeriodo(nuevoDesde: string, nuevoHasta: string) {
     setDesde(nuevoDesde);
     setHasta(nuevoHasta);
@@ -213,6 +222,9 @@ export function ListadoDeViajes({
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeViajes = usePaginacion(visibles);
+
   return (
     <>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
@@ -221,19 +233,17 @@ export function ListadoDeViajes({
       {viajes.error ? <Aviso tono="error">{viajes.error}</Aviso> : null}
 
       <Formulario>
-        <Campo
+        <CampoDeFecha
           etiqueta="Desde"
           valor={desde}
           onChange={(v) => cambiarPeriodo(v, hasta)}
-          ayuda="AAAA-MM-DD"
           error={desdeMal ? 'La fecha va en formato AAAA-MM-DD.' : undefined}
-          ancho={150}
+          max={hasta || undefined}
         />
-        <Campo
+        <CampoDeFecha
           etiqueta="Hasta"
           valor={hasta}
           onChange={(v) => cambiarPeriodo(desde, v)}
-          ayuda="AAAA-MM-DD"
           error={
             hastaMal
               ? 'La fecha va en formato AAAA-MM-DD.'
@@ -241,7 +251,7 @@ export function ListadoDeViajes({
                 ? 'Tiene que ser igual o posterior a «Desde».'
                 : undefined
           }
-          ancho={150}
+          min={desde || undefined}
         />
         <Selector
           etiqueta="Volqueta"
@@ -287,17 +297,25 @@ export function ListadoDeViajes({
         />
       </Formulario>
 
-      <Tabla
-        columnas={columnas}
-        filas={visibles}
-        vacio={
-          viajes.cargando
-            ? 'Cargando los viajes…'
-            : viajes.datos.length === 0
-              ? 'No hay viajes registrados en este periodo.'
-              : 'Ningún viaje coincide con los filtros elegidos.'
-        }
-      />
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeViajes.pagina}
+          vacio={
+            viajes.cargando
+              ? 'Cargando los viajes…'
+              : viajes.datos.length === 0
+                ? 'No hay viajes registrados en este periodo.'
+                : 'Ningún viaje coincide con los filtros elegidos.'
+          }
+        />
+        <Paginacion
+          pagina={paginaDeViajes.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeViajes.total}
+          onCambiar={paginaDeViajes.irAPagina}
+        />
+      </>
 
       {porAnular ? (
         <VentanaAnularViaje

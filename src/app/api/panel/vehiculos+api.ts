@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gte, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, gte, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -38,7 +38,14 @@ export async function GET(peticion: Request) {
         obraNombre: obras.nombre,
         odometroKm: vehiculos.odometroKm,
         horometroH: vehiculos.horometroH,
+        // Spec 026, RF-21: cuándo se actualizó la última lectura.
+        medidorActualizadoEn: vehiculos.medidorActualizadoEn,
         estado: vehiculos.estado,
+        // Spec 024, RF-32: la marca «creado desde WhatsApp».
+        desdeWhatsapp: sql<boolean>`exists (
+          select 1 from whatsapp_creados c
+          where c.tipo = 'vehiculo' and c.registro_id = ${vehiculos.id}
+        )`.mapWith(Boolean),
       })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))

@@ -13,7 +13,7 @@
  * dos copias cortas, y leer una consulta concreta es más fácil que leer una
  * abstracción.
  */
-import { and, asc, eq, isNull, type SQL } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { canteraMateriales, canteraSitios, obras } from '@/db/servidor/esquema';
@@ -82,6 +82,11 @@ export async function leerSitios(condicion: SQL | undefined): Promise<SitioDeCan
       obraNombre: obras.nombre,
       nombre: canteraSitios.nombre,
       tipo: canteraSitios.tipo,
+      // Spec 024, RF-32: la marca «creado desde WhatsApp».
+      desdeWhatsapp: sql<boolean>`exists (
+        select 1 from whatsapp_creados c
+        where c.tipo = 'sitio_cantera' and c.registro_id = ${canteraSitios.id}
+      )`.mapWith(Boolean),
     })
     .from(canteraSitios)
     .leftJoin(obras, eq(obras.id, canteraSitios.obraId))
@@ -119,6 +124,11 @@ export async function leerMateriales(
       obraId: canteraMateriales.obraId,
       obraNombre: obras.nombre,
       nombre: canteraMateriales.nombre,
+      // Spec 024, RF-32: la marca «creado desde WhatsApp».
+      desdeWhatsapp: sql<boolean>`exists (
+        select 1 from whatsapp_creados c
+        where c.tipo = 'material_cantera' and c.registro_id = ${canteraMateriales.id}
+      )`.mapWith(Boolean),
     })
     .from(canteraMateriales)
     .leftJoin(obras, eq(obras.id, canteraMateriales.obraId))

@@ -31,16 +31,31 @@ import {
 } from '@/constants/theme';
 
 import { ETIQUETA_ROL } from './contratos';
+import { useMenu } from './estado-menu';
 import { Icono, type NombreDeIcono } from './iconos';
 import { useSesionPanel } from './sesion';
 
 export function BarraSuperior() {
   const { persona, salir, pedirCambioDeClave } = useSesionPanel();
+  const { regimen, alternar } = useMenu();
+  // En el celular la barra se compacta: ☰, el logotipo y los botones solo con su ícono
+  // (spec 026, RF-33, RF-39).
+  const celular = regimen === 'oculto';
 
   return (
-    <View style={estilos.franja}>
+    <View style={[estilos.franja, celular && estilos.franjaCelular]}>
       <View style={estilos.pildora}>
         <View style={estilos.marca}>
+          {celular ? (
+            <Pressable
+              onPress={alternar}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir el menú"
+              style={estilos.botonMenu}
+            >
+              <Text style={estilos.botonMenuTexto}>☰</Text>
+            </Pressable>
+          ) : null}
           <View style={estilos.fondoLogotipo}>
             <Image
               source={require('@/../assets/obras_civiles_transparente.png')}
@@ -49,13 +64,15 @@ export function BarraSuperior() {
               accessibilityLabel="Obras Civiles Colombianas"
             />
           </View>
-          <Text style={estilos.nombreSistema} numberOfLines={1}>
-            Control de Obra
-          </Text>
+          {celular ? null : (
+            <Text style={estilos.nombreSistema} numberOfLines={1}>
+              Control de Obra
+            </Text>
+          )}
         </View>
 
         <View style={estilos.cuenta}>
-          {persona ? (
+          {persona && !celular ? (
             <Text style={estilos.persona} numberOfLines={1}>
               {persona.nombreCompleto}
               <Text style={estilos.cargo}> · {ETIQUETA_ROL[persona.rol]}</Text>
@@ -64,9 +81,10 @@ export function BarraSuperior() {
           <BotonDeBarra
             icono="clave"
             titulo="Cambiar contraseña"
+            soloIcono={celular}
             onPress={() => pedirCambioDeClave(true)}
           />
-          <BotonDeBarra icono="salir" titulo="Cerrar sesión" onPress={salir} />
+          <BotonDeBarra icono="salir" titulo="Cerrar sesión" soloIcono={celular} onPress={salir} />
         </View>
       </View>
     </View>
@@ -84,10 +102,13 @@ function BotonDeBarra({
   icono,
   titulo,
   onPress,
+  soloIcono,
 }: {
   icono: NombreDeIcono;
   titulo: string;
   onPress: () => void;
+  /** En el celular el título no cabe: queda para el lector de pantalla. */
+  soloIcono?: boolean;
 }) {
   const [encima, setEncima] = useState(false);
   const [enfocado, setEnfocado] = useState(false);
@@ -100,20 +121,32 @@ function BotonDeBarra({
       onFocus={() => setEnfocado(true)}
       onBlur={() => setEnfocado(false)}
       accessibilityRole="button"
+      accessibilityLabel={titulo}
       style={[
         estilos.boton,
+        soloIcono && estilos.botonSoloIcono,
         encima && estilos.botonEncima,
         enfocado && estilos.botonEnfocado,
       ]}
     >
       <Icono nombre={icono} color={Panel.textoBarra} tamano={16} />
-      <Text style={estilos.botonTexto}>{titulo}</Text>
+      {soloIcono ? null : <Text style={estilos.botonTexto}>{titulo}</Text>}
     </Pressable>
   );
 }
 
 const estilos = StyleSheet.create({
   /** El aire alrededor de la píldora: es lo que la hace flotar (RF-15). */
+  franjaCelular: { paddingHorizontal: Spacing.two, paddingTop: Spacing.two },
+  botonMenu: {
+    minWidth: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radio.pastilla,
+  },
+  botonMenuTexto: { fontFamily: FuentePanel.texto, fontSize: 22, color: Panel.textoBarra },
+  botonSoloIcono: { paddingHorizontal: Spacing.two, minWidth: 40, minHeight: 40, justifyContent: 'center' },
   franja: {
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.three,

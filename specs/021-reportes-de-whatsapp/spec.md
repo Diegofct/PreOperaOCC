@@ -4,7 +4,10 @@
 > llena todas las secciones de la bitácora, RF-60 a RF-95; todas las dudas resueltas; el conductor de
 > cada viaje sale del operador de su volqueta, RF-94 y RF-95; con la bitácora cerrada se
 > aprueban solo los viajes, RF-96 a RF-98) · Cambio: 2026-10-05 (la cantidad escrita de una
-> actividad gana al cálculo, en toda la bitácora, RF-99 a RF-103; reemplaza 004/RF-68)
+> actividad gana al cálculo, en toda la bitácora, RF-99 a RF-103; reemplaza 004/RF-68) · Cambio:
+> 2026-10-08 (el conductor, la volqueta, el material y los sitios de un viaje se reconocen por
+> más caminos, RF-104 a RF-112; RF-94 pasa a ser el segundo camino; aprobado el 2026-10-08 y
+> cumplido el 2026-10-09 con las tareas de la spec 024; ver su validacion.md)
 
 ## Contexto y objetivo
 
@@ -297,9 +300,43 @@ lo complete.
 - RF-86: SI los metros de llegada de un viaje no son múltiplo de 25, ENTONCES EL SISTEMA
   exigirá elegirlos de la lista de 010/RF-13 antes de aprobar.
 - RF-94: EL SISTEMA tomará como conductor de cada viaje del reporte el operador que el mismo
-  reporte trae para esa volqueta en la sección de vehículos. *(cambio 2026-10-05, 010/RF-34)*
+  reporte trae para esa volqueta en la sección de vehículos. *(cambio 2026-10-05, 010/RF-34;
+  desde el cambio 2026-10-08 es el segundo camino de RF-105)*
 - RF-95: SI la volqueta de un viaje no trae operador en el reporte, ENTONCES EL SISTEMA exigirá
-  elegir el conductor antes de aprobar.
+  elegir el conductor antes de aprobar. *(desde el cambio 2026-10-08, solo cuando ningún
+  camino de RF-105 lo reconoce)*
+
+#### El conductor y la volqueta de un viaje *(cambio 2026-10-08)*
+
+> El 7-oct llegaron al grupo varias fotos de vales de cantera con el mismo formato, y en unas se
+> reconoció la volqueta o el conductor y en otras no. Una foto de vale es un mensaje suelto: no
+> trae la sección de vehículos, así que por RF-94 su conductor nunca se reconocía, aunque el
+> nombre estuviera escrito en el vale. Y una placa con un carácter mal leído en la foto («TFO42O»)
+> no coincidía con ninguna de la obra.
+
+- RF-104: CUANDO un viaje del reporte traiga escrito el nombre de su conductor, EL SISTEMA lo
+  reconocerá entre las personas registradas, como al operador de una máquina (RF-74).
+- RF-105: EL SISTEMA propondrá el conductor de cada viaje por el primero de estos caminos que lo
+  reconozca: el nombre escrito en el viaje (RF-104); el operador de esa volqueta en el mismo
+  reporte (RF-94); la persona que hizo el preoperacional de esa volqueta el día del viaje; la
+  persona que condujo el último viaje vigente de esa volqueta en la obra.
+- RF-106: SI dos personas distintas hicieron el preoperacional de esa volqueta el día del viaje,
+  ENTONCES EL SISTEMA no tomará ese camino y pasará al siguiente.
+- RF-107: SI la placa escrita de un viaje o de una máquina no coincide con ningún equipo de la
+  obra, ENTONCES EL SISTEMA la comparará tomando como iguales los caracteres que se confunden al
+  leer una foto: O y 0, I y 1, S y 5, B y 8, Z y 2.
+- RF-108: SI con esa comparación coinciden dos o más equipos de la obra, ENTONCES EL SISTEMA no
+  elegirá ninguno, como en RF-71.
+- RF-109: EL SISTEMA mostrará en la propuesta por qué camino se reconoció el conductor de cada
+  viaje cuando no haya sido el nombre escrito, para que quien revisa lo confirme.
+- RF-110: EL SISTEMA reconocerá el material y los sitios de un viaje sin tener en cuenta
+  espacios, guiones ni puntos: «Sub-base» es «SUBBASE».
+- RF-112: SI un viaje trae escrito el nombre de su conductor y ese nombre no se reconoce,
+  ENTONCES EL SISTEMA no propondrá el conductor por el preoperacional ni por el último viaje.
+  *(cambio 2026-10-08: el nombre escrito es mejor evidencia que la volqueta)*
+- RF-111: EL SISTEMA reconocerá los sitios de un viaje sin tener en cuenta las palabras
+  «cantera», «el» y «la» ni sus abreviaturas: «Cantera FORTUNE» y «C. Fortune» son «LA
+  FORTUNE».
 - RF-87: CUANDO un mensaje suelto informe viajes agregados («TFO420 – 4 viajes»), EL SISTEMA
   propondrá un viaje por cada uno, y exigirá completar los datos que falten (RF-83).
 
@@ -410,6 +447,14 @@ Además:
   en la bitácora mientras esté abierta.
 - **Reporte diario cuando la bitácora del día ya está cerrada**: no se aprueba lo que va a la
   bitácora (RF-41), pero sí los viajes (RF-43).
+- *(cambio 2026-10-08)* **Foto de un vale sin texto ni nombre del conductor**: el conductor sale
+  del preoperacional de esa volqueta ese día o de su último viaje (RF-105), y la propuesta dice de
+  dónde salió (RF-109). Si ningún camino lo da, se elige antes de aprobar (RF-95).
+- **Placa con un carácter mal leído** («TFO42O», «LLQ37T»): se reconoce si queda un solo equipo de
+  la obra al tomar como iguales los caracteres que se confunden (RF-107). Una letra que no es de
+  esos pares («LLQ37T») no se corrige y se elige de la lista (RF-71).
+- **Volqueta de un tercero que no está registrada en la obra**: no se reconoce y se elige o se
+  quita, como hoy (RF-71).
 
 ## Fuera de alcance
 

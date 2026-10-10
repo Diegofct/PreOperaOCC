@@ -28,7 +28,7 @@
  * paso queda escrito qué campos participan de verdad en cada regla.
  */
 import { MENSAJES_DE_VIAJE, validarAbscisa } from './cantera';
-import { minutosDeHora } from './horas';
+import { mensajeDePersona, minutosDeHora, validarPersonaDelParte, type PersonaConHoras } from './horas';
 import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
 
 /* ------------------------------------------------------------------------ */
@@ -113,6 +113,7 @@ export const MENSAJES_DE_ENSAYO = {
   sinPr: 'Elija el PR donde se hizo el ensayo.',
   sinMetros: 'Elija los metros donde se hizo el ensayo.',
   sinLugar: 'Escriba el lugar donde se hizo el ensayo.',
+  metrosDelEnsayo: 'Los metros van de 0 a 999.',
 } as const;
 
 export type CampoDeEnsayo =
@@ -123,6 +124,7 @@ export type CampoDeEnsayo =
   | 'pr'
   | 'metros'
   | 'lugar'
+  | 'tramo'
   | 'observacion';
 
 export interface FaltaDeEnsayo {
@@ -134,7 +136,17 @@ export interface FaltaDeEnsayo {
  * Dónde se hizo un ensayo: en la vía, a la altura de un PR, o en otro lugar escrito
  * (RF-87). Una sola de las dos formas; los `null` son lo que todavía no se eligió.
  */
-export type UbicacionPorValidar = { pr: number | null; metros: number | null } | { lugar: string | null };
+export interface AbscisaPorValidar {
+  pr: number | null;
+  metros: number | null;
+}
+export type UbicacionPorValidar =
+  | AbscisaPorValidar
+  | { desde: AbscisaPorValidar; hasta: AbscisaPorValidar }
+  | { lugar: string | null };
+
+/** Los metros de una abscisa de ensayo: cualquiera de 0 a 999 (spec 025, RF-32). */
+export const METROS_MAXIMOS_DEL_ENSAYO = 999;
 
 /** Lo que se mira de un ensayo para dejarlo guardar. */
 export interface EnsayoEvaluable {
@@ -143,6 +155,31 @@ export interface EnsayoEvaluable {
   horaFin?: string | null;
   responsable?: string | null;
   ubicacion?: UbicacionPorValidar | null;
+  /** Spec 025, RF-38: con resultado o con «cumple», la observación no hace falta. */
+  resultado?: number | null;
+  cumple?: 'si' | 'no' | null;
+}
+
+/**
+ * Lo que falta en una abscisa de ensayo. El PR con la regla de cantera; los metros
+ * no: un ensayo se toma donde se toma, no en los mojones de 25 en 25 por los que se
+ * descarga un viaje (spec 025, RF-32).
+ */
+function faltasDeAbscisaDeEnsayo(abscisa: AbscisaPorValidar): FaltaDeEnsayo[] {
+  const faltas: FaltaDeEnsayo[] = [];
+  for (const falta of validarAbscisa(abscisa.pr, 0)) {
+    faltas.push({
+      campo: 'pr',
+      mensaje: falta.mensaje === MENSAJES_DE_VIAJE.sinPr ? MENSAJES_DE_ENSAYO.sinPr : falta.mensaje,
+    });
+  }
+  const { metros } = abscisa;
+  if (metros === null) {
+    faltas.push({ campo: 'metros', mensaje: MENSAJES_DE_ENSAYO.sinMetros });
+  } else if (!Number.isInteger(metros) || metros < 0 || metros > METROS_MAXIMOS_DEL_ENSAYO) {
+    faltas.push({ campo: 'metros', mensaje: MENSAJES_DE_ENSAYO.metrosDelEnsayo });
+  }
+  return faltas;
 }
 
 /**
@@ -165,12 +202,11 @@ export interface EnsayoEvaluable {
 export function faltasDelEnsayo(ensayo: EnsayoEvaluable): FaltaDeEnsayo[] {
   const faltas: FaltaDeEnsayo[] = [];
 
+  // La hora de fin es opcional (spec 025, RF-29); si está, va después del inicio (RF-30).
   const inicio = minutosDeHora(ensayo.horaInicio);
   const fin = minutosDeHora(ensayo.horaFin);
   if (inicio === null) faltas.push({ campo: 'horaInicio', mensaje: MENSAJES_DE_ENSAYO.sinInicio });
-  if (fin === null) {
-    faltas.push({ campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.sinFin });
-  } else if (inicio !== null && fin <= inicio) {
+  if (fin !== null && inicio !== null && fin <= inicio) {
     // Sin cruzar la medianoche: un ensayo que la pasa se registra en dos filas.
     faltas.push({ campo: 'horaFin', mensaje: MENSAJES_DE_ENSAYO.finNoPosterior });
   }
@@ -186,19 +222,22 @@ export function faltasDelEnsayo(ensayo: EnsayoEvaluable): FaltaDeEnsayo[] {
     if (!ubicacion.lugar?.trim()) {
       faltas.push({ campo: 'lugar', mensaje: MENSAJES_DE_ENSAYO.sinLugar });
     }
-  } else {
-    for (const falta of validarAbscisa(ubicacion.pr, ubicacion.metros)) {
-      const mensaje =
-        falta.mensaje === MENSAJES_DE_VIAJE.sinPr
-          ? MENSAJES_DE_ENSAYO.sinPr
-          : falta.mensaje === MENSAJES_DE_VIAJE.sinMetros
-            ? MENSAJES_DE_ENSAYO.sinMetros
-            : falta.mensaje;
-      faltas.push({ campo: falta.campo === 'pr' ? 'pr' : 'metros', mensaje });
+  } else if ('desde' in ubicacion) {
+    // Un tramo, en el orden en que se escribió (RF-31, RF-33).
+    for (const [extremo, abscisa] of [['Inicio', ubicacion.desde], ['Fin', ubicacion.hasta]] as const) {
+      for (const falta of faltasDeAbscisaDeEnsayo(abscisa)) {
+        faltas.push({ campo: 'tramo', mensaje: `${extremo} del tramo: ${falta.mensaje}` });
+      }
     }
+  } else {
+    faltas.push(...faltasDeAbscisaDeEnsayo(ubicacion));
   }
 
-  const sinObservacion = faltaObservacionDelEnsayo(ensayo.observacion);
+  const conResultado =
+    (typeof ensayo.resultado === 'number' && !Number.isNaN(ensayo.resultado)) ||
+    ensayo.cumple === 'si' ||
+    ensayo.cumple === 'no';
+  const sinObservacion = conResultado ? null : faltaObservacionDelEnsayo(ensayo.observacion);
   if (sinObservacion) faltas.push({ campo: 'observacion', mensaje: sinObservacion });
 
   return faltas;
@@ -424,8 +463,11 @@ export interface MaquinaEvaluable {
   observaciones?: string;
 }
 
-/** Lo que se mira de una persona. Su horario completo, nada más. */
-export interface PersonaEvaluable {
+/**
+ * Lo que se mira de una persona: su horario completo, o sus horas laboradas, o su
+ * novedad (spec 025, RF-6, RF-19).
+ */
+export interface PersonaEvaluable extends PersonaConHoras {
   nombre: string;
   entrada: string | null;
   salida: string | null;
@@ -645,9 +687,13 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
     }
   }
 
+  // La misma regla que al guardar (025/RF-61): lo que se dejó guardar se deja cerrar.
   for (const persona of parte.personal) {
-    if (!persona.entrada || !persona.salida) {
+    const error = validarPersonaDelParte(persona);
+    if (error === 'falta_entrada' || error === 'falta_salida') {
       bloqueos.push(`A ${persona.nombre} le falta la hora de entrada o de salida.`);
+    } else if (error) {
+      bloqueos.push(`${persona.nombre}: ${mensajeDePersona(error)}`);
     }
   }
 

@@ -45,6 +45,9 @@ services:
       # Spec 021. Opcional a propósito: sin ella el panel funciona igual y la
       # integración de WhatsApp no entra (su guardia está cerrada por defecto).
       TOKEN_INTEGRACION_WHATSAPP: ${TOKEN_INTEGRACION_WHATSAPP:-}
+      # Spec 024. `1` guarda solo lo que llega por WhatsApp; cualquier otro valor deja
+      # todo pendiente en la bandeja, como en la 021: es la vuelta atrás.
+      WHATSAPP_GUARDADO_AUTOMATICO: ${WHATSAPP_GUARDADO_AUTOMATICO:-0}
 
     # Informativo: `docker ps` dice si está sano. No reinicia nada por sí solo,
     # pero es la forma rápida de contestar «¿volvió bien?» después de un

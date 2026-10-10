@@ -29,10 +29,47 @@ import { useMemo, useState } from 'react';
 
 import { normalizar } from '@/shared/rules/texto';
 
+import { recortarPagina } from './paginas';
 import { useParametroDeDireccion } from './usar-parametro-direccion';
 
-/** Cuántas filas caben cómodas en pantalla sin obligar a hacer scroll largo. */
-export const POR_PAGINA = 25;
+export { POR_PAGINA, recortarPagina } from './paginas';
+
+/**
+ * Vuelve a la página 1 cuando cambia lo que se lista (spec 025, RF-57): un filtro o
+ * una búsqueda nuevos traen otras filas, y quedarse en la página 3 de las de antes
+ * no tiene sentido. Se mira en el render, como la corrección de la página, para no
+ * pintar primero la página equivocada.
+ */
+function usePaginaQueVuelveAlCambiar(marca: string): [number, (p: number) => void] {
+  const [pagina, setPagina] = useState(1);
+  const [vista, setVista] = useState(marca);
+  if (vista !== marca) {
+    setVista(marca);
+    setPagina(1);
+  }
+  return [pagina, setPagina];
+}
+
+export interface Paginado<T> {
+  /** Las filas de la página. */
+  pagina: T[];
+  /** Cuántas filas hay en total. */
+  total: number;
+  paginaActual: number;
+  irAPagina: (pagina: number) => void;
+}
+
+/**
+ * Páginas de `POR_PAGINA` para una tabla sin buscador (spec 025, RF-56). Vuelve a la
+ * página 1 cuando cambia lo listado (RF-57): cuando cambia cuántas filas hay, o
+ * `filtros`, el texto de los filtros de la pantalla. Se mira un texto y no la lista
+ * porque muchas pantallas la recalculan en cada render.
+ */
+export function usePaginacion<T>(filas: T[], filtros = ''): Paginado<T> {
+  const [paginaActual, irAPagina] = usePaginaQueVuelveAlCambiar(`${filas.length}|${filtros}`);
+  const recorte = recortarPagina(filas, paginaActual);
+  return { pagina: recorte.filas, total: filas.length, paginaActual: recorte.pagina, irAPagina };
+}
 
 export interface ListadoFiltrado<T> {
   /** Lo que se pinta: ya buscado, filtrado y recortado a la página. */
@@ -98,11 +135,14 @@ export function useListadoFiltrado<T>(
    * no hay nada. Se calcula al pintar y no se guarda, que es lo que evita el
    * parpadeo de un efecto que corrige después de haber pintado mal.
    */
-  const paginas = Math.max(1, Math.ceil(ordenadas.length / POR_PAGINA));
-  const pagina = Math.min(paginaActual, paginas);
-
-  const desde = (pagina - 1) * POR_PAGINA;
-  const recorte = ordenadas.slice(desde, desde + POR_PAGINA);
+  // Un filtro de la pantalla que cambia lo que coincide vuelve a la página 1 (025/RF-57).
+  // `pasaFiltros` cambia de identidad en cada render, así que se mira el resultado.
+  const [coincidiaAntes, setCoincidiaAntes] = useState(coincidentes.length);
+  if (coincidiaAntes !== coincidentes.length) {
+    setCoincidiaAntes(coincidentes.length);
+    setPaginaActual(1);
+  }
+  const { filas: recorte, pagina } = recortarPagina(ordenadas, paginaActual);
 
   return {
     pagina: recorte,

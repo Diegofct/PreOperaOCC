@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -9,6 +9,7 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
 import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
+import { USUARIO_IA_WHATSAPP } from '@/shared/rules/whatsapp-automatico';
 
 /**
  * Las personas: operadores y personal administrativo. `GET` y `POST`.
@@ -51,12 +52,24 @@ export async function GET(peticion: Request) {
           where ${dispositivos.usuarioId} = ${usuarios.id}
             and ${dispositivos.revocadoEn} is null
         )`.mapWith(Boolean),
+        // Spec 024, RF-32: la marca «creado desde WhatsApp».
+        desdeWhatsapp: sql<boolean>`exists (
+          select 1 from whatsapp_creados c
+          where c.tipo = 'persona' and c.registro_id = ${usuarios.id}
+        )`.mapWith(Boolean),
       })
       .from(usuarios)
       // `left` y no `inner`: el personal de gerencia no está adscrito a ninguna
       // obra, y con un inner join desaparecería del listado.
       .leftJoin(obras, eq(obras.id, usuarios.obraId))
-      .where(and(isNull(usuarios.eliminadoEn), filtroDeObra(sesion, usuarios.obraId)))
+      .where(
+        and(
+          isNull(usuarios.eliminadoEn),
+          filtroDeObra(sesion, usuarios.obraId),
+          // El usuario de sistema «IA WhatsApp» no es una persona de la obra (spec 024).
+          ne(usuarios.id, USUARIO_IA_WHATSAPP.id),
+        ),
+      )
       .orderBy(asc(usuarios.nombreCompleto));
 
     return ok(filas);

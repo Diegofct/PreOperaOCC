@@ -263,6 +263,124 @@ export function horasLegibles(minutos: number): string {
 }
 
 /* ------------------------------------------------------------------------ */
+/* Las horas como las reporta la obra (spec 025)                            */
+/* ------------------------------------------------------------------------ */
+
+/** Lo que se mira de una persona del parte para dejarla guardar. */
+export interface PersonaConHoras {
+  entrada?: string | null;
+  salida?: string | null;
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  novedad?: string | null;
+}
+
+export type ErrorPersona =
+  | ErrorHorario
+  | 'sin_horas'
+  | 'extra_sin_laboradas'
+  | 'mas_de_16'
+  | 'horas_invalidas'
+  | 'extra_mayor';
+
+const hay = (n: number | null | undefined): n is number => typeof n === 'number' && !Number.isNaN(n);
+
+/** Una cantidad de horas válida: no negativa y de media hora en media hora (RF-4). */
+function horasValidas(n: number): boolean {
+  return n >= 0 && Number.isInteger(n * 2);
+}
+
+/**
+ * ¿Se puede guardar esta persona? (spec 025, RF-6 a RF-12, RF-19, RF-20; y spec
+ * 016 cuando trae entrada y salida, RF-7).
+ *
+ * Vale con cualquiera de tres cosas: las horas laboradas, la entrada y la salida,
+ * o una novedad. Las extra que falten se leen como 0 (RF-12); que vengan sin las
+ * laboradas no, porque las laboradas son el total del que salen (RF-5, RF-11).
+ * Si trae entrada o salida, se le exigen las dos como siempre: media jornada
+ * escrita es un dedazo, venga o no con horas.
+ */
+export function validarPersonaDelParte(persona: PersonaConHoras): ErrorPersona | null {
+  const { horasLaboradas: l, extraDiurnas: ed, extraNocturnas: en } = persona;
+  if (!hay(l) && (hay(ed) || hay(en))) return 'extra_sin_laboradas';
+  if (hay(l)) {
+    if (l > MAXIMO_MINUTOS_POR_DIA / HORA) return 'mas_de_16';
+    if (![l, ed ?? 0, en ?? 0].every(horasValidas)) return 'horas_invalidas';
+    if ((ed ?? 0) + (en ?? 0) > l) return 'extra_mayor';
+  }
+  if (persona.entrada || persona.salida) return validarHorario(persona.entrada ?? null, persona.salida ?? null);
+  if (!hay(l) && !persona.novedad) return 'sin_horas';
+  return null;
+}
+
+export function mensajeDePersona(error: ErrorPersona): string {
+  switch (error) {
+    case 'sin_horas':
+      return 'Escriba sus horas laboradas, su hora de entrada y salida, o su novedad.';
+    case 'extra_sin_laboradas':
+      return 'Escriba primero las horas laboradas.';
+    case 'mas_de_16':
+      return `Son más de ${MAXIMO_MINUTOS_POR_DIA / HORA} horas. Revise las horas.`;
+    case 'horas_invalidas':
+      return 'Las horas van de media hora en media hora: 8, 8.5, 9.';
+    case 'extra_mayor':
+      return 'Las horas extra no pueden ser más que las laboradas.';
+    default:
+      return mensajeDeHorario(error);
+  }
+}
+
+/** Las horas de una persona, en minutos, con su fuente (RF-14, RF-15). */
+export type HorasDeLaPersona =
+  | { fuente: 'reportadas'; trabajados: number; extraDiurna: number; extraNocturna: number; extra: number }
+  | ({ fuente: 'calculadas' } & DesgloseDeHoras);
+
+/**
+ * Lo que se muestra y se suma de una persona: lo reportado si tiene horas
+ * laboradas (RF-14), lo calculado con el horario si solo tiene entrada y salida
+ * (RF-15), o `null` si no tiene ninguna de las dos (una novedad sola cuenta 0, RF-22).
+ */
+export function horasDeLaPersona(
+  fecha: string,
+  persona: PersonaConHoras,
+  horario: HorarioDeObra,
+): HorasDeLaPersona | null {
+  if (hay(persona.horasLaboradas)) {
+    const extraDiurna = Math.round((persona.extraDiurnas ?? 0) * HORA);
+    const extraNocturna = Math.round((persona.extraNocturnas ?? 0) * HORA);
+    return {
+      fuente: 'reportadas',
+      trabajados: Math.round(persona.horasLaboradas * HORA),
+      extraDiurna,
+      extraNocturna,
+      extra: extraDiurna + extraNocturna,
+    };
+  }
+  const desglose = desglosarJornada(fecha, persona.entrada ?? null, persona.salida ?? null, horario);
+  return desglose ? { fuente: 'calculadas', ...desglose } : null;
+}
+
+/** Cuánto pueden diferir lo reportado y lo calculado sin avisar: un cuarto de hora. */
+export const TOLERANCIA_MINUTOS = 15;
+
+/**
+ * ¿Lo reportado no cuadra con la entrada y la salida? (RF-16). Solo avisa: no
+ * impide guardar ni cerrar. `false` si no hay las dos cosas que comparar.
+ */
+export function horasNoCuadran(fecha: string, persona: PersonaConHoras, horario: HorarioDeObra): boolean {
+  if (!hay(persona.horasLaboradas)) return false;
+  const calculado = desglosarJornada(fecha, persona.entrada ?? null, persona.salida ?? null, horario);
+  if (!calculado) return false;
+  const reportado = horasDeLaPersona(fecha, persona, horario)!;
+  return (
+    Math.abs(reportado.trabajados - calculado.trabajados) > TOLERANCIA_MINUTOS ||
+    Math.abs(reportado.extraDiurna - calculado.extraDiurna) > TOLERANCIA_MINUTOS ||
+    Math.abs(reportado.extraNocturna - calculado.extraNocturna) > TOLERANCIA_MINUTOS
+  );
+}
+
+/* ------------------------------------------------------------------------ */
 /* El horario de cada obra (spec 016)                                        */
 /* ------------------------------------------------------------------------ */
 

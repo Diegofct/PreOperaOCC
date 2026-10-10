@@ -53,7 +53,7 @@ interface Etiqueta {
 
 export function MenuLateral() {
   const { persona } = useSesionPanel();
-  const { abierto, encima, anchoReservado, alternar, cerrarEncima } = useMenu();
+  const { regimen, abierto, encima, anchoReservado, alternar, cerrarEncima } = useMenu();
   const activo = moduloDeLaRuta(usePathname());
   const grupos = gruposDelMenu(
     modulosVisibles(persona?.rol ?? 'operador', persona?.modulosDeObra),
@@ -62,6 +62,9 @@ export function MenuLateral() {
   const [desplazado, setDesplazado] = useState(0);
   const [etiqueta, setEtiqueta] = useState<Etiqueta | null>(null);
   const conEtiqueta = etiqueta !== null && !abierto;
+
+  // En el celular no hay riel: el menú solo existe mientras está abierto con ☰ (026/RF-33).
+  if (regimen === 'oculto' && !encima) return null;
 
   return (
     // La columna reserva siempre su ancho; el menú de dentro es el que, abierto en
@@ -74,6 +77,14 @@ export function MenuLateral() {
         (conEtiqueta || encima) && estilos.columnaEncima,
       ]}
     >
+      {/* Tocar fuera del menú abierto lo cierra, como en cualquier menú de celular. */}
+      {regimen === 'oculto' ? (
+        <Pressable
+          accessibilityLabel="Cerrar el menú"
+          onPress={cerrarEncima}
+          style={estilos.velo}
+        />
+      ) : null}
       <View style={[estilos.menu, encima && estilos.menuEncima]}>
         <ScrollView
           // Sin barra visible: se come 8 del ancho y vuelve a cortar «Reportes de
@@ -283,6 +294,15 @@ const estilos = StyleSheet.create({
     transitionDuration: `${Movimiento.base}ms`,
   },
   columnaEncima: { zIndex: 20 },
+  /** Lo que queda detrás del menú abierto en el celular: lo oscurece y, tocado, lo cierra. */
+  velo: {
+    position: 'fixed' as 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
   menu: {
     flex: 1,
     backgroundColor: Panel.fondo,

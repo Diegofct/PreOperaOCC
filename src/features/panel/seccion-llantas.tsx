@@ -35,9 +35,11 @@ import {
   Selector,
   Tabla,
   type Columna,
+  Paginacion,
 } from './componentes';
 import type { LlantaFila, VehiculoFila } from './contratos';
 import { useListado } from './marco';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 /** Vacío es ausencia, no cero: una medida sin escribir no se sabe. */
 function aNumero(texto: string): number | null {
@@ -211,6 +213,9 @@ export function SeccionLlantas({ vehiculos }: { vehiculos: VehiculoFila[] }) {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeLlantas = usePaginacion(llantas.datos);
+
   return (
     <Seccion titulo="Llantas">
       <Formulario>
@@ -285,11 +290,19 @@ export function SeccionLlantas({ vehiculos }: { vehiculos: VehiculoFila[] }) {
       ) : null}
 
       {vehiculoId ? (
-        <Tabla
-          columnas={columnas}
-          filas={llantas.datos}
-          vacio="Este equipo todavía no tiene llantas registradas."
-        />
+        <>
+          <Tabla
+            columnas={columnas}
+            filas={paginaDeLlantas.pagina}
+            vacio="Este equipo todavía no tiene llantas registradas."
+          />
+          <Paginacion
+            pagina={paginaDeLlantas.paginaActual}
+            porPagina={POR_PAGINA}
+            total={paginaDeLlantas.total}
+            onCambiar={paginaDeLlantas.irAPagina}
+          />
+        </>
       ) : null}
     </Seccion>
   );

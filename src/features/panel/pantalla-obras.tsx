@@ -25,12 +25,14 @@ import {
   Seccion,
   Tabla,
   type Columna,
+  Paginacion,
 } from './componentes';
 import { EditorDeHorario, horarioValido } from './editor-horario';
 import { MarcoPantalla, useListado } from './marco';
 import { MODULOS_DE_OBRA_NUEVA, ModulosDeLaObra } from './modulos-de-obra';
 import { VentanaCorregirObra } from './ventana-obra';
 import type { ObraFila } from './contratos';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 export default function PantallaObras() {
   const listado = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
@@ -108,6 +110,9 @@ export default function PantallaObras() {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeObras = usePaginacion(listado.datos);
+
   return (
     <MarcoPantalla
       modulo="obras"
@@ -181,11 +186,19 @@ export default function PantallaObras() {
       ) : null}
 
       <Seccion titulo={`Obras registradas (${listado.datos.length})`}>
-        <Tabla
-          columnas={columnas}
-          filas={listado.datos}
-          vacio="Aquí van los frentes de trabajo de OCC. La obra es la raíz de todo lo demás: las personas pertenecen a una, los vehículos están en una, y sin al menos una registrada las otras pantallas no tienen dónde colgar nada. Registre la primera en el formulario de arriba."
-        />
+        <>
+          <Tabla
+            columnas={columnas}
+            filas={paginaDeObras.pagina}
+            vacio="Aquí van los frentes de trabajo de OCC. La obra es la raíz de todo lo demás: las personas pertenecen a una, los vehículos están en una, y sin al menos una registrada las otras pantallas no tienen dónde colgar nada. Registre la primera en el formulario de arriba."
+          />
+          <Paginacion
+            pagina={paginaDeObras.paginaActual}
+            porPagina={POR_PAGINA}
+            total={paginaDeObras.total}
+            onCambiar={paginaDeObras.irAPagina}
+          />
+        </>
       </Seccion>
     </MarcoPantalla>
   );

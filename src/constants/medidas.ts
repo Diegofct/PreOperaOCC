@@ -140,6 +140,13 @@ export const AnchoMenuPlegado = 72;
  */
 export const AnchoMinimoMenuFijo = 1280;
 
+/**
+ * Por debajo de esto es un celular (spec 026, RF-33 a RF-41): el menú se esconde
+ * detrás de un botón ☰, los formularios van en una columna y las tablas se desplazan
+ * a lo ancho dentro de su marco.
+ */
+export const AnchoCelular = 768;
+
 /** El ancho más angosto en el que la spec promete el panel completo (022, RNF). */
 export const AnchoMinimoPanel = 1024;
 
