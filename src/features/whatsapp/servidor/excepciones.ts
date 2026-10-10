@@ -35,7 +35,7 @@ import type { EstadoDeExcepcion } from '@/shared/rules/whatsapp-automatico';
 import { escribirReporteDeAlmacen, faltasDelAlmacen } from './almacen';
 import { guardarEnBitacora, guardarViajes } from './aprobacion';
 import { catalogosDeLaObra } from './catalogos';
-import { obraDelMensaje } from './obra';
+import { diaDelMensaje, obraDelMensaje } from './obra';
 
 /** Las secciones de la bitácora que un renglón completado puede llevar. */
 const SECCIONES_DE_BITACORA = ['clima', 'actividades', 'maquinaria', 'personal', 'ensayos'] as const;
@@ -87,22 +87,39 @@ function aFila(f: Awaited<ReturnType<typeof consulta>>[number]): ExcepcionFila {
   };
 }
 
-/** La lista, de lo más antiguo a lo más nuevo (RF-60, RF-64). */
+/**
+ * La lista de un rango de días del reporte, de lo más antiguo a lo más nuevo (024/RF-60,
+ * RF-64; 025/RF-46, RF-48). Sin tope: el rango acota (025/RF-53). Con los pendientes,
+ * también cuántos quedan antes de «Desde», para que no se olviden por estar fuera.
+ */
 export async function listarExcepciones(
   sesion: PersonaEnSesion,
-  filtro: { obraId: string | null; estado: EstadoDeExcepcion },
-): Promise<ExcepcionFila[]> {
+  filtro: { obraId: string | null; estado: EstadoDeExcepcion; desde: string; hasta: string },
+): Promise<{ excepciones: ExcepcionFila[]; anterioresPendientes: number }> {
+  const alcance = and(
+    filtroDeObraEstricto(sesion, obraDelMensaje),
+    veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
+    eq(whatsappExcepciones.estado, filtro.estado),
+  );
   const filas = await consulta()
-    .where(
-      and(
-        filtroDeObraEstricto(sesion, obraDelMensaje),
-        veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
-        eq(whatsappExcepciones.estado, filtro.estado),
-      ),
-    )
-    .orderBy(asc(whatsappMensajes.enviadoEn), asc(whatsappExcepciones.seccion), asc(whatsappExcepciones.renglon))
-    .limit(300);
-  return filas.map(aFila);
+    .where(and(alcance, sql`${diaDelMensaje} between ${filtro.desde} and ${filtro.hasta}`))
+    // Por día del reporte y hora, como el historial (026/RF-27).
+    .orderBy(
+      asc(diaDelMensaje),
+      asc(whatsappMensajes.enviadoEn),
+      asc(whatsappExcepciones.seccion),
+      asc(whatsappExcepciones.renglon),
+    );
+  const [anteriores] =
+    filtro.estado === 'pendiente'
+      ? await baseServidor()
+          .select({ n: sql<number>`count(*)::int` })
+          .from(whatsappExcepciones)
+          .innerJoin(whatsappMensajes, eq(whatsappMensajes.id, whatsappExcepciones.mensajeId))
+          .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
+          .where(and(alcance, sql`${diaDelMensaje} < ${filtro.desde}`))
+      : [{ n: 0 }];
+  return { excepciones: filas.map(aFila), anterioresPendientes: anteriores?.n ?? 0 };
 }
 
 /** Una excepción al alcance de la sesión, o `null`. */
@@ -230,6 +247,7 @@ export async function guardarExcepcion(
     const faltas = faltasDelReporte(reporte, {
       hoy: fechaDeJornada(),
       claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',
+      lecturaDe: catalogos.lecturaDe,
     }).filter((f) => f.seccion === seccion || f.seccion === 'fecha');
     if (faltas.length > 0) return respuestaDeFaltas(faltas);
     const enBitacora = await guardarEnBitacora({

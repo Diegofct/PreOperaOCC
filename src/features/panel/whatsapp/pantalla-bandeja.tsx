@@ -36,15 +36,18 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from '../componentes';
 import type { GrupoFila, ObraFila, PropuestaFila } from '../contratos';
 import { MarcoPantalla, useListado } from '../marco';
+import { CamposDeFechas, useFiltroDeFechas } from './filtro-de-fechas';
 import { CreadoAutomaticamente } from './creado-automaticamente';
 import { EstadoDelDia } from './estado-del-dia';
 import { NoSePudoGuardar } from './no-se-pudo-guardar';
 import { DetalleDeReporte } from './propuesta-reporte';
 import { ReportesEsperados } from './reportes-esperados';
 import { usePersona } from '../sesion';
+import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
 
 /** Día y hora en la obra, corto: «3 oct, 07:30 p. m.». */
 function momento(iso: string | null): string {
@@ -175,8 +178,14 @@ export default function PantallaBandeja() {
   const obras = useListado<ObraFila>(
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
+  // El rango de días del reporte, en la dirección (spec 025, RF-45, RF-49, RF-54).
+  const fechas = useFiltroDeFechas();
+  const { desde, hasta } = fechas.consultado;
   const propuestas = useListado<PropuestaFila>(
-    useCallback(() => api.whatsapp.propuestas.listar(estado, obraId), [estado, obraId]),
+    useCallback(
+      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }),
+      [estado, obraId, desde, hasta],
+    ),
   );
 
   const opcionesDeObra: Opcion[] = obras.datos
@@ -282,6 +291,9 @@ export default function PantallaBandeja() {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDelHistorial = usePaginacion(propuestas.datos, `${estado}|${obraId}|${desde}|${hasta}`);
+
   return (
     <MarcoPantalla
       modulo="whatsapp"
@@ -342,12 +354,21 @@ export default function PantallaBandeja() {
               ancho={280}
             />
           ) : null}
+          <CamposDeFechas filtro={fechas} />
         </Acciones>
-        <Tabla
-          columnas={columnas}
-          filas={propuestas.datos}
-          vacio={`No hay reportes en «${ESTADOS.find((e) => e.valor === estado)!.etiqueta}».`}
-        />
+        <>
+          <Tabla
+            columnas={columnas}
+            filas={paginaDelHistorial.pagina}
+            vacio={`No hay reportes en «${ESTADOS.find((e) => e.valor === estado)!.etiqueta}» entre el ${desde} y el ${hasta}.`}
+          />
+          <Paginacion
+            pagina={paginaDelHistorial.paginaActual}
+            porPagina={POR_PAGINA}
+            total={paginaDelHistorial.total}
+            onCambiar={paginaDelHistorial.irAPagina}
+          />
+        </>
       </Seccion>
       )}
     </MarcoPantalla>
@@ -448,6 +469,9 @@ function GruposDeWhatsapp({
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeGrupos = usePaginacion(grupos.datos);
+
   return (
     <Seccion titulo="Grupos de WhatsApp">
       {sinObra > 0 ? (
@@ -459,7 +483,15 @@ function GruposDeWhatsapp({
       ) : null}
       {grupos.error ? <Aviso tono="error">{grupos.error}</Aviso> : null}
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
-      <Tabla columnas={columnas} filas={grupos.datos} vacio="Todavía no ha llegado ningún grupo." />
+      <>
+        <Tabla columnas={columnas} filas={paginaDeGrupos.pagina} vacio="Todavía no ha llegado ningún grupo." />
+        <Paginacion
+          pagina={paginaDeGrupos.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeGrupos.total}
+          onCambiar={paginaDeGrupos.irAPagina}
+        />
+      </>
     </Seccion>
   );
 }

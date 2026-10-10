@@ -29,10 +29,13 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from '../componentes';
 import type { CreadoFila } from '../contratos';
 import { useListado } from '../marco';
+import { CamposDeFechas, useFiltroDeFechas } from './filtro-de-fechas';
 import { usePersona } from '../sesion';
+import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
 
 const NOMBRE_DEL_TIPO: Record<TipoCreado, string> = {
   persona: 'Persona',
@@ -59,10 +62,18 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
   const [hecho, setHecho] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // El rango de días en que se creó (spec 025, RF-47). Lo de antes sin revisar se avisa.
+  const fechas = useFiltroDeFechas();
+  const { desde, hasta } = fechas.consultado;
+  const [anteriores, setAnteriores] = useState(0);
   const lista = useListado<FilaCreada>(
     useCallback(
-      () => api.whatsapp.creados.listar(obraId).then((l) => l.map((c) => ({ ...c, id: `${c.tipo}|${c.registroId}` }))),
-      [obraId],
+      () =>
+        api.whatsapp.creados.listar(obraId, { desde, hasta }).then((r) => {
+          setAnteriores(r.anterioresSinRevisar);
+          return r.creados.map((c) => ({ ...c, id: `${c.tipo}|${c.registroId}` }));
+        }),
+      [obraId, desde, hasta],
     ),
   );
 
@@ -123,14 +134,17 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeCreados = usePaginacion(lista.datos);
+
   return (
     <Seccion titulo="Creado automáticamente">
       <Ayuda>
         Lo que el sistema registró solo porque no existía. Si está bien, márquelo revisado. Si era alguien o algo que ya
         estaba registrado con otro nombre, use «Es el mismo que…».
       </Ayuda>
-      {esGerencia ? (
-        <Acciones>
+      <Acciones>
+        {esGerencia ? (
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -140,12 +154,30 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
             permiteVacio
             ancho={280}
           />
-        </Acciones>
-      ) : null}
+        ) : null}
+        <CamposDeFechas filtro={fechas} />
+      </Acciones>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       {lista.error ? <Aviso tono="error">{lista.error}</Aviso> : null}
-      <Tabla columnas={columnas} filas={lista.datos} vacio="No hay nada creado automáticamente por revisar." />
+      {anteriores > 0 ? (
+        <Aviso tono="info">
+          {`Hay ${anteriores} sin revisar de días anteriores al ${desde}. Cambie «Desde» para verl${anteriores === 1 ? 'o' : 'os'}.`}
+        </Aviso>
+      ) : null}
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeCreados.pagina}
+          vacio={`No hay nada creado automáticamente por revisar entre el ${desde} y el ${hasta}.`}
+        />
+        <Paginacion
+          pagina={paginaDeCreados.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeCreados.total}
+          onCambiar={paginaDeCreados.irAPagina}
+        />
+      </>
       {uniendo ? (
         <VentanaUnir
           creado={uniendo}

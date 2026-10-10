@@ -26,9 +26,11 @@ import {
   Selector,
   Tabla,
   type Columna,
+  Paginacion,
 } from './componentes';
 import type { AsignacionFila, PersonaFila, VehiculoFila } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 /**
  * Fecha corta para una tabla; la hora no aporta nada aquí.
@@ -123,6 +125,9 @@ export default function PantallaAsignaciones() {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeAsignaciones = usePaginacion(asignaciones.datos);
+
   return (
     <MarcoPantalla
       modulo="asignaciones"
@@ -166,11 +171,19 @@ export default function PantallaAsignaciones() {
       </Seccion>
 
       <Seccion titulo={`Asignaciones (${asignaciones.datos.length})`}>
-        <Tabla
-          columnas={columnas}
-          filas={asignaciones.datos}
-          vacio="Todavía no hay asignaciones. Hasta que se registre una, el operador no puede levantar el preoperacional de ninguna máquina."
-        />
+        <>
+          <Tabla
+            columnas={columnas}
+            filas={paginaDeAsignaciones.pagina}
+            vacio="Todavía no hay asignaciones. Hasta que se registre una, el operador no puede levantar el preoperacional de ninguna máquina."
+          />
+          <Paginacion
+            pagina={paginaDeAsignaciones.paginaActual}
+            porPagina={POR_PAGINA}
+            total={paginaDeAsignaciones.total}
+            onCambiar={paginaDeAsignaciones.irAPagina}
+          />
+        </>
       </Seccion>
     </MarcoPantalla>
   );

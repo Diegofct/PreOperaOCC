@@ -12,7 +12,9 @@
  */
 import { useCallback, useState } from 'react';
 
-import { DESTINO_OBRA, OPCIONES_DE_METROS, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import { NOVEDADES_DE_PERSONAL, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
+import { DESTINO_OBRA, formatearAbscisa, OPCIONES_DE_METROS, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import type { UbicacionPorValidar } from '@/shared/rules/parte';
 import { alcanza } from '@/shared/rules/permisos';
 import {
   etiquetaDeCategoria,
@@ -23,6 +25,7 @@ import {
   type MovimientoDelReporte,
   type PersonaDelReporte,
   type ViajeDelReporte,
+  ubicacionDeTexto,
 } from '@/shared/rules/whatsapp';
 
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
@@ -42,9 +45,11 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from '../componentes';
 import type { DetalleDePropuesta, ExcepcionFila } from '../contratos';
 import { useListado } from '../marco';
+import { CamposDeFechas, useFiltroDeFechas } from './filtro-de-fechas';
 import { usePersona } from '../sesion';
 import {
   CampoNumero,
@@ -53,6 +58,52 @@ import {
   OPCIONES_DE_CLIMA,
   OPCIONES_DE_ENSAYO,
 } from './propuesta-reporte';
+import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
+
+const OPCIONES_DE_NOVEDAD = NOVEDADES_DE_PERSONAL.map((n) => ({ valor: n.id, etiqueta: n.nombre }));
+
+const OPCIONES_DE_CUMPLE = [
+  { valor: 'si', etiqueta: 'Cumple' },
+  { valor: 'no', etiqueta: 'No cumple' },
+];
+
+/** La ubicación de un ensayo como se lee: «PR 0 + 070 a PR 0 + 150», «PR 1 + 140» o el lugar. */
+function textoDeUbicacion(u: UbicacionPorValidar | null): string {
+  if (!u) return '';
+  const abscisa = (a: { pr: number | null; metros: number | null }) =>
+    a.pr === null || a.metros === null ? '' : formatearAbscisa(a.pr, a.metros);
+  if ('lugar' in u) return u.lugar ?? '';
+  if ('desde' in u) return `${abscisa(u.desde)} a ${abscisa(u.hasta)}`;
+  return abscisa(u);
+}
+
+/**
+ * La ubicación de un ensayo, escrita como en el reporte y leída con la misma regla
+ * que el reporte (spec 025, RF-31, RF-43): «Pr 0+70 al Pr 0+150» es un tramo, «K1+140»
+ * una abscisa, y lo demás un lugar. El texto se guarda aparte para no reescribirlo
+ * mientras se teclea.
+ */
+function CampoDeUbicacion({
+  valor,
+  onChange,
+}: {
+  valor: UbicacionPorValidar | null;
+  onChange: (u: UbicacionPorValidar | null) => void;
+}) {
+  const [texto, setTexto] = useState(() => textoDeUbicacion(valor));
+  return (
+    <Campo
+      etiqueta="Ubicación"
+      valor={texto}
+      onChange={(x) => {
+        setTexto(x);
+        onChange(ubicacionDeTexto(x));
+      }}
+      ayuda="PR 1+140, «PR 0+70 al PR 0+150» o el lugar."
+      ancho={260}
+    />
+  );
+}
 
 /** Cómo se nombra cada sección en la lista. */
 const NOMBRE_DE_SECCION: Record<string, string> = {
@@ -92,8 +143,20 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
   const [reintentando, setReintentando] = useState<ExcepcionFila | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
 
+  // El rango de días del reporte (spec 025, RF-46). Lo pendiente de antes no se
+  // esconde: se cuenta y se avisa.
+  const fechas = useFiltroDeFechas();
+  const { desde, hasta } = fechas.consultado;
+  const [anteriores, setAnteriores] = useState(0);
   const lista = useListado<ExcepcionFila>(
-    useCallback(() => api.whatsapp.excepciones.listar('pendiente', obraId), [obraId]),
+    useCallback(
+      () =>
+        api.whatsapp.excepciones.listar('pendiente', obraId, { desde, hasta }).then((r) => {
+          setAnteriores(r.anterioresPendientes);
+          return r.excepciones;
+        }),
+      [obraId, desde, hasta],
+    ),
   );
 
   const columnas: Columna<ExcepcionFila>[] = [
@@ -155,14 +218,17 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeExcepciones = usePaginacion(lista.datos);
+
   return (
     <Seccion titulo="No se pudo guardar">
       <Ayuda>
         Lo que el sistema no pudo guardar solo. Complételo y guárdelo, o descártelo con un motivo. Lo que no es un
         renglón (la fecha, una bitácora cerrada) se reintenta.
       </Ayuda>
-      {esGerencia ? (
-        <Acciones>
+      <Acciones>
+        {esGerencia ? (
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -172,11 +238,29 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
             permiteVacio
             ancho={280}
           />
-        </Acciones>
-      ) : null}
+        ) : null}
+        <CamposDeFechas filtro={fechas} />
+      </Acciones>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {lista.error ? <Aviso tono="error">{lista.error}</Aviso> : null}
-      <Tabla columnas={columnas} filas={lista.datos} vacio="No hay nada pendiente: todo se guardó." />
+      {anteriores > 0 ? (
+        <Aviso tono="info">
+          {`Hay ${anteriores} pendiente${anteriores === 1 ? '' : 's'} de días anteriores al ${desde}. Cambie «Desde» para verl${anteriores === 1 ? 'o' : 'os'}.`}
+        </Aviso>
+      ) : null}
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeExcepciones.pagina}
+          vacio={`No hay nada pendiente entre el ${desde} y el ${hasta}.`}
+        />
+        <Paginacion
+          pagina={paginaDeExcepciones.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeExcepciones.total}
+          onCambiar={paginaDeExcepciones.irAPagina}
+        />
+      </>
 
       {completando ? (
         <VentanaCompletar
@@ -436,6 +520,37 @@ function CamposDelRenglon({
         />
         <SelectorDeHora etiqueta="Entrada" valor={p.entrada ?? ''} onChange={(x) => cambiar({ entrada: x || null })} />
         <SelectorDeHora etiqueta="Salida" valor={p.salida ?? ''} onChange={(x) => cambiar({ salida: x || null })} />
+        {/* O las horas como las reporta la obra, o la novedad (spec 025, RF-27). */}
+        <CampoNumero
+          etiqueta="Laboradas (L)"
+          valor={p.horasLaboradas}
+          onChange={(n) => cambiar({ horasLaboradas: n })}
+          editable
+          ancho={110}
+        />
+        <CampoNumero
+          etiqueta="Extra diurnas (ED)"
+          valor={p.extraDiurnas}
+          onChange={(n) => cambiar({ extraDiurnas: n })}
+          editable
+          ancho={130}
+        />
+        <CampoNumero
+          etiqueta="Extra nocturnas (EN)"
+          valor={p.extraNocturnas}
+          onChange={(n) => cambiar({ extraNocturnas: n })}
+          editable
+          ancho={140}
+        />
+        <Selector
+          etiqueta="Novedad"
+          valor={p.novedad ?? null}
+          opciones={OPCIONES_DE_NOVEDAD}
+          onChange={(x) => cambiar({ novedad: (x as NovedadDePersonal | null) ?? null })}
+          vacio="Sin novedad"
+          permiteVacio
+          ancho={170}
+        />
       </>
     );
   }
@@ -519,7 +634,34 @@ function CamposDelRenglon({
           ancho={260}
         />
         <SelectorDeHora etiqueta="Inicio" valor={e.horaInicio ?? ''} onChange={(x) => cambiar({ horaInicio: x || null })} />
-        <SelectorDeHora etiqueta="Fin" valor={e.horaFin ?? ''} onChange={(x) => cambiar({ horaFin: x || null })} />
+        {/* Opcional desde la spec 025 (RF-29). */}
+        <SelectorDeHora etiqueta="Fin (opcional)" valor={e.horaFin ?? ''} onChange={(x) => cambiar({ horaFin: x || null })} />
+        <Campo
+          etiqueta="Responsable"
+          valor={e.responsable ?? ''}
+          onChange={(x) => cambiar({ responsable: x || null })}
+          ancho={220}
+        />
+        <CampoDeUbicacion valor={e.ubicacion} onChange={(u) => cambiar({ ubicacion: u })} />
+        {/* En casillas propias (spec 025, RF-27, RF-34 a RF-36). */}
+        <CampoNumero etiqueta="Edad (días)" valor={e.edadDias} onChange={(n) => cambiar({ edadDias: n })} editable ancho={110} />
+        <CampoNumero etiqueta="Resultado" valor={e.resultado} onChange={(n) => cambiar({ resultado: n })} editable ancho={110} />
+        <Campo etiqueta="Unidad" valor={e.unidad ?? ''} onChange={(x) => cambiar({ unidad: x || null })} ancho={100} />
+        <Selector
+          etiqueta="¿Cumple?"
+          valor={e.cumple ?? null}
+          opciones={OPCIONES_DE_CUMPLE}
+          onChange={(x) => cambiar({ cumple: x === 'si' || x === 'no' ? x : null })}
+          vacio="No se sabe"
+          permiteVacio
+          ancho={150}
+        />
+        <Campo
+          etiqueta="Observación"
+          valor={e.observacion ?? ''}
+          onChange={(x) => cambiar({ observacion: x || null })}
+          ancho={320}
+        />
       </>
     );
   }

@@ -14,6 +14,7 @@
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
  */
+import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
 import type {
@@ -475,8 +476,9 @@ export const api = {
         panelEnviar<GrupoFila>(`/whatsapp/grupos/${encodeURIComponent(id)}`, 'PATCH', { obraId }),
     },
     propuestas: {
-      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null) => {
-        const parametros = new URLSearchParams({ estado });
+      /** Con el rango de días del reporte (spec 025, RF-45); sin él, la última semana. */
+      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
         return panel<{ propuestas: PropuestaFila[] }>(
           `/whatsapp/propuestas?${parametros.toString()}`,
@@ -520,10 +522,14 @@ export const api = {
     },
     /** «Creado automáticamente»: revisar y unir (spec 024, RF-33 a RF-36). */
     creados: {
-      listar: (obraId?: string | null) =>
-        panel<{ creados: CreadoFila[] }>(
-          `/whatsapp/creados${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`,
-        ).then((r) => r.creados),
+      /** Con lo que quedó sin revisar antes de «Desde» (spec 025, RF-47). */
+      listar: (obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ ...rango });
+        if (obraId) parametros.set('obraId', obraId);
+        return panel<{ creados: CreadoFila[]; anterioresSinRevisar: number }>(
+          `/whatsapp/creados?${parametros.toString()}`,
+        );
+      },
       revisado: (tipo: string, id: string) =>
         panelEnviar<{ revisado: true }>(
           `/whatsapp/creados/${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/revisado`,
@@ -539,11 +545,12 @@ export const api = {
     },
     /** «No se pudo guardar»: completar o descartar (spec 024, RF-60 a RF-63). */
     excepciones: {
-      listar: (estado: 'pendiente' | 'guardada' | 'descartada', obraId?: string | null) => {
-        const parametros = new URLSearchParams({ estado });
+      /** Con los pendientes anteriores a «Desde» (spec 025, RF-46). */
+      listar: (estado: 'pendiente' | 'guardada' | 'descartada', obraId?: string | null, rango?: RangoDeFechas) => {
+        const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
-        return panel<{ excepciones: ExcepcionFila[] }>(`/whatsapp/excepciones?${parametros.toString()}`).then(
-          (r) => r.excepciones,
+        return panel<{ excepciones: ExcepcionFila[]; anterioresPendientes: number }>(
+          `/whatsapp/excepciones?${parametros.toString()}`,
         );
       },
       guardar: (id: string, datos?: unknown, fecha?: string) =>

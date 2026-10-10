@@ -38,6 +38,8 @@ export async function GET(peticion: Request) {
         obraNombre: obras.nombre,
         odometroKm: vehiculos.odometroKm,
         horometroH: vehiculos.horometroH,
+        // Spec 026, RF-21: cuándo se actualizó la última lectura.
+        medidorActualizadoEn: vehiculos.medidorActualizadoEn,
         estado: vehiculos.estado,
         // Spec 024, RF-32: la marca «creado desde WhatsApp».
         desdeWhatsapp: sql<boolean>`exists (

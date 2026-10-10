@@ -15,10 +15,17 @@
  * de negocio y llevan sus casos en `scripts/verificar-reglas.ts` (constitución 3
  * y 5).
  */
-import { ENSAYOS_DE_CALIDAD, IDS_CLIMA, type CondicionClima } from '@/shared/catalogos/bitacora';
+import {
+  ENSAYOS_DE_CALIDAD,
+  IDS_CLIMA,
+  IDS_DE_NOVEDAD,
+  type CondicionClima,
+  type NovedadDePersonal,
+} from '@/shared/catalogos/bitacora';
 import { actividadPorItem, CLAVE_OTRA_ACTIVIDAD } from '@/shared/catalogos/presupuesto';
 
 import { abreviaturaDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
+import { TIPOS_VEHICULO } from '@/shared/catalogos/tipos-vehiculo';
 import { CARGOS, type Cargo } from '@/shared/catalogos/cargos';
 
 import {
@@ -29,8 +36,19 @@ import {
   type TipoMovimiento,
 } from './almacen';
 import { DESTINO_OBRA, valeLimpio, validarViaje } from './cantera';
-import { mensajeDeFranja, mensajeDeHorario, validarFranjas, validarHorario } from './horas';
-import { mensajeDeAvance, validarAvance, type ClaseDeMedidor } from './jornada';
+import {
+  mensajeDeFranja,
+  mensajeDePersona,
+  validarFranjas,
+  validarPersonaDelParte,
+} from './horas';
+import {
+  faltaContraElVehiculo,
+  mensajeDeAvance,
+  validarAvance,
+  type ClaseDeMedidor,
+  type LecturaRegistrada,
+} from './jornada';
 import { faltasDeActividad, faltasDelEnsayo, type UbicacionPorValidar } from './parte';
 import { normalizar } from './texto';
 
@@ -51,13 +69,32 @@ export interface AbscisaLeida {
  * metros van de 25 en 25, lo dice la regla de cada destino (`validarAbscisa`),
  * para que el residente vea la falta en vez de una abscisa corregida a escondidas.
  */
+const ABSCISA = /(?:^|[^a-z])(?:abs\.?\s*)?(?:k|pr)\s*(\d{1,3})\s*\+\s*(\d{1,3})(?!\d)/g;
+
 export function abscisaDeTexto(texto: string | null | undefined): AbscisaLeida | null {
-  if (!texto) return null;
-  const coincidencia = /(?:^|[^a-z])(?:abs\.?\s*)?(?:k|pr)\s*(\d{1,3})\s*\+\s*(\d{1,3})(?!\d)/.exec(
-    normalizar(texto),
-  );
-  if (!coincidencia) return null;
-  return { pr: Number(coincidencia[1]), metros: Number(coincidencia[2]) };
+  return abscisasDeTexto(texto)[0] ?? null;
+}
+
+/** Todas las abscisas de un texto, en el orden en que se escribieron. */
+function abscisasDeTexto(texto: string | null | undefined): AbscisaLeida[] {
+  if (!texto) return [];
+  return [...normalizar(texto).matchAll(ABSCISA)].map((c) => ({ pr: Number(c[1]), metros: Number(c[2]) }));
+}
+
+/**
+ * Dónde se hizo un ensayo, leído del reporte (spec 025, RF-31, RF-33, RF-43):
+ * «Pr 0 + 70 al Pr 0 +150» → un tramo, en el orden escrito; «K1+140» → una abscisa;
+ * lo que no trae ninguna, el texto tal cual como lugar. Si las abscisas caben en la
+ * vía lo dice la regla del ensayo, no esta lectura.
+ */
+export function ubicacionDeTexto(
+  texto: string | null | undefined,
+): { pr: number; metros: number } | { desde: AbscisaLeida; hasta: AbscisaLeida } | { lugar: string } | null {
+  const lugar = texto?.trim() ?? '';
+  if (!lugar) return null;
+  const abscisas = abscisasDeTexto(lugar);
+  if (abscisas.length >= 2) return { desde: abscisas[0], hasta: abscisas[1] };
+  return abscisas[0] ?? { lugar };
 }
 
 /* ── La hora ───────────────────────────────────────────────────────────── */
@@ -135,6 +172,10 @@ export interface VehiculoConocido {
   placa: string | null;
   /** Nula en un equipo aún sin asignar a obra, como en `alcance.ts`. */
   obraId: string | null;
+  /** Para reconocer la maquinaria por su nombre (spec 026, RF-1 a RF-3, RF-14). */
+  tipoId?: string | null;
+  marca?: string | null;
+  modelo?: string | null;
 }
 
 /** Lo que hace falta saber de una persona para reconocerla en un reporte. */
@@ -226,6 +267,102 @@ export function candidatosDeVehiculo(
       clavesLeidasDe(v).some((c) => c.length >= LARGO_MINIMO_PARA_BUSCAR_DENTRO && leido.includes(c)),
     ),
   );
+}
+
+/* ── La maquinaria por su nombre (spec 026) ─────────────────────────────── */
+
+/**
+ * El tipo de equipo con que empieza lo escrito (RF-2): «Vibrócompactador Volvo» es
+ * «Vibro Compactadora», «Montacarga a Diesel» es «Montacargas». Se compara sin tildes,
+ * espacios ni signos, y se acepta el nombre del catálogo sin su última letra (el
+ * plural o el género). Gana el más largo: «Excavadora de oruga» antes que «Excavadora».
+ */
+export function tipoDeEquipo(texto: string | null | undefined): string | null {
+  if (!texto) return null;
+  const escrito = compacto(texto);
+  if (escrito.length < 4) return null;
+  let mejor: { id: string; largo: number } | null = null;
+  for (const tipo of TIPOS_VEHICULO) {
+    const t = compacto(tipo.nombre);
+    const corto = t.slice(0, -1);
+    const largo = escrito.startsWith(t) ? t.length : escrito.startsWith(corto) && corto.length >= 4 ? corto.length : 0;
+    if (largo > 0 && (!mejor || largo > mejor.largo)) mejor = { id: tipo.id, largo };
+  }
+  return mejor?.id ?? null;
+}
+
+/**
+ * ¿Lo escrito nombra la marca del equipo? (RF-3). Basta con la marca entera
+ * («dynapac») o con su primera palabra si es de 4 letras o más («wirtgen» de
+ * «WIRTGEN WR 2000»), sin mayúsculas, tildes ni espacios.
+ */
+function nombraLaMarca(escrito: string, marca: string | null | undefined): boolean {
+  if (!marca?.trim()) return false;
+  const entera = compacto(marca);
+  const primera = compacto(palabras(marca)[0] ?? '');
+  return (entera.length >= 3 && escrito.includes(entera)) || (primera.length >= 4 && escrito.includes(primera));
+}
+
+export interface MaquinaReconocidaPorNombre {
+  /** El equipo, o `null` si no hay uno solo. */
+  id: string | null;
+  /** Por dónde se reconoció; `tipo_marca` es el que puede chocar entre renglones (RF-6). */
+  como: 'placa' | 'modelo' | 'tipo_marca' | null;
+  /** Los equipos que pueden ser, si son dos o más (RF-5). */
+  candidatos: string[];
+  /** El tipo reconocido en lo escrito, aunque no haya equipo: con él se registra (RF-8). */
+  tipoId: string | null;
+}
+
+/**
+ * El equipo de la obra que nombra un renglón de maquinaria (spec 026, RF-1 a RF-7,
+ * RF-14), en este orden:
+ *
+ *  1. por placa o código, como siempre (`candidatosDeVehiculo`, RF-7);
+ *  2. por el modelo, cuando es exactamente lo escrito: es como queda registrada una
+ *     máquina que creó el sistema, para reconocerla en el reporte siguiente (RF-14);
+ *  3. por tipo y marca (RF-1 a RF-4). La IA puede traer el tipo y la marca aparte;
+ *     si no, salen de lo escrito.
+ *
+ * Dos o más candidatos en un paso son ninguno, y se dicen (RF-5).
+ */
+export function reconocerMaquina(
+  texto: string | null | undefined,
+  vehiculos: readonly VehiculoConocido[],
+  obraId: string,
+  ia: { tipo?: string | null; marca?: string | null } = {},
+): MaquinaReconocidaPorNombre {
+  const tipoId = tipoDeEquipo(ia.tipo) ?? tipoDeEquipo(texto);
+  const ninguno = { id: null, como: null, candidatos: [], tipoId };
+  if (!texto?.trim()) return ninguno;
+
+  const porPlaca = candidatosDeVehiculo(texto, vehiculos, obraId);
+  if (porPlaca.length === 1) return { id: porPlaca[0], como: 'placa', candidatos: [], tipoId };
+  if (porPlaca.length > 1) return { ...ninguno, candidatos: porPlaca };
+
+  const escrito = compacto(texto);
+  const deLaObra = vehiculos.filter((v) => v.obraId === null || v.obraId === obraId);
+  const porModelo = deLaObra.filter((v) => v.modelo && compacto(v.modelo) === escrito);
+  if (porModelo.length === 1) return { id: porModelo[0].id, como: 'modelo', candidatos: [], tipoId };
+
+  if (!tipoId) return ninguno;
+  const conMarca = compacto([texto, ia.marca ?? ''].join(' '));
+  const porTipoYMarca = deLaObra.filter((v) => v.tipoId === tipoId && nombraLaMarca(conMarca, v.marca));
+  if (porTipoYMarca.length === 1) return { id: porTipoYMarca[0].id, como: 'tipo_marca', candidatos: [], tipoId };
+  return { ...ninguno, candidatos: porTipoYMarca.map((v) => v.id) };
+}
+
+/**
+ * La unidad de una lectura, si el reporte la dice (RF-16): «km» es odómetro; «h»,
+ * «hr», «hrs» u «horas» es horómetro. Lo que la IA ya separó gana a lo escrito.
+ */
+export function unidadDeMedidor(...textos: (string | null | undefined)[]): 'odometro' | 'horometro' | null {
+  for (const texto of textos) {
+    const t = normalizar(texto ?? '');
+    if (/(^|[^a-z])km\b|kilometr/.test(t)) return 'odometro';
+    if (/(^|[^a-z])(h|hr|hrs|hora|horas)\b|horometr/.test(t)) return 'horometro';
+  }
+  return null;
 }
 
 function palabras(texto: string): string[] {
@@ -568,6 +705,16 @@ export interface MaquinaDelReporte extends MaquinaReconocida {
   medidorInicial: number | null;
   medidorFinal: number | null;
   observaciones: string;
+  /**
+   * Spec 026. Opcionales: lo resuelto antes no los trae.
+   *  · `unidad`: el medidor que dice el reporte («km» u «h», RF-16); manda sobre el del tipo.
+   *  · `conflicto`: otro renglón del reporte es el mismo equipo por tipo y marca (RF-6).
+   *  · `tipoId` y `marcaEscrita`: con qué se registra la máquina si no existe (RF-8, RF-9).
+   */
+  unidad?: 'odometro' | 'horometro' | null;
+  conflicto?: boolean;
+  tipoId?: string | null;
+  marcaEscrita?: string | null;
 }
 
 export interface PersonaDelReporte {
@@ -581,6 +728,11 @@ export interface PersonaDelReporte {
    * de ahí se propone el cargo si hay que registrar a la persona.
    */
   hoja: string | null;
+  /** Las horas como las reporta la obra y la novedad (spec 025, RF-23, RF-24). */
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  novedad?: NovedadDePersonal | null;
 }
 
 export interface EnsayoDelReporte {
@@ -592,6 +744,11 @@ export interface EnsayoDelReporte {
   responsable: string | null;
   ubicacion: UbicacionPorValidar | null;
   observacion: string | null;
+  /** En casillas propias (spec 025, RF-42). */
+  edadDias?: number | null;
+  resultado?: number | null;
+  unidad?: string | null;
+  cumple?: 'si' | 'no' | null;
 }
 
 export interface ViajeDelReporte {
@@ -643,6 +800,11 @@ export interface ContextoDelReporte {
   hoy: string;
   /** En qué se mide cada equipo reconocido: horas de motor o kilómetros. */
   claseDeMedidor: (vehiculoId: string) => ClaseDeMedidor;
+  /**
+   * La última lectura registrada en Vehículos de ese medidor (spec 026, RF-18, RF-19).
+   * Ausente, no se compara: es lo que pasa en la bandeja manual de la 021.
+   */
+  lecturaDe?: (vehiculoId: string, clase: ClaseDeMedidor) => LecturaRegistrada;
   /**
    * El almacén de la obra, para revisar un reporte de almacén (spec 023): sus
    * materiales vigentes con su unidad y su stock de hoy, en centésimas. Ausente,
@@ -743,16 +905,30 @@ export function faltasDelReporte(
   // Maquinaria (RF-68 a RF-75).
   const maquinasVistas = new Set<string>();
   reporte.maquinaria.forEach((maquina, i) => {
-    if (!maquina.vehiculoId) {
+    if (!maquina.vehiculoId && maquina.conflicto) {
+      falta('maquinaria', i, `Dos renglones del reporte pueden ser el mismo equipo («${maquina.escrito}»): elija cuál es.`);
+    } else if (!maquina.vehiculoId) {
       falta('maquinaria', i, `No se reconoció «${maquina.escrito}»: elija el equipo de la lista.`);
     } else {
       if (maquinasVistas.has(maquina.vehiculoId)) {
         falta('maquinaria', i, 'Esta máquina ya está en otro renglón del reporte.');
       }
       maquinasVistas.add(maquina.vehiculoId);
-      const clase = contexto.claseDeMedidor(maquina.vehiculoId);
+      // El medidor que dice el reporte manda sobre el del tipo (026/RF-16, RF-17).
+      const clase = maquina.unidad ?? contexto.claseDeMedidor(maquina.vehiculoId);
       const error = validarAvance(clase, maquina.medidorInicial, maquina.medidorFinal);
       if (error) falta('maquinaria', i, mensajeDeAvance(clase, error, maquina.medidorInicial));
+      // Contra lo registrado en Vehículos: ni hacia atrás ni más de lo posible (026/RF-18, RF-19).
+      const contraElVehiculo =
+        !error && contexto.lecturaDe
+          ? faltaContraElVehiculo(
+              clase,
+              maquina.medidorFinal,
+              contexto.lecturaDe(maquina.vehiculoId, clase),
+              reporte.fecha ?? contexto.hoy,
+            )
+          : null;
+      if (contraElVehiculo) falta('maquinaria', i, contraElVehiculo);
     }
     if (maquina.operadorEscrito?.trim() && !maquina.operadorId) {
       falta(
@@ -779,8 +955,9 @@ export function faltasDelReporte(
       }
       personasVistas.add(persona.usuarioId);
     }
-    const error = validarHorario(persona.entrada, persona.salida);
-    if (error) falta('personal', i, mensajeDeHorario(error));
+    // Horas laboradas, entrada y salida, o novedad (spec 025, RF-26, RF-28).
+    const error = validarPersonaDelParte(persona);
+    if (error) falta('personal', i, mensajeDePersona(error));
   });
 
   // Control calidad de obra (RF-36, RF-81).
@@ -965,14 +1142,23 @@ export interface PropuestaLeible {
     medidor_inicial?: number | null;
     medidor_final?: number | null;
     observacion?: string | null;
+    /** Spec 026: «km» u «h», el tipo de equipo y la marca, como los separa la IA. */
+    unidad_medidor?: string | null;
+    tipo_equipo?: string | null;
+    marca?: string | null;
   }[];
   personal?: readonly {
     nombre?: string | null;
     entrada?: string | null;
     salida?: string | null;
     observacion?: string | null;
-    /** La hoja del archivo (spec 023). */
+    /** La hoja del archivo (spec 023), o el título del grupo de cargo (spec 025, RF-25). */
     cargo_hoja?: string | null;
+    /** Spec 025, RF-23, RF-24. */
+    horas_laboradas?: number | string | null;
+    extra_diurnas?: number | string | null;
+    extra_nocturnas?: number | string | null;
+    novedad?: string | null;
   }[];
   ensayos?: readonly {
     tipo?: string | null;
@@ -984,6 +1170,8 @@ export interface PropuestaLeible {
     unidad?: string | null;
     cumple?: string | null;
     observacion?: string | null;
+    /** Spec 025, RF-42. */
+    edad_dias?: number | string | null;
   }[];
   viajes?: readonly {
     placa?: string | null;
@@ -1176,6 +1364,29 @@ const ENSAYOS_COMO_OPCIONES: readonly OpcionConNombre[] = ENSAYOS_DE_CALIDAD.map
   nombre: e.nombre,
 }));
 
+/**
+ * Lo que en la obra se escribe en vez del nombre de la lista (spec 025, RF-40):
+ * «Compresión de probetas de suelo cemento con 4 %» es una compresión simple. Se
+ * mira solo si el nombre no se reconoce tal cual, para que «Moldeo de probetas» siga
+ * siendo el moldeo.
+ */
+const SINONIMOS_DE_ENSAYO: readonly [string, string][] = [
+  ['compresion', 'compresion_simple'],
+  ['densidad', 'densidad_en_campo'],
+  ['proctor', 'proctor_compactacion'],
+  ['cbr', 'cbr_sin_cemento'],
+  ['granulometr', 'granulometria'],
+];
+
+/** El id del ensayo de la lista de OCC, o `null` (RF-40). */
+export function reconocerEnsayo(texto: string | null | undefined): string | null {
+  const directo = reconocerPorNombre(texto, ENSAYOS_COMO_OPCIONES);
+  if (directo || !texto) return directo;
+  const escrito = normalizar(texto);
+  const ids = new Set(SINONIMOS_DE_ENSAYO.filter(([raiz]) => escrito.includes(raiz)).map(([, id]) => id));
+  return ids.size === 1 ? [...ids][0] : null;
+}
+
 function textoLimpio(texto: string | null | undefined): string {
   return texto?.trim() ?? '';
 }
@@ -1184,18 +1395,55 @@ function numeroONulo(valor: number | null | undefined): number | null {
   return typeof valor === 'number' && Number.isFinite(valor) ? valor : null;
 }
 
-/** La observación de un ensayo: resultado, si cumple y lo que se anotó (RF-37). */
+/**
+ * Un número escrito por la IA: «8», «8,5», «2.98 MPa» o «8 Hrs.» → 8, 8.5, 2.98, 8.
+ * Lo que no empieza por un número es `null`.
+ */
+export function numeroDeTexto(valor: number | string | null | undefined): number | null {
+  if (typeof valor === 'number') return Number.isFinite(valor) ? valor : null;
+  if (!valor) return null;
+  const coincidencia = /^\s*(-?\d+(?:[.,]\d+)?)/.exec(valor);
+  return coincidencia ? Number(coincidencia[1].replace(',', '.')) : null;
+}
+
+/**
+ * La novedad de una persona, leída del reporte (spec 025, RF-24): «Incapacitado»,
+ * «incapacidad», «permiso», «vacaciones», «ausente» o «no asistió».
+ */
+export function novedadDeTexto(texto: string | null | undefined): NovedadDePersonal | null {
+  const t = normalizar(texto ?? '');
+  if (!t) return null;
+  if (t.includes('incapac')) return 'incapacitado';
+  if (t.includes('permiso')) return 'permiso';
+  if (t.includes('vacacion')) return 'vacaciones';
+  if (t.includes('ausen') || t.includes('no asisti') || t.includes('falto')) return 'ausente';
+  return IDS_DE_NOVEDAD.find((id) => id === t) ?? null;
+}
+
+/**
+ * La observación de un ensayo. Desde la spec 025 el resultado, si cumple y la edad
+ * tienen casillas propias (RF-42); a la observación solo va lo que se anotó, más el
+ * resultado si no es un número («No cumple», «Sin resultado») para no perderlo.
+ */
 function observacionDelEnsayo(ensayo: NonNullable<PropuestaLeible['ensayos']>[number]): string | null {
   const partes: string[] = [];
   const resultado = ensayo.resultado;
-  if (resultado !== null && resultado !== undefined && String(resultado).trim() !== '') {
-    partes.push(`Resultado: ${String(resultado).trim()}${ensayo.unidad ? ` ${ensayo.unidad.trim()}` : ''}`);
+  if (typeof resultado === 'string' && resultado.trim() && numeroDeTexto(resultado) === null) {
+    partes.push(`Resultado: ${resultado.trim()}`);
   }
-  const cumple = normalizar(ensayo.cumple ?? '');
-  if (cumple === 'si') partes.push('Cumple');
-  if (cumple === 'no') partes.push('No cumple');
   if (textoLimpio(ensayo.observacion)) partes.push(textoLimpio(ensayo.observacion));
   return partes.length > 0 ? partes.join('. ') : null;
+}
+
+/** Las propiedades que no son `null`: los campos opcionales que no vinieron no se escriben. */
+function soloLosQueHay<T extends Record<string, unknown>>(campos: T): Partial<T> {
+  return Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== null)) as Partial<T>;
+}
+
+/** «si» o «no»; «desconocido» y lo demás, `null` (RF-36). */
+function cumpleDeTexto(texto: string | null | undefined): 'si' | 'no' | null {
+  const t = normalizar(texto ?? '');
+  return t === 'si' || t === 'no' ? t : null;
 }
 
 /**
@@ -1215,6 +1463,8 @@ function observacionDelEnsayo(ensayo: NonNullable<PropuestaLeible['ensayos']>[nu
  *    (RF-94, RF-104 a RF-106), y un renglón con «4 viajes» son cuatro viajes (RF-87).
  *  · Las novedades van a las notas (RF-38); un mensaje de notas sin novedades
  *    lleva su resumen.
+ *  · El personal trae sus horas reportadas y su novedad, y el ensayo su tramo, su
+ *    edad, su resultado y si cumple en casillas propias (spec 025).
  *
  * Nada se adivina: lo que no se reconoce queda en `null`, con lo escrito al lado,
  * y `faltasDelReporte` lo exige antes de aprobar.
@@ -1267,16 +1517,40 @@ export function resolverPropuesta(
     .filter((m) => numeroONulo(m.medidor_inicial) !== null || numeroONulo(m.medidor_final) !== null)
     .map((m) => {
       const operadorEscrito = textoLimpio(m.operador) || null;
+      const marcaEscrita = textoLimpio(m.marca) || null;
+      const reconocida = reconocerMaquina(m.equipo, catalogos.vehiculos, catalogos.obraId, {
+        tipo: m.tipo_equipo,
+        marca: marcaEscrita,
+      });
       return {
-        vehiculoId: reconocerVehiculo(m.equipo, catalogos.vehiculos, catalogos.obraId),
+        vehiculoId: reconocida.id,
         escrito: textoLimpio(m.equipo),
         operadorId: reconocerPersona(operadorEscrito, catalogos.personas),
         operadorEscrito,
         medidorInicial: numeroONulo(m.medidor_inicial),
         medidorFinal: numeroONulo(m.medidor_final),
         observaciones: textoLimpio(m.observacion),
+        // Spec 026: solo lo que vino, para que lo resuelto antes se lea igual.
+        ...soloLosQueHay({
+          unidad: unidadDeMedidor(m.unidad_medidor, m.equipo),
+          tipoId: reconocida.tipoId,
+          marcaEscrita,
+        }),
+        ...(reconocida.como === 'tipo_marca' ? { porTipoYMarca: true } : {}),
       };
     });
+  // Dos renglones que son el mismo equipo por tipo y marca: ninguno se asigna (026/RF-6).
+  const porTipoYMarca = new Map<string, number>();
+  for (const m of maquinaria as (MaquinaDelReporte & { porTipoYMarca?: boolean })[]) {
+    if (m.porTipoYMarca && m.vehiculoId) porTipoYMarca.set(m.vehiculoId, (porTipoYMarca.get(m.vehiculoId) ?? 0) + 1);
+  }
+  for (const m of maquinaria as (MaquinaDelReporte & { porTipoYMarca?: boolean })[]) {
+    if (m.porTipoYMarca && m.vehiculoId && (porTipoYMarca.get(m.vehiculoId) ?? 0) > 1) {
+      m.vehiculoId = null;
+      m.conflicto = true;
+    }
+    delete m.porTipoYMarca;
+  }
 
   const personal: PersonaDelReporte[] = (propuesta.personal ?? []).map((p) => ({
     usuarioId: reconocerPersona(p.nombre, catalogos.personas),
@@ -1285,21 +1559,31 @@ export function resolverPropuesta(
     salida: horaDeTexto(p.salida),
     observaciones: textoLimpio(p.observacion),
     hoja: textoLimpio(p.cargo_hoja) || null,
+    // Solo lo que vino (spec 025): un reporte con entrada y salida se lee como antes.
+    ...soloLosQueHay({
+      horasLaboradas: numeroDeTexto(p.horas_laboradas),
+      extraDiurnas: numeroDeTexto(p.extra_diurnas),
+      extraNocturnas: numeroDeTexto(p.extra_nocturnas),
+      novedad: novedadDeTexto(p.novedad),
+    }),
   }));
 
-  const ensayos: EnsayoDelReporte[] = (propuesta.ensayos ?? []).map((e) => {
-    const lugar = textoLimpio(e.ubicacion);
-    const abscisa = abscisaDeTexto(lugar);
-    return {
-      ensayo: reconocerPorNombre(e.tipo, ENSAYOS_COMO_OPCIONES),
-      escrito: textoLimpio(e.tipo),
-      horaInicio: horaDeTexto(e.hora_inicio),
-      horaFin: horaDeTexto(e.hora_fin),
-      responsable: textoLimpio(e.responsable) || null,
-      ubicacion: abscisa ?? (lugar ? { lugar } : null),
-      observacion: observacionDelEnsayo(e),
-    };
-  });
+  const ensayos: EnsayoDelReporte[] = (propuesta.ensayos ?? []).map((e) => ({
+    ensayo: reconocerEnsayo(e.tipo),
+    escrito: textoLimpio(e.tipo),
+    horaInicio: horaDeTexto(e.hora_inicio),
+    horaFin: horaDeTexto(e.hora_fin),
+    responsable: textoLimpio(e.responsable) || null,
+    // Un tramo, una abscisa o el texto como lugar (spec 025, RF-31, RF-43).
+    ubicacion: ubicacionDeTexto(e.ubicacion),
+    observacion: observacionDelEnsayo(e),
+    ...soloLosQueHay({
+      edadDias: numeroDeTexto(e.edad_dias),
+      resultado: numeroDeTexto(e.resultado),
+      unidad: textoLimpio(e.unidad) || null,
+      cumple: cumpleDeTexto(e.cumple),
+    }),
+  }));
 
   const viajes: ViajeDelReporte[] = (propuesta.viajes ?? []).flatMap((v) => {
     const vehiculoId = reconocerVehiculo(v.placa, catalogos.vehiculos, catalogos.obraId);

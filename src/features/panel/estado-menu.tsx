@@ -100,10 +100,11 @@ export function ProveedorMenu({ children }: { children: ReactNode }) {
   const regimen = regimenDelMenu({ ventana, preferencia });
   // Fuera del riel el «encima» no significa nada; se ignora en vez de borrarlo con
   // un efecto, y `alternar` lo deja cerrado al volver.
-  const encima = regimen === 'riel' && abiertoEncima;
+  const angosto = regimen === 'riel' || regimen === 'oculto';
+  const encima = angosto && abiertoEncima;
 
   const alternar = useCallback(() => {
-    if (regimen === 'riel') {
+    if (regimen === 'riel' || regimen === 'oculto') {
       setAbiertoEncima((antes) => !antes);
       return;
     }
@@ -118,7 +119,9 @@ export function ProveedorMenu({ children }: { children: ReactNode }) {
       regimen,
       abierto: regimen === 'fijoAbierto' || encima,
       encima,
-      anchoReservado: regimen === 'fijoAbierto' ? AnchoMenuAbierto : AnchoMenuPlegado,
+      // Oculto no reserva nada: el contenido usa todo el ancho del celular (026/RF-33).
+      anchoReservado:
+        regimen === 'fijoAbierto' ? AnchoMenuAbierto : regimen === 'oculto' ? 0 : AnchoMenuPlegado,
       alternar,
       cerrarEncima,
     }),

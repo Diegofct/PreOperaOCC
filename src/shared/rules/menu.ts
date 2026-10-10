@@ -12,6 +12,7 @@
  */
 import {
   AnchoBarraDesplazamiento,
+  AnchoCelular,
   AnchoMinimoMenuFijo,
   MaxContentWidthPanel,
   Spacing,
@@ -55,7 +56,8 @@ export type PreferenciaDelMenu = 'abierto' | 'plegado' | null;
  * - `fijoAbierto` y `fijoPlegado`: ocupa su columna y empuja el contenido.
  * - `riel`: ventana angosta; se ve plegado y, al abrirlo, va encima (RF-13).
  */
-export type RegimenDelMenu = 'fijoAbierto' | 'fijoPlegado' | 'riel';
+/** `oculto`: en el celular, ni siquiera el riel; se abre con ☰ encima (spec 026, RF-33). */
+export type RegimenDelMenu = 'fijoAbierto' | 'fijoPlegado' | 'riel' | 'oculto';
 
 export function regimenDelMenu({
   ventana,
@@ -64,6 +66,7 @@ export function regimenDelMenu({
   ventana: number;
   preferencia: PreferenciaDelMenu;
 }): RegimenDelMenu {
+  if (ventana < AnchoCelular) return 'oculto';
   if (ventana < AnchoMinimoMenuFijo) return 'riel';
   return preferencia === 'plegado' ? 'fijoPlegado' : 'fijoAbierto';
 }

@@ -54,6 +54,16 @@ function aNumero(texto: string): number | null {
   return Number.isFinite(valor) ? Math.trunc(valor) : null;
 }
 
+/** Una lectura con un decimal como mucho: «5836.6», «47283». */
+function lectura(valor: number): string {
+  return String(Math.round(valor * 10) / 10);
+}
+
+/** «8 oct.», el día en la obra. */
+function diaCorto(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short' });
+}
+
 export default function PantallaVehiculos() {
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
   const tipos = useListado<TipoVehiculoFila>(useCallback(() => api.tiposVehiculo.listar(), []));
@@ -152,11 +162,15 @@ export default function PantallaVehiculos() {
       clave: 'medidores',
       titulo: 'Odóm. / Horóm.',
       ancho: 145,
+      // Con un decimal y la fecha de la última lectura (spec 026, RF-20, RF-21).
       pintar: (v) => (
-        <Celda>
-          {v.odometroKm !== null ? `${v.odometroKm} km` : '—'} ·{' '}
-          {v.horometroH !== null ? `${v.horometroH} h` : '—'}
-        </Celda>
+        <>
+          <Celda>
+            {v.odometroKm !== null ? `${lectura(v.odometroKm)} km` : '—'} ·{' '}
+            {v.horometroH !== null ? `${lectura(v.horometroH)} h` : '—'}
+          </Celda>
+          {v.medidorActualizadoEn ? <Celda>{`act. ${diaCorto(v.medidorActualizadoEn)}`}</Celda> : null}
+        </>
       ),
     },
     {

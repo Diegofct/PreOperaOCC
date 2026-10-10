@@ -39,7 +39,7 @@ import {
   Acciones,
   Aviso,
   Boton,
-  Campo,
+  CampoDeFecha,
   Celda,
   Formulario,
   Seccion,
@@ -47,12 +47,14 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from '@/features/panel/componentes';
 import type { EnsayoFila, ObraFila } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 
 import { EtiquetaDeEstado, EtiquetaDeVeredicto } from './etiquetas';
+import { POR_PAGINA, usePaginacion } from '@/features/panel/usar-listado-filtrado';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -225,6 +227,9 @@ export default function PantallaLaboratorio() {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeEnsayos = usePaginacion(visibles);
+
   return (
     <MarcoPantalla
       modulo="laboratorio"
@@ -264,19 +269,18 @@ export default function PantallaLaboratorio() {
               ancho={260}
             />
           ) : null}
-          <Campo
+          <CampoDeFecha
             etiqueta="Ejecución desde"
             valor={desde}
             onChange={(v) => cambiarPeriodo(v, hasta)}
-            ayuda="AAAA-MM-DD"
             error={desdeMal ? 'La fecha va en formato AAAA-MM-DD.' : undefined}
-            ancho={150}
+            max={hasta || undefined}
           />
-          <Campo
+          <CampoDeFecha
             etiqueta="Hasta"
             valor={hasta}
             onChange={(v) => cambiarPeriodo(desde, v)}
-            ayuda="AAAA-MM-DD"
+            min={desde || undefined}
             error={
               hastaMal
                 ? 'La fecha va en formato AAAA-MM-DD.'
@@ -284,7 +288,7 @@ export default function PantallaLaboratorio() {
                   ? 'Tiene que ser igual o posterior a «Desde».'
                   : undefined
             }
-            ancho={150}
+            
           />
           <Selector
             etiqueta="Material"
@@ -338,17 +342,25 @@ export default function PantallaLaboratorio() {
         ) : null}
       </Seccion>
 
-      <Tabla
-        columnas={columnas}
-        filas={visibles}
-        vacio={
-          ensayos.cargando
-            ? 'Cargando los ensayos…'
-            : ensayos.datos.length === 0
-              ? 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.'
-              : 'Ningún ensayo coincide con los filtros elegidos.'
-        }
-      />
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeEnsayos.pagina}
+          vacio={
+            ensayos.cargando
+              ? 'Cargando los ensayos…'
+              : ensayos.datos.length === 0
+                ? 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.'
+                : 'Ningún ensayo coincide con los filtros elegidos.'
+          }
+        />
+        <Paginacion
+          pagina={paginaDeEnsayos.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeEnsayos.total}
+          onCambiar={paginaDeEnsayos.irAPagina}
+        />
+      </>
     </MarcoPantalla>
   );
 }

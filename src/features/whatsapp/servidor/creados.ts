@@ -65,13 +65,16 @@ async function nombres(tipo: TipoCreado, ids: string[]): Promise<Map<string, { n
   return new Map(filas.map((f) => [f.id, { nombre: f.nombre, detalle: f.detalle }]));
 }
 
-/** Lo creado sin revisar de la obra (o de todas, para la gerencia), lo más antiguo primero (RF-33). */
+/**
+ * Lo creado de la obra (o de todas, para la gerencia) en un rango de días en que se
+ * creó, lo más antiguo primero (024/RF-33; 025/RF-47). Sin tope: el rango acota.
+ */
 export async function listarCreados(
   sesion: PersonaEnSesion,
-  filtro: { obraId: string | null; revisados: boolean },
-): Promise<CreadoFila[]> {
+  filtro: { obraId: string | null; revisados: boolean; desde: string; hasta: string },
+): Promise<{ creados: CreadoFila[]; anterioresSinRevisar: number }> {
   const obraId = veTodasLasObras(sesion) ? filtro.obraId : sesion.obraId;
-  if (!veTodasLasObras(sesion) && !obraId) return [];
+  if (!veTodasLasObras(sesion) && !obraId) return { creados: [], anterioresSinRevisar: 0 };
   const filas = await baseServidor()
     .select({
       tipo: whatsappCreados.tipo,
@@ -91,16 +94,16 @@ export async function listarCreados(
       and(
         obraId ? eq(whatsappCreados.obraId, obraId) : undefined,
         filtro.revisados ? isNotNull(whatsappCreados.revisadoEn) : isNull(whatsappCreados.revisadoEn),
+        sql`(${whatsappCreados.creadoEn} at time zone 'America/Bogota')::date between ${filtro.desde} and ${filtro.hasta}`,
       ),
     )
-    .orderBy(asc(whatsappCreados.creadoEn))
-    .limit(300);
+    .orderBy(asc(whatsappCreados.creadoEn));
 
   const porTipo = new Map<TipoCreado, Map<string, { nombre: string; detalle: string | null }>>();
   for (const tipo of TIPOS_CREADOS) {
     porTipo.set(tipo, await nombres(tipo, filas.filter((f) => f.tipo === tipo).map((f) => f.registroId)));
   }
-  return filas.map((f) => {
+  const creados = filas.map((f) => {
     const n = porTipo.get(f.tipo)?.get(f.registroId);
     return {
       ...f,
@@ -110,6 +113,21 @@ export async function listarCreados(
       revisadoEn: f.revisadoEn?.toISOString() ?? null,
     };
   });
+
+  // Lo que quedó sin revisar antes de «Desde»: que no se olvide por estar fuera del rango.
+  const [anteriores] = filtro.revisados
+    ? [{ n: 0 }]
+    : await baseServidor()
+        .select({ n: sql<number>`count(*)::int` })
+        .from(whatsappCreados)
+        .where(
+          and(
+            obraId ? eq(whatsappCreados.obraId, obraId) : undefined,
+            isNull(whatsappCreados.revisadoEn),
+            sql`(${whatsappCreados.creadoEn} at time zone 'America/Bogota')::date < ${filtro.desde}`,
+          ),
+        );
+  return { creados, anterioresSinRevisar: anteriores?.n ?? 0 };
 }
 
 /** Una marca al alcance de la sesión, o `null`. */

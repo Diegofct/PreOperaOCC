@@ -48,10 +48,7 @@ import {
 } from '@/shared/rules/whatsapp';
 
 import { catalogosDeLaObra } from './catalogos';
-import { obraDelMensaje } from './obra';
-
-/** Más de esto en un estado ya no es una bandeja: es un atraso que se pagina. */
-const LIMITE_DE_LA_LISTA = 200;
+import { diaDelMensaje, obraDelMensaje } from './obra';
 
 const COLUMNAS_DE_LA_FILA = {
   id: whatsappMensajes.id,
@@ -103,13 +100,14 @@ function aFila(fila: {
 }
 
 /**
- * La lista de un estado, del más antiguo al más reciente (RF-16): lo que lleva más
- * tiempo esperando es lo primero que hay que resolver. La gerencia puede pedir una
- * obra; el residente ve la suya y nada más (RF-14).
+ * La lista de un estado en un rango de días del reporte, de la fecha «Desde» a la
+ * fecha «Hasta» (spec 025, RF-45, RF-48; spec 026, RF-26, que reemplaza 025/RF-52). Sin tope: el rango ya acota lo que se lee,
+ * y un tope dejaba fuera justo lo más nuevo (RF-53). La gerencia puede pedir una
+ * obra; el residente ve la suya y nada más (021/RF-14).
  */
 export async function leerBandeja(
   sesion: PersonaEnSesion,
-  filtro: { estado: EstadoMensajeWhatsapp; obraId: string | null },
+  filtro: { estado: EstadoMensajeWhatsapp; obraId: string | null; desde: string; hasta: string },
 ): Promise<PropuestaFila[]> {
   // El mensaje con su grupo y su obra: la obra sale de `obraDelMensaje`.
   const filas = await baseServidor()
@@ -122,12 +120,13 @@ export async function leerBandeja(
         filtroDeObraEstricto(sesion, obraDelMensaje),
         veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
         eq(whatsappMensajes.estado, filtro.estado),
+        sql`${diaDelMensaje} between ${filtro.desde} and ${filtro.hasta}`,
         // Lo que complementa a un mensaje que existe va dentro de él (RF-20).
         sql`not exists (select 1 from whatsapp_mensajes p where p.id = ${whatsappMensajes.complementaA})`,
       ),
     )
-    .orderBy(asc(whatsappMensajes.enviadoEn))
-    .limit(LIMITE_DE_LA_LISTA);
+    // De «Desde» a «Hasta», y en cada día del más antiguo al más reciente (026/RF-26).
+    .orderBy(asc(diaDelMensaje), asc(whatsappMensajes.enviadoEn));
 
   return filas.map(aFila);
 }

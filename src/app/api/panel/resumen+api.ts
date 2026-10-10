@@ -13,7 +13,7 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
 import { cumplimientoDelDia } from '@/shared/rules/cumplimiento';
-import { desglosarJornada, horarioEfectivo } from '@/shared/rules/horas';
+import { horarioEfectivo, horasDeLaPersona } from '@/shared/rules/horas';
 import {
   avanceDeMedidor,
   fechaDeJornada,
@@ -94,11 +94,16 @@ export async function GET(peticion: Request) {
       // parte en pantalla (spec 016): con uno fijo, el Inicio y el parte darían
       // cifras distintas para las mismas personas.
       const horario = horarioEfectivo(parte, parte.horarioDeLaObra);
+      // Lo reportado manda sobre el cálculo (spec 025, RF-14, RF-17); una persona con
+      // novedad y sin horas cuenta, con 0 horas (RF-22).
       for (const persona of parte.personal) {
-        const desglose = desglosarJornada(parte.fecha, persona.entrada, persona.salida, horario);
-        if (!desglose) continue;
-        minutosPersonal += desglose.trabajados;
-        minutosExtra += desglose.extra;
+        const horas = horasDeLaPersona(parte.fecha, persona, horario);
+        if (!horas) {
+          if (persona.novedad) personasContadas++;
+          continue;
+        }
+        minutosPersonal += horas.trabajados;
+        minutosExtra += horas.extra;
         personasContadas++;
       }
     }

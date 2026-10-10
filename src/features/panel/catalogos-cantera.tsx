@@ -34,6 +34,7 @@ import {
   Selector,
   Tabla,
   type Columna,
+  Paginacion,
 } from './componentes';
 import {
   ETIQUETA_TIPO_SITIO,
@@ -44,6 +45,7 @@ import {
 } from './contratos';
 import { useListado } from './marco';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 const OPCIONES_DE_TIPO = TIPOS_SITIO.map((t) => ({ valor: t, etiqueta: ETIQUETA_TIPO_SITIO[t] }));
 
@@ -142,6 +144,9 @@ function SeccionSitios({
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeSitios = usePaginacion(sitios.datos);
+
   return (
     <Seccion titulo="Sitios: canteras, plantas y otros">
       {puedeRegistrar ? (
@@ -210,17 +215,25 @@ function SeccionSitios({
         />
       ) : null}
 
-      <Tabla
-        columnas={columnasSitios}
-        filas={sitios.datos}
-        vacio={
-          sitios.cargando
-            ? 'Cargando…'
-            : puedeRegistrar
-              ? 'Todavía no hay sitios. Registre al menos una cantera: sin un origen no se puede registrar ningún viaje.'
-              : 'Esta obra todavía no tiene sitios registrados.'
-        }
-      />
+      <>
+        <Tabla
+          columnas={columnasSitios}
+          filas={paginaDeSitios.pagina}
+          vacio={
+            sitios.cargando
+              ? 'Cargando…'
+              : puedeRegistrar
+                ? 'Todavía no hay sitios. Registre al menos una cantera: sin un origen no se puede registrar ningún viaje.'
+                : 'Esta obra todavía no tiene sitios registrados.'
+          }
+        />
+        <Paginacion
+          pagina={paginaDeSitios.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeSitios.total}
+          onCambiar={paginaDeSitios.irAPagina}
+        />
+      </>
     </Seccion>
   );
 }
@@ -282,6 +295,9 @@ function SeccionMateriales({
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeMateriales = usePaginacion(materiales.datos);
+
   return (
     <Seccion titulo="Materiales de cantera">
       {puedeRegistrar ? (
@@ -337,17 +353,25 @@ function SeccionMateriales({
         />
       ) : null}
 
-      <Tabla
-        columnas={columnasMateriales}
-        filas={materiales.datos}
-        vacio={
-          materiales.cargando
-            ? 'Cargando…'
-            : puedeRegistrar
-              ? 'Todavía no hay materiales. Registre los que salen de la cantera: afirmado, subbase, arena…'
-              : 'Esta obra todavía no tiene materiales de cantera registrados.'
-        }
-      />
+      <>
+        <Tabla
+          columnas={columnasMateriales}
+          filas={paginaDeMateriales.pagina}
+          vacio={
+            materiales.cargando
+              ? 'Cargando…'
+              : puedeRegistrar
+                ? 'Todavía no hay materiales. Registre los que salen de la cantera: afirmado, subbase, arena…'
+                : 'Esta obra todavía no tiene materiales de cantera registrados.'
+          }
+        />
+        <Paginacion
+          pagina={paginaDeMateriales.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeMateriales.total}
+          onCambiar={paginaDeMateriales.irAPagina}
+        />
+      </>
     </Seccion>
   );
 }

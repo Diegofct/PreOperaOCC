@@ -124,6 +124,12 @@ export async function crearVolqueta(datos: {
   obraId: string;
   placa: string;
   mensajeId: string;
+  /**
+   * El tipo reconocido en lo escrito y la marca (spec 026, RF-9): «Camioneta Jmc NPX
+   * 602» es una camioneta, no una volqueta. Sin tipo, volqueta, como en la 024.
+   */
+  tipoId?: string | null;
+  marca?: string | null;
 }): Promise<string> {
   const db = baseServidor();
   const id = await idDeterminista(datos.obraId, 'vehiculo', datos.placa);
@@ -134,7 +140,8 @@ export async function crearVolqueta(datos: {
       id,
       codigoInterno,
       placa: datos.placa,
-      tipoVehiculoId: 'volqueta',
+      tipoVehiculoId: datos.tipoId ?? 'volqueta',
+      marca: datos.marca ? nombreLimpio(datos.marca).toUpperCase() : null,
       obraId: datos.obraId,
       estado: 'operativo',
     })
@@ -150,6 +157,49 @@ export async function crearVolqueta(datos: {
     await anotarCreado({ tipo: 'vehiculo', registroId: id, obraId: datos.obraId, mensajeId: datos.mensajeId });
   }
   return siSeUnio('vehiculo', vehiculoId);
+}
+
+/**
+ * Registra en la obra una máquina que el reporte nombra y que no existe (spec 026,
+ * RF-8 a RF-12, RF-14): con su tipo, la marca que trae el reporte, y lo escrito como
+ * modelo, que es como el siguiente reporte la reconoce (`reconocerMaquina`). Sin placa;
+ * el código interno es automático. El id sale de la obra y lo escrito: dos reportes con
+ * el mismo renglón no la crean dos veces.
+ */
+export async function crearMaquina(datos: {
+  obraId: string;
+  tipoId: string;
+  marca: string | null;
+  escrito: string;
+  mensajeId: string;
+}): Promise<string> {
+  const db = baseServidor();
+  const escrito = nombreLimpio(datos.escrito);
+  const id = await idDeterminista(datos.obraId, 'maquina', claveDeNombre(escrito));
+  const codigoInterno = `WA-${datos.tipoId.toUpperCase()}-${id.replace(/-/g, '').slice(-4).toUpperCase()}`;
+  await db
+    .insert(vehiculos)
+    .values({
+      id,
+      codigoInterno,
+      placa: null,
+      tipoVehiculoId: datos.tipoId,
+      marca: datos.marca ? nombreLimpio(datos.marca).toUpperCase() : null,
+      modelo: escrito,
+      obraId: datos.obraId,
+      estado: 'operativo',
+    })
+    .onConflictDoNothing();
+
+  const [creada] = await db
+    .select({ id: vehiculos.id })
+    .from(vehiculos)
+    .where(and(eq(vehiculos.id, id), isNull(vehiculos.eliminadoEn)))
+    .limit(1);
+  if (creada) {
+    await anotarCreado({ tipo: 'vehiculo', registroId: id, obraId: datos.obraId, mensajeId: datos.mensajeId });
+  }
+  return siSeUnio('vehiculo', id);
 }
 
 /** Registra un material de Control Cantera en la obra con el nombre escrito (RF-28). */

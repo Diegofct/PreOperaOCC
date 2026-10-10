@@ -29,7 +29,6 @@ import {
 import {
   faltasDelDestino,
   MENSAJES_DE_VIAJE,
-  OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
   valeLimpio,
   type CanteraDelParte,
@@ -39,8 +38,14 @@ import {
   IDS_UNIDAD_DE_ACTIVIDAD,
   type UnidadDeActividad,
 } from '@/shared/catalogos/presupuesto';
-import { faltaObservacionDelEnsayo, faltasDeActividad } from '@/shared/rules/parte';
-import type { OrigenWhatsapp, ViajeDelParte } from '@/features/bitacoras/tipos';
+import {
+  faltaObservacionDelEnsayo,
+  faltasDeActividad,
+  MENSAJES_DE_ENSAYO,
+  METROS_MAXIMOS_DEL_ENSAYO,
+} from '@/shared/rules/parte';
+import { IDS_DE_NOVEDAD, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
+import type { OrigenWhatsapp, UbicacionDelEnsayo, ViajeDelParte } from '@/features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '@/features/laboratorio/tipos';
 import type {
   EstadoVisibleEnsayo,
@@ -335,6 +340,8 @@ export interface VehiculoFila {
   obraNombre: string | null;
   odometroKm: number | null;
   horometroH: number | null;
+  /** ISO 8601, o `null` si nunca se registró una lectura (spec 026, RF-21). */
+  medidorActualizadoEn?: string | null;
   estado: EstadoVehiculo;
   /** Llantas puestas a las que les queda 30% de vida o menos. Ver spec 003. */
   llantasPorCambiar: number;
@@ -755,12 +762,25 @@ export const maquinaDelParte = z.object({
   operadorId: idOpcional,
 });
 
+/** Unas horas del parte: un número, o nada. Si valen lo decide la regla (spec 025, RF-4). */
+const horasDelParte = z.number().finite().nullish();
+
+/**
+ * Una persona del parte. Desde la spec 025 basta con las horas laboradas, la entrada
+ * y la salida, o la novedad (RF-6, RF-7, RF-19): qué combinación vale lo decide
+ * `validarPersonaDelParte` en el servidor, la misma regla que el cierre.
+ */
 export const personaDelParte = z.object({
   usuarioId: textoObligatorio(64, 'la persona'),
-  entrada: horaDelDia,
-  salida: horaDelDia,
+  // Vacía es «no se escribió»: la pantalla manda "" cuando la casilla está en blanco.
+  entrada: z.union([horaDelDia, z.literal('')]).nullish().transform((v) => v || null),
+  salida: z.union([horaDelDia, z.literal('')]).nullish().transform((v) => v || null),
   /** Lo que explica sus horas: llegó tarde, salió a cita médica (spec 016, RF-26). Opcional. */
   observaciones: textoOpcional(1000).transform((v) => v ?? ''),
+  horasLaboradas: horasDelParte,
+  extraDiurnas: horasDelParte,
+  extraNocturnas: horasDelParte,
+  novedad: z.enum(IDS_DE_NOVEDAD).nullish(),
 });
 
 export const actividadDelParte = z.object({
@@ -855,15 +875,22 @@ const horaDelEnsayo = z
  * un lugar escrito. Estrictas las dos: una ubicación con PR **y** lugar no es
  * ninguna de las dos formas y se rechaza, en vez de guardar una y perder la otra.
  */
+const abscisaDelEnsayo = z
+  .object({
+    pr: z.number().refine((v) => OPCIONES_DE_PR.includes(v), MENSAJES_DE_VIAJE.prFueraDeRango),
+    // Cualquiera de 0 a 999, no de 25 en 25 (spec 025, RF-32).
+    metros: z
+      .number()
+      .int(MENSAJES_DE_ENSAYO.metrosDelEnsayo)
+      .min(0, MENSAJES_DE_ENSAYO.metrosDelEnsayo)
+      .max(METROS_MAXIMOS_DEL_ENSAYO, MENSAJES_DE_ENSAYO.metrosDelEnsayo),
+  })
+  .strict();
+
 const ubicacionDelEnsayo = z.union([
-  z
-    .object({
-      pr: z.number().refine((v) => OPCIONES_DE_PR.includes(v), MENSAJES_DE_VIAJE.prFueraDeRango),
-      metros: z
-        .number()
-        .refine((v) => OPCIONES_DE_METROS.includes(v), MENSAJES_DE_VIAJE.metrosFueraDeRango),
-    })
-    .strict(),
+  abscisaDelEnsayo,
+  // Un tramo, en el orden en que se escribió (spec 025, RF-31, RF-33).
+  z.object({ desde: abscisaDelEnsayo, hasta: abscisaDelEnsayo }).strict(),
   z.object({ lugar: z.string().trim().max(160) }).strict(),
 ]);
 
@@ -885,6 +912,11 @@ export const ensayoDelParte = z
     horaFin: horaDelEnsayo,
     responsable: z.string().trim().max(120).nullish(),
     ubicacion: ubicacionDelEnsayo.nullish(),
+    // Spec 025, RF-34 a RF-36.
+    edadDias: z.number().int().min(0).max(3650).nullish(),
+    resultado: z.number().finite().nullish(),
+    unidad: z.string().trim().max(20).nullish(),
+    cumple: z.enum(['si', 'no']).nullish(),
   })
   .superRefine((fila, contexto) => {
     if (!fila.ensayo) {
@@ -893,7 +925,9 @@ export const ensayoDelParte = z
       }
       return;
     }
-    const falta = faltaObservacionDelEnsayo(fila.observacion);
+    // Con resultado o «cumple», la observación no hace falta (spec 025, RF-38).
+    const conResultado = typeof fila.resultado === 'number' || Boolean(fila.cumple);
+    const falta = conResultado ? null : faltaObservacionDelEnsayo(fila.observacion);
     if (falta) contexto.addIssue({ code: 'custom', path: ['observacion'], message: falta });
   });
 
@@ -942,6 +976,11 @@ export interface PersonaDelParteFila {
   salida: string | null;
   /** Ausente en los partes anteriores a la spec 016 (RF-29). */
   observaciones?: string;
+  /** Spec 025, RF-1 a RF-3 y RF-18. Ausentes en lo anterior y en lo que trae entrada y salida. */
+  horasLaboradas?: number | null;
+  extraDiurnas?: number | null;
+  extraNocturnas?: number | null;
+  novedad?: NovedadDePersonal | null;
 }
 
 export interface ActividadDelParteFila {
@@ -993,7 +1032,12 @@ export interface EnsayoDelParteFila {
   horaInicio?: string;
   horaFin?: string;
   responsable?: string;
-  ubicacion?: { pr: number; metros: number } | { lugar: string };
+  ubicacion?: UbicacionDelEnsayo;
+  /** Spec 025, RF-34 a RF-36. Ausentes en los ensayos anteriores (RF-44). */
+  edadDias?: number | null;
+  resultado?: number | null;
+  unidad?: string | null;
+  cumple?: 'si' | 'no' | null;
 }
 
 /**
@@ -1639,6 +1683,7 @@ export interface GranulometriaDelParteFila {
  */
 const textoDeIa = z.string().nullish();
 const numeroDeIa = z.number().nullish();
+const numeroOTextoDeIa = z.union([z.number(), z.string()]).nullish();
 const listaDeIa = <T extends z.ZodType>(fila: T) => z.array(fila).max(200).default([]);
 
 export const propuestaDeIa = z.looseObject({
@@ -1680,6 +1725,10 @@ export const propuestaDeIa = z.looseObject({
       medidor_inicial: numeroDeIa,
       medidor_final: numeroDeIa,
       observacion: textoDeIa,
+      /** Spec 026, RF-9, RF-16. */
+      unidad_medidor: textoDeIa,
+      tipo_equipo: textoDeIa,
+      marca: textoDeIa,
     }),
   ),
   personal: listaDeIa(
@@ -1690,6 +1739,14 @@ export const propuestaDeIa = z.looseObject({
       observacion: textoDeIa,
       /** La hoja del archivo de donde salió la persona (spec 023, RF-62). */
       cargo_hoja: textoDeIa,
+      /**
+       * Las horas como las reporta la obra y la novedad (spec 025, RF-23, RF-24).
+       * Número o texto: una entrega no se rechaza entera por un «8» entre comillas.
+       */
+      horas_laboradas: numeroOTextoDeIa,
+      extra_diurnas: numeroOTextoDeIa,
+      extra_nocturnas: numeroOTextoDeIa,
+      novedad: textoDeIa,
     }),
   ),
   ensayos: listaDeIa(
@@ -1699,10 +1756,12 @@ export const propuestaDeIa = z.looseObject({
       hora_fin: textoDeIa,
       responsable: textoDeIa,
       ubicacion: textoDeIa,
-      resultado: z.union([z.number(), z.string()]).nullish(),
+      resultado: numeroOTextoDeIa,
       unidad: textoDeIa,
       cumple: textoDeIa,
       observacion: textoDeIa,
+      /** Spec 025, RF-42. */
+      edad_dias: numeroOTextoDeIa,
     }),
   ),
   viajes: listaDeIa(
@@ -1793,8 +1852,11 @@ const idDeElegido = z.string().trim().max(64).nullable();
 const textoDeCorreccion = (max: number) => z.string().max(max).nullable();
 const numeroDeCorreccion = z.number().finite().nullable();
 
+const abscisaCorregida = z.object({ pr: z.number().int().nullable(), metros: z.number().int().nullable() });
 const ubicacionCorregida = z.union([
-  z.object({ pr: z.number().int().nullable(), metros: z.number().int().nullable() }),
+  // Spec 025, RF-31: un tramo. Primero: un objeto con «desde» no es una abscisa.
+  z.object({ desde: abscisaCorregida, hasta: abscisaCorregida }),
+  abscisaCorregida,
   z.object({ lugar: textoDeCorreccion(200) }),
 ]);
 
@@ -1834,6 +1896,11 @@ export const reporteCorregido = z.object({
         medidorInicial: numeroDeCorreccion,
         medidorFinal: numeroDeCorreccion,
         observaciones: z.string().max(1000),
+        // Spec 026: opcionales, lo de antes no los trae.
+        unidad: z.enum(['odometro', 'horometro']).nullish(),
+        conflicto: z.boolean().optional(),
+        tipoId: textoDeCorreccion(60).optional(),
+        marcaEscrita: textoDeCorreccion(100).optional(),
       }),
     )
     .max(40),
@@ -1847,6 +1914,11 @@ export const reporteCorregido = z.object({
         observaciones: z.string().max(1000),
         // Con valor por defecto: las propuestas corregidas antes de la spec 023 no lo traen.
         hoja: textoDeCorreccion(100).default(null),
+        // Spec 025, RF-23 a RF-27: opcionales, lo de antes no los trae.
+        horasLaboradas: numeroDeCorreccion.optional(),
+        extraDiurnas: numeroDeCorreccion.optional(),
+        extraNocturnas: numeroDeCorreccion.optional(),
+        novedad: z.enum(IDS_DE_NOVEDAD).nullish(),
       }),
     )
     .max(80),
@@ -1860,6 +1932,11 @@ export const reporteCorregido = z.object({
         responsable: textoDeCorreccion(200),
         ubicacion: ubicacionCorregida.nullable(),
         observacion: textoDeCorreccion(1000),
+        // Spec 025, RF-42: opcionales, lo de antes no los trae.
+        edadDias: numeroDeCorreccion.optional(),
+        resultado: numeroDeCorreccion.optional(),
+        unidad: textoDeCorreccion(20).optional(),
+        cumple: z.enum(['si', 'no']).nullish(),
       }),
     )
     .max(40),

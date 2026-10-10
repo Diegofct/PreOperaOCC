@@ -47,9 +47,11 @@ import {
   Selector,
   Tabla,
   type Columna,
+  Paginacion,
 } from './componentes';
 import type { MaterialDeAlmacenFila, MovimientoDeAlmacenFila } from './contratos';
 import { useListado } from './marco';
+import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -188,6 +190,9 @@ export function HistorialAlmacen({
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeMovimientos = usePaginacion(visibles);
+
   return (
     <Seccion titulo={`Historial de ${material.nombre}`}>
       <Aviso tono="info">
@@ -228,17 +233,25 @@ export function HistorialAlmacen({
         <Boton titulo="Cerrar historial" tono="secundario" onPress={onCerrar} />
       </Formulario>
 
-      <Tabla
-        columnas={columnas}
-        filas={visibles}
-        vacio={
-          historial.cargando
-            ? 'Cargando el historial…'
-            : historial.datos.length === 0
-              ? 'Este material todavía no tiene movimientos.'
-              : 'Ningún movimiento coincide con el periodo y el tipo elegidos.'
-        }
-      />
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeMovimientos.pagina}
+          vacio={
+            historial.cargando
+              ? 'Cargando el historial…'
+              : historial.datos.length === 0
+                ? 'Este material todavía no tiene movimientos.'
+                : 'Ningún movimiento coincide con el periodo y el tipo elegidos.'
+          }
+        />
+        <Paginacion
+          pagina={paginaDeMovimientos.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeMovimientos.total}
+          onCambiar={paginaDeMovimientos.irAPagina}
+        />
+      </>
 
       {porAnular ? (
         <VentanaAnularMovimiento

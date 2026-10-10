@@ -20,7 +20,17 @@
  *  3. **Anillo de foco.** Se puede recorrer el panel entero con el tabulador, y
  *     eso solo sirve si se ve dónde está uno.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   Dimensions,
   Platform,
@@ -59,6 +69,7 @@ import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
 import { CapaFlotante } from './capa-flotante';
 import { anchoMinimoDeColumna } from './columnas';
 import type { Orden } from './ordenar';
+import { useEsAngosto } from './usar-ancho';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
 
 /* ------------------------------------------------------------------------ */
@@ -178,6 +189,7 @@ export function Etiqueta({
   tono: 'neutro' | 'atencion' | 'malo' | 'bueno';
   children: ReactNode;
 }) {
+  const angosto = useEsAngosto();
   const paleta = {
     neutro: { fondo: Estado.naFondo, texto: Estado.na },
     atencion: { fondo: Estado.atencionFondo, texto: Estado.atencion },
@@ -187,7 +199,7 @@ export function Etiqueta({
 
   return (
     <View style={[estilos.etiqueta, { backgroundColor: paleta.fondo }]}>
-      <Text style={[estilos.etiquetaTexto, { color: paleta.texto }]}>{children}</Text>
+      <Text style={[estilos.etiquetaTexto, angosto && estilos.textoAngosto, { color: paleta.texto }]}>{children}</Text>
     </View>
   );
 }
@@ -207,6 +219,7 @@ export function Boton({
   tono?: 'primario' | 'secundario' | 'peligro';
   deshabilitado?: boolean;
 }) {
+  const angosto = useEsAngosto();
   /**
    * El botón principal va en el grafito, no en el rojo de OCC.
    *
@@ -252,6 +265,7 @@ export function Boton({
       // `hovered` solo llega en web; en nativo es siempre falso y no estorba.
       style={({ pressed, hovered }) => [
         estilos.boton,
+        angosto && estilos.controlAngosto,
         {
           backgroundColor: pressed || hovered ? paleta.fondoActivo : paleta.fondo,
           borderColor: paleta.borde,
@@ -263,7 +277,7 @@ export function Boton({
         deshabilitado && estilos.botonInactivo,
       ]}
     >
-      <Text style={[estilos.botonTexto, { color: paleta.texto }]}>{titulo}</Text>
+      <Text style={[estilos.botonTexto, angosto && estilos.rotuloAngosto, { color: paleta.texto }]}>{titulo}</Text>
     </Pressable>
   );
 }
@@ -277,10 +291,31 @@ export function Boton({
  * (spec 007, RF-17): descubrir que un campo era obligatorio por el rechazo es
  * descubrirlo tarde.
  */
+/**
+ * Dentro de un `Formulario` de alta los campos crecen hasta llenar su renglón, para
+ * que las filas queden parejas en vez de dentadas (spec 026, RF-29 a RF-31).
+ */
+const EnFormulario = createContext(false);
+
+/**
+ * El ancho de un campo con `ancho` (spec 026):
+ *  · en el celular, el renglón entero: un campo por renglón (RF-35);
+ *  · en un formulario de alta, ese ancho como base, creciendo hasta el doble (RF-29);
+ *  · en lo demás, ese ancho fijo, como siempre.
+ */
+function useAnchoDeCampo(ancho: number): FlexStyle {
+  const angosto = useEsAngosto();
+  const enFormulario = useContext(EnFormulario);
+  if (angosto) return { width: '100%' };
+  if (enFormulario) return { flexBasis: ancho, flexGrow: 1, minWidth: ancho, maxWidth: ancho * 2 };
+  return { width: ancho };
+}
+
 function EtiquetaDeCampo({ texto, obligatorio }: { texto: string; obligatorio?: boolean }) {
+  const angosto = useEsAngosto();
   return (
     <Text
-      style={estilos.campoEtiqueta}
+      style={[estilos.campoEtiqueta, angosto && estilos.textoAngosto]}
       accessibilityLabel={obligatorio ? `${texto}, obligatorio` : texto}
     >
       {texto}
@@ -340,14 +375,16 @@ export function Campo({
    */
   ancho?: number;
 }) {
+  const angosto = useEsAngosto();
   const [enfocado, setEnfocado] = useState(false);
+  const anchoDeCampo = useAnchoDeCampo(ancho ?? 0);
 
   return (
     <View
       style={[
         estilos.campo,
         ancho !== undefined
-          ? { width: ancho }
+          ? anchoDeCampo
           : multilinea
             ? estilos.campoRenglonEntero
             : estilos.campoLleno,
@@ -370,6 +407,7 @@ export function Campo({
         readOnly={soloLectura}
         style={[
           estilos.campoEntrada,
+          angosto && estilos.controlAngosto,
           multilinea && estilos.campoAreaDeTexto,
           soloLectura && estilos.campoSoloLectura,
           enfocado && !soloLectura && estilos.campoEnfocado,
@@ -378,7 +416,86 @@ export function Campo({
         placeholderTextColor={Panel.textoApoyo}
       />
       {error ? <Text style={estilos.campoError}>{error}</Text> : null}
-      {!error && ayuda ? <Text style={estilos.campoAyuda}>{ayuda}</Text> : null}
+      {!error && ayuda ? <Text style={[estilos.campoAyuda, angosto && estilos.textoAngosto]}>{ayuda}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * Una fecha `AAAA-MM-DD` elegida en el calendario del navegador (spec 026, RF-24,
+ * RF-25, RF-28).
+ *
+ * Es el `<input type="date">` del navegador y no un calendario propio: en el
+ * computador abre un almanaque, en el celular el selector del sistema, y no añade
+ * ninguna dependencia. Se viste con los mismos tokens que `Campo`. `min` y `max`
+ * limitan lo que se puede elegir: «Hasta» no ofrece días anteriores a «Desde».
+ * Fuera de la web (no se usa: el panel solo existe ahí) cae en un `Campo` de texto.
+ */
+export function CampoDeFecha({
+  etiqueta,
+  valor,
+  onChange,
+  min,
+  max,
+  error,
+  ayuda,
+  ancho = 170,
+}: {
+  etiqueta: string;
+  valor: string;
+  onChange: (v: string) => void;
+  min?: string;
+  max?: string;
+  error?: string;
+  ayuda?: string;
+  ancho?: number;
+}) {
+  const angosto = useEsAngosto();
+  const [enfocado, setEnfocado] = useState(false);
+  const anchoDeCampo = useAnchoDeCampo(ancho);
+  if (Platform.OS !== 'web') {
+    return <Campo etiqueta={etiqueta} valor={valor} onChange={onChange} error={error} ayuda={ayuda} ancho={ancho} />;
+  }
+  const borde = error ? Estado.noConforme : enfocado ? Panel.accion : Panel.borde;
+  return (
+    <View style={[estilos.campo, anchoDeCampo]}>
+      <EtiquetaDeCampo texto={etiqueta} />
+      {createElement('input', {
+        type: 'date',
+        value: valor,
+        min,
+        max,
+        'aria-label': etiqueta,
+        onChange: (e: { target: { value: string } }) => onChange(e.target.value),
+        onFocus: () => setEnfocado(true),
+        onBlur: () => setEnfocado(false),
+        // El almanaque se abre al tocar cualquier parte del campo, no solo el ícono.
+        onClick: (e: { currentTarget: { showPicker?: () => void } }) => {
+          try {
+            e.currentTarget.showPicker?.();
+          } catch {
+            // Algunos navegadores solo lo permiten con un gesto directo: queda el ícono.
+          }
+        },
+        style: {
+          boxSizing: 'border-box',
+          width: '100%',
+          minHeight: angosto ? ALTO_DE_CONTROL_ANGOSTO : CampoPanel.alto,
+          paddingLeft: Spacing.three,
+          paddingRight: Spacing.two,
+          border: `${Grosor.linea}px solid ${borde}`,
+          borderRadius: Radio.md,
+          fontFamily: FuentePanel.texto,
+          fontSize: TextoPanel.cuerpo,
+          color: Panel.texto,
+          backgroundColor: Panel.superficie,
+          outline: 'none',
+          boxShadow: enfocado ? ANILLO_DE_FOCO : 'none',
+          cursor: 'pointer',
+        },
+      })}
+      {error ? <Text style={estilos.campoError}>{error}</Text> : null}
+      {!error && ayuda ? <Text style={[estilos.campoAyuda, angosto && estilos.textoAngosto]}>{ayuda}</Text> : null}
     </View>
   );
 }
@@ -481,6 +598,7 @@ export function Selector({
   /** Hay que elegir algo para poder guardar. Se marca en la etiqueta (spec 007, RF-17). */
   obligatorio?: boolean;
 }) {
+  const angosto = useEsAngosto();
   const [colocacion, setColocacion] = useState<
     (ColocacionDeLista & { x: number; anchoBoton: number }) | null
   >(null);
@@ -601,6 +719,7 @@ export function Selector({
    * siguiente vuelta, con la capa ya activa, lo resuelve.
    */
   const buscador = useRef<TextInput>(null);
+  const anchoDeCampo = useAnchoDeCampo(ancho ?? 0);
   useEffect(() => {
     if (!abierto || !conBuscador) return;
     const pedido = setTimeout(() => buscador.current?.focus(), 0);
@@ -614,7 +733,7 @@ export function Selector({
   }, [abierto, idLista, senalada]);
 
   return (
-    <View style={[estilos.campo, ancho === undefined ? estilos.campoLleno : { width: ancho }]}>
+    <View style={[estilos.campo, ancho === undefined ? estilos.campoLleno : anchoDeCampo]}>
       <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       <Pressable
         ref={boton}
@@ -627,6 +746,7 @@ export function Selector({
         style={({ hovered }) => [
           estilos.campoEntrada,
           estilos.selectorBoton,
+          angosto && estilos.controlAngosto,
           hovered && estilos.campoHover,
           // Abierto o enfocado con el tabulador: en los dos casos hay que ver
           // dónde está uno.
@@ -908,6 +1028,8 @@ export function Tabla<T extends { id: string }>({
     Spacing.three * (columnas.length - 1) +
     Spacing.three * 2;
 
+  const angosto = useEsAngosto();
+
   if (filas.length === 0) {
     return (
       <View style={estilos.tablaVacia}>
@@ -924,7 +1046,8 @@ export function Tabla<T extends { id: string }>({
     // tabla es ruido que sugiere que hay algo más que ver cuando no lo hay.
     <ScrollView
       horizontal
-      showsHorizontalScrollIndicator={false}
+      // En el celular sí se ve la barra: es la única pista de que hay más columnas (026/RF-36).
+      showsHorizontalScrollIndicator={angosto}
       style={[estilos.tablaMarco, variante === 'desnuda' && estilos.tablaDesnuda]}
       // El contenido mide lo que su marco (para que las columnas se encojan en vez
       // de empujar) pero nunca menos que la tabla encogida del todo. Además, así la
@@ -944,7 +1067,7 @@ export function Tabla<T extends { id: string }>({
                 onPress={() => alOrdenar(columna.clave)}
               />
             ) : (
-              <Text key={columna.clave} style={[estilos.tablaTitulo, estiloDeColumna(columna)]}>
+              <Text key={columna.clave} style={[estilos.tablaTitulo, angosto && estilos.rotuloAngosto, estiloDeColumna(columna)]}>
                 {columna.titulo}
               </Text>
             ),
@@ -1091,7 +1214,11 @@ export function Seccion({ titulo, children }: { titulo: string; children: ReactN
 
 /** La fila de campos de un formulario de alta: se acomoda sola al ancho. */
 export function Formulario({ children }: { children: ReactNode }) {
-  return <View style={estilos.formulario}>{children}</View>;
+  return (
+    <EnFormulario.Provider value>
+      <View style={estilos.formulario}>{children}</View>
+    </EnFormulario.Provider>
+  );
 }
 
 /**
@@ -1104,7 +1231,8 @@ export function Formulario({ children }: { children: ReactNode }) {
  * el borde.
  */
 export function Acciones({ children }: { children: ReactNode }) {
-  return <View style={estilos.grupoAcciones}>{children}</View>;
+  const angosto = useEsAngosto();
+  return <View style={[estilos.grupoAcciones, angosto && estilos.grupoAccionesAngosto]}>{children}</View>;
 }
 
 /**
@@ -1289,11 +1417,12 @@ export function Modal({
    */
   soloBotonCierra?: boolean;
 }) {
+  const angosto = useEsAngosto();
   return (
     <CapaFlotante visible alCerrar={soloBotonCierra ? () => {} : onCerrar} telon="oscuro">
       {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
-      <View style={estilos.centroModal}>
-        <View style={estilos.ventana}>
+      <View style={[estilos.centroModal, angosto && estilos.centroModalAngosto]}>
+        <View style={[estilos.ventana, angosto && estilos.ventanaAngosta]}>
           <View style={estilos.ventanaCabecera}>
             <Text style={estilos.ventanaTitulo}>{titulo}</Text>
             <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
@@ -1406,6 +1535,9 @@ export function Confirmado({ mensaje }: { mensaje: string | null }) {
 }
 
 /** El anillo de foco del panel: franja clara y aro grafito (spec 022). */
+/** En el celular, lo que se toca mide al menos esto (spec 026, RF-40). */
+const ALTO_DE_CONTROL_ANGOSTO = 44;
+
 const ANILLO_DE_FOCO = `0 0 0 2px ${Panel.superficie}, 0 0 0 ${2 + Grosor.marca}px ${Panel.foco}`;
 
 /**
@@ -1521,6 +1653,14 @@ const estilos = StyleSheet.create({
     overflow: 'hidden',
   },
   ventanaDesplazable: { flexShrink: 1 },
+  /** En el celular: controles de 44 px y texto de 14 como mínimo (spec 026, RF-40, RNF). */
+  controlAngosto: { minHeight: ALTO_DE_CONTROL_ANGOSTO },
+  textoAngosto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo },
+  /** Lo mismo para lo que va en la letra de los rótulos: botones y títulos de tabla. */
+  rotuloAngosto: { fontFamily: FuentePanel.rotulo, fontSize: TextoPanel.apoyo + 1 },
+  /** En el celular la ventana ocupa la pantalla entera (spec 026, RF-37). */
+  centroModalAngosto: { padding: 0 },
+  ventanaAngosta: { maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0 },
   ventanaCabecera: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1872,9 +2012,13 @@ const estilos = StyleSheet.create({
   grupoAcciones: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    alignItems: 'center',
+    // Por abajo (spec 026, RF-29): un botón junto a campos con etiqueta queda a la
+    // altura de los campos y no de sus etiquetas.
+    alignItems: 'flex-end',
     gap: Spacing.two,
   },
+  /** En el celular los campos van uno debajo de otro; los botones siguen en línea. */
+  grupoAccionesAngosto: { alignItems: 'stretch' },
   acciones: {
     width: '100%',
     flexDirection: 'row',

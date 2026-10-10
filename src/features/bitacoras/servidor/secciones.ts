@@ -42,7 +42,7 @@ import {
   type MaquinaDelParte,
   type PersonaDelParte,
 } from '@/features/bitacoras/tipos';
-import { mensajeDeFranja, mensajeDeHorario, validarFranjas, validarHorario } from '@/shared/rules/horas';
+import { mensajeDeFranja, mensajeDePersona, validarFranjas, validarPersonaDelParte } from '@/shared/rules/horas';
 import { medidorDeClase, mensajeDeAvance, validarAvance } from '@/shared/rules/jornada';
 
 /** Las filas de la sección, o por qué no se pueden guardar. */
@@ -114,7 +114,7 @@ export async function maquinariaDelParte(
   }
 
   for (const maquina of pedidas) {
-    const clase = medidorDeClase(porId.get(maquina.vehiculoId)!.clase);
+    const clase = maquina.claseMedidor ?? medidorDeClase(porId.get(maquina.vehiculoId)!.clase);
     const error = validarAvance(clase, maquina.medidorInicial ?? null, maquina.medidorFinal ?? null);
     // Falta una lectura todavía no es un error mientras se llena: solo se
     // exigen completas al cerrar. Lo que sí se rechaza ya es una lectura
@@ -147,7 +147,7 @@ export async function maquinariaDelParte(
       return construirMaquina(
         m,
         equipo.codigo,
-        medidorDeClase(equipo.clase),
+        m.claseMedidor ?? medidorDeClase(equipo.clase),
         m.operadorId ? (nombreDe.get(m.operadorId) ?? null) : null,
       );
     }),
@@ -163,9 +163,10 @@ export async function personalDelParte(
     return { error: 'Una persona no puede estar dos veces en la misma bitácora.' };
   }
 
+  // Horas laboradas, entrada y salida, o novedad (spec 025, RF-6 a RF-12, RF-19).
   for (const persona of pedidas) {
-    const error = validarHorario(persona.entrada, persona.salida);
-    if (error) return { error: mensajeDeHorario(error) };
+    const error = validarPersonaDelParte(persona);
+    if (error) return { error: mensajeDePersona(error) };
   }
 
   const gente = ids.length

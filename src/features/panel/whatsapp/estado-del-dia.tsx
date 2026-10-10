@@ -18,7 +18,7 @@ import {
   Acciones,
   Aviso,
   Boton,
-  Campo,
+  CampoDeFecha,
   Celda,
   Confirmacion,
   Etiqueta,
@@ -27,10 +27,12 @@ import {
   Tabla,
   type Columna,
   type Opcion,
+  Paginacion,
 } from '../componentes';
 import type { DiaDeWhatsapp } from '../contratos';
 import { useListado } from '../marco';
 import { usePersona } from '../sesion';
+import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -154,6 +156,9 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
     },
   ];
 
+  // Páginas de 15 (spec 025, RF-55 a RF-58).
+  const paginaDeDias = usePaginacion(dias.datos);
+
   return (
     <Seccion titulo="Estado del día">
       <Acciones>
@@ -168,30 +173,36 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
             ancho={260}
           />
         ) : null}
-        <Campo
+        <CampoDeFecha
           etiqueta="Desde"
           valor={desde}
           onChange={setDesde}
-          ayuda="AAAA-MM-DD"
           error={FECHA.test(desde) ? undefined : 'AAAA-MM-DD'}
-          ancho={150}
+          max={hasta || undefined}
         />
-        <Campo
+        <CampoDeFecha
           etiqueta="Hasta"
           valor={hasta}
           onChange={setHasta}
-          ayuda="AAAA-MM-DD"
           error={FECHA.test(hasta) ? undefined : 'AAAA-MM-DD'}
-          ancho={150}
+          min={desde || undefined}
         />
       </Acciones>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {dias.error ? <Aviso tono="error">{dias.error}</Aviso> : null}
-      <Tabla
-        columnas={columnas}
-        filas={dias.datos}
-        vacio="No hay días con reportes en ese periodo."
-      />
+      <>
+        <Tabla
+          columnas={columnas}
+          filas={paginaDeDias.pagina}
+          vacio="No hay días con reportes en ese periodo."
+        />
+        <Paginacion
+          pagina={paginaDeDias.paginaActual}
+          porPagina={POR_PAGINA}
+          total={paginaDeDias.total}
+          onCambiar={paginaDeDias.irAPagina}
+        />
+      </>
       {porArmar ? (
         <Confirmacion
           titulo="Guardar con lo que hay"

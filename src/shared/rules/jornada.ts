@@ -235,6 +235,40 @@ export function mensajeDeAvance(
   }
 }
 
+/** La última lectura registrada de un medidor del vehículo, y el día en que se registró. */
+export interface LecturaRegistrada {
+  valor: number | null;
+  /** `YYYY-MM-DD`, el día en la obra; `null` si nunca se registró. */
+  fecha: string | null;
+}
+
+/**
+ * Lo que falla de una lectura final contra la registrada en Vehículos, o `null`
+ * (spec 026, RF-18, RF-19). Un medidor no retrocede; y entre la lectura registrada y
+ * esta no puede haber más de lo que cabe en los días que pasaron, contando al menos
+ * uno. Sin lectura registrada no hay contra qué comparar: la primera vale.
+ */
+export function faltaContraElVehiculo(
+  clase: ClaseDeMedidor,
+  final: number | null,
+  registrada: LecturaRegistrada,
+  fechaDelReporte: string,
+): string | null {
+  if (final === null || registrada.valor === null) return null;
+  const unidad = UNIDAD_DE_MEDIDOR[clase];
+  if (final < registrada.valor) {
+    return `La lectura (${final} ${unidad}) es menor que la registrada en Vehículos (${registrada.valor} ${unidad}).`;
+  }
+  const dias = registrada.fecha
+    ? Math.max(1, Math.round((Date.parse(fechaDelReporte) - Date.parse(registrada.fecha)) / 86_400_000))
+    : 1;
+  const tope = MAXIMO_AVANCE_POR_DIA[clase] * dias;
+  if (final - registrada.valor > tope) {
+    return `Son más de ${tope} ${unidad} desde la última lectura registrada (${registrada.valor} ${unidad}). Revise las lecturas.`;
+  }
+  return null;
+}
+
 /**
  * Qué medidor le corresponde a un tipo de equipo.
  *

@@ -28,7 +28,7 @@ import { materialesConStock } from '@/features/almacen-obra/servidor/materiales'
 import { opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
 import type { DetalleDePropuesta, OpcionesDeCantera } from '@/features/panel/contratos';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
-import { medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
+import { fechaDeJornada, medidorDeClase, type ClaseDeMedidor, type LecturaRegistrada } from '@/shared/rules/jornada';
 import type {
   CatalogosDeLaObra,
   PreoperacionalDelDia,
@@ -90,6 +90,8 @@ export async function catalogosDeLaObra(
 ): Promise<{
   catalogos: CatalogosDeLaObra;
   claseDe: Map<string, ClaseDeMedidor>;
+  /** La última lectura registrada de un medidor del equipo (spec 026, RF-18, RF-19). */
+  lecturaDe: (vehiculoId: string, clase: ClaseDeMedidor) => LecturaRegistrada;
   cargoDe: Map<string, string | null>;
   /** Las personas registradas en esta obra, para las posibles coincidencias (023/RF-65). */
   personasDeLaObra: { id: string; nombreCompleto: string; cargo: string | null }[];
@@ -104,6 +106,13 @@ export async function catalogosDeLaObra(
         placa: vehiculos.placa,
         obraId: vehiculos.obraId,
         clase: tiposVehiculo.claseMedidor,
+        // Spec 026: para reconocer por tipo y marca, y comparar con la última lectura.
+        tipoId: vehiculos.tipoVehiculoId,
+        marca: vehiculos.marca,
+        modelo: vehiculos.modelo,
+        odometroKm: vehiculos.odometroKm,
+        horometroH: vehiculos.horometroH,
+        medidorActualizadoEn: vehiculos.medidorActualizadoEn,
       })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
@@ -140,6 +149,13 @@ export async function catalogosDeLaObra(
       ultimosViajes,
     },
     claseDe: new Map(equipos.map((e) => [e.id, medidorDeClase(e.clase)])),
+    lecturaDe: (vehiculoId, clase) => {
+      const e = equipos.find((x) => x.id === vehiculoId);
+      return {
+        valor: (clase === 'odometro' ? e?.odometroKm : e?.horometroH) ?? null,
+        fecha: e?.medidorActualizadoEn ? fechaDeJornada(e.medidorActualizadoEn.getTime()) : null,
+      };
+    },
     cargoDe: new Map(personas.map((p) => [p.id, p.cargo])),
     personasDeLaObra: personas
       .filter((p) => p.obraId === obraId)

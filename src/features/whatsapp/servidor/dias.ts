@@ -37,6 +37,7 @@ import { reporteCorregido } from '@/features/panel/contratos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
   candidatosDeVehiculo,
+  reconocerMaquina,
   faltasDelReporte,
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
@@ -52,7 +53,7 @@ import { ACTOR_SISTEMA, type Actor } from './actor';
 import { fotosElegidas, guardarEnBitacora, marcarMensaje } from './aprobacion';
 import { apartar } from './apartados';
 import { catalogosDeLaObra } from './catalogos';
-import { crearPersona, crearVolqueta } from './creacion';
+import { crearMaquina, crearPersona, crearVolqueta } from './creacion';
 import { obraDelMensaje } from './obra';
 
 /** Cómo se armó la bitácora: con todo, por la hora límite, o con «Guardar con lo que hay». */
@@ -178,10 +179,30 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
   const maquinaria = [];
   for (const m of reporte.maquinaria) {
     let { vehiculoId, operadorId } = m;
-    if (!vehiculoId && m.escrito) {
+    if (!vehiculoId && m.escrito && !m.conflicto) {
       const placa = placaDeLaMaquina(m.escrito);
       if (placa && candidatosDeVehiculo(m.escrito, catalogos.catalogos.vehiculos, obraId).length === 0) {
-        vehiculoId = await crearVolqueta({ obraId, placa, mensajeId: mensaje.id });
+        vehiculoId = await crearVolqueta({
+          obraId,
+          placa,
+          mensajeId: mensaje.id,
+          tipoId: m.tipoId,
+          marca: m.marcaEscrita,
+        });
+      } else if (!placa && m.tipoId) {
+        // Sin placa, con tipo y sin ningún candidato: la máquina se registra (026/RF-8, RF-13).
+        const reconocida = reconocerMaquina(m.escrito, catalogos.catalogos.vehiculos, obraId, {
+          marca: m.marcaEscrita,
+        });
+        if (reconocida.candidatos.length === 0) {
+          vehiculoId = await crearMaquina({
+            obraId,
+            tipoId: m.tipoId,
+            marca: m.marcaEscrita ?? null,
+            escrito: m.escrito,
+            mensajeId: mensaje.id,
+          });
+        }
       }
     }
     if (!operadorId && m.operadorEscrito) {
@@ -199,6 +220,7 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
   const faltas = faltasDelReporte(reporte, {
     hoy: fechaDeJornada(),
     claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',
+    lecturaDe: catalogos.lecturaDe,
   }).filter((f) => f.seccion !== 'viajes' && f.seccion !== 'almacen');
   const { guardable, excepciones } = separarRenglones(reporte, faltas);
   await apartar(mensaje.id, excepciones);
@@ -224,8 +246,12 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
   });
 
   if (enBitacora instanceof Response) {
+    const { error, choque } = (await enBitacora.json()) as { error?: string; choque?: boolean };
+    // Otro guardó la misma bitácora a la vez (el pulso y la entrega, el 8-oct): no es
+    // un problema del reporte. Se queda en espera y lo retoma el próximo pulso; lo que
+    // ya se escribió no se duplica porque los ids son deterministas (spec 025, T12).
+    if (choque) return null;
     // Cerrada entre medias, o una validación de la bitácora: el mensaje entero se aparta.
-    const { error } = (await enBitacora.json()) as { error?: string };
     await apartar(mensaje.id, [
       { seccion: 'bitacora', renglon: null, motivo: error ?? 'No se pudo llevar a la bitácora.', datos: null },
     ]);

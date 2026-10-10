@@ -31,6 +31,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  doublePrecision,
   boolean,
   check,
   date,
@@ -306,9 +307,12 @@ export const vehiculos = pgTable(
      * Últimas lecturas conocidas. En el teléfono las adelanta la captura del
      * día; aquí llegarán con el push y siempre por el mayor valor, nunca hacia
      * atrás: un medidor que retrocede es un error de digitación, no un hecho.
+     *
+     * Con decimal desde la spec 026 (RF-20): el horómetro se lee «5828.4 h», y con
+     * entero cada día se perdían décimas que al mes son horas.
      */
-    odometroKm: integer('odometro_km'),
-    horometroH: integer('horometro_h'),
+    odometroKm: doublePrecision('odometro_km'),
+    horometroH: doublePrecision('horometro_h'),
     medidorActualizadoEn: timestamp('medidor_actualizado_en', {
       withTimezone: true,
       mode: 'date',

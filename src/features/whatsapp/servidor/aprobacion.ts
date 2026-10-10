@@ -71,7 +71,7 @@ import { filtroDeObraEstricto } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { DESTINO_OBRA, valeLimpio } from '@/shared/rules/cantera';
-import { DESFASE_COLOMBIA_MS, fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
+import { DESFASE_COLOMBIA_MS, fechaDeJornada, medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
 import {
   claveDeMaterialNuevo,
   destinoDeCategoria,
@@ -225,6 +225,9 @@ export async function fotosElegidas(
  * condicionado; y pone las fotos elegidas. Con la bitácora cerrada no escribe nada y
  * responde el 409 que la pantalla sabe leer.
  */
+/** Cuántas veces se intenta escribir la bitácora antes de rendirse por choque de versión. */
+const INTENTOS_DE_ESCRITURA = 4;
+
 export async function guardarEnBitacora(datos: {
   mensajeId: string;
   reporte: ReporteDelDia;
@@ -267,6 +270,8 @@ export async function guardarEnBitacora(datos: {
       medidorFinal: m.medidorFinal,
       observaciones: m.observaciones,
       operadorId: m.operadorId,
+      // Spec 026, RF-16: el medidor que dice el reporte.
+      claseMedidor: m.unidad ?? null,
     })),
     obraId,
   );
@@ -275,9 +280,14 @@ export async function guardarEnBitacora(datos: {
   const personal = await personalDelParte(
     reporte.personal.map((p) => ({
       usuarioId: p.usuarioId!,
-      entrada: p.entrada!,
-      salida: p.salida!,
+      entrada: p.entrada,
+      salida: p.salida,
       observaciones: p.observaciones,
+      // Spec 025, RF-23, RF-24.
+      horasLaboradas: p.horasLaboradas,
+      extraDiurnas: p.extraDiurnas,
+      extraNocturnas: p.extraNocturnas,
+      novedad: p.novedad,
     })),
   );
   if ('error' in personal) return errorDePeticion(personal.error, 400);
@@ -318,6 +328,11 @@ export async function guardarEnBitacora(datos: {
         horaFin: e.horaFin,
         responsable: e.responsable,
         ubicacion: e.ubicacion,
+        // Spec 025, RF-42.
+        edadDias: e.edadDias,
+        resultado: e.resultado,
+        unidad: e.unidad,
+        cumple: e.cumple,
       })),
     ),
     [],
@@ -340,7 +355,9 @@ export async function guardarEnBitacora(datos: {
   // 3. La bitácora del día: se abre si no existe (RF-40), y se escribe de una vez.
   let parteId: string | null = null;
   {
-    for (let intento = 0; intento < 2 && !parteId; intento++) {
+    // Cuatro intentos, releyendo cada vez: el pulso y la entrega pueden llevar a la vez
+    // mensajes del mismo día (defecto visto el 8-oct, spec 025).
+    for (let intento = 0; intento < INTENTOS_DE_ESCRITURA && !parteId; intento++) {
       await db
         .insert(partesDeObra)
         .values({ id: uuidv7(), obraId, usuarioId: actor.id, fecha })
@@ -408,9 +425,11 @@ export async function guardarEnBitacora(datos: {
       if (escrita) parteId = escrita.id;
     }
     if (!parteId) {
-      return errorDePeticion(
-        'Alguien guardó la bitácora de ese día mientras se aprobaba. Vuelva a intentarlo.',
-        409,
+      // `choque` distingue esto de la bitácora cerrada: es pasajero, y quien guarda solo
+      // lo reintenta en vez de apartarlo (`llevarABitacora`).
+      return Response.json(
+        { error: 'Alguien guardó la bitácora de ese día mientras se aprobaba. Vuelva a intentarlo.', choque: true },
+        { status: 409 },
       );
     }
   }
@@ -468,7 +487,33 @@ export async function guardarEnBitacora(datos: {
     }
   }
 
+  // Las lecturas del día, a Vehículos: solo hacia adelante (spec 026, RF-15 a RF-17, RF-20).
+  await actualizarMedidores(maquinaria.filas);
+
   return { parteId: parteId! };
+}
+
+/**
+ * Lleva la lectura final de cada máquina a su vehículo, en el medidor de la fila,
+ * sin retroceder nunca: `greatest` en la base, como al cerrar la bitácora (RF-23). Se
+ * puede repetir sin cambiar nada. Lo que no cuadra con lo registrado ya lo apartó
+ * `faltasDelReporte` antes de llegar aquí (RF-18, RF-19).
+ */
+async function actualizarMedidores(
+  filas: readonly { vehiculoId: string; claseMedidor: ClaseDeMedidor; medidorFinal: number | null }[],
+): Promise<void> {
+  const db = baseServidor();
+  for (const fila of filas) {
+    if (fila.medidorFinal === null) continue;
+    const columna = fila.claseMedidor === 'odometro' ? vehiculos.odometroKm : vehiculos.horometroH;
+    await db
+      .update(vehiculos)
+      .set({
+        [fila.claseMedidor === 'odometro' ? 'odometroKm' : 'horometroH']: sql`greatest(coalesce(${columna}, 0), ${fila.medidorFinal})`,
+        medidorActualizadoEn: new Date(),
+      })
+      .where(and(eq(vehiculos.id, fila.vehiculoId), sql`coalesce(${columna}, 0) <= ${fila.medidorFinal}`));
+  }
 }
 
 /**

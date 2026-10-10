@@ -59,7 +59,8 @@ import {
   type SeccionDelParte,
 } from '@/shared/rules/parte';
 
-import { Aviso } from './componentes';
+import { Aviso, Selector } from './componentes';
+import { useEsAngosto } from './usar-ancho';
 import { useMenu } from './estado-menu';
 
 /* ------------------------------------------------------------------------ */
@@ -152,6 +153,27 @@ export function IndiceDeSecciones({
   alElegir: (id: string) => void;
   pie?: ReactNode;
 }) {
+  // En el celular la lista de diez secciones se come la pantalla: va como un
+  // desplegable, con lo que falta para cerrar debajo (spec 026, RF-38).
+  const angosto = useEsAngosto();
+  if (angosto) {
+    return (
+      <View style={estilos.indice}>
+        <Selector
+          etiqueta="Ir a la sección"
+          valor={activa}
+          opciones={secciones.map((seccion) => ({
+            valor: seccion.id,
+            etiqueta: `${GLIFO[seccion.estado]} ${seccion.titulo}`,
+            detalle: detalleDe(seccion),
+          }))}
+          onChange={(id) => id && alElegir(id)}
+          vacio="Elija una sección"
+        />
+        {pie ? <View style={estilos.indicePie}>{pie}</View> : null}
+      </View>
+    );
+  }
   return (
     <View style={estilos.indice}>
       {secciones.map((seccion) => (
@@ -339,7 +361,9 @@ export function useSaltoASeccion(desplazamiento: React.RefObject<ScrollView | nu
 
 const estilos = StyleSheet.create({
   disposicion: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.four },
-  disposicionEstrecha: { flexDirection: 'column', gap: Spacing.three },
+  // Estirados: en columna, sin esto el documento medía lo que su contenido y se salía
+  // por la derecha en el celular (spec 026, RF-39).
+  disposicionEstrecha: { flexDirection: 'column', alignItems: 'stretch', gap: Spacing.three },
 
   /**
    * `alignSelf: 'flex-start'` es imprescindible con `sticky`: si la columna se

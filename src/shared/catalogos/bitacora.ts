@@ -68,3 +68,23 @@ export type Ensayo = (typeof ENSAYOS_DE_CALIDAD)[number]['id'];
 export function nombreDeEnsayo(id: string): string {
   return ENSAYOS_DE_CALIDAD.find((e) => e.id === id)?.nombre ?? id;
 }
+
+/**
+ * Por qué una persona del parte no trabajó, o no trabajó el día entero (spec 025,
+ * RF-18). Lista cerrada por lo mismo que el clima: «incapacitado», «incapacidad» e
+ * «incap.» son la misma novedad y tres filas distintas en cualquier cuenta.
+ */
+export const NOVEDADES_DE_PERSONAL = [
+  { id: 'incapacitado', nombre: 'Incapacitado' },
+  { id: 'permiso', nombre: 'Permiso' },
+  { id: 'vacaciones', nombre: 'Vacaciones' },
+  { id: 'ausente', nombre: 'Ausente' },
+] as const;
+
+export type NovedadDePersonal = (typeof NOVEDADES_DE_PERSONAL)[number]['id'];
+
+export const IDS_DE_NOVEDAD = NOVEDADES_DE_PERSONAL.map((n) => n.id) as readonly NovedadDePersonal[];
+
+export function nombreDeNovedad(id: string): string {
+  return NOVEDADES_DE_PERSONAL.find((n) => n.id === id)?.nombre ?? id;
+}
