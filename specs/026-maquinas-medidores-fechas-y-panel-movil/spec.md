@@ -1,6 +1,7 @@
 # Spec 026 — Máquinas reconocidas por nombre, medidores al día, fechas con calendario y panel para celular
 
-> Estado: **Aprobada** (2026-10-09) · Fecha: 2026-10-09 · Cambia la spec 024 (máquinas no reconocidas), la 025 (orden
+> Estado: **Cumplida**, con el cambio del 2026-10-13 (RF-49 a RF-53) cumplido el 2026-10-14. Cumplida el 2026-10-11 (ver `validacion.md`); aprobada el 2026-10-09, cambio del 2026-10-10 (RF-42 a RF-48) aprobado el 2026-10-10
+> · Fecha: 2026-10-09 · Cambia la spec 024 (máquinas no reconocidas), la 025 (orden
 > del historial, 025/RF-52) y la 003 (lecturas de los vehículos con decimales)
 
 ## Contexto y objetivo
@@ -103,6 +104,46 @@ mismo nivel) y debe poder usarse **desde el navegador del celular**.
   RF-15 a RF-19 al guardarlo.
 - RF-23: EL SISTEMA seguirá actualizando las lecturas al cerrar la bitácora, como hoy, sin
   retroceder nunca.
+- RF-42: EL SISTEMA guardará con la última lectura de cada vehículo el día del reporte del que
+  salió, además del momento en que se actualizó. (Cambio del 2026-10-10)
+- RF-43: SI el día del reporte es anterior al día de la última lectura registrada del vehículo,
+  ENTONCES EL SISTEMA guardará el renglón en la bitácora de ese día sin aplicar RF-18 ni RF-19, y
+  no cambiará la lectura del vehículo. (Cambio del 2026-10-10)
+- RF-44: EL SISTEMA contará los días de RF-19 entre el día del reporte y el día de la última
+  lectura registrada, y no entre las fechas en que se procesaron. (Cambio del 2026-10-10)
+- RF-45: SI un renglón que ya está en «No se pudo guardar» vuelve a fallar al reprocesar el
+  mensaje, ENTONCES EL SISTEMA mostrará el motivo nuevo en lugar del anterior. (Cambio del
+  2026-10-10)
+
+### Esperar las fotos antes de guardar (cambio del 2026-10-10, cambia 024/RF-53)
+
+- RF-46: MIENTRAS un mensaje, o alguno de los que lo complementan, tenga una foto o un documento
+  cuyo archivo todavía no ha llegado al panel, EL SISTEMA no guardará ese mensaje en la bitácora y
+  lo volverá a intentar en el siguiente pulso.
+- RF-47: SI pasan 30 minutos desde que llegó el mensaje y el archivo sigue sin llegar, ENTONCES
+  EL SISTEMA guardará el mensaje sin ese archivo.
+- RF-48: CUANDO el archivo que faltaba llegue después de que se guardó el mensaje, y la bitácora
+  de ese día siga abierta y sin foto del día, EL SISTEMA pondrá esa foto como foto del día
+  (024/RF-53).
+
+### Lo que no se leyó el 8 y el 9-oct (cambio del 2026-10-13)
+
+- RF-49: CUANDO el modelo registrado de un equipo de la obra tenga al menos 4 caracteres, con
+  alguna letra, y esté escrito en el renglón —sin contar espacios, signos ni mayúsculas—, EL
+  SISTEMA reconocerá ese equipo, después de la placa y el código y antes del tipo y la marca
+  («Motoniveladora Komatsu GD 566» reconoce el equipo de modelo «GD566»). Amplía RF-14.
+- RF-50: CUANDO un renglón del reporte se reconozca por placa, código o modelo, EL SISTEMA no
+  contará ese equipo entre los candidatos por tipo y marca de los demás renglones del mismo
+  reporte. Si así no queda ningún candidato y el tipo se reconoce, se aplica RF-8.
+- RF-51: SI una lectura del renglón tiene punto decimal y, quitándolo, el renglón cumpliría las
+  comprobaciones de las lecturas (la final no menor que la inicial y dentro del tope de RF-19),
+  ENTONCES EL SISTEMA añadirá al motivo de «No se pudo guardar» «¿Quiso decir X?», sin corregir
+  la lectura por su cuenta.
+- RF-52: EL SISTEMA aceptará como metros de llegada de un viaje a la obra cualquier número entero
+  de 0 a 999, y no solo de 25 en 25, en Control Cantera, en lo que llega por WhatsApp y en «No se
+  pudo guardar», y se escribirán en un campo numérico. (Reemplaza 010/RF-13.)
+- RF-53: EL SISTEMA tendrá «Humedad» en la lista de ensayos de la bitácora, y reconocerá como ese
+  ensayo «Humedades», «Humedad natural» y «Contenido de humedad».
 
 ### Fechas con calendario (H4)
 
@@ -154,7 +195,8 @@ mismo nivel) y debe poder usarse **desde el navegador del celular**.
 - [x] **API** — rutas de Reportes de WhatsApp (orden), guardado automático y «No se pudo
   guardar» (reconocer, crear y medidores).
 - [x] **Sincronización** — el pull de vehículos lleva las lecturas con decimal.
-- [x] **Datos** — las lecturas de los vehículos pasan a tener decimal.
+- [x] **Datos** — las lecturas de los vehículos pasan a tener decimal. Cambio del 2026-10-13: el
+  `check` de los metros de `cantera_viajes` pasa a 0–999 sin paso (migración).
 - [x] **Reglas** — reconocer por tipo y marca, tipo escrito, medidor por unidad, salto posible
   desde la última lectura. Casos nuevos en `verificar-reglas.ts`.
 - [x] **Integración (n8n)** — la IA pone la unidad de cada lectura («km» u «h»).
@@ -175,10 +217,34 @@ mismo nivel) y debe poder usarse **desde el navegador del celular**.
 - **Dos reportes del mismo día con lecturas distintas de la misma máquina:** se aplica la mayor
   (nunca retrocede). El reemplazo de la fila de la bitácora sigue siendo el de 021/RF-92.
 - **Un reporte de un día viejo** que llega después de uno más nuevo trae una lectura menor que la
-  registrada. Por RF-18 va a «No se pudo guardar», donde se completa o se descarta.
+  registrada. ~~Por RF-18 va a «No se pudo guardar», donde se completa o se descarta.~~ Por RF-43
+  se guarda en la bitácora de su día y no toca Vehículos: la lectura del día más nuevo manda.
+  (Cambio del 2026-10-10: el 8-oct, reprocesado después del 9-oct, dejaba en «No se pudo
+  guardar» casi todas sus máquinas.)
+- **Un reporte de un día viejo con una lectura mayor que la registrada** (la TFO 429 dice
+  16253 h el 8-oct y 15714.6 h el 9-oct): se guarda en la bitácora del 8-oct y Vehículos se queda
+  con la del 9-oct (RF-43). La diferencia entre los dos reportes la revisa la persona.
+- **Lecturas registradas antes del cambio:** no tienen día del reporte. Se toma el día en que se
+  actualizaron.
+- **Reporte que llega tarde, con el día ya vencido** (el 9-oct, después de la falta de
+  créditos): se guardaba en cuanto llegaba, y sus fotos subían segundos después, así que quedaba
+  sin foto del día. Por RF-46 espera a que lleguen.
+- **Video o archivo que nunca llega** (falló la descarga en WhatsApp): RF-47 lo deja de esperar
+  a los 30 minutos.
 - **«Inició 25.6 / Terminó 25.6»** (no trabajó): se guarda, y el medidor no cambia.
 - **Volqueta con lectura en horas** («14647.0 hr»): actualiza el horómetro de esa volqueta (RF-16),
   y la fila se valida contra el horómetro.
+- **Dos máquinas del mismo tipo y marca, una registrada y otra no** (8 y 9-oct: «Komatsu GD 566»,
+  la MOTONV-01, y «Komatsu alquilada GD555»): con el modelo «GD 566» en la MOTONV-01, la primera se
+  reconoce por RF-49 y la alquilada se registra sola por RF-50 y RF-8. Sin modelo distintivo
+  sigue aplicando RF-6.
+- **El modelo es un año** («1995»): no tiene letras, así que RF-49 no lo usa; un «1995» escrito en
+  otro renglón no reconoce ese equipo.
+- **Punto de más en una lectura** («18740.7km» por 187407): RF-51 lo sugiere en el motivo; el
+  renglón sigue en «No se pudo guardar» hasta que una persona lo complete.
+- **Un dígito cambiado** («16655.9 hr» por 14655.9): no se puede adivinar; el motivo de RF-19
+  basta para que la persona lo revise.
+- **Viajes de cantera guardados antes del cambio:** siguen igual; ya estaban en múltiplos de 25.
 
 ## Fuera de alcance
 
@@ -189,6 +255,9 @@ mismo nivel) y debe poder usarse **desde el navegador del celular**.
 - Tablas convertidas en tarjetas en el celular: se desplazan a lo ancho (RF-36).
 - Un modo oscuro, o un rediseño de colores o tipografías.
 - Las lecturas de las máquinas en los preoperacionales (spec 013).
+- Volver a abrir los renglones que ya se descartaron en «No se pudo guardar»: se reprocesa el
+  mensaje con la receta de despliegue.
+- Llevar a la bitácora todas las fotos del día: va en la spec 027.
 
 ## Criterios de finalización
 
@@ -209,6 +278,19 @@ mismo nivel) y debe poder usarse **desde el navegador del celular**.
     - el panel se recorre a 390 px sin desplazamiento horizontal de la página.
 - **Producción:** el 8-oct se reprocesa, los vehículos de CONSORCIO MAGDALENA quedan con sus
   lecturas, y lo que no cuadra queda en «No se pudo guardar».
+- **Cambio del 2026-10-10:**
+  - las reglas puras de RF-43, RF-44 y RF-46 con casos en `scripts/verificar-reglas.ts`;
+  - en producción, el 8-oct, reprocesado otra vez, lleva a su bitácora el montacarga, la
+    recicladora y el Dynapac, sin cambiar la lectura de ningún vehículo;
+  - un reporte con fotos que llega con el día ya vencido queda con su foto del día.
+- **Cambio del 2026-10-13:**
+  - las reglas puras de RF-49 a RF-53 con casos en `scripts/verificar-reglas.ts`, entre ellos
+    las dos Komatsu, «18740.7» → «¿Quiso decir 187407?», K1+460 y «Humedades»;
+  - en producción, el 8 y el 9-oct reprocesados llevan a su bitácora las dos motoniveladoras
+    (salvo la GD555 del 9-oct, que no trae lectura final) y las tres humedades, y a Control
+    Cantera los tres vales de K1+460, K1+510 y K1+396;
+  - las lecturas de la TAY076 (8 y 9-oct) y de la TFO427 (8-oct) se completan con 187407 y
+    14655.9, con permiso del usuario.
 
 ## Dudas abiertas
 

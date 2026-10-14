@@ -139,3 +139,44 @@
   se puede unir.
 - **Que el responsive rompa el escritorio.** Todo va detrás de `useEsAngosto`, y la prueba de
   anchos y una pasada en Chrome a 1280 px lo cuidan.
+
+## Cambio del 2026-10-10 (RF-42 a RF-48)
+
+- **Datos:** `vehiculos.medidor_dia` (`date`, nulo), migración 0023. Lo que había antes no tiene
+  día: se toma `fechaDeJornada(medidor_actualizado_en)`. Solo servidor: la app no lo recibe.
+- **Reglas:** en `faltaContraElVehiculo`, si `fechaDelReporte < registrada.fecha` no hay falta
+  (RF-43); `registrada.fecha` pasa a ser el día del reporte, así que RF-19 ya cuenta días de
+  reporte (RF-44). `esperaArchivo` en `whatsapp-automatico.ts` (RF-46, RF-47).
+- **Servidor:** `actualizarMedidores(filas, fecha)` escribe solo si el día registrado es nulo o
+  `<= fecha`, y deja `medidor_dia = fecha`. Los demás caminos usan
+  `greatest(medidor_dia, su día)`. `apartar` hace `on conflict do update` del motivo y los
+  datos cuando la excepción sigue pendiente (RF-45). `llevarABitacora` devuelve `null` sin
+  escribir si el mensaje o lo que ya lo complementa tiene una imagen o un documento sin
+  archivo; se queda `en_espera` y lo retoman el PUT del archivo (que llama `actualizarDia` del
+  mensaje o del que complementa) o el pulso. El PUT, si el mensaje ya está guardado como
+  reporte diario y su bitácora sigue abierta y sin foto del día, la pone (RF-48), con el mismo
+  id determinista de `guardarEnBitacora`.
+- **Riesgo:** un video nunca sube si pesa demasiado; por eso solo se esperan imágenes y
+  documentos, y con tope de 30 minutos.
+
+## Cambio del 2026-10-13 (RF-49 a RF-53)
+
+- **Reglas (`whatsapp.ts`):** `reconocerMaquina` recibe `excluidos` (ids que otro renglón ya tomó)
+  y suma un paso por modelo contenido (RF-49: modelo compacto de 4+ caracteres con alguna letra,
+  incluido en lo escrito compacto) entre la placa y el tipo y la marca. `resolverPropuesta`
+  reconoce en dos pasadas: primero placa, código y modelo de todos los renglones; luego tipo y
+  marca sin esos equipos (RF-50). El renglón que se queda sin candidatos queda con `tipoId` y
+  sin `conflicto`, y `llevarABitacora` lo crea (RF-8) pasando los mismos excluidos a su
+  comprobación de candidatos.
+- **Sugerencia (RF-51):** `lecturaSugerida(clase, inicial, final)` en `jornada.ts`: prueba quitar
+  el punto a la inicial o a la final (solo si su texto tiene decimales) y devuelve la que deja
+  pasar `validarAvance`; `faltasDelReporte` la añade al motivo «¿Quiso decir X?».
+- **Metros (RF-52):** en `cantera.ts`, `METROS_MAXIMOS = 999` sin paso; `OPCIONES_DE_METROS`
+  desaparece y las tres pantallas (`ventana-viaje.tsx`, `propuesta-reporte.tsx`,
+  `no-se-pudo-guardar.tsx`) usan un `Campo soloNumeros`. Migración 0024: el `check` de
+  `cantera_viajes` pasa a `metros between 0 and 999` sin `% 25`.
+- **Humedad (RF-53):** `{ id: 'humedad', nombre: 'Humedad' }` al final de `ENSAYOS_DE_CALIDAD`
+  (los ids no se reutilizan) y el sinónimo `humedad` en `SINONIMOS_DE_ENSAYO`.
+- **Producción:** migración 0024 antes de la imagen; modelo «GD 566» en la MOTONV-01 (lo pidió el
+  usuario); reprocesar 3EB024B22E22EB9C3B2A3D y 3EB077E77A826D4E7C999B y los tres vales; completar
+  las lecturas de TAY076 y TFO427.

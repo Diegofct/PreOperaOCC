@@ -11,9 +11,11 @@
  * son las de la obra del mensaje: salen de su detalle, el mismo de la propuesta.
  */
 import { useCallback, useState } from 'react';
+import { Image, StyleSheet } from 'react-native';
 
+import { Panel, Radio } from '@/constants/theme';
 import { NOVEDADES_DE_PERSONAL, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
-import { DESTINO_OBRA, formatearAbscisa, OPCIONES_DE_METROS, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import { DESTINO_OBRA, formatearAbscisa, OPCIONES_DE_PR } from '@/shared/rules/cantera';
 import type { UbicacionPorValidar } from '@/shared/rules/parte';
 import { alcanza } from '@/shared/rules/permisos';
 import {
@@ -117,7 +119,23 @@ const NOMBRE_DE_SECCION: Record<string, string> = {
   fecha: 'Fecha del reporte',
   bitacora: 'Bitácora',
   mensaje: 'Mensaje',
+  // Spec 027, RF-21: la foto que llegó con la bitácora de su día ya cerrada.
+  fotos: 'Foto',
 };
+
+/**
+ * Las secciones que no se completan ni se reintentan: solo se descartan. La foto de una
+ * bitácora cerrada no tiene dónde entrar —la bitácora firmada no se toca (027/RF-20)—, así
+ * que lo único que cabe es verla y descartarla con un motivo (RF-22).
+ */
+const SOLO_SE_DESCARTAN = ['fotos'];
+
+/** El id de la foto de WhatsApp de un apartado de la sección `fotos`. */
+function fotoDelApartado(e: ExcepcionFila): string | null {
+  if (e.seccion !== 'fotos' || !e.datos || typeof e.datos !== 'object') return null;
+  const id = (e.datos as { mediaId?: unknown }).mediaId;
+  return typeof id === 'string' ? id : null;
+}
 
 /** Las secciones cuyo renglón se completa aquí. */
 const SE_COMPLETAN = ['viajes', 'personal', 'maquinaria', 'clima', 'actividades', 'ensayos', 'almacen'];
@@ -189,6 +207,14 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
             {`${NOMBRE_DE_SECCION[e.seccion] ?? e.seccion}${e.renglon !== null ? ` ${e.renglon + 1}` : ''} · ${etiquetaDeCategoria(e.categoria)}`}
           </Celda>
           <Celda lineas={2}>{e.resumen ?? '—'}</Celda>
+          {fotoDelApartado(e) ? (
+            <Image
+              source={{ uri: `/api/panel/media/${fotoDelApartado(e)}` }}
+              style={estilos.miniatura}
+              resizeMode="cover"
+              accessibilityLabel="La foto que no se pudo agregar"
+            />
+          ) : null}
         </>
       ),
     },
@@ -207,7 +233,7 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
       pintar: (e) =>
         puedeAtender ? (
           <Acciones>
-            {e.renglon !== null && SE_COMPLETAN.includes(e.seccion) ? (
+            {SOLO_SE_DESCARTAN.includes(e.seccion) ? null : e.renglon !== null && SE_COMPLETAN.includes(e.seccion) ? (
               <Boton titulo="Completar" onPress={() => setCompletando(e)} />
             ) : (
               <Boton titulo="Reintentar" onPress={() => setReintentando(e)} />
@@ -490,14 +516,8 @@ function CamposDelRenglon({
               vacio="Elija el PR"
               ancho={150}
             />
-            <Selector
-              etiqueta="Metros"
-              valor={v.metros === null ? null : String(v.metros)}
-              opciones={OPCIONES_DE_METROS.map((n) => ({ valor: String(n), etiqueta: `+ ${String(n).padStart(3, '0')}` }))}
-              onChange={(x) => cambiar({ metros: x === null ? null : Number(x) })}
-              vacio="Elija los metros"
-              ancho={150}
-            />
+            {/* Cualquier entero de 0 a 999, no de 25 en 25 (026/RF-52). */}
+            <CampoNumero etiqueta="Metros" valor={v.metros} onChange={(n) => cambiar({ metros: n })} editable ancho={150} />
           </>
         ) : null}
         <Campo etiqueta="N.º de vale" valor={v.vale ?? ''} onChange={(x) => cambiar({ vale: x === '' ? null : x })} ancho={160} />
@@ -694,3 +714,15 @@ function CamposDelRenglon({
 
   return <Ayuda>Este renglón no se completa aquí.</Ayuda>;
 }
+
+const estilos = StyleSheet.create({
+  miniatura: {
+    width: 120,
+    height: 90,
+    marginTop: 4,
+    borderRadius: Radio.sm,
+    borderWidth: 1,
+    borderColor: Panel.borde,
+    backgroundColor: Panel.fondoCabecera,
+  },
+});

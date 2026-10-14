@@ -133,13 +133,15 @@ import type {
   CanteraDelParteFila,
   GranulometriaDelParteFila,
   DiaDeObra,
+  FotosDelDiaFila,
   JornadaFila,
   ObraFila,
   ParteFila,
   PersonaFila,
   VehiculoFila,
 } from "./contratos";
-import { MarcoPantalla, useListado } from "./marco";
+import { FotosDelDia } from "./fotos-del-dia";
+import { MarcoPantalla, useListado, type Listado } from "./marco";
 import { SubirFoto } from "./subir-foto";
 import { usePersona } from "./sesion";
 
@@ -454,11 +456,19 @@ export default function PantallaPartes() {
       [parte],
     ),
   );
-  // Las que no llevan `itemKey` son del día; las que lo llevan son de una
-  // actividad y se pintan en su fila.
-  const fotosDelDia = fotos.datos
-    .filter((f) => f.itemKey === null)
-    .map((f) => f.id);
+  /**
+   * La sección «Fotografía del día» (spec 027, cambio del 2026-10-14): las de WhatsApp, las
+   * subidas en el panel y las principales viejas, juntas y sin las quitadas. Se pide aquí y
+   * no dentro de la sección por lo mismo que las fotos de arriba: el índice y los bloqueos del
+   * cierre cuentan cuántas hay (RF-41).
+   */
+  const seccionDeFotos = useListado<FotosDelDiaFila>(
+    useCallback(
+      () => (parte ? api.partes.fotosDelDia(parte.id).then((r) => [r]) : Promise.resolve([])),
+      [parte],
+    ),
+  );
+  const fotosDelDia = seccionDeFotos.datos[0]?.fotos ?? [];
 
   /**
    * Los viajes de cantera del día (spec 010), pedidos aquí por la misma razón que
@@ -522,7 +532,7 @@ export default function PantallaPartes() {
     sinTrabajo: parte?.sinTrabajo ?? false,
     // Todavía no se iza el conteo de fotos: lo hace T17. Hasta entonces es
     // `null`, que la regla traduce a «comprobando» y nunca a «sin registrar».
-    fotos: fotos.cargando ? null : fotosDelDia.length,
+    fotos: seccionDeFotos.cargando ? null : fotosDelDia.length,
     historicoCerradas,
     cerrado,
     anulado,
@@ -543,7 +553,7 @@ export default function PantallaPartes() {
   // Mientras las fotos cargan no se evalúa: diría «falta la fotografía del día»
   // durante el segundo en que todavía no se sabe si la hay.
   const bloqueos =
-    parte && !cerrado && !anulado && !fotos.cargando && !granulometrias.cargando
+    parte && !cerrado && !anulado && !fotos.cargando && !seccionDeFotos.cargando && !granulometrias.cargando
       ? bloqueosDelCierre({ ...parte, ensayosDelModulo }, {
           delDia: fotosDelDia.length,
           itemsConFoto: fotos.datos.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
@@ -733,8 +743,11 @@ export default function PantallaPartes() {
             parte={parte}
             editable={editable}
             alMedir={salto.alMedirBanda}
-            fotosDelDia={fotosDelDia}
-            alSubir={fotos.recargar}
+            seccion={seccionDeFotos}
+            alSubir={() => {
+              fotos.recargar();
+              seccionDeFotos.recargar();
+            }}
           />
           <Cierre
             // Lleva la marca de día sin trabajo en su estado: cambiar de día
@@ -2667,7 +2680,9 @@ function SeccionNotas({
 /* ------------------------------------------------------------------------ */
 
 /**
- * Una o varias fotografías del día.
+ * La fotografía del día: **una sola sección** con todas las fotos del día —las que llegaron
+ * por WhatsApp y las subidas aquí—, sin foto principal (spec 027, cambio del 2026-10-14,
+ * RF-34, RF-35), y el botón para subir otra.
  *
  * Se guardan en el mismo bucket privado que las firmas y las fotos de hallazgo
  * del preoperacional, y se sirven por la misma puerta: nunca hay un enlace
@@ -2678,29 +2693,28 @@ function SeccionFotoDelDia({
   parte,
   editable,
   alMedir,
-  fotosDelDia,
+  seccion,
   alSubir,
 }: {
   parte: ParteFila;
   editable: boolean;
   alMedir: (id: string, y: number) => void;
   /**
-   * Las fotos del día, izadas a la pantalla.
-   *
-   * Antes se pedían aquí dentro, y entonces el índice no tenía forma de saber
-   * cuántas hay para encender su entrada. Se descartó añadir el conteo a la
-   * respuesta de la bitácora: habría que tocar contrato, ruta y serialización para
-   * un dato de presentación que la misma pantalla ya está pidiendo.
+   * Las fotos de la sección, izadas a la pantalla: el índice y los bloqueos del cierre
+   * necesitan saber cuántas hay. Se descartó añadir el conteo a la respuesta de la bitácora:
+   * habría que tocar contrato, ruta y serialización para un dato que la pantalla ya pide.
    */
-  fotosDelDia: string[];
+  seccion: Listado<FotosDelDiaFila>;
   alSubir: () => void;
 }) {
   return (
     <SeccionEnMarco id="fotografia" titulo="Fotografía del día" alMedir={alMedir}>
+      <FotosDelDia parteId={parte.id} editable={editable} seccion={seccion} />
       <SubirFoto
         titulo="Añadir fotografía"
         rutaDeSubida={`/api/panel/partes/${parte.id}/foto`}
-        fotos={fotosDelDia}
+        fotos={[]}
+        sinMiniaturas
         editable={editable}
         alSubir={alSubir}
       />

@@ -7,6 +7,10 @@
  * aparecer. Lo del mensaje entero (sin renglón: la fecha, la bitácora cerrada, el
  * abandono) es distinto: «guardarlo» es reintentar (RF-61), y si el reintento vuelve
  * a fallar tiene que reaparecer pendiente, con el motivo nuevo.
+ *
+ * Un renglón que sigue pendiente y vuelve a fallar al reprocesar el mensaje se queda
+ * con el motivo nuevo (spec 026, RF-45): el viejo puede ya no ser cierto (la TFO 427
+ * seguía diciendo «800 km» cuando el reporte ya traía horas).
  */
 import { sql } from 'drizzle-orm';
 
@@ -41,6 +45,7 @@ export async function apartar(mensajeId: string, apartados: readonly RenglonApar
         resueltaPor: null,
         resueltaEn: null,
       },
-      where: sql`${whatsappExcepciones.renglon} is null and ${whatsappExcepciones.estado} = 'guardada'`,
+      where: sql`(${whatsappExcepciones.renglon} is null and ${whatsappExcepciones.estado} = 'guardada')
+        or ${whatsappExcepciones.estado} = 'pendiente'`,
     });
 }

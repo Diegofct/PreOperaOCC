@@ -52,7 +52,7 @@ import { UNIDADES_ALMACEN, type UnidadAlmacen } from '@/shared/catalogos/almacen
 import { CARGOS, type Cargo } from '@/shared/catalogos/cargos';
 import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/materiales';
 import { formatearCantidad, type TipoMovimiento } from '@/shared/rules/almacen';
-import { DESTINO_OBRA, OPCIONES_DE_METROS, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import { DESTINO_OBRA, OPCIONES_DE_PR } from '@/shared/rules/cantera';
 import { alcanza } from '@/shared/rules/permisos';
 import { normalizar } from '@/shared/rules/texto';
 import {
@@ -819,19 +819,19 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                     vacio="Elija el PR"
                     ancho={150}
                   />
-                  <Selector
+                  {/* Cualquier entero de 0 a 999 (025/RF-32). */}
+                  <CampoNumero
                     etiqueta="Metros"
-                    valor={e.ubicacion && 'metros' in e.ubicacion && e.ubicacion.metros !== null ? String(e.ubicacion.metros) : null}
-                    opciones={OPCIONES_DE_METROS.map((n) => ({ valor: String(n), etiqueta: `+ ${String(n).padStart(3, '0')}` }))}
-                    onChange={(v) =>
+                    valor={e.ubicacion && 'metros' in e.ubicacion ? e.ubicacion.metros : null}
+                    onChange={(n) =>
                       cambiarRenglon('ensayos', i, {
                         ubicacion: {
                           pr: e.ubicacion && 'pr' in e.ubicacion ? e.ubicacion.pr : null,
-                          metros: v === null ? null : Number(v),
+                          metros: n,
                         },
                       })
                     }
-                    vacio="Elija los metros"
+                    editable={editable}
                     ancho={150}
                   />
                 </>
@@ -956,12 +956,12 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
                   vacio="Elija el PR"
                   ancho={150}
                 />
-                <Selector
+                {/* Cualquier entero de 0 a 999, no de 25 en 25 (026/RF-52). */}
+                <CampoNumero
                   etiqueta="Metros"
-                  valor={v.metros === null ? null : String(v.metros)}
-                  opciones={OPCIONES_DE_METROS.map((n) => ({ valor: String(n), etiqueta: `+ ${String(n).padStart(3, '0')}` }))}
-                  onChange={(x) => cambiarRenglon('viajes', i, { metros: x === null ? null : Number(x) })}
-                  vacio="Elija los metros"
+                  valor={v.metros}
+                  onChange={(n) => cambiarRenglon('viajes', i, { metros: n })}
+                  editable={editable}
                   ancho={150}
                 />
               </>

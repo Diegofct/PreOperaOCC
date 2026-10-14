@@ -245,6 +245,12 @@ export async function guardarEnBitacora(datos: {
    * se pudo guardar» (spec 024, RF-61) no puede chocar con los que el mensaje ya llevó.
    */
   claveDeIds?: string;
+  /**
+   * La posición en el reporte de cada actividad y cada ensayo de `reporte`, si se
+   * filtraron renglones (`renglonesGuardados`): los ids salen de ella y no del lugar en la
+   * lista filtrada, para que reprocesar no los corra.
+   */
+  renglonesOriginales?: { actividades: number[]; ensayos: number[] };
 }): Promise<{ parteId: string } | Response> {
   const db = baseServidor();
   const { mensajeId, reporte, obraId, actor, autorNombre, enviadoEn, fotos, fotosElegidas, viajesPendientes } = datos;
@@ -295,7 +301,7 @@ export async function guardarEnBitacora(datos: {
   const actividades = actividadesDelParte(
     await Promise.all(
       reporte.actividades.map(async (a, i) => ({
-        id: await idDeterminista(id, 'actividades', i),
+        id: await idDeterminista(id, 'actividades', datos.renglonesOriginales?.actividades[i] ?? i),
         clave: a.clave!,
         texto: a.texto ?? null,
         unidad: a.unidad ?? null,
@@ -321,7 +327,7 @@ export async function guardarEnBitacora(datos: {
   const laboratorio = laboratorioDelParte(
     await Promise.all(
       reporte.ensayos.map(async (e, i) => ({
-        id: await idDeterminista(id, 'ensayos', i),
+        id: await idDeterminista(id, 'ensayos', datos.renglonesOriginales?.ensayos[i] ?? i),
         ensayo: e.ensayo,
         observacion: e.observacion,
         horaInicio: e.horaInicio,
@@ -487,8 +493,9 @@ export async function guardarEnBitacora(datos: {
     }
   }
 
-  // Las lecturas del día, a Vehículos: solo hacia adelante (spec 026, RF-15 a RF-17, RF-20).
-  await actualizarMedidores(maquinaria.filas);
+  // Las lecturas del día, a Vehículos: solo hacia adelante (spec 026, RF-15 a RF-17, RF-20),
+  // y nunca desde un día anterior al de la lectura registrada (RF-42, RF-43).
+  await actualizarMedidores(maquinaria.filas, fecha);
 
   return { parteId: parteId! };
 }
@@ -498,9 +505,14 @@ export async function guardarEnBitacora(datos: {
  * sin retroceder nunca: `greatest` en la base, como al cerrar la bitácora (RF-23). Se
  * puede repetir sin cambiar nada. Lo que no cuadra con lo registrado ya lo apartó
  * `faltasDelReporte` antes de llegar aquí (RF-18, RF-19).
+ *
+ * Cada lectura queda con el día del reporte (RF-42). La de un día anterior al de la
+ * registrada no se escribe aunque sea mayor (RF-43): la del día más nuevo manda. Lo de
+ * antes del cambio no tiene día y se compara con el día en que se actualizó.
  */
 async function actualizarMedidores(
   filas: readonly { vehiculoId: string; claseMedidor: ClaseDeMedidor; medidorFinal: number | null }[],
+  fecha: string,
 ): Promise<void> {
   const db = baseServidor();
   for (const fila of filas) {
@@ -511,8 +523,15 @@ async function actualizarMedidores(
       .set({
         [fila.claseMedidor === 'odometro' ? 'odometroKm' : 'horometroH']: sql`greatest(coalesce(${columna}, 0), ${fila.medidorFinal})`,
         medidorActualizadoEn: new Date(),
+        medidorDia: fecha,
       })
-      .where(and(eq(vehiculos.id, fila.vehiculoId), sql`coalesce(${columna}, 0) <= ${fila.medidorFinal}`));
+      .where(
+        and(
+          eq(vehiculos.id, fila.vehiculoId),
+          sql`coalesce(${columna}, 0) <= ${fila.medidorFinal}`,
+          sql`coalesce(${vehiculos.medidorDia}, ((${vehiculos.medidorActualizadoEn} at time zone 'UTC') - interval '5 hours')::date, ${fecha}::date) <= ${fecha}::date`,
+        ),
+      );
   }
 }
 

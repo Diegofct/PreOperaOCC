@@ -9,20 +9,26 @@
  *  2. procesa, del más antiguo al más nuevo, hasta 30 mensajes que siguen
  *     `pendientes`: los de la bandeja de antes de la 024 al activarla (RF-68), y los
  *     que fallaron al llegar;
+ *     (y a los días no vencidos les da otra vuelta, por lo que esperaba un archivo,
+ *     026/RF-46);
  *  3. un mensaje que falla 5 veces deja de reintentarse y va entero a «No se pudo
- *     guardar» con el error, para que una persona lo vea (decisión del plan).
+ *     guardar» con el error, para que una persona lo vea (decisión del plan);
+ *  4. mira otra vez las fotos de los días que recibieron alguna en las últimas 48 horas
+ *     (spec 027, RF-1, RF-10): la que llegó antes que su mensaje, o la de un mensaje que
+ *     no pasa por la bitácora, entra aquí si nadie más la agregó.
  *
  * Todo lo que hace se puede repetir: dos pulsos seguidos no duplican nada.
  */
 import { and, asc, eq, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
+import { media, whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
 import { diaVencido } from '@/shared/rules/whatsapp-automatico';
 
 import { apartar } from './apartados';
 import { anotarFalloDelProceso, procesarMensaje } from './automatico';
-import { armarBitacora } from './dias';
+import { actualizarDia, armarBitacora } from './dias';
+import { diaDeLaFoto, sincronizarFotosDelDia } from './fotos-del-dia';
 import { obraDelMensaje } from './obra';
 
 /** Cuántos mensajes pendientes procesa cada pulso: unos 30 caben en un minuto. */
@@ -31,11 +37,15 @@ const PENDIENTES_POR_PULSO = 30;
 /** Después de tantos fallos, un mensaje deja de reintentarse. */
 const INTENTOS_MAXIMOS = 5;
 
+/** Hasta cuándo atrás el pulso vuelve a mirar las fotos de un día (spec 027). */
+const HORAS_DE_FOTOS = 48;
+
 export interface ResultadoDelPulso {
   diasArmados: number;
   procesados: number;
   conError: number;
   abandonados: number;
+  fotosAgregadas: number;
 }
 
 /**
@@ -54,7 +64,13 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
     .where(and(eq(whatsappMensajes.estado, 'en_espera'), isNotNull(whatsappMensajes.fechaHecho), deLaObra));
   let diasArmados = 0;
   for (const { obraId, fecha } of dias) {
-    if (!fecha || !diaVencido(fecha, ahoraMs)) continue;
+    if (!fecha) continue;
+    if (!diaVencido(fecha, ahoraMs)) {
+      // Lo que quedó esperando un archivo en un día ya armado (026/RF-46, RF-47): si el
+      // archivo no llega, nadie más lo retomaría antes de la hora límite.
+      await actualizarDia(obraId, fecha);
+      continue;
+    }
     await armarBitacora(obraId, fecha, 'vencido');
     diasArmados++;
   }
@@ -105,5 +121,24 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
       }
     }
   }
-  return { diasArmados, procesados, conError, abandonados };
+  // 4. Las fotos de los días que recibieron alguna hace poco (spec 027).
+  const diasConFotos = await db
+    .selectDistinct({ obraId: sql<string>`${obraDelMensaje}`, fecha: diaDeLaFoto })
+    .from(media)
+    .innerJoin(whatsappMensajes, eq(whatsappMensajes.id, media.duenoId))
+    .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
+    .where(
+      and(
+        eq(media.duenoTipo, 'whatsapp'),
+        sql`${media.recibidoEn} > ${new Date(ahoraMs - HORAS_DE_FOTOS * 3_600_000).toISOString()}::timestamptz`,
+        sql`${diaDeLaFoto} is not null`,
+        deLaObra,
+      ),
+    );
+  let fotosAgregadas = 0;
+  for (const { obraId, fecha } of diasConFotos) {
+    if (fecha) fotosAgregadas += (await sincronizarFotosDelDia(obraId, fecha)).agregadas;
+  }
+
+  return { diasArmados, procesados, conError, abandonados, fotosAgregadas };
 }

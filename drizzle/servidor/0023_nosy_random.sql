@@ -1,0 +1,1 @@
+ALTER TABLE "vehiculos" ADD COLUMN "medidor_dia" date;

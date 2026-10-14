@@ -5,11 +5,12 @@
  * aunque venga de un equipo autenticado: un token demuestra qué teléfono es, no
  * que lo que manda sea correcto.
  */
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { asignaciones, operacionesIdempotentes, vehiculos } from '@/db/servidor/esquema';
 import type { OperadorEnPeticion } from '@/features/servidor/guardia-movil';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /**
  * ¿Ya se procesó este envío?
@@ -121,7 +122,13 @@ export async function avanzarMedidores(
 
   await baseServidor()
     .update(vehiculos)
-    .set({ odometroKm, horometroH, medidorActualizadoEn: cuando })
+    .set({
+      odometroKm,
+      horometroH,
+      medidorActualizadoEn: cuando,
+      // El día de la lectura, sin retroceder (spec 026, RF-42).
+      medidorDia: sql`greatest(${vehiculos.medidorDia}, ${fechaDeJornada(cuando.getTime())}::date)`,
+    })
     .where(eq(vehiculos.id, maquina.id));
 }
 

@@ -33,6 +33,8 @@ import type {
   BitacoraEditada,
   BitacoraNueva,
   CanteraDelParteFila,
+  FotoQuitada,
+  FotosDelDiaFila,
   ClaveNueva,
   ClaveTemporalFila,
   CodigosFila,
@@ -274,6 +276,15 @@ export const api = {
       panelEnviar<ParteFila>(`/partes/${id}`, 'PATCH', cambios),
     fotos: (id: string) =>
       panel<{ id: string; itemKey: string | null; disponible: boolean }[]>(`/partes/${id}/foto`),
+    /** Las «Fotos del día» que llegaron por WhatsApp, y aparte las quitadas (spec 027). */
+    fotosDelDia: (id: string) => panel<FotosDelDiaFila>(`/partes/${id}/fotos-del-dia`),
+    /** Quita una foto de la sección, con motivo (spec 027, RF-22, RF-24). */
+    quitarFoto: (id: string, fotoId: string, motivo: string) =>
+      panelEnviar<{ id: string }>(
+        `/partes/${id}/fotos-del-dia/${encodeURIComponent(fotoId)}/quitar`,
+        'POST',
+        { motivo } satisfies FotoQuitada,
+      ),
     cerrar: (id: string) => panelEnviar<{ id: string }>(`/partes/${id}/cerrar`, 'POST'),
     /** La sección «Control Cantera»: vigentes si está abierto, fijados si está cerrado. */
     cantera: (id: string) => panel<CanteraDelParteFila>(`/partes/${id}/cantera`),

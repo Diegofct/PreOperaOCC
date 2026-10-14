@@ -37,7 +37,7 @@ export function nombreDeClima(id: string): string {
  * Son los de la guía de OCC para el laboratorista —«Tabla práctica de ensayos y
  * controles, material tratado con cemento»—, en su orden: antes, durante, a los 7
  * días y con la capa terminada. Escritos a mano y no importados como el
- * presupuesto: son diecisiete nombres cortos, y leer el Word exigiría una
+ * presupuesto: son dieciocho nombres cortos, y leer el Word exigiría una
  * dependencia que el proyecto no tiene.
  *
  * Los id son estables: una vez que un parte guarde un ensayo, su id no se renombra
@@ -61,6 +61,8 @@ export const ENSAYOS_DE_CALIDAD = [
   { id: 'compactacion', nombre: 'Compactación' },
   { id: 'espesor', nombre: 'Espesor' },
   { id: 'planicidad', nombre: 'Planicidad' },
+  // Spec 026, cambio del 2026-10-13 (RF-53): el laboratorio la reporta a diario.
+  { id: 'humedad', nombre: 'Humedad' },
 ] as const;
 
 export type Ensayo = (typeof ENSAYOS_DE_CALIDAD)[number]['id'];

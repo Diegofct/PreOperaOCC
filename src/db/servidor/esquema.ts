@@ -317,6 +317,12 @@ export const vehiculos = pgTable(
       withTimezone: true,
       mode: 'date',
     }),
+    /**
+     * El día de la obra del que es la última lectura (spec 026, RF-42): el del reporte,
+     * el de la bitácora o el del preoperacional, no el de cuando se procesó. Un reporte
+     * de un día anterior no la cambia (RF-43). Nulo en lo de antes del cambio.
+     */
+    medidorDia: date('medidor_dia', { mode: 'string' }),
     estado: estadoVehiculo('estado').notNull().default('operativo'),
     eliminadoEn: eliminadoEn(),
     creadoEn: creadoEn(),
@@ -966,10 +972,11 @@ export const canteraViajes = pgTable(
       'ck_cantera_viaje_destino',
       // `is not null` explícito: un `check` que da desconocido (por un nulo) se
       // acepta, y sin esto un viaje a la obra sin PR pasaría la restricción.
+      // Los metros, cualquier entero de 0 a 999 (spec 026, RF-52; antes de 25 en 25).
       sql`(${t.destinoObra} and ${t.destinoId} is null
             and ${t.pr} is not null and ${t.metros} is not null
             and ${t.pr} between 0 and 25
-            and ${t.metros} between 0 and 975 and ${t.metros} % 25 = 0)
+            and ${t.metros} between 0 and 999)
        or (not ${t.destinoObra} and ${t.destinoId} is not null
             and ${t.pr} is null and ${t.metros} is null)`,
     ),
@@ -1355,6 +1362,57 @@ export const whatsappCreados = pgTable(
   (t) => [
     primaryKey({ columns: [t.tipo, t.registroId] }),
     index('ix_whatsapp_creado_obra').on(t.obraId, t.revisadoEn),
+  ],
+);
+
+/**
+ * Las «Fotos del día» de una bitácora (spec 027): cada foto de WhatsApp de la obra y el
+ * día que entró a ella.
+ *
+ * Apunta a la foto de WhatsApp y no la copia (RF-32): el archivo es el mismo objeto de R2,
+ * y quién la mandó, a qué hora, en qué tipo de mensaje y qué dijo la IA se leen del
+ * mensaje. Por eso es una tabla aparte y no otra fila de `media` como la foto principal:
+ * `media` no tiene dónde decir quién la quitó y por qué.
+ *
+ * Quitar es lógico (principio 4, RF-25): la fila se queda con quién, cuándo y por qué, y
+ * su existencia es justo lo que impide que la foto vuelva a entrar al reprocesar (RF-27).
+ */
+export const bitacoraFotos = pgTable(
+  'bitacora_fotos',
+  {
+    /** `idDeterminista(parteId, 'foto-del-dia', mediaId)`: reintentar no duplica. */
+    id: text('id').primaryKey(),
+    parteId: text('parte_id')
+      .notNull()
+      .references(() => partesDeObra.id),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    /**
+     * El mensaje de WhatsApp del que salió; `null` si se subió en el panel (cambio del
+     * 2026-10-14, RF-34, RF-38): su hora es entonces la de subida de la foto.
+     */
+    mensajeId: text('mensaje_id').references(() => whatsappMensajes.id),
+    /** La huella del archivo, para no repetir la misma foto mandada dos veces (RF-8). */
+    sha256: text('sha256'),
+    agregadaEn: timestamp('agregada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    quitadaEn: timestamp('quitada_en', { withTimezone: true, mode: 'date' }),
+    quitadaPor: text('quitada_por').references(() => usuarios.id),
+    motivoQuitada: text('motivo_quitada'),
+  },
+  (t) => [
+    uniqueIndex('ux_bitacora_foto_media').on(t.parteId, t.mediaId),
+    uniqueIndex('ux_bitacora_foto_huella')
+      .on(t.parteId, t.sha256)
+      .where(sql`${t.sha256} is not null`),
+    check(
+      'ck_bitacora_foto_quitada',
+      // Quitar exige quién y por qué (RF-24, RF-25).
+      sql`${t.quitadaEn} is null
+       or (${t.quitadaPor} is not null and ${t.motivoQuitada} is not null and length(trim(${t.motivoQuitada})) > 0)`,
+    ),
   ],
 );
 
