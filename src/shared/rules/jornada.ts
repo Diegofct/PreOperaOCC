@@ -235,10 +235,32 @@ export function mensajeDeAvance(
   }
 }
 
-/** La última lectura registrada de un medidor del vehículo, y el día en que se registró. */
+/**
+ * La lectura que probablemente se quiso escribir, si a una de las dos le sobra el punto
+ * decimal («18740.7» por 187407) y sin él el avance cuadra; `null` si no (spec 026,
+ * RF-51). Es una sugerencia para el motivo: nunca corrige la lectura.
+ */
+export function lecturaSugerida(
+  clase: ClaseDeMedidor,
+  inicial: number | null,
+  final: number | null,
+): number | null {
+  const sinPunto = (n: number | null) =>
+    n !== null && !Number.isInteger(n) ? Number(String(n).replace('.', '')) : null;
+  const finalSinPunto = sinPunto(final);
+  if (finalSinPunto !== null && validarAvance(clase, inicial, finalSinPunto) === null) return finalSinPunto;
+  const inicialSinPunto = sinPunto(inicial);
+  if (inicialSinPunto !== null && validarAvance(clase, inicialSinPunto, final) === null) return inicialSinPunto;
+  return null;
+}
+
+/** La última lectura registrada de un medidor del vehículo, y de qué día es. */
 export interface LecturaRegistrada {
   valor: number | null;
-  /** `YYYY-MM-DD`, el día en la obra; `null` si nunca se registró. */
+  /**
+   * `YYYY-MM-DD`, el día de la obra del que es la lectura —el del reporte, no el de
+   * cuando se procesó (026/RF-42)—; `null` si nunca se registró.
+   */
   fecha: string | null;
 }
 
@@ -247,6 +269,10 @@ export interface LecturaRegistrada {
  * (spec 026, RF-18, RF-19). Un medidor no retrocede; y entre la lectura registrada y
  * esta no puede haber más de lo que cabe en los días que pasaron, contando al menos
  * uno. Sin lectura registrada no hay contra qué comparar: la primera vale.
+ *
+ * Un reporte de un día **anterior** al de la lectura registrada tampoco se compara
+ * (RF-43): lo normal es que su lectura sea menor, y no va a cambiar Vehículos. Los
+ * días de RF-19 se cuentan entre los días de los reportes (RF-44).
  */
 export function faltaContraElVehiculo(
   clase: ClaseDeMedidor,
@@ -255,6 +281,7 @@ export function faltaContraElVehiculo(
   fechaDelReporte: string,
 ): string | null {
   if (final === null || registrada.valor === null) return null;
+  if (registrada.fecha && fechaDelReporte < registrada.fecha) return null;
   const unidad = UNIDAD_DE_MEDIDOR[clase];
   if (final < registrada.valor) {
     return `La lectura (${final} ${unidad}) es menor que la registrada en Vehículos (${registrada.valor} ${unidad}).`;

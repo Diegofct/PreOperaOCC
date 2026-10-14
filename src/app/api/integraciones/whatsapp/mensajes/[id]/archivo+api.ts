@@ -6,6 +6,7 @@ import { media, whatsappMensajes } from '@/db/servidor/esquema';
 import { claveDeObjeto, guardar } from '@/features/media/servidor/almacen';
 import { requerirIntegracion } from '@/features/servidor/guardia-integracion';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { archivoRecibido } from '@/features/whatsapp/servidor/dias';
 import { idDeLaRuta } from '@/features/whatsapp/servidor/obra';
 import { aHex } from '@/shared/cripto/formato-pbkdf2';
 import { rechazoDeArchivo, tipoDeArchivo } from '@/shared/rules/whatsapp';
@@ -79,6 +80,14 @@ export async function PUT(peticion: Request, { id: crudo }: { id: string }) {
       claveR2: clave,
       subidoEn: new Date(),
     });
+
+    // El reporte que esperaba este archivo sigue ya (spec 026, RF-46, RF-48). Si falla,
+    // el archivo igual quedó guardado: lo retoma el pulso, y n8n no lo vuelve a subir.
+    try {
+      await archivoRecibido(id);
+    } catch (fallo) {
+      console.error('archivoRecibido', id, fallo);
+    }
 
     return ok({ id: mediaId, estado: 'guardado' }, 201);
   });

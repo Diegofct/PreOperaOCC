@@ -113,6 +113,7 @@ export async function catalogosDeLaObra(
         odometroKm: vehiculos.odometroKm,
         horometroH: vehiculos.horometroH,
         medidorActualizadoEn: vehiculos.medidorActualizadoEn,
+        medidorDia: vehiculos.medidorDia,
       })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
@@ -153,7 +154,10 @@ export async function catalogosDeLaObra(
       const e = equipos.find((x) => x.id === vehiculoId);
       return {
         valor: (clase === 'odometro' ? e?.odometroKm : e?.horometroH) ?? null,
-        fecha: e?.medidorActualizadoEn ? fechaDeJornada(e.medidorActualizadoEn.getTime()) : null,
+        // El día del reporte de la lectura (026/RF-42); lo de antes del cambio no lo
+        // tiene y se toma el día en que se actualizó.
+        fecha:
+          e?.medidorDia ?? (e?.medidorActualizadoEn ? fechaDeJornada(e.medidorActualizadoEn.getTime()) : null),
       };
     },
     cargoDe: new Map(personas.map((p) => [p.id, p.cargo])),

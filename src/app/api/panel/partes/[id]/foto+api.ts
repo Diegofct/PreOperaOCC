@@ -5,6 +5,8 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { media, partesDeObra } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { claveDeObjeto, guardar } from '@/features/media/servidor/almacen';
+import { agregarSubidaALaLista } from '@/features/whatsapp/servidor/fotos-del-dia';
+import { aHex } from '@/shared/cripto/formato-pbkdf2';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
@@ -58,6 +60,9 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     const clave = claveDeObjeto('bitacora', id, mediaId, mime);
     await guardar(clave, contenido, mime);
 
+    // La huella: con ella la sección no repite la misma foto subida dos veces (027/RF-36).
+    const huella = aHex(new Uint8Array(await crypto.subtle.digest('SHA-256', contenido)));
+
     const [fila] = await baseServidor()
       .insert(media)
       .values({
@@ -68,10 +73,15 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         itemKey: item,
         mime,
         bytes: contenido.byteLength,
+        sha256: huella,
         claveR2: clave,
         subidoEn: new Date(),
       })
       .returning({ id: media.id, itemKey: media.itemKey });
+
+    // La foto del día entra a la sección como las de WhatsApp: así se ve, se cuenta y se
+    // quita igual (spec 027, cambio del 2026-10-14, RF-34, RF-39). La de una actividad no.
+    if (item === null) await agregarSubidaALaLista({ parteId: id, mediaId, sha256: huella });
 
     return ok(fila, 201);
   });

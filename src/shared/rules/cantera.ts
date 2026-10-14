@@ -9,10 +9,10 @@
  *
  * Una vía se mide por abscisas: «PR 5 + 300» es el punto de referencia 5 más 300
  * metros. Es el dato que importa de un viaje a la obra, porque dice exactamente
- * dónde quedó el material. La obra de OCC tiene unos 25 km, y los metros se
- * anotan de 25 en 25: por eso el PR va de 0 a 25 y los metros de 0 a 975 (RF-12,
- * RF-13). Se eligen de una lista y no se escriben: un «PR 5 + 3000» tecleado
- * sería otro punto de la vía sin que nadie lo notara.
+ * dónde quedó el material. La obra de OCC tiene unos 25 km: el PR va de 0 a 25 y
+ * se elige de una lista (RF-12). Los metros se escriben, cualquier entero de 0 a
+ * 999 (spec 026, RF-52, que reemplaza 010/RF-13): los vales traen la abscisa exacta
+ * —«K1+460»—, no la de 25 en 25. El tope sigue impidiendo un «PR 5 + 3000».
  */
 import { operaVehiculos } from '@/shared/catalogos/cargos';
 
@@ -20,19 +20,13 @@ import { operaVehiculos } from '@/shared/catalogos/cargos';
 export const DESTINO_OBRA = 'obra';
 
 const PR_MAXIMO = 25;
-const METROS_MAXIMOS = 975;
-const PASO_DE_METROS = 25;
+/** Spec 026, RF-52: cualquier entero, ya no de 25 en 25. */
+export const METROS_MAXIMOS = 999;
 
 /** 0, 1, …, 25 (RF-12). */
 export const OPCIONES_DE_PR: readonly number[] = Array.from(
   { length: PR_MAXIMO + 1 },
   (_, i) => i,
-);
-
-/** 0, 25, …, 975 (RF-13). */
-export const OPCIONES_DE_METROS: readonly number[] = Array.from(
-  { length: METROS_MAXIMOS / PASO_DE_METROS + 1 },
-  (_, i) => i * PASO_DE_METROS,
 );
 
 /**
@@ -61,7 +55,7 @@ export const MENSAJES_DE_VIAJE = {
   sinPr: 'Falta el PR de llegada.',
   sinMetros: 'Faltan los metros de llegada.',
   prFueraDeRango: 'El PR va de 0 a 25.',
-  metrosFueraDeRango: 'Los metros van de 0 a 975, de 25 en 25.',
+  metrosFueraDeRango: 'Los metros van de 0 a 999.',
   abscisaSinObra: 'El PR y los metros solo se anotan cuando el destino es la obra.',
   mismoSitio: 'El origen y el destino no pueden ser el mismo sitio.',
   valeLargo: 'El número de vale va hasta 30 caracteres.',
@@ -154,8 +148,7 @@ export function validarAbscisa(pr: number | null, metros: number | null): FaltaD
   } else if (
     !Number.isInteger(metros) ||
     metros < 0 ||
-    metros > METROS_MAXIMOS ||
-    metros % PASO_DE_METROS !== 0
+    metros > METROS_MAXIMOS
   ) {
     faltas.push({ campo: 'metros', mensaje: MENSAJES_DE_VIAJE.metrosFueraDeRango });
   }

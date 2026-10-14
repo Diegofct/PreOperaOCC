@@ -13,6 +13,7 @@ import {
   responder,
 } from '@/features/servidor/respuestas';
 import { validarMedidor } from '@/shared/rules/inspeccion';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /** Editar y dar de baja un vehículo. `PATCH` y `DELETE /api/panel/vehiculos/:id`. */
 
@@ -88,7 +89,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
 
     const [fila] = await baseServidor()
       .update(vehiculos)
-      .set(tocaMedidor ? { ...cambios, medidorActualizadoEn: new Date() } : cambios)
+      .set(tocaMedidor ? { ...cambios, medidorActualizadoEn: new Date(), medidorDia: fechaDeJornada() } : cambios)
       .where(and(eq(vehiculos.id, id), isNull(vehiculos.eliminadoEn)))
       .returning(COLUMNAS);
 

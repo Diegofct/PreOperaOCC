@@ -17,15 +17,23 @@
  * falte (personas de la sección de personal y operadores, volquetas con placa —RF-22,
  * RF-30—), apartar los renglones incompletos (RF-19), y escribir el resto con
  * `guardarEnBitacora`, que junta los reportes del mismo día con las reglas de la 021
- * (RF-44) y no duplica lo que ya llevó (RF-54). La foto del día la pone el sistema si
- * la bitácora no tiene una (RF-53). Los viajes del reporte ya se guardaron al llegar
+ * (RF-44) y no duplica lo que ya llevó (RF-54). Las fotos van a la sección «Fotografía
+ * del día» por `sincronizarFotosDelDia` (spec 027): ya no se copia la primera del reporte
+ * diario como foto principal (cambio del 2026-10-14, RF-40). Los viajes del reporte ya se
+ * guardaron al llegar
  * (RF-52): aquí no se tocan.
+ *
+ * ── Esperar los archivos ──
+ *
+ * La integración manda el mensaje y después sus bytes. Un reporte que se guarda en ese
+ * hueco queda sin foto del día (el 9-oct). Por eso un mensaje cuya imagen o documento
+ * —o la de lo que ya lo complementa— no ha llegado se queda en espera hasta 30 minutos
+ * (026/RF-46, RF-47); lo retoma la llegada del archivo (`archivoRecibido`) o el pulso.
  */
-import { and, asc, eq, inArray, isNull, like, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import {
-  media,
   obras,
   partesDeObra,
   whatsappDias,
@@ -37,6 +45,7 @@ import { reporteCorregido } from '@/features/panel/contratos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
   candidatosDeVehiculo,
+  equiposTomados,
   reconocerMaquina,
   faltasDelReporte,
   type ReporteDelDia,
@@ -44,16 +53,19 @@ import {
 import {
   decisionDePersona,
   diaCompleto,
+  esperaArchivo,
   placaDeLaMaquina,
+  renglonesGuardados,
   separarRenglones,
   type ReporteEsperado,
 } from '@/shared/rules/whatsapp-automatico';
 
 import { ACTOR_SISTEMA, type Actor } from './actor';
-import { fotosElegidas, guardarEnBitacora, marcarMensaje } from './aprobacion';
+import { guardarEnBitacora, marcarMensaje } from './aprobacion';
 import { apartar } from './apartados';
 import { catalogosDeLaObra } from './catalogos';
 import { crearMaquina, crearPersona, crearVolqueta } from './creacion';
+import { diaDeLaFoto, sincronizarFotosDelDia } from './fotos-del-dia';
 import { obraDelMensaje } from './obra';
 
 /** Cómo se armó la bitácora: con todo, por la hora límite, o con «Guardar con lo que hay». */
@@ -96,25 +108,27 @@ async function mensajesEnEspera(obraId: string, fecha: string) {
 type MensajeEnEspera = Awaited<ReturnType<typeof mensajesEnEspera>>[number];
 
 /**
- * La primera foto del mensaje o de lo que lo complementa, para la foto del día
- * (RF-53). Solo de un reporte diario: la foto de un incidente no es la del día.
+ * ¿El mensaje, o algo que ya lo complementa, espera todavía su archivo? (026/RF-46,
+ * RF-47). Una imagen o un documento sin su fila en `media`, de hace menos de 30 minutos.
  */
-async function primeraFoto(mensajeId: string): Promise<string | null> {
-  const [foto] = await baseServidor()
-    .select({ id: media.id })
-    .from(media)
-    .where(
-      and(
-        eq(media.duenoTipo, 'whatsapp'),
-        sql`(${media.duenoId} = ${mensajeId}
-             or ${media.duenoId} in (select c.id from whatsapp_mensajes c where c.complementa_a = ${mensajeId}))`,
-        like(media.mime, 'image/%'),
-        sql`${media.claveR2} is not null`,
-      ),
-    )
-    .orderBy(asc(media.recibidoEn))
-    .limit(1);
-  return foto?.id ?? null;
+async function faltaUnArchivo(mensajeId: string, ahoraMs: number): Promise<boolean> {
+  const filas = await baseServidor()
+    .select({
+      tipo: whatsappMensajes.tipo,
+      recibidoEn: whatsappMensajes.recibidoEn,
+      // Calificada a mano: en una consulta de una sola tabla, Drizzle escribe `"id"` sin
+      // tabla, y dentro de la subconsulta eso sería el id de `media`.
+      archivos: sql<number>`(select count(*)::int from media x
+        where x.dueno_tipo = 'whatsapp' and x.dueno_id = whatsapp_mensajes.id)`,
+    })
+    .from(whatsappMensajes)
+    .where(or(eq(whatsappMensajes.id, mensajeId), eq(whatsappMensajes.complementaA, mensajeId)));
+  return filas.some((f) =>
+    esperaArchivo(
+      { tipo: f.tipo, tieneArchivo: Number(f.archivos) > 0, recibidoEnMs: f.recibidoEn.getTime() },
+      ahoraMs,
+    ),
+  );
 }
 
 /** El mensaje, guardado: con la bitácora a la que fue y lo que quedó (RF-58). */
@@ -149,9 +163,12 @@ async function marcarLlevado(
 /**
  * Lleva un mensaje en espera a la bitácora de su día (RF-44, RF-50, RF-53, RF-54).
  * Devuelve el id de la bitácora, o `null` si el mensaje entero fue a «No se pudo
- * guardar».
+ * guardar» o sigue en espera (un choque, o un archivo que no ha llegado).
  */
 async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: string): Promise<string | null> {
+  // Su archivo todavía no llega: sigue en espera (026/RF-46).
+  if (await faltaUnArchivo(mensaje.id, Date.now())) return null;
+
   const enEspera = reporteCorregido.parse(mensaje.propuesta) as ReporteDelDia;
   // Los viajes se guardaron al llegar (RF-52).
   let reporte: ReporteDelDia = { ...enEspera, viajes: [] };
@@ -177,6 +194,8 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     }
   }
   const maquinaria = [];
+  // Lo que otros renglones ya tomaron no cuenta como candidato al crear (026/RF-50).
+  const tomados = equiposTomados(reporte.maquinaria, catalogos.catalogos);
   for (const m of reporte.maquinaria) {
     let { vehiculoId, operadorId } = m;
     if (!vehiculoId && m.escrito && !m.conflicto) {
@@ -191,9 +210,13 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
         });
       } else if (!placa && m.tipoId) {
         // Sin placa, con tipo y sin ningún candidato: la máquina se registra (026/RF-8, RF-13).
-        const reconocida = reconocerMaquina(m.escrito, catalogos.catalogos.vehiculos, obraId, {
-          marca: m.marcaEscrita,
-        });
+        const reconocida = reconocerMaquina(
+          m.escrito,
+          catalogos.catalogos.vehiculos,
+          obraId,
+          { marca: m.marcaEscrita },
+          tomados,
+        );
         if (reconocida.candidatos.length === 0) {
           vehiculoId = await crearMaquina({
             obraId,
@@ -229,10 +252,8 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     return null;
   }
 
-  // La foto del día, si es un reporte diario (RF-53, RF-73).
-  const delDia = mensaje.categoria === 'reporte_diario' ? await primeraFoto(mensaje.id) : null;
-  const elegidas = { delDia, porActividad: {} };
-  const fotos = await fotosElegidas(mensaje.id, elegidas, guardable.actividades.length);
+  // Sin foto principal: las fotos del mensaje entran a la sección con las demás, al final
+  // del armado o al llegar su archivo (spec 027, cambio del 2026-10-14, RF-40).
   const enBitacora = await guardarEnBitacora({
     mensajeId: mensaje.id,
     reporte: guardable,
@@ -240,9 +261,10 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     actor: ACTOR_SISTEMA,
     autorNombre: mensaje.autorNombre,
     enviadoEn: mensaje.enviadoEn,
-    fotos: Array.isArray(fotos) ? new Map() : fotos,
-    fotosElegidas: Array.isArray(fotos) ? { delDia: null, porActividad: {} } : elegidas,
+    fotos: new Map(),
+    fotosElegidas: { delDia: null, porActividad: {} },
     viajesPendientes: false,
+    renglonesOriginales: renglonesGuardados(reporte, excepciones),
   });
 
   if (enBitacora instanceof Response) {
@@ -326,6 +348,8 @@ export async function armarBitacora(
       armadaPor: motivo === 'a_mano' ? actor.id : null,
     })
     .where(and(eq(whatsappDias.obraId, obraId), eq(whatsappDias.fecha, fecha)));
+  // Las fotos del día, ya con la bitácora armada (spec 027, RF-1).
+  if (parteId) await sincronizarFotosDelDia(obraId, fecha);
   return { parteId, llevados: mensajes.length };
 }
 
@@ -340,6 +364,13 @@ export async function armarBitacora(
  * de cantera los tiene en Control Cantera, que la bitácora muestra al abrirla.
  */
 export async function actualizarDia(obraId: string, fecha: string): Promise<void> {
+  await llevarLoQueEspera(obraId, fecha);
+  // Las fotos del día, también las de mensajes que no esperaban a la bitácora (spec 027,
+  // RF-1), y el aviso de las que llegaron con ella cerrada (RF-21).
+  await sincronizarFotosDelDia(obraId, fecha);
+}
+
+async function llevarLoQueEspera(obraId: string, fecha: string): Promise<void> {
   const db = baseServidor();
   await db.insert(whatsappDias).values({ obraId, fecha }).onConflictDoNothing();
   const mensajes = await mensajesEnEspera(obraId, fecha);
@@ -384,4 +415,47 @@ export async function actualizarDia(obraId: string, fecha: string): Promise<void
     fecha,
   });
   if (completo) await armarBitacora(obraId, fecha, 'completo');
+}
+
+/**
+ * Llegó el archivo de un mensaje (`PUT …/archivo`). Dos cosas, ninguna obligatoria:
+ *
+ *  · si el mensaje, o el que complementa, esperaba ese archivo para ir a la
+ *    bitácora, se retoma su día ya (026/RF-46);
+ *  · la foto entra a la sección «Fotografía del día» de su día (spec 027, RF-1, RF-10).
+ *
+ * Ya no se pone como foto principal la del reporte diario que llega tarde (026/RF-48):
+ * desde el cambio del 2026-10-14 no hay foto principal (027/RF-40).
+ */
+export async function archivoRecibido(mensajeId: string): Promise<void> {
+  const db = baseServidor();
+  const filas = await db
+    .select({
+      id: whatsappMensajes.id,
+      estado: whatsappMensajes.estado,
+      categoria: whatsappMensajes.categoria,
+      fechaHecho: whatsappMensajes.fechaHecho,
+      parteId: whatsappMensajes.parteId,
+      obraId: obraDelMensaje,
+      diaDeLaFoto,
+    })
+    .from(whatsappMensajes)
+    .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
+    .where(
+      or(
+        eq(whatsappMensajes.id, mensajeId),
+        sql`${whatsappMensajes.id} = (select c.complementa_a from whatsapp_mensajes c where c.id = ${mensajeId})`,
+      ),
+    );
+
+  for (const m of filas) {
+    if (m.estado === 'en_espera' && m.obraId && m.fechaHecho) await actualizarDia(m.obraId, m.fechaHecho);
+  }
+
+  // La foto que llegó, a la sección de su día (spec 027, RF-1, RF-10).
+  const dias = new Set(filas.filter((m) => m.obraId && m.diaDeLaFoto).map((m) => `${m.obraId}|${m.diaDeLaFoto}`));
+  for (const dia of dias) {
+    const [obraId, fecha] = dia.split('|');
+    await sincronizarFotosDelDia(obraId, fecha);
+  }
 }

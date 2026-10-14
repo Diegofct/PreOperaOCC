@@ -4,8 +4,9 @@
  * Todo se **elige** de una lista, salvo la fecha —la hora también, en desplegables de
  * 15 minutos desde la spec 016—: el material, la volqueta,
  * el conductor, el origen y el destino salen de las opciones que el servidor da para
- * esa obra (solo lo vigente y elegible), y el PR y los metros, de sus listas (RF-12,
- * RF-13). Son como mucho ocho elecciones con destino obra (requisito no funcional).
+ * esa obra (solo lo vigente y elegible), y el PR, de su lista (RF-12); los metros se
+ * escriben, de 0 a 999 (026/RF-52, que reemplaza 010/RF-13).
+ * Son como mucho ocho elecciones con destino obra (requisito no funcional).
  *
  * ── El PR y los metros solo con destino obra ──
  *
@@ -31,7 +32,6 @@ import { useState } from 'react';
 
 import {
   DESTINO_OBRA,
-  OPCIONES_DE_METROS,
   OPCIONES_DE_PR,
   formatearAbscisa,
   validarViaje,
@@ -304,16 +304,16 @@ export function VentanaViaje({
                   error={faltaDe('pr')}
                   ancho={170}
                 />
-                <Selector
+                {/* Se escriben, cualquier entero de 0 a 999 (026/RF-52). */}
+                <Campo
                   etiqueta="Metros"
                   obligatorio
-                  valor={metros === null ? null : String(metros)}
-                  opciones={OPCIONES_DE_METROS.map((n) => ({
-                    valor: String(n),
-                    etiqueta: `+ ${String(n).padStart(3, '0')}`,
-                  }))}
-                  onChange={(v) => setMetros(v === null ? null : Number(v))}
-                  vacio="Elija los metros"
+                  soloNumeros
+                  valor={metros === null ? '' : String(metros)}
+                  onChange={(v) => {
+                    const limpio = v.replace(/\D/g, '');
+                    setMetros(limpio === '' ? null : Number(limpio));
+                  }}
                   error={faltaDe('metros')}
                   ancho={170}
                 />

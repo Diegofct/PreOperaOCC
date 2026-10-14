@@ -44,6 +44,7 @@ import {
 } from './horas';
 import {
   faltaContraElVehiculo,
+  lecturaSugerida,
   mensajeDeAvance,
   validarAvance,
   type ClaseDeMedidor,
@@ -65,8 +66,8 @@ export interface AbscisaLeida {
  *
  * En la obra se escribe la misma referencia de dos maneras —«K» en los reportes
  * de actividades, «PR» en Control Cantera y en los ensayos— y OCC confirmó que son
- * la misma. Aquí solo se lee: si el PR o los metros caben en la vía, o si los
- * metros van de 25 en 25, lo dice la regla de cada destino (`validarAbscisa`),
+ * la misma. Aquí solo se lee: si el PR o los metros caben en la vía lo dice la
+ * regla de cada destino (`validarAbscisa`),
  * para que el residente vea la falta en vez de una abscisa corregida a escondidas.
  */
 const ABSCISA = /(?:^|[^a-z])(?:abs\.?\s*)?(?:k|pr)\s*(\d{1,3})\s*\+\s*(\d{1,3})(?!\d)/g;
@@ -331,6 +332,8 @@ export function reconocerMaquina(
   vehiculos: readonly VehiculoConocido[],
   obraId: string,
   ia: { tipo?: string | null; marca?: string | null } = {},
+  /** Los que otro renglón del reporte ya tomó por placa, código o modelo (RF-50). */
+  excluidos: ReadonlySet<string> = new Set(),
 ): MaquinaReconocidaPorNombre {
   const tipoId = tipoDeEquipo(ia.tipo) ?? tipoDeEquipo(texto);
   const ninguno = { id: null, como: null, candidatos: [], tipoId };
@@ -345,11 +348,38 @@ export function reconocerMaquina(
   const porModelo = deLaObra.filter((v) => v.modelo && compacto(v.modelo) === escrito);
   if (porModelo.length === 1) return { id: porModelo[0].id, como: 'modelo', candidatos: [], tipoId };
 
+  // El modelo escrito dentro del renglón, si se distingue de un año (cambio 2026-10-13, RF-49).
+  const modeloDentro = deLaObra.filter((v) => {
+    const modelo = compacto(v.modelo ?? '');
+    return modelo.length >= 4 && /[a-z]/.test(modelo) && escrito.includes(modelo);
+  });
+  if (modeloDentro.length === 1) return { id: modeloDentro[0].id, como: 'modelo', candidatos: [], tipoId };
+  if (modeloDentro.length > 1) return { ...ninguno, candidatos: modeloDentro.map((v) => v.id) };
+
   if (!tipoId) return ninguno;
   const conMarca = compacto([texto, ia.marca ?? ''].join(' '));
-  const porTipoYMarca = deLaObra.filter((v) => v.tipoId === tipoId && nombraLaMarca(conMarca, v.marca));
+  const porTipoYMarca = deLaObra.filter(
+    (v) => v.tipoId === tipoId && !excluidos.has(v.id) && nombraLaMarca(conMarca, v.marca),
+  );
   if (porTipoYMarca.length === 1) return { id: porTipoYMarca[0].id, como: 'tipo_marca', candidatos: [], tipoId };
   return { ...ninguno, candidatos: porTipoYMarca.map((v) => v.id) };
+}
+
+/**
+ * Los equipos que los renglones de un reporte nombran sin dudas —por placa, código o
+ * modelo—, para no ofrecerlos por tipo y marca a los demás renglones (cambio 2026-10-13,
+ * RF-50). Recibe los renglones como los manda la IA o ya resueltos (`escrito`).
+ */
+export function equiposTomados(
+  renglones: readonly { equipo?: string | null; escrito?: string | null }[],
+  catalogos: { vehiculos: readonly VehiculoConocido[]; obraId: string },
+): Set<string> {
+  const tomados = new Set<string>();
+  for (const r of renglones) {
+    const reconocida = reconocerMaquina(r.equipo ?? r.escrito, catalogos.vehiculos, catalogos.obraId);
+    if (reconocida.id && reconocida.como !== 'tipo_marca') tomados.add(reconocida.id);
+  }
+  return tomados;
 }
 
 /**
@@ -917,7 +947,12 @@ export function faltasDelReporte(
       // El medidor que dice el reporte manda sobre el del tipo (026/RF-16, RF-17).
       const clase = maquina.unidad ?? contexto.claseDeMedidor(maquina.vehiculoId);
       const error = validarAvance(clase, maquina.medidorInicial, maquina.medidorFinal);
-      if (error) falta('maquinaria', i, mensajeDeAvance(clase, error, maquina.medidorInicial));
+      if (error) {
+        // Un punto de más se sugiere, no se corrige (026/RF-51).
+        const sugerida = lecturaSugerida(clase, maquina.medidorInicial, maquina.medidorFinal);
+        const motivo = mensajeDeAvance(clase, error, maquina.medidorInicial);
+        falta('maquinaria', i, sugerida === null ? motivo : `${motivo} ¿Quiso decir ${sugerida}?`);
+      }
       // Contra lo registrado en Vehículos: ni hacia atrás ni más de lo posible (026/RF-18, RF-19).
       const contraElVehiculo =
         !error && contexto.lecturaDe
@@ -1376,6 +1411,8 @@ const SINONIMOS_DE_ENSAYO: readonly [string, string][] = [
   ['proctor', 'proctor_compactacion'],
   ['cbr', 'cbr_sin_cemento'],
   ['granulometr', 'granulometria'],
+  // «Humedades», «Humedad natural», «Contenido de humedad» (026/RF-53).
+  ['humedad', 'humedad'],
 ];
 
 /** El id del ensayo de la lista de OCC, o `null` (RF-40). */
@@ -1513,15 +1550,23 @@ export function resolverPropuesta(
     });
   });
 
-  const maquinaria: MaquinaDelReporte[] = (propuesta.maquinaria ?? [])
-    .filter((m) => numeroONulo(m.medidor_inicial) !== null || numeroONulo(m.medidor_final) !== null)
+  const conLecturas = (propuesta.maquinaria ?? []).filter(
+    (m) => numeroONulo(m.medidor_inicial) !== null || numeroONulo(m.medidor_final) !== null,
+  );
+  // Primera pasada: lo que cada renglón toma por placa, código o modelo no es candidato por
+  // tipo y marca de los demás (cambio 2026-10-13, RF-50).
+  const tomados = equiposTomados(conLecturas, catalogos);
+  const maquinaria: MaquinaDelReporte[] = conLecturas
     .map((m) => {
       const operadorEscrito = textoLimpio(m.operador) || null;
       const marcaEscrita = textoLimpio(m.marca) || null;
-      const reconocida = reconocerMaquina(m.equipo, catalogos.vehiculos, catalogos.obraId, {
-        tipo: m.tipo_equipo,
-        marca: marcaEscrita,
-      });
+      const reconocida = reconocerMaquina(
+        m.equipo,
+        catalogos.vehiculos,
+        catalogos.obraId,
+        { tipo: m.tipo_equipo, marca: marcaEscrita },
+        tomados,
+      );
       return {
         vehiculoId: reconocida.id,
         escrito: textoLimpio(m.equipo),

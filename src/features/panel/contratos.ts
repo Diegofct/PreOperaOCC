@@ -1498,6 +1498,41 @@ export interface ConsultaDeViajes {
 /** La sección «Control Cantera» de un parte, como la decide `canteraDelParte`. */
 export type CanteraDelParteFila = CanteraDelParte<ViajeDelParte>;
 
+/** Una foto de las «Fotos del día» de una bitácora (spec 027, RF-13 a RF-17, RF-25). */
+export interface FotoDelDiaFila {
+  id: string;
+  /** La imagen: se pide a `/api/panel/media/:mediaId`, sin copia (RF-32). */
+  mediaId: string;
+  /** Por WhatsApp o subida en el panel con «Añadir fotografía» (cambio del 2026-10-14, RF-38). */
+  origen: 'whatsapp' | 'panel';
+  /** Quién la mandó; `null` si se subió en el panel. */
+  autorNombre: string | null;
+  /**
+   * ISO 8601, en hora de Colombia en la pantalla: la de envío por WhatsApp (RF-15) o la de
+   * subida en el panel (RF-38).
+   */
+  enviadoEn: string;
+  /** El tipo de mensaje como lo nombra el historial: «Reporte diario», «Incidente»… (RF-16). */
+  tipo: string;
+  /** La descripción corta que hizo la IA del mensaje (RF-17); `null` si se subió en el panel. */
+  descripcion: string | null;
+  /** Quién la quitó, cuándo y por qué; `null` si sigue en la sección (RF-25). */
+  quitada: { por: string | null; en: string; motivo: string } | null;
+}
+
+/** `POST /api/panel/partes/:id/fotos-del-dia/:fotoId/quitar`: quitar exige motivo (RF-24). */
+export const fotoQuitada = z.object({
+  motivo: z.string().trim().min(1, 'Escriba por qué la quita.').max(300),
+});
+
+export type FotoQuitada = z.input<typeof fotoQuitada>;
+
+/** `GET /api/panel/partes/:id/fotos-del-dia`: las que se ven y, aparte, las quitadas. */
+export interface FotosDelDiaFila {
+  fotos: FotoDelDiaFila[];
+  quitadas: FotoDelDiaFila[];
+}
+
 /* ------------------------------------------------------------------------ */
 /* Laboratorio: granulometría (spec 018)                                     */
 /* ------------------------------------------------------------------------ */

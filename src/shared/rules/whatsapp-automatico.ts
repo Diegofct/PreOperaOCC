@@ -367,6 +367,25 @@ export function diaVencido(fecha: string, ahoraMs: number): boolean {
   return ahoraMs >= limite;
 }
 
+/** Cuánto se espera el archivo de un mensaje antes de guardarlo sin él (026/RF-47). */
+export const MINUTOS_DE_ESPERA_DEL_ARCHIVO = 30;
+
+/**
+ * ¿Hay que esperar el archivo de este mensaje antes de llevarlo a la bitácora?
+ * (026/RF-46, RF-47). La integración manda primero el mensaje y después sus bytes,
+ * y un reporte que se guarda en ese hueco queda sin foto del día. Solo se esperan
+ * imágenes y documentos: un video pesado puede no subir nunca. Y no más de 30
+ * minutos desde que llegó: un archivo que no subió no detiene el reporte.
+ */
+export function esperaArchivo(
+  mensaje: { tipo: string | null; tieneArchivo: boolean; recibidoEnMs: number },
+  ahoraMs: number,
+): boolean {
+  if (mensaje.tieneArchivo) return false;
+  if (mensaje.tipo !== 'imagen' && mensaje.tipo !== 'documento') return false;
+  return ahoraMs - mensaje.recibidoEnMs < MINUTOS_DE_ESPERA_DEL_ARCHIVO * 60 * 1000;
+}
+
 /* ── Lo que se guarda y lo que no ──────────────────────────────────────── */
 
 /** Una falta de `faltasDelReporte`: de un renglón, o de una sección entera si `renglon` es nulo. */
@@ -413,6 +432,26 @@ function esSeccionConRenglones(seccion: string): seccion is SeccionConRenglones 
  * Los renglones apartados conservan su número en el reporte original, que es el que
  * se completa después.
  */
+/**
+ * La posición en el reporte de cada actividad y cada ensayo que quedó en `guardable`,
+ * para que sus ids salgan del renglón y no de su lugar en la lista ya filtrada. Sin esto,
+ * reprocesar un mensaje cuyos renglones apartados cambiaron corre los ids: la fusión
+ * descarta las filas nuevas que caen sobre un id ya usado y duplica las demás (visto el
+ * 2026-10-13 con las humedades del 9-oct).
+ */
+export function renglonesGuardados(
+  reporte: Pick<ReporteDelDia, 'actividades' | 'ensayos'>,
+  excepciones: readonly RenglonApartado[],
+): { actividades: number[]; ensayos: number[] } {
+  const quedan = (seccion: 'actividades' | 'ensayos') => {
+    const apartados = excepciones.filter((e) => e.seccion === seccion);
+    if (apartados.some((e) => e.renglon === null)) return [];
+    const fuera = new Set(apartados.map((e) => e.renglon));
+    return reporte[seccion].map((_, i) => i).filter((i) => !fuera.has(i));
+  };
+  return { actividades: quedan('actividades'), ensayos: quedan('ensayos') };
+}
+
 export function separarRenglones(
   reporte: ReporteDelDia,
   faltas: readonly FaltaDeRenglon[],

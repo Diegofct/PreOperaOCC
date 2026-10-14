@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
+import { fotosDeLaBitacora } from '@/features/whatsapp/servidor/fotos-del-dia';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { horarioDeLaObraDelParte } from '@/features/bitacoras/servidor/horario';
 import { viajesParaFijarAlCerrar } from '@/features/cantera/servidor/parte';
@@ -65,7 +66,9 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .where(and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, id)));
 
     const fotos = {
-      delDia: fotosDelParte.filter((f) => f.itemKey === null).length,
+      // La fotografía del día es la sección entera: las de WhatsApp, las subidas y las
+      // principales viejas, sin las quitadas (spec 027, cambio del 2026-10-14, RF-41).
+      delDia: (await fotosDeLaBitacora(id)).fotos.length,
       itemsConFoto: fotosDelParte.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
     };
 
@@ -146,6 +149,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         .set({
           [maquina.claseMedidor === 'odometro' ? 'odometroKm' : 'horometroH']: sql`greatest(coalesce(${columna}, 0), ${maquina.medidorFinal})`,
           medidorActualizadoEn: new Date(),
+          // El día de la bitácora, sin retroceder (spec 026, RF-42).
+          medidorDia: sql`greatest(${vehiculos.medidorDia}, ${parte.fecha}::date)`,
         })
         .where(eq(vehiculos.id, maquina.vehiculoId));
     }

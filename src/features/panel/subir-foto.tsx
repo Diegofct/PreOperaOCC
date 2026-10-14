@@ -27,6 +27,7 @@ export function SubirFoto({
   titulo,
   rutaDeSubida,
   fotos,
+  sinMiniaturas = false,
   editable,
   alSubir,
 }: {
@@ -35,6 +36,11 @@ export function SubirFoto({
   rutaDeSubida: string;
   /** Los ids ya subidos, para pintarlos. */
   fotos: string[];
+  /**
+   * Solo el botón: las fotos las pinta otro (la sección «Fotografía del día», spec 027,
+   * cambio del 2026-10-14). Sin esto, la tira y el «Todavía sin fotografía» saldrían dos veces.
+   */
+  sinMiniaturas?: boolean;
   editable: boolean;
   alSubir: () => void;
 }) {
@@ -81,7 +87,7 @@ export function SubirFoto({
 
   return (
     <View style={estilos.bloque}>
-      {fotos.length > 0 ? (
+      {sinMiniaturas ? null : fotos.length > 0 ? (
         <View style={estilos.tira}>
           {fotos.map((id) => (
             <Image

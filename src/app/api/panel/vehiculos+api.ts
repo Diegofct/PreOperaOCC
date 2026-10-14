@@ -8,6 +8,7 @@ import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { DESGASTE_PARA_CAMBIO } from '@/shared/catalogos/llantas';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
+import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /**
  * La flota. `GET` y `POST /api/panel/vehiculos`.
@@ -101,6 +102,7 @@ export async function POST(peticion: Request) {
         id: uuidv7(),
         ...datos,
         medidorActualizadoEn: traeMedidor ? new Date() : null,
+        medidorDia: traeMedidor ? fechaDeJornada() : null,
       })
       .returning({ id: vehiculos.id });
 

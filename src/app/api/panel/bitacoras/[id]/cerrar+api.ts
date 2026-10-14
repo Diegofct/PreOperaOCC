@@ -1,11 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { bitacoras, vehiculos } from '@/db/servidor/esquema';
 import { rechazoSiNoEsEditable } from '@/features/bitacoras/servidor/acceso';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
-import { esBitacoraCompleta, mensajeDeHorometros, validarHorometros } from '@/shared/rules/jornada';
+import { esBitacoraCompleta, fechaDeJornada, mensajeDeHorometros, validarHorometros } from '@/shared/rules/jornada';
 
 /**
  * Cerrar la jornada. `POST /api/panel/bitacoras/:id/cerrar`.
@@ -78,6 +78,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
           .set({
             horometroH: Math.max(actual.horometroFinal, maquina.horometroH ?? 0),
             medidorActualizadoEn: ahora,
+            // El día de la lectura, sin retroceder (spec 026, RF-42).
+            medidorDia: sql`greatest(${vehiculos.medidorDia}, ${fechaDeJornada(ahora.getTime())}::date)`,
           })
           .where(eq(vehiculos.id, actual.vehiculoId));
       }

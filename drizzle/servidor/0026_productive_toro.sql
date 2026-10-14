@@ -1,0 +1,1 @@
+ALTER TABLE "bitacora_fotos" ALTER COLUMN "mensaje_id" DROP NOT NULL;

@@ -164,6 +164,7 @@ import {
 import {
   abscisaDeTexto,
   reconocerEnsayo,
+  equiposTomados,
   reconocerMaquina,
   tipoDeEquipo,
   ubicacionDeTexto,
@@ -205,8 +206,10 @@ import {
   decisionDePersona,
   diaCompleto,
   diaVencido,
+  esperaArchivo,
   placaDeLaMaquina,
   placaRegistrable,
+  renglonesGuardados,
   separarRenglones,
   tipoDeReporte,
   viajeRepetido,
@@ -285,6 +288,7 @@ import {
   sumarDias,
   validarHorometros,
   faltaContraElVehiculo,
+  lecturaSugerida,
 } from '../src/shared/rules/jornada';
 import {
   bloqueosDelCierre,
@@ -329,7 +333,7 @@ import {
   filtrarViajes,
   formatearAbscisa,
   mismoVale,
-  OPCIONES_DE_METROS,
+  METROS_MAXIMOS,
   OPCIONES_DE_PR,
   validarAbscisa,
   validarViaje,
@@ -383,6 +387,13 @@ import {
   sitioNuevo,
   viajeNuevo,
 } from '../src/features/panel/contratos';
+import {
+  fotoEntraALaBitacora,
+  fotosParaAgregar,
+  unificarFotosDelDia,
+  type FotoCandidata,
+  type FotoDeLaSeccion,
+} from '../src/shared/rules/fotos-del-dia';
 import {
   leerOrdenGuardado,
   ordenarFilas,
@@ -4021,8 +4032,8 @@ prueba('las actividades del parte son las del presupuesto de OCC, cada una con s
   assert.ok(opciones.every((o) => actividadPorItem(o.valor) !== undefined));
 });
 
-prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC', () => {
-  // Spec 004, RF-61 y anexo A, en su orden.
+prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC y la humedad', () => {
+  // Spec 004, RF-61 y anexo A, en su orden; la humedad, al final (026/RF-53).
   assert.deepEqual(
     ENSAYOS_DE_CALIDAD.map((e) => e.nombre),
     [
@@ -4043,9 +4054,10 @@ prueba('los ensayos de Control Calidad de Obra son los 17 de la guía de OCC', (
       'Compactación',
       'Espesor',
       'Planicidad',
+      'Humedad',
     ],
   );
-  assert.equal(new Set(ENSAYOS_DE_CALIDAD.map((e) => e.id)).size, 17);
+  assert.equal(new Set(ENSAYOS_DE_CALIDAD.map((e) => e.id)).size, 18);
   assert.equal(nombreDeEnsayo('densidad_en_campo'), 'Densidad en campo');
   assert.equal(nombreDeEnsayo('inventado'), 'inventado');
 });
@@ -5062,14 +5074,12 @@ prueba('los movimientos se filtran por periodo y por tipo, sin esconder los anul
 
 /* ── Control Cantera (spec 010) ── */
 
-prueba('el PR se elige de 0 a 25 y los metros de 0 a 975, de 25 en 25', () => {
-  // Spec 010 / RF-12 y RF-13.
+prueba('el PR se elige de 0 a 25 y los metros se escriben de 0 a 999', () => {
+  // Spec 010 / RF-12; los metros, spec 026 / RF-52 (reemplaza 010/RF-13).
   assert.equal(OPCIONES_DE_PR.length, 26);
   assert.equal(OPCIONES_DE_PR[0], 0);
   assert.equal(OPCIONES_DE_PR.at(-1), 25);
-  assert.equal(OPCIONES_DE_METROS.length, 40);
-  assert.deepEqual(OPCIONES_DE_METROS.slice(0, 3), [0, 25, 50]);
-  assert.equal(OPCIONES_DE_METROS.at(-1), 975);
+  assert.equal(METROS_MAXIMOS, 999);
 });
 
 prueba('la llegada a la obra se escribe como abscisa, con los metros en tres cifras', () => {
@@ -5090,9 +5100,13 @@ prueba('una abscisa incompleta nombra lo que falta y una fuera de rango se recha
   assert.deepEqual(faltas(26, 300), ['pr: El PR va de 0 a 25.']);
   assert.deepEqual(faltas(-1, 300), ['pr: El PR va de 0 a 25.']);
   assert.deepEqual(faltas(2.5, 300), ['pr: El PR va de 0 a 25.']);
-  assert.deepEqual(faltas(5, 980), ['metros: Los metros van de 0 a 975, de 25 en 25.']);
-  assert.deepEqual(faltas(5, 310), ['metros: Los metros van de 0 a 975, de 25 en 25.']);
-  assert.deepEqual(faltas(25, 975), []);
+  assert.deepEqual(faltas(5, 1000), ['metros: Los metros van de 0 a 999.']);
+  assert.deepEqual(faltas(5, -1), ['metros: Los metros van de 0 a 999.']);
+  assert.deepEqual(faltas(5, 2.5), ['metros: Los metros van de 0 a 999.']);
+  // Los vales del 8 y 9-oct: K1+460, K1+510, K1+396 (026/RF-52).
+  assert.deepEqual(faltas(1, 460), []);
+  assert.deepEqual(faltas(1, 396), []);
+  assert.deepEqual(faltas(25, 999), []);
   assert.deepEqual(faltas(0, 0), []);
 });
 
@@ -5310,9 +5324,10 @@ prueba('el contrato del viaje exige la abscisa con la obra y la rechaza con un s
   assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5 }), [
     'metros: Faltan los metros de llegada.',
   ]);
-  assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5, metros: 310 }), [
-    'metros: Los metros van de 0 a 975, de 25 en 25.',
+  assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5, metros: 1200 }), [
+    'metros: Los metros van de 0 a 999.',
   ]);
+  assert.deepEqual(faltas({ ...base, destino: DESTINO_OBRA, pr: 5, metros: 310 }), []);
   assert.deepEqual(faltas({ ...base, destino: 'planta', pr: 5, metros: null }), [
     'pr: El PR y los metros solo se anotan cuando el destino es la obra.',
   ]);
@@ -6657,7 +6672,7 @@ prueba('cinco errores salen a la vez, cada uno en su sección y renglón (RF-64)
   const reporte = reporteCompleto();
   reporte.actividades[1] = { clave: null, itemEscrito: '9.9.9' };
   reporte.ensayos[0] = { ...reporte.ensayos[0], ensayo: null, escrito: 'densidad nuclear' };
-  reporte.viajes[0] = { ...reporte.viajes[0], metros: 170 };
+  reporte.viajes[0] = { ...reporte.viajes[0], metros: 1200 };
   reporte.viajes[1] = { ...reporte.viajes[1], hora: null };
   reporte.personal[0] = { ...reporte.personal[0], usuarioId: null, escrito: 'el mono' };
 
@@ -6670,7 +6685,7 @@ prueba('cinco errores salen a la vez, cada uno en su sección y renglón (RF-64)
   assert.ok(mensajes[0].includes('9.9.9'), 'el ítem que no está se nombra (RF-33)');
   assert.ok(mensajes[1].includes('el mono'), 'la persona no reconocida se nombra (RF-79)');
   assert.ok(mensajes[2].includes('densidad nuclear'), 'el ensayo que no está se nombra (RF-36)');
-  assert.equal(mensajes[3], 'Los metros van de 0 a 975, de 25 en 25.'); // RF-86
+  assert.equal(mensajes[3], 'Los metros van de 0 a 999.'); // RF-86, 026/RF-52
   assert.equal(mensajes[4], 'Falta la hora del viaje.'); // RF-83
 
   // Y una vez corregido, ya no le falta nada.
@@ -8622,12 +8637,288 @@ prueba('026/RF-18, RF-19: la lectura contra la registrada en Vehículos', () => 
   assert.equal(faltaContraElVehiculo('horometro', null, r, '2026-10-08'), null);
 });
 
+prueba('026/RF-43, RF-44: un día anterior a la lectura registrada no se compara', () => {
+  // El 8-oct reprocesado después del 9-oct: la LLQ379 dice 47283 y Vehículos, 47402 del 9-oct.
+  const del9 = { valor: 47402, fecha: '2026-10-09' };
+  assert.equal(faltaContraElVehiculo('odometro', 47283, del9, '2026-10-08'), null);
+  // Ni siquiera si es mayor (la TFO 429): no va a tocar Vehículos.
+  assert.equal(faltaContraElVehiculo('horometro', 16253, { valor: 15714.6, fecha: '2026-10-09' }, '2026-10-08'), null);
+  // El mismo día sí se compara.
+  assert.match(faltaContraElVehiculo('odometro', 47283, del9, '2026-10-09')!, /es menor que la registrada/);
+  // RF-44: dos días de reporte dan el doble de tope, aunque se procesen el mismo día.
+  assert.equal(faltaContraElVehiculo('horometro', 5845, { valor: 5800, fecha: '2026-10-07' }, '2026-10-09'), null);
+  assert.match(faltaContraElVehiculo('horometro', 5849, { valor: 5800, fecha: '2026-10-07' }, '2026-10-09')!, /Son más de 48 h/);
+});
+
+prueba('026/RF-46, RF-47: esperar el archivo de una imagen o un documento, hasta 30 min', () => {
+  const llego = Date.parse('2026-10-10T21:05:28Z');
+  const imagen = { tipo: 'imagen', tieneArchivo: false, recibidoEnMs: llego };
+  assert.equal(esperaArchivo(imagen, llego + 12_000), true);
+  assert.equal(esperaArchivo({ ...imagen, tieneArchivo: true }, llego + 12_000), false);
+  assert.equal(esperaArchivo({ ...imagen, tipo: 'documento' }, llego + 29 * 60_000), true);
+  assert.equal(esperaArchivo(imagen, llego + 30 * 60_000), false);
+  assert.equal(esperaArchivo({ ...imagen, tipo: 'video' }, llego + 1_000), false);
+  assert.equal(esperaArchivo({ ...imagen, tipo: 'texto' }, llego + 1_000), false);
+});
+
 prueba('026/RF-33: en el celular el menú queda oculto, sin riel', () => {
   for (const preferencia of [null, 'abierto', 'plegado'] as const) {
     assert.equal(regimenDelMenu({ ventana: 390, preferencia }), 'oculto', String(preferencia));
     assert.equal(regimenDelMenu({ ventana: 767, preferencia }), 'oculto');
     assert.equal(regimenDelMenu({ ventana: 768, preferencia }), 'riel');
   }
+});
+
+/* ── Cambio del 2026-10-13: lo que no se leyó el 8 y 9-oct ── */
+
+const KOMATSU_DEL_8_OCT = [
+  { equipo: 'Motoniveladora Komatsu alquilada GD555', marca: 'Komatsu', tipo_equipo: 'Motoniveladora', unidad_medidor: 'h', medidor_inicial: 5828.4, medidor_final: 5836.6 },
+  { equipo: 'Motoniveladora Komatsu GD 566', marca: 'Komatsu', tipo_equipo: 'Motoniveladora', unidad_medidor: 'h', medidor_inicial: 5733, medidor_final: 5733 },
+];
+
+prueba('026/RF-49: el modelo escrito en el renglón reconoce el equipo, pero no un año', () => {
+  const equipos = EQUIPOS_DE_MAGDALENA.map((e) => (e.id === 'motonv-01' ? { ...e, modelo: 'GD 566' } : e));
+  const r = reconocerMaquina('Motoniveladora Komatsu GD566', equipos, 'mag');
+  assert.deepEqual([r.id, r.como], ['motonv-01', 'modelo']);
+  // «1995» (el año de la MOTONV-01 de antes) no reconoce nada por estar escrito.
+  assert.equal(reconocerMaquina('Equipo 1995', EQUIPOS_DE_MAGDALENA, 'mag').id, null);
+  // Dos modelos dentro del renglón son ninguno.
+  const dos = [...equipos, { id: 'otra', codigoInterno: 'OTRA', placa: null, obraId: 'mag', tipoId: 'motoniveladora', marca: 'KOMATSU', modelo: 'GD5' + '66' }];
+  assert.equal(reconocerMaquina('Motoniveladora Komatsu GD 566', dos, 'mag').id, null);
+});
+
+prueba('026/RF-50: la GD 566 se reconoce por modelo y la alquilada queda para registrarse', () => {
+  const catalogos: CatalogosDeLaObra = {
+    ...CATALOGOS_DE_PRUEBA,
+    obraId: 'mag',
+    vehiculos: EQUIPOS_DE_MAGDALENA.map((e) => (e.id === 'motonv-01' ? { ...e, modelo: 'GD 566' } : e)),
+  };
+  const { reporte } = resolverPropuesta(
+    { fecha_evento: '2026-10-08', maquinaria: KOMATSU_DEL_8_OCT },
+    catalogos,
+    { diaDelMensaje: '2026-10-08', destino: 'reporte' },
+  );
+  assert.deepEqual(
+    reporte.maquinaria.map((m) => [m.vehiculoId, m.conflicto ?? false, m.tipoId ?? null]),
+    [
+      [null, false, 'motoniveladora'],
+      ['motonv-01', false, 'motoniveladora'],
+    ],
+  );
+  // La alquilada no tiene candidatos fuera de la ya tomada: se registra (RF-8).
+  const tomados = equiposTomados(reporte.maquinaria, catalogos);
+  assert.deepEqual([...tomados], ['motonv-01']);
+  assert.deepEqual(reconocerMaquina(reporte.maquinaria[0].escrito, catalogos.vehiculos, 'mag', {}, tomados).candidatos, []);
+  // Sin el modelo distintivo sigue el choque de RF-6.
+  const sinModelo = resolverPropuesta(
+    { fecha_evento: '2026-10-08', maquinaria: KOMATSU_DEL_8_OCT },
+    { ...catalogos, vehiculos: EQUIPOS_DE_MAGDALENA },
+    { diaDelMensaje: '2026-10-08', destino: 'reporte' },
+  );
+  assert.deepEqual(sinModelo.reporte.maquinaria.map((m) => m.conflicto ?? false), [true, true]);
+});
+
+prueba('026/RF-51: un punto de más en la lectura se sugiere, no se corrige', () => {
+  // TAY076: el 8-oct terminó «18740.7», el 9-oct inició «18740.7» (era 187407).
+  assert.equal(lecturaSugerida('odometro', 187202, 18740.7), 187407);
+  assert.equal(lecturaSugerida('odometro', 18740.7, 187489), 187407);
+  // TFO427: «16655.9» por 14655.9 es un dígito cambiado, no se adivina.
+  assert.equal(lecturaSugerida('horometro', 14647, 16655.9), null);
+  assert.equal(lecturaSugerida('odometro', 100, 90), null);
+  const catalogos: CatalogosDeLaObra = {
+    ...CATALOGOS_DE_PRUEBA,
+    obraId: 'mag',
+    vehiculos: [{ id: 'tay076', codigoInterno: 'VOL-MAG-04', placa: 'TAY076', obraId: 'mag', tipoId: 'volqueta', marca: 'KENTWORTH', modelo: '2015' }],
+  };
+  const { reporte } = resolverPropuesta(
+    { fecha_evento: '2026-10-08', maquinaria: [{ equipo: 'Volqueta Kentworth TAY 076', unidad_medidor: 'km', medidor_inicial: 187202, medidor_final: 18740.7 }] },
+    catalogos,
+    { diaDelMensaje: '2026-10-08', destino: 'reporte' },
+  );
+  const [falta] = faltasDelReporte(reporte, { ...CONTEXTO_DEL_REPORTE, hoy: '2026-10-09' });
+  assert.match(falta.mensaje, /no puede ser menor que la inicial .* ¿Quiso decir 187407\?$/);
+  assert.equal(reporte.maquinaria[0].medidorFinal, 18740.7, 'la lectura no se toca');
+});
+
+prueba('026/RF-53: «Humedad» está en la lista de ensayos', () => {
+  assert.equal(reconocerEnsayo('Humedad'), 'humedad');
+  assert.equal(reconocerEnsayo('Humedades'), 'humedad');
+  assert.equal(reconocerEnsayo('Humedad natural'), 'humedad');
+  assert.equal(reconocerEnsayo('Contenido de humedad'), 'humedad');
+  assert.equal(reconocerEnsayo('densidad'), 'densidad_en_campo');
+  assert.equal(nombreDeEnsayo('humedad'), 'Humedad');
+});
+
+prueba('los ids de ensayos y actividades salen del renglón del reporte, no de la lista filtrada', () => {
+  // El 9-oct: tres humedades apartadas y luego guardadas al reprocesar (2026-10-13).
+  const reporte = { actividades: [{}, {}], ensayos: [{}, {}, {}, {}, {}] } as unknown as ReporteDelDia;
+  const apartado = (seccion: string, renglon: number | null) => ({ seccion, renglon, motivo: 'x', datos: null });
+  assert.deepEqual(renglonesGuardados(reporte, [apartado('ensayos', 0), apartado('ensayos', 2)]), {
+    actividades: [0, 1],
+    ensayos: [1, 3, 4],
+  });
+  assert.deepEqual(renglonesGuardados(reporte, []).ensayos, [0, 1, 2, 3, 4]);
+  // La sección entera apartada no guarda nada.
+  assert.deepEqual(renglonesGuardados(reporte, [apartado('actividades', null)]).actividades, []);
+  // Lo de otras secciones no cuenta.
+  assert.deepEqual(renglonesGuardados(reporte, [apartado('maquinaria', 1)]).ensayos, [0, 1, 2, 3, 4]);
+});
+
+/* ── Todas las fotos del día en la bitácora (spec 027) ── */
+
+const fotoDePrueba = (cambios: Partial<FotoCandidata> = {}): FotoCandidata => ({
+  mediaId: 'm1',
+  mensajeId: 'msg1',
+  mime: 'image/jpeg',
+  categoria: 'reporte_diario',
+  fechaHecho: '2026-10-08',
+  sha256: 'aaa',
+  recibidaEnMs: Date.parse('2026-10-08T23:10:00Z'),
+  ...cambios,
+});
+const bitacoraAbierta = { fecha: '2026-10-08', cerradaEnMs: null };
+
+prueba('027: una foto de la obra entra a la bitácora abierta de su día (RF-1, RF-2)', () => {
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba(), bitacoraAbierta), 'agregar');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ categoria: 'incidente' }), bitacoraAbierta), 'agregar');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ categoria: 'seguimiento' }), bitacoraAbierta), 'agregar');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ mime: 'image/png' }), bitacoraAbierta), 'agregar');
+  // De otro día no es de esta bitácora.
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ fechaHecho: '2026-10-09' }), bitacoraAbierta), 'no');
+});
+
+prueba('027: vales, «Ignorar» y videos no entran a las fotos del día (RF-3 a RF-6)', () => {
+  for (const categoria of ['suministro_cantera', 'reporte_almacen', 'ignorar']) {
+    assert.equal(fotoEntraALaBitacora(fotoDePrueba({ categoria }), bitacoraAbierta), 'no', categoria);
+  }
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ mime: 'video/mp4' }), bitacoraAbierta), 'no');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ mime: 'application/pdf' }), bitacoraAbierta), 'no');
+});
+
+prueba('027: sin categoría o sin día todavía, la foto espera (RF-10)', () => {
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ categoria: null }), bitacoraAbierta), 'no');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ fechaHecho: null }), bitacoraAbierta), 'no');
+});
+
+prueba('027: a una bitácora cerrada no entra; la que llega después del cierre se aparta (RF-20, RF-21)', () => {
+  const cerrada = { fecha: '2026-10-08', cerradaEnMs: Date.parse('2026-10-10T15:00:00Z') };
+  const tarde = Date.parse('2026-10-10T16:00:00Z');
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba({ recibidaEnMs: tarde }), cerrada), 'apartar_cerrada');
+  // Llegó antes del cierre y no se agregó: ya no se agrega, ni se avisa.
+  assert.equal(fotoEntraALaBitacora(fotoDePrueba(), cerrada), 'no');
+  // Un vale que llega tarde no genera aviso: nunca iba a entrar.
+  assert.equal(
+    fotoEntraALaBitacora(fotoDePrueba({ categoria: 'suministro_cantera', recibidaEnMs: tarde }), cerrada),
+    'no',
+  );
+});
+
+prueba('027: las bitácoras anteriores al 7-oct-2026 no reciben fotos (RF-31)', () => {
+  assert.equal(
+    fotoEntraALaBitacora(fotoDePrueba({ fechaHecho: '2026-10-06' }), { fecha: '2026-10-06', cerradaEnMs: null }),
+    'no',
+  );
+  assert.equal(
+    fotoEntraALaBitacora(fotoDePrueba({ fechaHecho: '2026-10-07' }), { fecha: '2026-10-07', cerradaEnMs: null }),
+    'agregar',
+  );
+});
+
+prueba('027: la misma foto entra una sola vez y nunca la principal (RF-8, RF-12)', () => {
+  const temprana = fotoDePrueba({ mediaId: 'a', sha256: 'x', recibidaEnMs: 1 });
+  const repetida = fotoDePrueba({ mediaId: 'b', sha256: 'x', recibidaEnMs: 2 });
+  const otra = fotoDePrueba({ mediaId: 'c', sha256: 'y', recibidaEnMs: 3 });
+  const principal = fotoDePrueba({ mediaId: 'd', sha256: 'z', recibidaEnMs: 0 });
+  assert.deepEqual(
+    fotosParaAgregar([repetida, otra, temprana, principal], [], 'z').map((f) => f.mediaId),
+    ['a', 'c'],
+  );
+  // Sin huella se distinguen por su id.
+  const sinHuella = [fotoDePrueba({ mediaId: 'e', sha256: null }), fotoDePrueba({ mediaId: 'f', sha256: null })];
+  assert.deepEqual(
+    fotosParaAgregar(sinHuella, [], null).map((f) => f.mediaId),
+    ['e', 'f'],
+  );
+});
+
+prueba('027: lo que ya está en la bitácora, agregado o quitado, no se vuelve a agregar (RF-27)', () => {
+  const candidatas = [
+    fotoDePrueba({ mediaId: 'a', sha256: 'x' }),
+    fotoDePrueba({ mediaId: 'b', sha256: 'y' }),
+    fotoDePrueba({ mediaId: 'c', sha256: 'w' }),
+  ];
+  // `a` ya tiene su fila (agregada o quitada); `b` es el mismo archivo que otra que ya estaba.
+  const yaEstan = [
+    { mediaId: 'a', sha256: 'x' },
+    { mediaId: 'otra', sha256: 'y' },
+  ];
+  assert.deepEqual(
+    fotosParaAgregar(candidatas, yaEstan, null).map((f) => f.mediaId),
+    ['c'],
+  );
+});
+
+/* ── Una sola sección de fotos (spec 027, cambio del 2026-10-14) ── */
+
+const fotoDeSeccion = (cambios: Partial<FotoDeLaSeccion> & { mediaId: string }): FotoDeLaSeccion => ({
+  sha256: null,
+  horaMs: 0,
+  quitada: false,
+  ...cambios,
+});
+
+prueba('027/RF-35 a RF-37: una sola sección, por hora, sin principal ni repetidas', () => {
+  const lista = [
+    // WhatsApp a las 15:00 y a las 7:40; subida en el panel a las 10:00.
+    fotoDeSeccion({ mediaId: 'wa-tarde', sha256: 'a', horaMs: Date.parse('2026-10-08T20:00:00Z') }),
+    fotoDeSeccion({ mediaId: 'wa-temprano', sha256: 'b', horaMs: Date.parse('2026-10-08T12:40:00Z') }),
+    fotoDeSeccion({ mediaId: 'subida', sha256: null, horaMs: Date.parse('2026-10-08T15:00:00Z') }),
+  ];
+  // La principal vieja es copia de «wa-temprano» (misma huella) y otra que solo existe como principal.
+  const principales = [
+    fotoDeSeccion({ mediaId: 'copia', sha256: 'b', horaMs: Date.parse('2026-10-08T12:41:00Z') }),
+    fotoDeSeccion({ mediaId: 'sola', sha256: 'c', horaMs: Date.parse('2026-10-08T13:00:00Z') }),
+  ];
+  const { fotos } = unificarFotosDelDia(lista, principales);
+  assert.deepEqual(
+    fotos.map((f) => f.mediaId),
+    ['wa-temprano', 'sola', 'subida', 'wa-tarde'],
+  );
+});
+
+prueba('027/RF-39: las quitadas van aparte, y su copia principal tampoco vuelve', () => {
+  const lista = [
+    fotoDeSeccion({ mediaId: 'quitada', sha256: 'x', horaMs: 1, quitada: true }),
+    fotoDeSeccion({ mediaId: 'queda', sha256: 'y', horaMs: 2 }),
+  ];
+  const principales = [fotoDeSeccion({ mediaId: 'copia-de-la-quitada', sha256: 'x', horaMs: 3 })];
+  const { fotos, quitadas } = unificarFotosDelDia(lista, principales);
+  assert.deepEqual(
+    fotos.map((f) => f.mediaId),
+    ['queda'],
+  );
+  assert.deepEqual(
+    quitadas.map((f) => f.mediaId),
+    ['quitada'],
+  );
+  // La principal que es la misma fila de media que una de la lista no se cuenta dos veces.
+  assert.equal(unificarFotosDelDia([fotoDeSeccion({ mediaId: 'm' })], [fotoDeSeccion({ mediaId: 'm' })]).fotos.length, 1);
+});
+
+prueba('027/RF-41: con una foto de WhatsApp y sin principal, el cierre no pide fotografía', () => {
+  const soloWhatsapp = unificarFotosDelDia([fotoDeSeccion({ mediaId: 'wa', sha256: 'a', horaMs: 1 })], []);
+  assert.deepEqual(
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: soloWhatsapp.fotos.length, itemsConFoto: ['act-2'] }),
+    [],
+  );
+  // Todas quitadas: vuelve a faltar.
+  const todasQuitadas = unificarFotosDelDia([fotoDeSeccion({ mediaId: 'wa', quitada: true })], []);
+  assert.equal(todasQuitadas.fotos.length, 0);
+  assert.ok(
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: todasQuitadas.fotos.length, itemsConFoto: ['act-2'] }).some((b) =>
+      b.includes('Fotografía del día'),
+    ),
+  );
 });
 
 verificarFirmaS3()
