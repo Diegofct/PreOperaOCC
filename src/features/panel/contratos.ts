@@ -16,7 +16,11 @@
  */
 import { z } from 'zod';
 
-import type { Periodo } from '@/shared/rules/jornada';
+import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
+import type { EnsayoDeObra } from '@/shared/rules/ensayos-de-obra';
+import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '@/shared/rules/mantenimiento';
+import type { LecturaAnterior, Periodo } from '@/shared/rules/jornada';
+import type { TipoDePeriodo } from '@/shared/rules/periodos';
 import { IDS_UNIDAD, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { IDS_CARGO, type Cargo } from '@/shared/catalogos/cargos';
 import type { FranjaGranulometrica } from '@/shared/catalogos/franjas-granulometricas';
@@ -1068,6 +1072,11 @@ export interface ParteFila {
    * `horarioEfectivo`: el guardado, el de siempre o el vigente de la obra (spec 016).
    */
   horario: HorarioDeObra;
+  /**
+   * La lectura con la que empieza el día cada máquina, por id de vehículo (spec 029,
+   * RF-1 a RF-3, RF-9). Vacío en un parte cerrado o anulado.
+   */
+  lecturasAnteriores: Record<string, LecturaAnterior>;
 }
 
 /** Lo que devuelve la consulta de un día: el parte y con qué llenarlo. */
@@ -1688,6 +1697,14 @@ export interface ConsultaDeEnsayos {
   pendientes: number;
 }
 
+/** Un ensayo de las bitácoras visto desde Laboratorio (spec 029, RF-26), con su obra. */
+export type EnsayoDeObraFila = EnsayoDeObra & { obraCodigo: string };
+
+/** Lo que responde `GET /api/panel/laboratorio/ensayos-de-obra` (spec 029). */
+export interface ConsultaDeEnsayosDeObra {
+  ensayos: EnsayoDeObraFila[];
+}
+
 /**
  * La parte de Control Calidad de Obra que viene del módulo (RF-106 a RF-112):
  * vigentes mientras el parte está abierto; fijados desde que se cierra;
@@ -1764,6 +1781,21 @@ export const propuestaDeIa = z.looseObject({
       unidad_medidor: textoDeIa,
       tipo_equipo: textoDeIa,
       marca: textoDeIa,
+    }),
+  ),
+  /**
+   * Spec 030, RF-36 a RF-41: los mantenimientos que dice el mensaje. `clase` llega como
+   * texto y se entiende al leerla: la IA puede escribir «cambio de aceite».
+   */
+  mantenimientos: listaDeIa(
+    z.looseObject({
+      equipo: textoDeIa,
+      tipo_equipo: textoDeIa,
+      marca: textoDeIa,
+      clase: textoDeIa,
+      resuelto: z.boolean().nullish(),
+      lectura: numeroDeIa,
+      descripcion: textoDeIa,
     }),
   ),
   personal: listaDeIa(
@@ -2023,6 +2055,21 @@ export const reporteCorregido = z.object({
     )
     .max(60)
     .default([]),
+  // Spec 030, RF-36 a RF-41: opcional, lo de antes no lo trae.
+  mantenimientos: z
+    .array(
+      z.object({
+        vehiculoId: idDeElegido,
+        escrito: z.string().max(200),
+        clase: z.enum(CLASES_DE_MANTENIMIENTO).nullable(),
+        resuelto: z.boolean(),
+        lectura: numeroDeCorreccion,
+        descripcion: z.string().max(1000),
+        conflicto: z.boolean().optional(),
+      }),
+    )
+    .max(40)
+    .optional(),
 }) satisfies z.ZodType<ReporteDelDia>;
 
 /** La versión que leyó quien corrige o decide (RF-29). */
@@ -2326,3 +2373,83 @@ export const grupoAsociado = z.object({
   // Con su mensaje también cuando no viene: sin él, Zod responde en inglés.
   obraId: z.string({ error: 'Elija la obra.' }).trim().min(1, 'Elija la obra.').max(64),
 });
+
+/* ------------------------------------------------------------------------ */
+/* Mantenimiento de las máquinas (spec 030)                                  */
+/* ------------------------------------------------------------------------ */
+
+const notaDeMantenimiento = z.string().trim().max(500, 'La nota no puede pasar de 500 caracteres.');
+
+/** Lo que pide «Registrar mantenimiento» (RF-32). La lectura nula toma la registrada. */
+export const mantenimientoNuevo = z.object({
+  vehiculoId: z.string().trim().min(1, 'Elija la máquina.').max(64),
+  clase: z.enum(CLASES_DE_MANTENIMIENTO, { error: 'Elija la clase de mantenimiento.' }),
+  fecha: fechaDeJornadaZod,
+  lectura: z.number().finite().min(0, 'La lectura no puede ser negativa.').nullable().default(null),
+  nota: notaDeMantenimiento.default(''),
+});
+
+export type MantenimientoNuevo = z.input<typeof mantenimientoNuevo>;
+
+/** Anular exige motivo (RF-35). */
+export const anulacionDeMantenimiento = z.object({
+  motivo: z.string().trim().min(1, 'Escriba por qué lo anula.').max(500),
+});
+
+/** Marcar resuelto un correctivo (RF-29). */
+export const resolucionDeCorrectivo = z.object({
+  fecha: fechaDeJornadaZod,
+  nota: notaDeMantenimiento.default(''),
+});
+
+/**
+ * Un intervalo de un tipo de equipo o de una máquina (RF-24, RF-25). `cada` nulo lo
+ * quita: el tipo vuelve al de arranque y la máquina al de su tipo.
+ */
+export const intervaloEditado = z
+  .object({
+    tipoVehiculoId: z.string().trim().min(1).max(64).optional(),
+    vehiculoId: z.string().trim().min(1).max(64).optional(),
+    clase: z.enum(CLASES_CON_INTERVALO, { error: 'Elija aceite o preventivo.' }),
+    cada: z.number().finite().positive('El intervalo tiene que ser mayor que cero.').nullable(),
+    avisoPorcentaje: z.number().int().min(50, 'El aviso va de 50 a 99 %.').max(99, 'El aviso va de 50 a 99 %.').default(90),
+  })
+  .refine((v) => Boolean(v.tipoVehiculoId) !== Boolean(v.vehiculoId), {
+    message: 'Diga si es el intervalo de un tipo de equipo o de una máquina.',
+  });
+
+export type IntervaloEditado = z.input<typeof intervaloEditado>;
+
+/** El intervalo que vale para cada clase de un tipo de equipo, y de dónde sale (RF-23, RF-24). */
+export interface IntervalosDeTipoFila {
+  tipoVehiculoId: string;
+  nombre: string;
+  claseMedidor: 'horometro' | 'odometro';
+  clases: Record<'aceite' | 'preventivo', { cada: number; avisoPorcentaje: number; origen: 'vehiculo' | 'tipo' | 'arranque' }>;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Reportes (spec 030)                                                       */
+/* ------------------------------------------------------------------------ */
+
+/** Lo que pasa al cruzar el JSON: las fechas llegan como texto. */
+type EnJson<T> = T extends Date
+  ? string
+  : T extends readonly (infer U)[]
+    ? EnJson<U>[]
+    : T extends object
+      ? { [K in keyof T]: EnJson<T[K]> }
+      : T;
+
+export type { PestanaDeReporte };
+
+/** Lo que responde `GET /api/panel/reportes/:pestana`, tal como llega al panel. */
+export type ReporteFila<P extends PestanaDeReporte> = EnJson<ReporteDe<P>>;
+
+/** Qué reporte se pide: la obra (solo cuenta para la gerencia), el periodo y su fecha. */
+export interface ConsultaDeReporte {
+  obraId: string | null;
+  tipo: TipoDePeriodo;
+  fecha: string;
+}
+

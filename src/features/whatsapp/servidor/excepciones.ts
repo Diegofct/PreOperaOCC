@@ -13,7 +13,9 @@
  *  · un renglón de la bitácora (personal, máquina, actividad, ensayo, clima), a la
  *    bitácora de su día, con ids propios de la excepción para no chocar con los que el
  *    mensaje ya llevó;
- *  · un movimiento de almacén, al almacén, igual.
+ *  · un movimiento de almacén, al almacén, igual;
+ *  · un mantenimiento (spec 030, RF-40), al registro de mantenimientos, con el id de
+ *    máquina, clase y día: si el mismo ya estaba, no se repite.
  *
  * Lo que no es un renglón —la fecha, la bitácora cerrada, un mensaje abandonado, una
  * sección entera— no se completa: «guardar» es reintentar. El mensaje vuelve a
@@ -23,6 +25,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, whatsappExcepciones, whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
+import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
 import { eleccionesAjenas, opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
 import { reporteCorregido, type ExcepcionFila } from '@/features/panel/contratos';
 import { filtroDeObraEstricto, veTodasLasObras } from '@/features/servidor/alcance';
@@ -30,11 +33,12 @@ import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { faltasDelReporte, type ReporteDelDia } from '@/shared/rules/whatsapp';
-import type { EstadoDeExcepcion } from '@/shared/rules/whatsapp-automatico';
+import { completarIniciales, type EstadoDeExcepcion } from '@/shared/rules/whatsapp-automatico';
 
 import { escribirReporteDeAlmacen, faltasDelAlmacen } from './almacen';
 import { guardarEnBitacora, guardarViajes } from './aprobacion';
 import { catalogosDeLaObra } from './catalogos';
+import { guardarMantenimientos } from './mantenimientos';
 import { diaDelMensaje, obraDelMensaje } from './obra';
 
 /** Las secciones de la bitácora que un renglón completado puede llevar. */
@@ -242,8 +246,22 @@ export async function guardarExcepcion(
     return { guardado: 'almacen' };
   }
 
+  if (seccion === 'mantenimientos') {
+    const faltas = faltasDelReporte(reporte, { hoy: fechaDeJornada(), claseDeMedidor: () => 'horometro' }).filter(
+      (f) => f.seccion === 'mantenimientos' || f.seccion === 'fecha',
+    );
+    if (faltas.length > 0) return respuestaDeFaltas(faltas);
+    // Escribir primero y marcar después: el id de máquina, clase y día no duplica.
+    await guardarMantenimientos({ mensajeId, obraId, reporte, actor: sesion });
+    if (!(await resolver(sesion, id, 'guardada'))) return yaResuelta();
+    return { guardado: 'mantenimiento' };
+  }
+
   if ((SECCIONES_DE_BITACORA as readonly string[]).includes(seccion)) {
     const catalogos = await catalogosDeLaObra(obraId, [fecha]);
+    // Una máquina completada solo con la final empieza donde terminó el día anterior
+    // (spec 029, RF-7), como al guardarse sola.
+    if (seccion === 'maquinaria') reporte = completarIniciales(reporte, await lecturasAnteriores(obraId, fecha));
     const faltas = faltasDelReporte(reporte, {
       hoy: fechaDeJornada(),
       claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',

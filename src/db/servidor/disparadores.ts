@@ -34,6 +34,9 @@ const TABLAS_CON_RELOJ = [
   'partes_de_obra',
   'whatsapp_grupos',
   'whatsapp_mensajes',
+  // Spec 030: quién cambió el intervalo y cuándo.
+  'mantenimiento_intervalos',
+  'mantenimiento_intervalos_vehiculo',
 ];
 
 const FUNCION = `

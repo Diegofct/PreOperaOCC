@@ -39,6 +39,13 @@ import type {
   ClaveTemporalFila,
   CodigosFila,
   ConsultaDeEnsayos,
+  ConsultaDeEnsayosDeObra,
+  ConsultaDeReporte,
+  IntervaloEditado,
+  IntervalosDeTipoFila,
+  MantenimientoNuevo,
+  PestanaDeReporte,
+  ReporteFila,
   ConsultaDeMovimientos,
   ConsultaDeViajes,
   CredencialesIngreso,
@@ -408,6 +415,24 @@ export const api = {
    * `obraId` solo lo tiene en cuenta el servidor para la gerencia. Cada paso del
    * flujo es su propia ruta y responde el ensayo entero, ya recalculado.
    */
+  /** El módulo de Reportes (spec 030). */
+  reportes: {
+    de: <P extends PestanaDeReporte>(pestana: P, consulta: ConsultaDeReporte) =>
+      panel<ReporteFila<P>>(`/reportes/${pestana}?${parametrosDeReporte(consulta)}`),
+    registrarMantenimiento: (datos: MantenimientoNuevo) =>
+      panelEnviar<{ id: string; avisoLectura: string | null }>('/reportes/mantenimientos', 'POST', datos),
+    anularMantenimiento: (id: string, motivo: string) =>
+      panelEnviar<{ anulado: true }>(`/reportes/mantenimientos/${id}/anular`, 'POST', { motivo }),
+    resolverCorrectivo: (id: string, datos: { fecha: string; nota: string }) =>
+      panelEnviar<{ resuelto: true }>(`/reportes/mantenimientos/${id}/resolver`, 'POST', datos),
+    intervalos: () => panel<{ tipos: IntervalosDeTipoFila[] }>('/reportes/intervalos'),
+    guardarIntervalo: (datos: IntervaloEditado) =>
+      panelEnviar<{ guardado: true }>('/reportes/intervalos', 'PUT', datos),
+    /** La dirección de la descarga en Excel: se abre, no se pide por `fetch` (RF-9). */
+    direccionDelExcel: (pestana: PestanaDeReporte, consulta: ConsultaDeReporte) =>
+      `/api/panel/reportes/exportar?pestana=${pestana}&${parametrosDeReporte(consulta)}`,
+  },
+
   laboratorio: {
     listar: ({ obraId, desde, hasta }: { obraId?: string | null; desde: string; hasta: string }) => {
       const parametros = new URLSearchParams({ desde, hasta });
@@ -431,6 +456,12 @@ export const api = {
       panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/anular`, 'POST', { motivo }),
     descartar: (id: string) =>
       panelEnviar<EnsayoDetalle>(`/laboratorio/granulometrias/${id}/descartar`, 'POST'),
+    /** Los ensayos de «Control Calidad de Obra» de las bitácoras (spec 029). */
+    ensayosDeObra: ({ obraId, desde, hasta }: { obraId?: string | null; desde: string; hasta: string }) => {
+      const parametros = new URLSearchParams({ desde, hasta });
+      if (obraId) parametros.set('obraId', obraId);
+      return panel<ConsultaDeEnsayosDeObra>(`/laboratorio/ensayos-de-obra?${parametros.toString()}`);
+    },
   },
 
   /**
@@ -606,3 +637,10 @@ export const api = {
       panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'cerrar' }),
   },
 };
+
+function parametrosDeReporte({ obraId, tipo, fecha }: ConsultaDeReporte): string {
+  const parametros = new URLSearchParams({ tipo, fecha });
+  if (obraId) parametros.set('obraId', obraId);
+  return parametros.toString();
+}
+

@@ -627,7 +627,8 @@ function faltaLlenar(titulos: readonly string[]): string {
  * falta **las siete secciones** (RF-50), y además:
  *
  *  · cada máquina con sus dos lecturas —cada una contra el tope de su propio
- *    medidor, que vive en `validarAvance`— y con sus observaciones (RF-51);
+ *    medidor, que vive en `validarAvance`—. Las observaciones también se pedían
+ *    (RF-51) hasta la spec 029 (RF-15), que las volvió opcionales;
  *  · cada persona con su hora de entrada y de salida;
  *  · **al menos una** actividad con fotografía, no todas (RF-52, corregido el
  *    2026-09-15).
@@ -682,9 +683,8 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
         `${maquina.codigo}: ${mensajeDeAvance(maquina.claseMedidor, error, maquina.medidorInicial)}`,
       );
     }
-    if (!hayTexto(maquina.observaciones)) {
-      bloqueos.push(`${maquina.codigo}: faltan las observaciones del día.`);
-    }
+    // Las observaciones ya no se exigen (spec 029, RF-15): «Sin observación» es una
+    // respuesta, y la casilla del panel la deja dicha.
   }
 
   // La misma regla que al guardar (025/RF-61): lo que se dejó guardar se deja cerrar.

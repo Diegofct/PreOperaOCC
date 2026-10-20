@@ -51,6 +51,7 @@ import {
   type LecturaRegistrada,
 } from './jornada';
 import { faltasDeActividad, faltasDelEnsayo, type UbicacionPorValidar } from './parte';
+import { esClaseDeMantenimiento, type ClaseDeMantenimiento } from './mantenimiento';
 import { normalizar } from './texto';
 
 /* ── La abscisa ────────────────────────────────────────────────────────── */
@@ -675,6 +676,27 @@ export interface ReporteDelDia {
    * en cualquier otra categoría. Su fecha es la del reporte (RF-21).
    */
   almacen: MovimientoDelReporte[];
+  /**
+   * Los mantenimientos que dice el mensaje (spec 030, RF-36 a RF-41). Opcional: los
+   * reportes leídos antes de la spec no lo traen, y se leen igual.
+   */
+  mantenimientos?: MantenimientoDelReporte[];
+}
+
+/** Un mantenimiento que dice un mensaje del grupo (spec 030, RF-36 a RF-41). */
+export interface MantenimientoDelReporte {
+  /** La máquina, o `null` si no se reconoció (RF-39, RF-40). */
+  vehiculoId: string | null;
+  escrito: string;
+  /** Aceite, preventivo o correctivo; `null` si no se entendió (RF-40). */
+  clase: ClaseDeMantenimiento | null;
+  /** «Ya quedó reparada»: cierra el correctivo pendiente de la máquina (RF-41). */
+  resuelto: boolean;
+  /** La lectura que diga el mensaje; sin ella, la registrada hasta ese día (RF-38). */
+  lectura: number | null;
+  descripcion: string;
+  /** Dos máquinas de la obra pueden ser la nombrada (como en la maquinaria, 026/RF-6). */
+  conflicto?: boolean;
 }
 
 /** Un ingreso o una salida de un reporte de almacén, como lo revisa el residente. */
@@ -853,7 +875,8 @@ export type SeccionDelReporte =
   | 'personal'
   | 'ensayos'
   | 'viajes'
-  | 'almacen';
+  | 'almacen'
+  | 'mantenimientos';
 
 /**
  * Una falta, con dónde se pinta: la sección y el renglón (desde 0; `null` cuando
@@ -971,6 +994,23 @@ export function faltasDelReporte(
         i,
         `No se reconoció al operador «${maquina.operadorEscrito.trim()}»: elíjalo de la lista, regístrelo o déjelo vacío.`,
       );
+    }
+  });
+
+  // Mantenimientos (spec 030, RF-40): la máquina y qué se le hizo. Uno que solo dice
+  // que quedó reparada no necesita clase: cierra el correctivo pendiente (RF-41).
+  (reporte.mantenimientos ?? []).forEach((m, i) => {
+    if (!m.vehiculoId) {
+      falta(
+        'mantenimientos',
+        i,
+        m.conflicto
+          ? `«${m.escrito}» puede ser más de una máquina de la obra: elija cuál es.`
+          : `No se reconoció la máquina «${m.escrito}»: elíjala de la lista.`,
+      );
+    }
+    if (!m.clase && !m.resuelto) {
+      falta('mantenimientos', i, 'No se entendió qué mantenimiento fue: elija cambio de aceite, preventivo o correctivo.');
     }
   });
 
@@ -1181,6 +1221,16 @@ export interface PropuestaLeible {
     unidad_medidor?: string | null;
     tipo_equipo?: string | null;
     marca?: string | null;
+  }[];
+  /** Spec 030, RF-36 a RF-41. */
+  mantenimientos?: readonly {
+    equipo?: string | null;
+    tipo_equipo?: string | null;
+    marca?: string | null;
+    clase?: string | null;
+    resuelto?: boolean | null;
+    lectura?: number | null;
+    descripcion?: string | null;
   }[];
   personal?: readonly {
     nombre?: string | null;
@@ -1717,6 +1767,24 @@ export function resolverPropuesta(
         ? textoLimpio(propuesta.resumen)
         : '';
 
+  // Los mantenimientos (spec 030, RF-36 a RF-41): la máquina como en la maquinaria
+  // (RF-39). Solo se agregan si el mensaje dice alguno: lo de antes se lee igual.
+  const mantenimientos: MantenimientoDelReporte[] = (propuesta.mantenimientos ?? []).map((m) => {
+    const reconocida = reconocerMaquina(m.equipo, catalogos.vehiculos, catalogos.obraId, {
+      tipo: m.tipo_equipo,
+      marca: textoLimpio(m.marca) || null,
+    });
+    return {
+      vehiculoId: reconocida.id,
+      escrito: textoLimpio(m.equipo),
+      clase: claseDeMantenimiento(m.clase),
+      resuelto: m.resuelto === true,
+      lectura: numeroONulo(m.lectura),
+      descripcion: textoLimpio(m.descripcion),
+      ...(reconocida.candidatos.length > 1 ? { conflicto: true } : {}),
+    };
+  });
+
   return {
     reporte: {
       fecha,
@@ -1728,9 +1796,25 @@ export function resolverPropuesta(
       viajes,
       notas,
       almacen,
+      ...(mantenimientos.length > 0 ? { mantenimientos } : {}),
     },
     fechaSupuesta: !fechaValida,
   };
+}
+
+/**
+ * La clase de mantenimiento que dijo la IA (spec 030, RF-36). Se aceptan sus nombres
+ * exactos y los de la obra: «cambio de aceite», «preventivo», «reparación»… Lo que no
+ * se entiende es `null`, y el renglón va a «No se pudo guardar» (RF-40).
+ */
+export function claseDeMantenimiento(texto: string | null | undefined): ClaseDeMantenimiento | null {
+  const limpio = normalizar(texto ?? '');
+  if (!limpio) return null;
+  if (esClaseDeMantenimiento(limpio)) return limpio;
+  if (/aceite/.test(limpio)) return 'aceite';
+  if (/preventiv/.test(limpio)) return 'preventivo';
+  if (/correctiv|repar|dano|falla|revent|averi/.test(limpio)) return 'correctivo';
+  return null;
 }
 
 /* ── Los archivos de un mensaje ────────────────────────────────────────── */

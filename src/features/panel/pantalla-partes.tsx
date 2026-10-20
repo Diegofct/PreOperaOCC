@@ -62,6 +62,7 @@ import {
 } from "@/shared/rules/horas";
 import {
   avanceDeMedidor,
+  avisoDeLecturaInicial,
   ETIQUETA_MEDIDOR,
   fechaDeJornada,
   horasDeMaquina,
@@ -106,6 +107,7 @@ import {
   Aviso,
   Boton,
   Campo,
+  CampoObservacion,
   Casilla,
   Celda,
   Etiqueta,
@@ -1095,6 +1097,11 @@ function SeccionMaquinaria({
             const final = aNumero(fila.final);
             const error = validarAvance(clase, inicial, final);
             const avance = avanceDeMedidor(inicial, final);
+            // De dónde salió la inicial, o que no coincide con la del día anterior
+            // (spec 029, RF-5, RF-9). Solo mientras se puede editar: cerrada, ya no importa.
+            const lectura = editable
+              ? avisoDeLecturaInicial(inicial, parte.lecturasAnteriores[fila.vehiculoId] ?? null)
+              : {};
 
             return (
               <FilaDeFormulario
@@ -1134,6 +1141,7 @@ function SeccionMaquinaria({
                   onChange={(v) => cambiar(indice, "inicial", v)}
                   soloNumeros
                   ancho={170}
+                  ayuda={lectura.ayuda}
                 />
                 <Campo
                   etiqueta={`${rotulo} final (${unidad})`}
@@ -1156,19 +1164,22 @@ function SeccionMaquinaria({
                         : `${avance} horas de máquina`
                   }
                 />
-                {/* Va en su propio renglón de la fila, debajo de las lecturas, y
-                    se sigue viendo cuando la bitácora ya está cerrada (RF-46). */}
-                <Campo
+                {/* Detrás de la casilla y alineada con las lecturas (spec 029, RF-10 a
+                    RF-14). Ya no hace falta para cerrar (RF-15). Se sigue viendo con la
+                    bitácora cerrada, con «Sin observación» si no hay (RF-18). */}
+                <CampoObservacion
                   etiqueta="Observaciones del día"
                   valor={fila.observaciones}
                   onChange={(v) => cambiar(indice, "observaciones", v)}
-                  multilinea
-                  ayuda={
-                    editable
-                      ? "Qué pasó con la máquina: fallas, tiempos muertos, traslados. Hace falta para cerrar el parte."
-                      : undefined
-                  }
+                  editable={editable}
+                  ayuda="Qué pasó con la máquina: fallas, tiempos muertos, traslados."
                 />
+                {/* Avisa y no impide: la escrita manda (spec 029, RF-5). */}
+                {lectura.aviso ? (
+                  <View style={estilos.avisoEnRenglon}>
+                    <Aviso tono="info">{lectura.aviso}</Aviso>
+                  </View>
+                ) : null}
                 {editable ? (
                   <AccionesFormulario>
                     <Boton
@@ -1196,13 +1207,22 @@ function SeccionMaquinaria({
               etiqueta: v.codigoInterno,
               detalle: v.tipoNombre,
             }))}
-            onChange={(v) =>
-              v &&
+            onChange={(v) => {
+              if (!v) return;
+              // Empieza donde terminó el día anterior (spec 029, RF-1 a RF-3): la
+              // ayuda del campo dice de dónde salió, y se puede cambiar (RF-4).
+              const anterior = parte.lecturasAnteriores[v];
               setFilas([
                 ...filas,
-                { vehiculoId: v, inicial: "", final: "", observaciones: "", operadorId: null },
-              ])
-            }
+                {
+                  vehiculoId: v,
+                  inicial: anterior ? String(anterior.valor) : "",
+                  final: "",
+                  observaciones: "",
+                  operadorId: null,
+                },
+              ]);
+            }}
             vacio="Elija un equipo"
             ancho={260}
           />
@@ -1335,16 +1355,18 @@ function SeccionPersonal({
                   soloLectura
                   ancho={240}
                 />
-                <SelectorDeHora
-                  etiqueta="Entrada"
-                  valor={fila.entrada}
-                  onChange={(v) => cambiar(indice, "entrada", v)}
-                />
-                <SelectorDeHora
-                  etiqueta="Salida"
-                  valor={fila.salida}
-                  onChange={(v) => cambiar(indice, "salida", v)}
-                />
+                {/* La obra reporta horas, no la hora de entrada y de salida: ya no se
+                    piden (spec 029, RF-19, RF-20). Una fila de antes que las trae las
+                    conserva y las muestra tal cual, con su cálculo debajo (RF-22). */}
+                {fila.entrada || fila.salida ? (
+                  <Campo
+                    etiqueta="Entrada y salida (registro anterior)"
+                    valor={`${fila.entrada || "—"} a ${fila.salida || "—"}`}
+                    onChange={() => {}}
+                    soloLectura
+                    ancho={200}
+                  />
+                ) : null}
                 {verHoras ? (
                   <>
                     <Campo
@@ -1442,19 +1464,15 @@ function SeccionPersonal({
                     </Aviso>
                   </View>
                 ) : null}
-                {/* A diferencia de la de la máquina, no hace falta para cerrar
-                    (RF-27): casi siempre no hay nada que explicar. Se sigue
-                    viendo con la bitácora cerrada o anulada (RF-28). */}
-                <Campo
+                {/* No hace falta para cerrar (RF-27): casi siempre no hay nada que
+                    explicar. Detrás de la casilla (spec 029, RF-10 a RF-14), y se sigue
+                    viendo con la bitácora cerrada o anulada (RF-28, 029/RF-18). */}
+                <CampoObservacion
                   etiqueta="Observaciones"
                   valor={fila.observaciones}
                   onChange={(v) => cambiar(indice, "observaciones", v)}
-                  multilinea
-                  ayuda={
-                    editable
-                      ? "Opcional. Lo que explica sus horas: llegó tarde, salió a una cita, hizo turno de noche."
-                      : undefined
-                  }
+                  editable={editable}
+                  ayuda="Lo que explica sus horas: llegó tarde, salió a una cita, hizo turno de noche."
                 />
                 {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
                 {horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA ? (
@@ -1722,12 +1740,11 @@ function SeccionActividades({
                   <Campo etiqueta="Alto" valor={numero(h.alto)} onChange={sinEscribir} soloLectura ancho={110} />
                   <Campo etiqueta="Área" valor={numero(h.area)} onChange={sinEscribir} soloLectura ancho={110} />
                   <Campo etiqueta="Volumen" valor={numero(h.volumen)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <Campo
+                  <CampoObservacion
                     etiqueta="Observaciones"
                     valor={h.observaciones}
                     onChange={sinEscribir}
-                    soloLectura
-                    multilinea
+                    editable={false}
                   />
                   {fotoDeLaFila}
                   {quitar}
@@ -1844,11 +1861,12 @@ function SeccionActividades({
                   ayuda={ayudaDeCantidad(cantidad)}
                   ancho={150}
                 />
-                <Campo
+                {/* Detrás de la casilla (spec 029, RF-10 a RF-14, RF-18). */}
+                <CampoObservacion
                   etiqueta="Observaciones"
                   valor={fila.observaciones}
                   onChange={(v) => cambiar(indice, "observaciones", v)}
-                  multilinea
+                  editable={editable}
                 />
                 {fotoDeLaFila}
                 {quitar}
@@ -2353,6 +2371,8 @@ function SeccionLaboratorio({
             }
 
             const faltas = intentoGuardar ? faltasDe(fila) : {};
+            // Sin resultado ni «cumple», la observación es obligatoria (025/RF-38, 029/RF-16).
+            const sinResultado = aNumero(fila.resultado.replace(",", ".")) === null && !fila.cumple;
             return (
               <FilaDeFormulario key={fila.id} ultima={ultima}>
                 <MarcaWhatsapp origen={origenDe(parte.laboratorio.find((e) => e.id === fila.id))} />
@@ -2503,19 +2523,20 @@ function SeccionLaboratorio({
                     />
                   </>
                 )}
-                {/* Si no hay resultado ni «cumple», obligatoria: «Sin observaciones» si no
-                    hay nada que anotar (RF-72; 025/RF-38, RF-39). */}
-                <Campo
-                  etiqueta="Observación"
+                {/* Si no hay resultado ni «cumple», obligatoria: la casilla queda marcada y
+                    fija (RF-72; 025/RF-38, RF-39; 029/RF-16). Con uno de los dos, opcional y
+                    detrás de la casilla como en las demás secciones (029/RF-10). */}
+                <CampoObservacion
                   valor={fila.observacion}
                   onChange={(v) => cambiar(indice, "observacion", v)}
+                  editable={editable}
+                  obligatoria={sinResultado}
                   ayuda={
-                    faltas.observacion
-                      ? undefined
-                      : "Opcional si hay resultado o se dice si cumple. Si no, escriba «Sin observaciones»."
+                    sinResultado && !faltas.observacion
+                      ? "Sin resultado ni «cumple», la observación es obligatoria. Si no hay nada que anotar, escriba «Sin observaciones»."
+                      : undefined
                   }
                   error={faltas.observacion}
-                  multilinea
                 />
                 {quitar}
               </FilaDeFormulario>

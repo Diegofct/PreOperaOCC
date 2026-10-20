@@ -317,7 +317,9 @@ export function validarPersonaDelParte(persona: PersonaConHoras): ErrorPersona |
 export function mensajeDePersona(error: ErrorPersona): string {
   switch (error) {
     case 'sin_horas':
-      return 'Escriba sus horas laboradas, su hora de entrada y salida, o su novedad.';
+      // La entrada y la salida ya no se piden (spec 029, RF-20, RF-21): las filas
+      // viejas que las traen no llegan aquí.
+      return 'Escriba sus horas laboradas (L) o su novedad.';
     case 'extra_sin_laboradas':
       return 'Escriba primero las horas laboradas.';
     case 'mas_de_16':

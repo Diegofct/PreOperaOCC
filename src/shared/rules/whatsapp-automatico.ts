@@ -10,7 +10,7 @@
 import { DESTINO_OBRA, mismoVale, valeLimpio } from './cantera';
 import { diaDeLaSemana, esDominicalOFestivo } from './festivos';
 import type { HorarioDeObra } from './horas';
-import { DESFASE_COLOMBIA_MS } from './jornada';
+import { DESFASE_COLOMBIA_MS, type LecturaAnterior } from './jornada';
 import type { Cargo } from '../catalogos/cargos';
 import { normalizar } from './texto';
 import {
@@ -367,6 +367,35 @@ export function diaVencido(fecha: string, ahoraMs: number): boolean {
   return ahoraMs >= limite;
 }
 
+/**
+ * ¿Es un día que todavía no llega? (spec 029, RF-33). Un mensaje que habla de un
+ * plan («el sábado mandamos el vibro») trae un día del hecho futuro: ese día no se
+ * crea ni se arma. `hoy` es `fechaDeJornada()`.
+ */
+export function diaPorVenir(fecha: string, hoy: string): boolean {
+  return fecha > hoy;
+}
+
+/**
+ * Llena la lectura inicial de las máquinas que el reporte trae solo con la final,
+ * con la lectura anterior de cada una (spec 029, RF-7). No pisa una inicial escrita
+ * ni llena la de una máquina sin final ni sin equipo reconocido. Si con esa inicial
+ * el avance no cuadra, lo dirá `faltasDelReporte`, como con una escrita (RF-8).
+ */
+export function completarIniciales(
+  reporte: ReporteDelDia,
+  anteriores: Readonly<Record<string, LecturaAnterior>>,
+): ReporteDelDia {
+  return {
+    ...reporte,
+    maquinaria: reporte.maquinaria.map((m) => {
+      if (m.medidorInicial !== null || m.medidorFinal === null || !m.vehiculoId) return m;
+      const anterior = anteriores[m.vehiculoId];
+      return anterior ? { ...m, medidorInicial: anterior.valor } : m;
+    }),
+  };
+}
+
 /** Cuánto se espera el archivo de un mensaje antes de guardarlo sin él (026/RF-47). */
 export const MINUTOS_DE_ESPERA_DEL_ARCHIVO = 30;
 
@@ -412,6 +441,7 @@ const SECCIONES_CON_RENGLONES = [
   'ensayos',
   'viajes',
   'almacen',
+  'mantenimientos',
 ] as const;
 
 type SeccionConRenglones = (typeof SECCIONES_CON_RENGLONES)[number];
@@ -471,7 +501,8 @@ export function separarRenglones(
   for (const seccion of SECCIONES_CON_RENGLONES) {
     const suyas = faltas.filter((f) => f.seccion === seccion);
     if (suyas.length === 0) continue;
-    const renglones = reporte[seccion] as readonly unknown[];
+    // `mantenimientos` es opcional: lo de antes de la spec 030 no lo trae.
+    const renglones = (reporte[seccion] ?? []) as readonly unknown[];
 
     const deLaSeccion = suyas.filter((f) => f.renglon === null);
     if (deLaSeccion.length > 0) {

@@ -79,6 +79,9 @@ export const MODULOS = [
   // Spec 021. Al final por lo mismo que los anteriores: no es un registro propio,
   // es la bandeja de lo que se reportó por WhatsApp para pasarlo a la bitácora.
   'whatsapp',
+  // Spec 030. Al final: es consulta de lo que ya guardaron los demás módulos, más el
+  // registro de los mantenimientos de las máquinas.
+  'reportes',
 ] as const;
 export type Modulo = (typeof MODULOS)[number];
 
@@ -232,6 +235,17 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
   whatsapp: {
     admin: ['ver', 'listar', 'escribir', 'aprobar'],
     supervisor: ['ver', 'listar', 'escribir', 'aprobar'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+  },
+  // Spec 030, RF-1 y RF-2. Los reportes son de la gerencia y del residente; escribir es
+  // registrar, anular o resolver un mantenimiento. Los intervalos por tipo de equipo
+  // y por máquina son solo de la gerencia, y eso lo exige su ruta (RF-24, RF-25).
+  reportes: {
+    admin: ['ver', 'listar', 'escribir'],
+    supervisor: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -391,6 +405,7 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
   cantera: 'Control Cantera',
   laboratorio: 'Laboratorio',
   whatsapp: 'Reportes de WhatsApp',
+  reportes: 'Reportes',
 };
 
 /**

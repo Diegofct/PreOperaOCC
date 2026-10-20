@@ -67,6 +67,7 @@ import {
 } from './creacion';
 import { actualizarDia } from './dias';
 import { idDeterminista } from './ids';
+import { guardarMantenimientos, type MantenimientosGuardados } from './mantenimientos';
 import { obraDelMensaje } from './obra';
 
 /** Lo que pasó con un mensaje al procesarlo. */
@@ -92,6 +93,14 @@ export interface ResultadoGuardado {
   apartados: number;
   /** Lo que se registró nuevo para este mensaje (RF-32). */
   creados: number;
+  /** Los mantenimientos que dijo el mensaje (spec 030, RF-36 a RF-42). */
+  mantenimientos?: MantenimientosGuardados;
+}
+
+/** El resultado con los mantenimientos del mensaje, si dijo alguno. */
+function conMantenimientos(resultado: ResultadoGuardado, m: MantenimientosGuardados | null): ResultadoGuardado {
+  if (!m || m.guardados.length + m.repetidos + m.resueltos + m.apartados === 0) return resultado;
+  return { ...resultado, apartados: resultado.apartados + m.apartados, mantenimientos: m };
 }
 
 /** El mensaje con lo que hace falta para procesarlo. */
@@ -442,11 +451,14 @@ export async function procesarMensaje(id: string): Promise<ResultadoDelProceso> 
     ? (reporteCorregido.parse(mensaje.propuesta) as ReporteDelDia)
     : resolverPropuesta(propuestaIa, catalogos.catalogos, { diaDelMensaje, destino }).reporte;
 
+  // Los mantenimientos se guardan ya, vaya adonde vaya el resto (spec 030, RF-36).
+  const enMantenimiento = await guardarMantenimientos({ mensajeId: id, obraId, reporte: leido });
+
   if (destino !== 'cantera' && destino !== 'almacen') {
-    return dejarEnEspera({ mensajeId: id, mensaje, obraId, reporte: leido, propuestaIa, catalogos });
+    return dejarEnEspera({ mensajeId: id, mensaje, obraId, reporte: leido, propuestaIa, catalogos, enMantenimiento });
   }
 
-  const { reporte, resultado } =
+  const { reporte, resultado: enSuModulo } =
     destino === 'cantera'
       ? await guardarEnCantera({
           mensajeId: id,
@@ -463,6 +475,7 @@ export async function procesarMensaje(id: string): Promise<ResultadoDelProceso> 
           almacenActivo: mensaje.almacenActivo ?? false,
           reporte: leido,
         });
+  const resultado = conMantenimientos(enSuModulo, enMantenimiento);
 
   const marcado = await marcarGuardado({
     mensajeId: id,
@@ -489,6 +502,7 @@ async function dejarEnEspera(datos: {
   reporte: ReporteDelDia;
   propuestaIa: PropuestaLeible & { hora_foto?: string | null };
   catalogos: Awaited<ReturnType<typeof catalogosDeLaObra>>;
+  enMantenimiento: MantenimientosGuardados;
 }): Promise<ResultadoDelProceso> {
   const { mensajeId, mensaje, obraId } = datos;
   let reporte = datos.reporte;
@@ -506,6 +520,7 @@ async function dejarEnEspera(datos: {
     reporte = enCantera.reporte;
     resultado = { ...enCantera.resultado, modulo: 'bitacora' };
   }
+  resultado = conMantenimientos(resultado, datos.enMantenimiento);
 
   const [enEspera] = await baseServidor()
     .update(whatsappMensajes)

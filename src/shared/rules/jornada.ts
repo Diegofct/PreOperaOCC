@@ -297,6 +297,74 @@ export function faltaContraElVehiculo(
 }
 
 /**
+ * La lectura con la que empieza el día de una máquina (spec 029, RF-1 a RF-3, RF-9):
+ * la final de la bitácora anterior, y si no hay, la registrada en Vehículos.
+ */
+export interface LecturaAnterior {
+  valor: number;
+  /** `YYYY-MM-DD`, el día del que es. */
+  fecha: string;
+  origen: 'bitacora' | 'vehiculo';
+}
+
+/**
+ * Cuál de las dos lecturas anteriores vale para el día `fecha` (029/RF-1 a RF-3).
+ *
+ * Gana la de la bitácora: es la final que se reportó en esta obra el último día
+ * que trabajó. La de Vehículos solo sirve si es de un día anterior; una del mismo
+ * día o posterior no es «la de ayer», es la de hoy o la de un reporte procesado
+ * después.
+ */
+export function lecturaAnterior(
+  deBitacora: { valor: number; fecha: string } | null,
+  delVehiculo: LecturaRegistrada,
+  fecha: string,
+): LecturaAnterior | null {
+  if (deBitacora && deBitacora.fecha < fecha) return { ...deBitacora, origen: 'bitacora' };
+  if (delVehiculo.valor !== null && delVehiculo.fecha && delVehiculo.fecha < fecha) {
+    return { valor: delVehiculo.valor, fecha: delVehiculo.fecha, origen: 'vehiculo' };
+  }
+  return null;
+}
+
+const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** `2026-10-18` → `18-oct`, como se escriben las fechas en la obra. */
+export function diaCorto(fecha: string): string {
+  const [, mes, dia] = fecha.split('-').map(Number);
+  return `${dia}-${MESES_CORTOS[mes - 1]}`;
+}
+
+/**
+ * Lo que se dice junto a la lectura inicial de una máquina (029/RF-5, RF-9):
+ *
+ *  · `ayuda`: de dónde salió, cuando la escrita coincide con la anterior;
+ *  · `aviso`: que no coincide, con el valor de ese día. Avisa y no impide.
+ *
+ * Sin lectura anterior o con la inicial vacía, nada.
+ */
+export function avisoDeLecturaInicial(
+  inicial: number | null,
+  anterior: LecturaAnterior | null,
+): { ayuda?: string; aviso?: string } {
+  if (inicial === null || !anterior) return {};
+  if (inicial !== anterior.valor) {
+    return {
+      aviso:
+        anterior.origen === 'bitacora'
+          ? `No coincide con la final del día anterior (${anterior.valor}, ${diaCorto(anterior.fecha)}).`
+          : `No coincide con la última lectura del vehículo (${anterior.valor}, ${diaCorto(anterior.fecha)}).`,
+    };
+  }
+  return {
+    ayuda:
+      anterior.origen === 'bitacora'
+        ? `Final del ${diaCorto(anterior.fecha)}`
+        : `Última lectura del vehículo (${diaCorto(anterior.fecha)})`,
+  };
+}
+
+/**
  * Qué medidor le corresponde a un tipo de equipo.
  *
  * `ambos` se resuelve como horómetro: hoy ningún tipo lo usa —la spec 003 pasó
