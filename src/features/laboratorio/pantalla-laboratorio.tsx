@@ -53,6 +53,7 @@ import type { EnsayoFila, ObraFila } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 
+import { EnsayosDeObra } from './ensayos-de-obra';
 import { EtiquetaDeEstado, EtiquetaDeVeredicto } from './etiquetas';
 import { POR_PAGINA, usePaginacion } from '@/features/panel/usar-listado-filtrado';
 
@@ -64,6 +65,18 @@ const DIAS_POR_DEFECTO = 30;
 const OPCIONES_DE_ESTADO: Opcion[] = (
   ['borrador', 'enviado', 'devuelto', 'aprobado', 'anulado'] as const
 ).map((estado) => ({ valor: estado, etiqueta: ETIQUETA_ESTADO_ENSAYO[estado] }));
+
+/**
+ * Las granulometrías del módulo y los ensayos de las bitácoras (spec 029, RF-24). En
+ * pestañas y no en una sola lista: unas se registran y se aprueban aquí, las otras
+ * solo se consultan, y mezclarlas haría pensar que se editan igual.
+ */
+const PESTANAS = [
+  { valor: 'granulometrias', titulo: 'Granulometrías' },
+  { valor: 'obra', titulo: 'Ensayos de obra' },
+] as const;
+
+type Pestana = (typeof PESTANAS)[number]['valor'];
 
 const OPCIONES_DE_VEREDICTO: Opcion[] = [
   { valor: 'cumple', etiqueta: 'Cumple' },
@@ -83,6 +96,7 @@ export default function PantallaLaboratorio() {
   );
   const obrasConLaboratorio = obras.datos.filter((o) => o.laboratorioActivo);
   const [obraElegida, setObraElegida] = useState<string | null>(null);
+  const [pestana, setPestana] = useState<Pestana>('granulometrias');
 
   const hoy = fechaDeJornada();
   const [desde, setDesde] = useState(restarDias(hoy, DIAS_POR_DEFECTO - 1));
@@ -237,8 +251,8 @@ export default function PantallaLaboratorio() {
       titulo="Laboratorio"
       descripcion={
         puedeRegistrar
-          ? 'Los ensayos de granulometría (INV E-123-13): se digitan las masas y el sistema calcula, dibuja la curva y dice si el material cumple.'
-          : 'Los ensayos de granulometría de su obra. Los registra el laboratorista; usted los aprueba o los devuelve.'
+          ? 'Los ensayos de granulometría (INV E-123-13): se digitan las masas y el sistema calcula, dibuja la curva y dice si el material cumple. En «Ensayos de obra», los que se anotan en las bitácoras.'
+          : 'Los ensayos de granulometría de su obra, que registra el laboratorista y usted aprueba o devuelve, y en «Ensayos de obra» los que se anotan en las bitácoras.'
       }
       error={obras.error}
       cargando={obras.cargando}
@@ -250,117 +264,134 @@ export default function PantallaLaboratorio() {
             : `Hay ${pendientes} ensayos esperando su aprobación.`}
         </Aviso>
       ) : null}
-      {ensayos.error ? <Aviso tono="error">{ensayos.error}</Aviso> : null}
-      {errorAlCrear ? <Aviso tono="error">{errorAlCrear}</Aviso> : null}
-
-      <Seccion titulo="Ensayos">
-        <Formulario>
-          {esGerencia ? (
-            <Selector
-              etiqueta="Obra"
-              valor={obraElegida}
-              opciones={obrasConLaboratorio.map((o) => ({
-                valor: o.id,
-                etiqueta: `${o.codigo} · ${o.nombre}`,
-              }))}
-              onChange={setObraElegida}
-              permiteVacio
-              vacio="Todas"
-              ancho={260}
-            />
-          ) : null}
-          <CampoDeFecha
-            etiqueta="Ejecución desde"
-            valor={desde}
-            onChange={(v) => cambiarPeriodo(v, hasta)}
-            error={desdeMal ? 'La fecha va en formato AAAA-MM-DD.' : undefined}
-            max={hasta || undefined}
+      <Acciones>
+        {PESTANAS.map((p) => (
+          <Boton
+            key={p.valor}
+            titulo={p.titulo}
+            tono={pestana === p.valor ? 'primario' : 'secundario'}
+            onPress={() => setPestana(p.valor)}
           />
-          <CampoDeFecha
-            etiqueta="Hasta"
-            valor={hasta}
-            onChange={(v) => cambiarPeriodo(desde, v)}
-            min={desde || undefined}
-            error={
-              hastaMal
-                ? 'La fecha va en formato AAAA-MM-DD.'
-                : !desdeMal && desde.trim() > hasta.trim()
-                  ? 'Tiene que ser igual o posterior a «Desde».'
-                  : undefined
-            }
+        ))}
+      </Acciones>
+
+      {pestana === 'obra' ? (
+        <EnsayosDeObra esGerencia={esGerencia} obrasConLaboratorio={obrasConLaboratorio} />
+      ) : (
+        <>
+          {ensayos.error ? <Aviso tono="error">{ensayos.error}</Aviso> : null}
+          {errorAlCrear ? <Aviso tono="error">{errorAlCrear}</Aviso> : null}
+
+          <Seccion titulo="Granulometrías">
+            <Formulario>
+              {esGerencia ? (
+                <Selector
+                  etiqueta="Obra"
+                  valor={obraElegida}
+                  opciones={obrasConLaboratorio.map((o) => ({
+                    valor: o.id,
+                    etiqueta: `${o.codigo} · ${o.nombre}`,
+                  }))}
+                  onChange={setObraElegida}
+                  permiteVacio
+                  vacio="Todas"
+                  ancho={260}
+                />
+              ) : null}
+              <CampoDeFecha
+                etiqueta="Ejecución desde"
+                valor={desde}
+                onChange={(v) => cambiarPeriodo(v, hasta)}
+                error={desdeMal ? 'La fecha va en formato AAAA-MM-DD.' : undefined}
+                max={hasta || undefined}
+              />
+              <CampoDeFecha
+                etiqueta="Hasta"
+                valor={hasta}
+                onChange={(v) => cambiarPeriodo(desde, v)}
+                min={desde || undefined}
+                error={
+                  hastaMal
+                    ? 'La fecha va en formato AAAA-MM-DD.'
+                    : !desdeMal && desde.trim() > hasta.trim()
+                      ? 'Tiene que ser igual o posterior a «Desde».'
+                      : undefined
+                }
             
-          />
-          <Selector
-            etiqueta="Material"
-            valor={material}
-            opciones={materiales}
-            onChange={setMaterial}
-            permiteVacio
-            vacio="Todos"
-            ancho={180}
-          />
-          <Selector
-            etiqueta="Franja"
-            valor={franjaId}
-            opciones={franjas}
-            onChange={setFranjaId}
-            permiteVacio
-            vacio="Todas"
-            ancho={200}
-          />
-          <Selector
-            etiqueta="Estado"
-            valor={estado}
-            opciones={OPCIONES_DE_ESTADO}
-            onChange={setEstado}
-            permiteVacio
-            vacio="Todos"
-            ancho={150}
-          />
-          <Selector
-            etiqueta="Veredicto"
-            valor={veredicto}
-            opciones={OPCIONES_DE_VEREDICTO}
-            onChange={setVeredicto}
-            permiteVacio
-            vacio="Todos"
-            ancho={150}
-          />
-        </Formulario>
+              />
+              <Selector
+                etiqueta="Material"
+                valor={material}
+                opciones={materiales}
+                onChange={setMaterial}
+                permiteVacio
+                vacio="Todos"
+                ancho={180}
+              />
+              <Selector
+                etiqueta="Franja"
+                valor={franjaId}
+                opciones={franjas}
+                onChange={setFranjaId}
+                permiteVacio
+                vacio="Todas"
+                ancho={200}
+              />
+              <Selector
+                etiqueta="Estado"
+                valor={estado}
+                opciones={OPCIONES_DE_ESTADO}
+                onChange={setEstado}
+                permiteVacio
+                vacio="Todos"
+                ancho={150}
+              />
+              <Selector
+                etiqueta="Veredicto"
+                valor={veredicto}
+                opciones={OPCIONES_DE_VEREDICTO}
+                onChange={setVeredicto}
+                permiteVacio
+                vacio="Todos"
+                ancho={150}
+              />
+            </Formulario>
 
-        {puedeRegistrar ? (
-          <Acciones>
-            <Boton
-              titulo={creando ? 'Creando…' : 'Nuevo ensayo'}
-              onPress={nuevoEnsayo}
-              deshabilitado={creando || faltaObraParaRegistrar}
-            />
-            {faltaObraParaRegistrar ? (
-              <Celda>Elija arriba la obra en la que se registra.</Celda>
+            {puedeRegistrar ? (
+              <Acciones>
+                <Boton
+                  titulo={creando ? 'Creando…' : 'Nuevo ensayo'}
+                  onPress={nuevoEnsayo}
+                  deshabilitado={creando || faltaObraParaRegistrar}
+                />
+                {faltaObraParaRegistrar ? (
+                  <Celda>Elija arriba la obra en la que se registra.</Celda>
+                ) : null}
+              </Acciones>
             ) : null}
-          </Acciones>
-        ) : null}
-      </Seccion>
+          </Seccion>
 
-      <>
-        <Tabla
-          columnas={columnas}
-          filas={paginaDeEnsayos.pagina}
-          vacio={
-            ensayos.cargando
-              ? 'Cargando los ensayos…'
-              : ensayos.datos.length === 0
-                ? 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.'
-                : 'Ningún ensayo coincide con los filtros elegidos.'
-          }
-        />
-        <Paginacion
-          pagina={paginaDeEnsayos.paginaActual}
-          porPagina={POR_PAGINA}
-          total={paginaDeEnsayos.total}
-          onCambiar={paginaDeEnsayos.irAPagina}
-        />
-      </>
+          <>
+            <Tabla
+              columnas={columnas}
+              filas={paginaDeEnsayos.pagina}
+              vacio={
+                ensayos.cargando
+                  ? 'Cargando los ensayos…'
+                  : ensayos.datos.length === 0
+                    ? 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.'
+                    : 'Ningún ensayo coincide con los filtros elegidos.'
+              }
+            />
+            <Paginacion
+              pagina={paginaDeEnsayos.paginaActual}
+              porPagina={POR_PAGINA}
+              total={paginaDeEnsayos.total}
+              onCambiar={paginaDeEnsayos.irAPagina}
+            />
+          </>
+        </>
+      )}
     </MarcoPantalla>
   );
 }

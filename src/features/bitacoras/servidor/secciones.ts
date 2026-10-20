@@ -163,12 +163,6 @@ export async function personalDelParte(
     return { error: 'Una persona no puede estar dos veces en la misma bitácora.' };
   }
 
-  // Horas laboradas, entrada y salida, o novedad (spec 025, RF-6 a RF-12, RF-19).
-  for (const persona of pedidas) {
-    const error = validarPersonaDelParte(persona);
-    if (error) return { error: mensajeDePersona(error) };
-  }
-
   const gente = ids.length
     ? await baseServidor()
         .select({ id: usuarios.id, nombre: usuarios.nombreCompleto, cargo: usuarios.cargo })
@@ -179,6 +173,14 @@ export async function personalDelParte(
   const porId = new Map(gente.map((u) => [u.id, u]));
   for (const usuarioId of ids) {
     if (!porId.has(usuarioId)) return { error: 'Esa persona no existe.' };
+  }
+
+  // Horas laboradas, entrada y salida, o novedad (spec 025, RF-6 a RF-12, RF-19). Con
+  // el nombre: entre cuarenta personas, «escriba sus horas» sin decir de quién no
+  // sirve (spec 029, RF-21).
+  for (const persona of pedidas) {
+    const error = validarPersonaDelParte(persona);
+    if (error) return { error: `${porId.get(persona.usuarioId)!.nombre}: ${mensajeDePersona(error)}` };
   }
 
   return {

@@ -42,6 +42,13 @@ const DIBUJOS = {
       <Path d="M8 9h8M8 12h5" />
     </>
   ),
+  // Spec 030: unas barras sobre su eje, como en una gráfica de un reporte.
+  reportes: (
+    <>
+      <Path d="M4 4v16h16" />
+      <Path d="M8 16v-4M12 16V8M16 16v-6" />
+    </>
+  ),
   preoperacionales: (
     <>
       <Rect x={5} y={4} width={14} height={17} rx={2} />

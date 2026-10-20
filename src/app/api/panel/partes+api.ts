@@ -3,6 +3,7 @@ import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, partesDeObra, usuarios } from '@/db/servidor/esquema';
+import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
@@ -22,6 +23,12 @@ import { fechaDeJornada } from '@/shared/rules/jornada';
  * anterior si se cerró antes de la spec, o el vigente de su obra si sigue
  * abierto. Lo decide el servidor y no la pantalla para que el panel y el Inicio
  * no puedan discrepar sobre las horas extra de un mismo parte.
+ *
+ * Cada parte **abierto** trae además la lectura con la que empieza el día cada
+ * máquina (spec 029, RF-1 a RF-3, RF-9): la pantalla la pone al añadir la máquina y
+ * avisa si se escribe otra. Viene con el día, y no en una ruta aparte, para que
+ * añadir una máquina no espere a otra petición. Uno cerrado o anulado ya no recibe
+ * máquinas: va vacío.
  */
 
 const COLUMNAS = {
@@ -76,7 +83,15 @@ export async function GET(peticion: Request) {
       .where(and(eq(partesDeObra.fecha, fecha), filtroDeObra(sesion, partesDeObra.obraId)))
       .orderBy(asc(obras.nombre));
 
-    return ok({ fecha, partes: filas.map(conHorarioEfectivo) });
+    const partes = await Promise.all(
+      filas.map(async (fila) => ({
+        ...conHorarioEfectivo(fila),
+        lecturasAnteriores:
+          fila.cerradoEn || fila.anuladoEn ? {} : await lecturasAnteriores(fila.obraId, fila.fecha),
+      })),
+    );
+
+    return ok({ fecha, partes });
   });
 }
 

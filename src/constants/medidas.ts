@@ -99,6 +99,12 @@ export const CampoPanel = {
   // Seis renglones de 21 de alto, más el relleno y el borde del campo.
   altoAreaDeTexto: 146,
   /**
+   * La observación de una fila de la bitácora, cuando la hay (spec 029, RF-12): tres
+   * renglones de 21, más el relleno y el borde. Casi nunca hay nada que anotar, y
+   * cuando lo hay es una frase; las seis de arriba siguen para las notas del día.
+   */
+  altoObservacion: 83,
+  /**
    * La lista de un selector, abierta. Da para unas seis opciones sin
    * desplazarse (spec 007, requisitos no funcionales).
    */

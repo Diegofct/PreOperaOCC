@@ -41,6 +41,7 @@ import {
   whatsappMensajes,
   whatsappReportesEsperados,
 } from '@/db/servidor/esquema';
+import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
 import { reporteCorregido } from '@/features/panel/contratos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
@@ -51,8 +52,10 @@ import {
   type ReporteDelDia,
 } from '@/shared/rules/whatsapp';
 import {
+  completarIniciales,
   decisionDePersona,
   diaCompleto,
+  diaPorVenir,
   esperaArchivo,
   placaDeLaMaquina,
   renglonesGuardados,
@@ -238,13 +241,17 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     maquinaria.push({ ...m, vehiculoId, operadorId });
   }
   reporte = { ...reporte, personal, maquinaria };
+  // La máquina que trae solo la lectura final empieza donde terminó el día anterior
+  // (spec 029, RF-7). Si así no cuadra, las faltas la apartan como a una escrita (RF-8).
+  reporte = completarIniciales(reporte, await lecturasAnteriores(obraId, fecha));
 
   // Lo que sigue incompleto, a «No se pudo guardar»; el resto, a la bitácora (RF-19, RF-20).
+  // Los viajes y los mantenimientos ya se guardaron y apartaron al procesar el mensaje.
   const faltas = faltasDelReporte(reporte, {
     hoy: fechaDeJornada(),
     claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',
     lecturaDe: catalogos.lecturaDe,
-  }).filter((f) => f.seccion !== 'viajes' && f.seccion !== 'almacen');
+  }).filter((f) => f.seccion !== 'viajes' && f.seccion !== 'almacen' && f.seccion !== 'mantenimientos');
   const { guardable, excepciones } = separarRenglones(reporte, faltas);
   await apartar(mensaje.id, excepciones);
   if (!guardable) {
@@ -321,6 +328,10 @@ export async function armarBitacora(
   motivo: MotivoDelArmado,
   actor: Actor = ACTOR_SISTEMA,
 ): Promise<{ parteId: string | null; llevados: number }> {
+  // Un día que no ha llegado no se arma (spec 029, RF-33).
+  if (diaPorVenir(fecha, fechaDeJornada())) {
+    return { parteId: null, llevados: await apartarLoQueEsperaPorVenir(obraId, fecha) };
+  }
   const db = baseServidor();
   await db.insert(whatsappDias).values({ obraId, fecha }).onConflictDoNothing();
 
@@ -364,10 +375,38 @@ export async function armarBitacora(
  * de cantera los tiene en Control Cantera, que la bitácora muestra al abrirla.
  */
 export async function actualizarDia(obraId: string, fecha: string): Promise<void> {
+  // Un día que no ha llegado no se crea ni se arma (spec 029, RF-33): lo que habla de
+  // él va a «No se pudo guardar» por la fecha (RF-34).
+  if (diaPorVenir(fecha, fechaDeJornada())) {
+    await apartarLoQueEsperaPorVenir(obraId, fecha);
+    return;
+  }
   await llevarLoQueEspera(obraId, fecha);
   // Las fotos del día, también las de mensajes que no esperaban a la bitácora (spec 027,
   // RF-1), y el aviso de las que llegaron con ella cerrada (RF-21).
   await sincronizarFotosDelDia(obraId, fecha);
+}
+
+/**
+ * Aparta, sin crear nada, los mensajes que esperan un día que todavía no llega
+ * (spec 029, RF-33, RF-34). No pasan por `llevarABitacora` a propósito: esa crea las
+ * personas y las máquinas que faltan antes de mirar la fecha, y un plan para el
+ * sábado no debe registrar a nadie. Devuelve cuántos apartó.
+ */
+async function apartarLoQueEsperaPorVenir(obraId: string, fecha: string): Promise<number> {
+  const mensajes = await mensajesEnEspera(obraId, fecha);
+  for (const mensaje of mensajes) {
+    await apartar(mensaje.id, [
+      { seccion: 'fecha', renglon: null, motivo: 'El día del reporte no puede ser posterior a hoy.', datos: null },
+    ]);
+    await marcarLlevado(mensaje, {
+      obraId,
+      reporte: reporteCorregido.parse(mensaje.propuesta) as ReporteDelDia,
+      parteId: null,
+      apartados: 1,
+    });
+  }
+  return mensajes.length;
 }
 
 async function llevarLoQueEspera(obraId: string, fecha: string): Promise<void> {

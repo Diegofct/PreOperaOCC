@@ -337,6 +337,7 @@ export function Campo({
   multilinea,
   soloLectura,
   obligatorio,
+  compacto,
 }: {
   etiqueta: string;
   valor: string;
@@ -344,6 +345,11 @@ export function Campo({
   ayuda?: string;
   error?: string;
   soloNumeros?: boolean;
+  /**
+   * Con `multilinea`, tres renglones en vez de seis: la observación de una fila de la
+   * bitácora (spec 029, RF-12), que cuando la hay es una frase.
+   */
+  compacto?: boolean;
   /**
    * Área de texto de varios renglones, para observaciones (spec 007, RF-24).
    *
@@ -401,7 +407,7 @@ export function Campo({
         returnKeyType={onEnviar && !multilinea ? 'go' : 'default'}
         multiline={multilinea}
         // En la web se traduce a `rows` del `<textarea>`.
-        numberOfLines={multilinea ? 6 : undefined}
+        numberOfLines={multilinea ? (compacto ? 3 : 6) : undefined}
         onFocus={() => setEnfocado(true)}
         onBlur={() => setEnfocado(false)}
         readOnly={soloLectura}
@@ -409,6 +415,7 @@ export function Campo({
           estilos.campoEntrada,
           angosto && estilos.controlAngosto,
           multilinea && estilos.campoAreaDeTexto,
+          multilinea && compacto && estilos.campoAreaCompacta,
           soloLectura && estilos.campoSoloLectura,
           enfocado && !soloLectura && estilos.campoEnfocado,
           error ? estilos.campoEntradaMal : null,
@@ -420,6 +427,102 @@ export function Campo({
     </View>
   );
 }
+
+/**
+ * La observación de una fila de la bitácora, detrás de una casilla (spec 029,
+ * RF-10 a RF-14, RF-16, RF-18).
+ *
+ * Casi nunca hay nada que anotar, y un recuadro vacío de seis renglones en cada
+ * máquina y cada persona era la mitad de la pantalla. Ahora:
+ *
+ *  · sin marcar, se lee «Sin observación»: no hay nada, y queda dicho (RF-11);
+ *  · marcada, sale el campo de tres renglones, con el ancho de una columna del
+ *    formulario y alineado con los demás campos de la fila (RF-12);
+ *  · con texto guardado, abre marcada (RF-13);
+ *  · desmarcarla borra el texto al guardar (RF-14). El texto se recuerda mientras
+ *    tanto: si fue un clic de más, volver a marcarla lo devuelve;
+ *  · `obligatoria` la deja marcada y sin poder desmarcarla, para el ensayo sin
+ *    resultado ni «cumple», donde la observación sigue haciendo falta (RF-16);
+ *  · sin poder editar, el texto en solo lectura o «Sin observación» (RF-18).
+ */
+export function CampoObservacion({
+  valor,
+  onChange,
+  editable,
+  etiqueta = 'Observación',
+  obligatoria = false,
+  error,
+  ayuda,
+}: {
+  valor: string;
+  onChange: (v: string) => void;
+  editable: boolean;
+  etiqueta?: string;
+  obligatoria?: boolean;
+  error?: string;
+  ayuda?: string;
+}) {
+  const [abierta, setAbierta] = useState(() => valor.trim() !== '');
+  // Lo escrito antes de desmarcar, para devolverlo si se vuelve a marcar.
+  const recordado = useRef('');
+  const anchoDeCampo = useAnchoDeCampo(ANCHO_OBSERVACION);
+  const hayTexto = valor.trim() !== '';
+  const marcada = abierta || obligatoria || (!editable && hayTexto);
+
+  function cambiarCasilla(marcar: boolean) {
+    if (marcar) {
+      setAbierta(true);
+      if (!valor && recordado.current) onChange(recordado.current);
+    } else {
+      recordado.current = valor;
+      setAbierta(false);
+      onChange('');
+    }
+  }
+
+  if (!editable) {
+    return (
+      <View style={[estilos.campo, anchoDeCampo]}>
+        {hayTexto ? (
+          <Campo etiqueta={etiqueta} valor={valor} onChange={() => {}} multilinea compacto soloLectura />
+        ) : (
+          <>
+            <EtiquetaDeCampo texto={etiqueta} />
+            <Text style={estilos.sinObservacion}>Sin observación</Text>
+          </>
+        )}
+      </View>
+    );
+  }
+
+  return (
+    <View style={[estilos.campo, anchoDeCampo]}>
+      <Casilla
+        etiqueta="¿Tienes alguna observación?"
+        marcada={marcada}
+        onChange={cambiarCasilla}
+        deshabilitada={obligatoria}
+      />
+      {marcada ? (
+        <Campo
+          etiqueta={etiqueta}
+          valor={valor}
+          onChange={onChange}
+          multilinea
+          compacto
+          obligatorio={obligatoria}
+          error={error}
+          ayuda={ayuda}
+        />
+      ) : (
+        <Text style={estilos.sinObservacion}>Sin observación</Text>
+      )}
+    </View>
+  );
+}
+
+/** El ancho de la observación: el de dos campos de lectura juntos. */
+const ANCHO_OBSERVACION = 360;
 
 /**
  * Una fecha `AAAA-MM-DD` elegida en el calendario del navegador (spec 026, RF-24,
@@ -1801,6 +1904,14 @@ const estilos = StyleSheet.create({
     minHeight: CampoPanel.altoAreaDeTexto,
     // Sin esto el texto nace centrado en vertical, como en un campo de una línea.
     textAlignVertical: 'top',
+  },
+  campoAreaCompacta: { minHeight: CampoPanel.altoObservacion },
+  /** «Sin observación»: se lee como un dato, no como una ayuda (spec 029, RF-11). */
+  sinObservacion: {
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.textoApoyo,
+    paddingVertical: Spacing.one,
   },
   /** La etiqueta, siempre encima de su campo (RF-26). */
   campoEtiqueta: {

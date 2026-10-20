@@ -66,6 +66,7 @@ import type { Cargo } from '../../shared/catalogos/cargos';
 import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
 import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
+import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
 import type {
   MasasDelEnsayo,
   ResultadoGranulometria,
@@ -163,6 +164,11 @@ export const tipoReporteWhatsapp = pgEnum('tipo_reporte_whatsapp', TIPOS_DE_REPO
 export const estadoDiaWhatsapp = pgEnum('estado_dia_whatsapp', ESTADOS_DEL_DIA);
 export const estadoExcepcionWhatsapp = pgEnum('estado_excepcion_whatsapp', ESTADOS_DE_EXCEPCION);
 export const tipoCreadoWhatsapp = pgEnum('tipo_creado_whatsapp', TIPOS_CREADOS);
+
+/** Spec 030: las clases de mantenimiento, y las que tienen intervalo. Ver `rules/mantenimiento`. */
+export const claseMantenimiento = pgEnum('clase_mantenimiento', CLASES_DE_MANTENIMIENTO);
+export const claseConIntervalo = pgEnum('clase_con_intervalo', CLASES_CON_INTERVALO);
+export const origenMantenimiento = pgEnum('origen_mantenimiento', ['panel', 'whatsapp']);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -1413,6 +1419,100 @@ export const bitacoraFotos = pgTable(
       sql`${t.quitadaEn} is null
        or (${t.quitadaPor} is not null and ${t.motivoQuitada} is not null and length(trim(${t.motivoQuitada})) > 0)`,
     ),
+  ],
+);
+
+/**
+ * El intervalo de mantenimiento de un tipo de equipo (spec 030, RF-24). Sin fila vale
+ * el de arranque de su clase de medidor, que vive en `rules/mantenimiento`: nada que
+ * sembrar, y un tipo nuevo lo hereda solo.
+ */
+export const mantenimientoIntervalos = pgTable(
+  'mantenimiento_intervalos',
+  {
+    tipoVehiculoId: text('tipo_vehiculo_id')
+      .notNull()
+      .references(() => tiposVehiculo.id),
+    clase: claseConIntervalo('clase').notNull(),
+    /** Cada cuántas horas o kilómetros, según el medidor del tipo. */
+    cada: doublePrecision('cada').notNull(),
+    avisoPorcentaje: integer('aviso_porcentaje').notNull().default(90),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tipoVehiculoId, t.clase] }),
+    check('ck_mantenimiento_intervalo', sql`${t.cada} > 0 and ${t.avisoPorcentaje} between 50 and 99`),
+  ],
+);
+
+/** El de una máquina concreta, que manda sobre el de su tipo (spec 030, RF-25). */
+export const mantenimientoIntervalosVehiculo = pgTable(
+  'mantenimiento_intervalos_vehiculo',
+  {
+    vehiculoId: text('vehiculo_id')
+      .notNull()
+      .references(() => vehiculos.id),
+    clase: claseConIntervalo('clase').notNull(),
+    cada: doublePrecision('cada').notNull(),
+    avisoPorcentaje: integer('aviso_porcentaje').notNull().default(90),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.vehiculoId, t.clase] }),
+    check('ck_mantenimiento_intervalo_vehiculo', sql`${t.cada} > 0 and ${t.avisoPorcentaje} between 50 and 99`),
+  ],
+);
+
+/**
+ * Un mantenimiento hecho a una máquina (spec 030, RF-32 a RF-42). **Evidencia: no se
+ * edita** (RF-35): se anula con motivo, y el anulado deja de contar. El correctivo
+ * queda pendiente hasta que se marca resuelto (RF-29).
+ *
+ * Lo que llega por WhatsApp lleva un id determinista de máquina, clase y día, así que
+ * el mismo mantenimiento dos veces se guarda una (RF-42).
+ */
+export const mantenimientos = pgTable(
+  'mantenimientos',
+  {
+    id: text('id').primaryKey(),
+    vehiculoId: text('vehiculo_id')
+      .notNull()
+      .references(() => vehiculos.id),
+    /** La obra donde estaba la máquina al registrarlo: para el alcance del residente. */
+    obraId: text('obra_id').references(() => obras.id),
+    clase: claseMantenimiento('clase').notNull(),
+    /** `YYYY-MM-DD`, el día en que se hizo. */
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    /** La lectura del medidor al hacerlo; nula solo si la máquina no tenía ninguna. */
+    lectura: doublePrecision('lectura'),
+    nota: text('nota').notNull().default(''),
+    origen: origenMantenimiento('origen').notNull(),
+    mensajeId: text('mensaje_id').references(() => whatsappMensajes.id),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    resueltoEn: date('resuelto_en', { mode: 'string' }),
+    resueltoPor: text('resuelto_por').references(() => usuarios.id),
+    notaResuelto: text('nota_resuelto'),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    index('ix_mantenimiento_vehiculo').on(t.vehiculoId, t.clase, t.fecha),
+    index('ix_mantenimiento_obra').on(t.obraId, t.fecha),
+    // Anular exige motivo (RF-35), como los viajes y las bitácoras.
+    check(
+      'ck_mantenimiento_anulacion',
+      sql`${t.anuladoEn} is null
+       or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+    // Solo un correctivo se resuelve (RF-29).
+    check('ck_mantenimiento_resuelto', sql`${t.resueltoEn} is null or ${t.clase} = 'correctivo'`),
+    check('ck_mantenimiento_origen', sql`(${t.origen} = 'whatsapp') = (${t.mensajeId} is not null)`),
   ],
 );
 

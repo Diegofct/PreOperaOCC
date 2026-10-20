@@ -16,6 +16,7 @@ import { Image, StyleSheet } from 'react-native';
 import { Panel, Radio } from '@/constants/theme';
 import { NOVEDADES_DE_PERSONAL, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
 import { DESTINO_OBRA, formatearAbscisa, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import { CLASES_DE_MANTENIMIENTO, NOMBRE_DE_CLASE } from '@/shared/rules/mantenimiento';
 import type { UbicacionPorValidar } from '@/shared/rules/parte';
 import { alcanza } from '@/shared/rules/permisos';
 import {
@@ -24,6 +25,7 @@ import {
   type EnsayoDelReporte,
   type FranjaDelReporte,
   type MaquinaDelReporte,
+  type MantenimientoDelReporte,
   type MovimientoDelReporte,
   type PersonaDelReporte,
   type ViajeDelReporte,
@@ -37,6 +39,7 @@ import {
   Ayuda,
   Boton,
   Campo,
+  Casilla,
   Celda,
   Confirmacion,
   FilaDeFormulario,
@@ -63,6 +66,8 @@ import {
 import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
 
 const OPCIONES_DE_NOVEDAD = NOVEDADES_DE_PERSONAL.map((n) => ({ valor: n.id, etiqueta: n.nombre }));
+
+const OPCIONES_DE_CLASE = CLASES_DE_MANTENIMIENTO.map((c) => ({ valor: c, etiqueta: NOMBRE_DE_CLASE[c] }));
 
 const OPCIONES_DE_CUMPLE = [
   { valor: 'si', etiqueta: 'Cumple' },
@@ -116,6 +121,8 @@ const NOMBRE_DE_SECCION: Record<string, string> = {
   actividades: 'Actividad',
   ensayos: 'Ensayo',
   almacen: 'Almacén',
+  // Spec 030, RF-40.
+  mantenimientos: 'Mantenimiento',
   fecha: 'Fecha del reporte',
   bitacora: 'Bitácora',
   mensaje: 'Mensaje',
@@ -138,7 +145,7 @@ function fotoDelApartado(e: ExcepcionFila): string | null {
 }
 
 /** Las secciones cuyo renglón se completa aquí. */
-const SE_COMPLETAN = ['viajes', 'personal', 'maquinaria', 'clima', 'actividades', 'ensayos', 'almacen'];
+const SE_COMPLETAN = ['viajes', 'personal', 'maquinaria', 'clima', 'actividades', 'ensayos', 'almacen', 'mantenimientos'];
 
 function momento(iso: string): string {
   return new Date(iso).toLocaleString('es-CO', {
@@ -708,6 +715,39 @@ function CamposDelRenglon({
         {m.tipo === 'salida' ? (
           <Campo etiqueta="Para qué" valor={m.paraQue ?? ''} onChange={(x) => cambiar({ paraQue: x })} ancho={260} />
         ) : null}
+      </>
+    );
+  }
+
+  if (seccion === 'mantenimientos') {
+    const m = datos as unknown as MantenimientoDelReporte;
+    return (
+      <>
+        {escrito(m.escrito, 'En el mensaje')}
+        <Selector
+          etiqueta="Equipo"
+          valor={m.vehiculoId}
+          opciones={equipos}
+          onChange={(x) => cambiar({ vehiculoId: x, conflicto: false })}
+          vacio="Elija el equipo"
+          ancho={240}
+        />
+        <Selector
+          etiqueta="Mantenimiento"
+          valor={m.clase}
+          opciones={OPCIONES_DE_CLASE}
+          onChange={(x) => cambiar({ clase: x })}
+          vacio={m.resuelto ? 'Solo cierra el correctivo' : 'Elija cuál fue'}
+          permiteVacio={m.resuelto}
+          ancho={200}
+        />
+        <CampoNumero etiqueta="Lectura (opcional)" valor={m.lectura} onChange={(n) => cambiar({ lectura: n })} editable />
+        <Campo etiqueta="Qué se hizo" valor={m.descripcion ?? ''} onChange={(x) => cambiar({ descripcion: x })} ancho={280} />
+        <Casilla
+          etiqueta="Ya quedó reparada: cierra el correctivo pendiente"
+          marcada={m.resuelto === true}
+          onChange={(x) => cambiar({ resuelto: x })}
+        />
       </>
     );
   }

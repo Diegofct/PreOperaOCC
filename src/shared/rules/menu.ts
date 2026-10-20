@@ -34,7 +34,7 @@ export interface GrupoDelMenu {
  */
 export const GRUPOS_DEL_MENU: readonly GrupoDelMenu[] = [
   { titulo: null, modulos: ['inicio'] },
-  { titulo: 'El día a día', modulos: ['bitacoras', 'whatsapp', 'preoperacionales'] },
+  { titulo: 'El día a día', modulos: ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes'] },
   { titulo: 'Módulos de obra', modulos: ['almacen', 'cantera', 'laboratorio'] },
   { titulo: 'Administración', modulos: ['obras', 'personas', 'vehiculos', 'asignaciones'] },
 ];
