@@ -26,6 +26,7 @@ import {
 } from '@/db/servidor/esquema';
 import { materialesConStock } from '@/features/almacen-obra/servidor/materiales';
 import { opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
+import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
 import type { DetalleDePropuesta, OpcionesDeCantera } from '@/features/panel/contratos';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { fechaDeJornada, medidorDeClase, type ClaseDeMedidor, type LecturaRegistrada } from '@/shared/rules/jornada';
@@ -98,7 +99,7 @@ export async function catalogosDeLaObra(
   opciones: DetalleDePropuesta['opciones'];
 }> {
   const db = baseServidor();
-  const [equipos, personas, cantera, almacen, preoperacionalesDelDia, ultimosViajes] = await Promise.all([
+  const [equipos, personas, cantera, almacen, preoperacionalesDelDia, ultimosViajes, actividades] = await Promise.all([
     db
       .select({
         id: vehiculos.id,
@@ -136,6 +137,7 @@ export async function catalogosDeLaObra(
     materialesConStock(obraId),
     preoperacionalesDeLosDias(obraId, dias),
     ultimosViajesDeLaObra(obraId),
+    catalogoDeLaObra(obraId),
   ]);
 
   return {
@@ -148,6 +150,8 @@ export async function catalogosDeLaObra(
       materialesAlmacen: almacen,
       preoperacionales: preoperacionalesDelDia,
       ultimosViajes,
+      // Spec 031: con presupuesto vigente, cada ítem en su capítulo.
+      actividades,
     },
     claseDe: new Map(equipos.map((e) => [e.id, medidorDeClase(e.clase)])),
     lecturaDe: (vehiculoId, clase) => {
@@ -181,6 +185,7 @@ export async function catalogosDeLaObra(
         }))
         .sort((a, b) => a.nombreCompleto.localeCompare(b.nombreCompleto, 'es')),
       cantera: cantera satisfies OpcionesDeCantera,
+      actividades,
     },
   };
 }

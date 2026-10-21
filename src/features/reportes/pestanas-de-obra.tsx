@@ -50,20 +50,42 @@ type Otra = ReporteFila<'actividades'>['otras'][number] & { id: string };
 export function PestanaActividades({ consulta }: { consulta: ConsultaDeReporte }) {
   const { datos, error, cargando } = useReporte('actividades', consulta);
   const [abierto, setAbierto] = useState<Item | null>(null);
-  const items = conId(datos?.items ?? [], (i) => i.item);
+  // Con presupuesto, el mismo ítem puede estar en varios capítulos: la fila es «capítulo|ítem» (spec 031).
+  const items = conId(datos?.items ?? [], (i) => (i.capituloId ? `${i.capituloId}|${i.item}` : i.item));
   const otras = conId(datos?.otras ?? [], (o, i) => `${o.fecha}-${i}`);
   const pagina = usePaginacion(items);
 
   const columnas: Columna<Item>[] = [
     { clave: 'item', titulo: 'Ítem', ancho: 80, pintar: (i) => <Celda>{i.item}</Celda> },
-    { clave: 'actividad', titulo: 'Actividad', ancho: 360, pintar: (i) => <Celda lineas={2}>{i.nombre}</Celda> },
+    { clave: 'actividad', titulo: 'Actividad', ancho: 300, pintar: (i) => <Celda lineas={2}>{i.nombre}</Celda> },
+    {
+      clave: 'capitulo',
+      titulo: 'Capítulo',
+      ancho: 220,
+      pintar: (i) => <Celda lineas={2}>{i.capitulo ? [i.capitulo, i.grupo].filter(Boolean).join(' · ') : 'Sin capítulo'}</Celda>,
+    },
     {
       clave: 'cantidad',
-      titulo: 'Cantidad',
-      ancho: 140,
+      titulo: 'En el periodo',
+      ancho: 130,
       pintar: (i) => <Celda>{`${cifra(i.cantidad, 2)} ${i.unidad}`}</Celda>,
     },
     { clave: 'dias', titulo: 'Días', ancho: 60, pintar: (i) => <Celda>{String(i.dias.length)}</Celda> },
+    {
+      clave: 'avance',
+      titulo: 'Acumulado / contratado',
+      ancho: 210,
+      pintar: (i) =>
+        i.contratado !== null ? (
+          <BarraDeProporcion
+            valor={i.acumulado ?? 0}
+            maximo={i.contratado}
+            texto={`${cifra(i.acumulado ?? 0, 2)} de ${cifra(i.contratado, 2)} · ${cifra(i.porcentaje ?? 0, 1)} %`}
+          />
+        ) : (
+          <Celda>—</Celda>
+        ),
+    },
     {
       clave: 'detalle',
       titulo: '',

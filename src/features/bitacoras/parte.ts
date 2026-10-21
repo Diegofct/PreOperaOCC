@@ -27,11 +27,11 @@ import {
 import { ENSAYOS_DE_CALIDAD, nombreDeClima, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import {
-  actividadPorItem,
   CLAVE_OTRA_ACTIVIDAD,
   etiquetaDeUnidad,
   IDS_UNIDAD_DE_ACTIVIDAD,
 } from '@/shared/catalogos/presupuesto';
+import { actividadDelCatalogo, catalogoFijo, type CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import { calcularDimensiones, resolverCantidad } from '@/shared/rules/dimensiones';
 import {
   faltaObservacionDelEnsayo,
@@ -128,6 +128,11 @@ export interface ActividadPedida {
   id?: string | null;
   /** El ítem del presupuesto («4.1.8») o «otra». */
   clave: string;
+  /**
+   * El capítulo del presupuesto vigente (spec 031, RF-59, RF-60). Obligatorio cuando la
+   * obra tiene presupuesto vigente; se ignora con el catálogo fijo.
+   */
+  capituloId?: string | null;
   /** Solo en «otra»: cuál fue. */
   texto?: string | null;
   /** Solo en «otra»: la clave de la unidad elegida. En las del presupuesto se ignora. */
@@ -155,10 +160,20 @@ export interface ActividadPedida {
  * Las actividades de la lista de prueba («excavacion») dan `null`: ya no se pueden
  * elegir. Las que ya estaban guardadas no pasan por aquí; se conservan tal cual
  * (tarea 004/T25).
+ *
+ * `catalogo` es el de la obra (spec 031): el fijo de siempre, o el de su presupuesto
+ * vigente, donde cada actividad es un ítem **dentro de su capítulo** y se busca por los
+ * dos (RF-59). Con presupuesto, el capítulo y el grupo se congelan por nombre con el
+ * parte, como la unidad (RF-60).
  */
-export function construirActividadDelParte(pedida: ActividadPedida): ActividadDelParte | null {
+export function construirActividadDelParte(
+  pedida: ActividadPedida,
+  catalogo: CatalogoDeActividades = catalogoFijo(),
+): ActividadDelParte | null {
   const otra = pedida.clave === CLAVE_OTRA_ACTIVIDAD;
-  const delPresupuesto = otra ? undefined : actividadPorItem(pedida.clave);
+  const delPresupuesto = otra
+    ? undefined
+    : actividadDelCatalogo(catalogo, pedida.clave, catalogo.origen === 'presupuesto' ? (pedida.capituloId ?? null) : null);
   if (!otra && !delPresupuesto) return null;
 
   if (otra) {
@@ -194,6 +209,10 @@ export function construirActividadDelParte(pedida: ActividadPedida): ActividadDe
     // cómo se escribe, el parte viejo seguiría diciendo lo que decía.
     unidad: etiquetaDeUnidad(unidad),
     cantidad,
+    // Solo con presupuesto: las actividades del catálogo fijo conservan su forma de siempre.
+    ...(delPresupuesto?.capituloId
+      ? { capituloId: delPresupuesto.capituloId, capitulo: delPresupuesto.capitulo, grupo: delPresupuesto.grupo }
+      : {}),
   };
 }
 

@@ -41,6 +41,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Spacing } from '@/constants/theme';
 import { horasLegibles } from '@/shared/rules/horas';
 import { alcanza, moduloDeEntrada } from '@/shared/rules/permisos';
+import { nombreDeAmparo } from '@/shared/rules/polizas';
 
 import { api } from './cliente-api';
 import {
@@ -50,6 +51,7 @@ import {
   Celda,
   Cifra,
   Cifras,
+  Etiqueta,
   Medidor,
   Seccion,
   Tabla,
@@ -107,12 +109,40 @@ function Portada() {
       error={resumen.error}
       cargando={resumen.cargando}
     >
+      {datos && datos.polizas.length > 0 ? <AvisoDePolizas polizas={datos.polizas} /> : null}
       {!datos ? null : esGerencia ? (
         <VistaGerencia datos={datos} periodo={periodo} onPeriodo={setPeriodo} />
       ) : (
         <VistaResidente datos={datos} />
       )}
     </MarcoPantalla>
+  );
+}
+
+/**
+ * Las pólizas por vencer o vencidas de las obras de quien mira (spec 031, RF-25), de la
+ * que vence antes a la que vence después, cada una con su enlace al contrato de la obra.
+ * Arriba de todo: renovar una póliza no puede quedar para cuando ya venció.
+ */
+function AvisoDePolizas({ polizas }: { polizas: ResumenFila['polizas'] }) {
+  const vencidas = polizas.filter((p) => p.vigencia === 'vencida').length;
+  return (
+    <Seccion titulo="Pólizas">
+      <Aviso tono={vencidas > 0 ? 'error' : 'info'}>
+        {`${polizas.length === 1 ? 'Una póliza' : `${polizas.length} pólizas`} ${vencidas > 0 ? 'vencidas o por vencer' : 'por vencer'}: ${polizas
+          .map((p) => `${p.obra} · ${nombreDeAmparo(p.amparo)} ${p.numero} (${p.aseguradora}): ${p.texto}`)
+          .join('; ')}.`}
+      </Aviso>
+      <Acciones>
+        {[...new Map(polizas.map((p) => [p.obraId, p.obra])).entries()].map(([obraId, obra]) => (
+          <Link key={obraId} href={`/panel/contrato?obra=${obraId}`} asChild>
+            <Pressable accessibilityRole="link">
+              <Etiqueta tono="atencion">{`Ver el contrato de ${obra}`}</Etiqueta>
+            </Pressable>
+          </Link>
+        ))}
+      </Acciones>
+    </Seccion>
   );
 }
 

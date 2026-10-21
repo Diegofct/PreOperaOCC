@@ -312,13 +312,27 @@ export interface ActividadLeida {
   descripcion: string;
   unidad?: string;
   cantidad?: number | null;
+  /** Spec 031: el capítulo y la vía del presupuesto vigente al registrarla. */
+  capituloId?: string | null;
+  capitulo?: string | null;
+  grupo?: string | null;
 }
 
 export interface CantidadDeItem {
   item: string;
+  /** Spec 031, RF-68: el capítulo y la vía; `null` en las de antes del presupuesto. */
+  capituloId: string | null;
+  capitulo: string | null;
+  grupo: string | null;
   nombre: string;
   unidad: string;
   cantidad: number;
+  /** Lo contratado de ese ítem en ese capítulo, del presupuesto vigente; `null` si no lo hay. */
+  contratado: number | null;
+  /** Lo ejecutado desde el primer día hasta el fin del periodo. */
+  acumulado: number | null;
+  /** acumulado / contratado, en por ciento con un decimal. */
+  porcentaje: number | null;
   /** Los días en que se trabajó, en orden. */
   dias: string[];
   /** Lo de cada día, para el detalle. */
@@ -337,6 +351,11 @@ export interface ActividadFueraDelPresupuesto {
  * Cuánto se ejecutó de cada ítem del presupuesto en el periodo (RF-51), y aparte las
  * actividades sin ítem —las «otras» y las de antes del 2026-09-16— (RF-52). Una
  * cantidad no anotada no suma, pero el día cuenta como trabajado.
+ *
+ * Spec 031, RF-68: con capítulo, cada ítem cuenta **dentro de su capítulo** —el 4.1.8 de
+ * las alcantarillas de una vía no es el de la cuneta de la otra—; las de antes del
+ * presupuesto, sin capítulo, siguen sumando por ítem. Lo contratado y el acumulado los
+ * pone `conContratado`.
  */
 export function cantidadesPorItem(
   partes: readonly { fecha: string; actividades: readonly ActividadLeida[] }[],
@@ -355,22 +374,68 @@ export function cantidadesPorItem(
         });
         continue;
       }
-      const suyo =
-        items.get(a.item) ??
-        { item: a.item, nombre: a.nombre, unidad: a.unidad ?? '', cantidad: 0, dias: [], porDia: [] };
+      const clave = a.capituloId ? `${a.capituloId}|${a.item}` : a.item;
+      const suyo = items.get(clave) ?? {
+        item: a.item,
+        capituloId: a.capituloId ?? null,
+        capitulo: a.capituloId ? (a.capitulo ?? null) : null,
+        grupo: a.capituloId ? (a.grupo ?? null) : null,
+        nombre: a.nombre,
+        unidad: a.unidad ?? '',
+        cantidad: 0,
+        contratado: null,
+        acumulado: null,
+        porcentaje: null,
+        dias: [],
+        porDia: [],
+      };
       const cantidad = a.cantidad ?? 0;
       suyo.cantidad = redondear2(suyo.cantidad + cantidad);
       if (!suyo.dias.includes(parte.fecha)) suyo.dias.push(parte.fecha);
       const delDia = suyo.porDia.find((d) => d.fecha === parte.fecha);
       if (delDia) delDia.cantidad = redondear2(delDia.cantidad + cantidad);
       else suyo.porDia.push({ fecha: parte.fecha, cantidad });
-      items.set(a.item, suyo);
+      items.set(clave, suyo);
     }
   }
   return {
-    items: [...items.values()].sort((a, b) => a.item.localeCompare(b.item, 'es', { numeric: true })),
+    items: [...items.values()].sort(
+      (a, b) =>
+        a.item.localeCompare(b.item, 'es', { numeric: true }) ||
+        (a.grupo ?? '').localeCompare(b.grupo ?? '') ||
+        (a.capitulo ?? '').localeCompare(b.capitulo ?? ''),
+    ),
     otras,
   };
+}
+
+/** La clave con que se cruzan lo ejecutado y lo contratado: «capítulo|ítem», o el ítem solo. */
+export function claveDeCantidad(item: { item: string; capituloId: string | null }): string {
+  return item.capituloId ? `${item.capituloId}|${item.item}` : item.item;
+}
+
+/**
+ * Lo contratado y lo acumulado de cada ítem del periodo (spec 031, RF-68). `contratado` y
+ * `acumulado` van por `claveDeCantidad`; el acumulado se cuenta desde el primer día de la
+ * obra hasta el fin del periodo. Sin contratado (sin presupuesto, o una actividad sin
+ * capítulo) no hay porcentaje.
+ */
+export function conContratado(
+  items: readonly CantidadDeItem[],
+  contratado: ReadonlyMap<string, number>,
+  acumulado: ReadonlyMap<string, number>,
+): CantidadDeItem[] {
+  return items.map((i) => {
+    const clave = claveDeCantidad(i);
+    const deContrato = i.capituloId ? (contratado.get(clave) ?? null) : null;
+    const hastaHoy = acumulado.get(clave) ?? i.cantidad;
+    return {
+      ...i,
+      contratado: deContrato,
+      acumulado: hastaHoy,
+      porcentaje: deContrato ? Math.round((hastaHoy / deContrato) * 1000) / 10 : null,
+    };
+  });
 }
 
 const redondear2 = (n: number) => Math.round(n * 100) / 100;

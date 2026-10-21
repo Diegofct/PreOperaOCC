@@ -18,13 +18,17 @@ import { ensayosDeLosPartes, type FilaDeCalidadLeida } from '@/shared/rules/ensa
 import {
   calidadPorEnsayo,
   cantidadesPorItem,
+  claveDeCantidad,
   climaDelPeriodo,
+  conContratado,
   horasDelPersonal,
   usoDeMaquinas,
   viajesAgrupados,
 } from '@/shared/rules/reportes';
 
 import {
+  actividadesHasta,
+  contratadoDeLaObra,
   partesDelPeriodo,
   preoperacionalesDelPeriodo,
   vehiculosDeLaObra,
@@ -139,8 +143,16 @@ async function reporteDePersonal(pedido: PedidoDeReporte) {
 
 /** Actividades (RF-51, RF-52). */
 async function reporteDeActividades(pedido: PedidoDeReporte) {
-  const partes = await partesDelPeriodo(pedido);
-  const { items, otras } = cantidadesPorItem(partes.map((p) => ({ fecha: p.fecha, actividades: p.actividades })));
+  const [partes, todas, contratado] = await Promise.all([
+    partesDelPeriodo(pedido),
+    actividadesHasta(pedido.obraId, pedido.periodo.hasta),
+    contratadoDeLaObra(pedido.obraId),
+  ]);
+  const delPeriodo = cantidadesPorItem(partes.map((p) => ({ fecha: p.fecha, actividades: p.actividades })));
+  // Spec 031, RF-68: lo acumulado desde el primer día y lo contratado del vigente.
+  const acumulado = new Map(cantidadesPorItem(todas).items.map((i) => [claveDeCantidad(i), i.cantidad]));
+  const items = conContratado(delPeriodo.items, contratado, acumulado);
+  const otras = delPeriodo.otras;
   return {
     ...encabezado(pedido, partes),
     cifras: {

@@ -86,6 +86,12 @@ import {
   etiquetaDeUnidad,
   UNIDADES_DE_ACTIVIDAD,
 } from "@/shared/catalogos/presupuesto";
+import {
+  actividadDelCatalogo,
+  catalogoFijo,
+  opcionDeActividad,
+  type CatalogoDeActividades,
+} from "@/shared/rules/actividades-de-obra";
 import { alcanza } from "@/shared/rules/permisos";
 import {
   bloqueosDelCierre,
@@ -175,17 +181,19 @@ function medidasDe(fila: FilaActividad) {
  * La clave de la unidad de una fila: la del presupuesto, la elegida en «otra», o
  * ninguna si todavía no se eligió (spec 004, RF-66, RF-70).
  */
-function unidadDe(fila: FilaActividad): string | null {
+function unidadDe(fila: FilaActividad, catalogo: CatalogoDeActividades = catalogoFijo()): string | null {
   if (fila.clave === CLAVE_OTRA_ACTIVIDAD) return fila.unidad || null;
-  return actividadPorItem(fila.clave)?.unidad ?? null;
+  // Con presupuesto, la del ítem en su capítulo (spec 031); si no, la de la lista fija.
+  const delCatalogo = actividadDelCatalogo(catalogo, fila.clave, fila.capituloId || null);
+  return delCatalogo?.unidad ?? actividadPorItem(fila.clave)?.unidad ?? null;
 }
 
 /**
  * La cantidad tal como la ve quien llena la fila: la escrita si hay, y si no, la de
  * su medida. La misma regla que aplica el servidor (spec 021, RF-99 y RF-100).
  */
-function cantidadDe(fila: FilaActividad) {
-  return resolverCantidad(unidadDe(fila), medidasDe(fila), aNumero(fila.cantidad));
+function cantidadDe(fila: FilaActividad, catalogo?: CatalogoDeActividades) {
+  return resolverCantidad(unidadDe(fila, catalogo), medidasDe(fila), aNumero(fila.cantidad));
 }
 
 /** La cantidad guardada como se pinta al abrir: vacía si es la que dan sus medidas. */
@@ -200,10 +208,11 @@ function cantidadInicial(a: {
   volumen: number | null;
 }): string {
   if (a.cantidad === null || a.cantidad === undefined) return "";
+  // La unidad guardada con la fila, que vale también para un ítem del presupuesto de la
+  // obra que no está en la lista fija (spec 031); sin ella, la de la lista fija.
   const unidad =
-    a.clave === CLAVE_OTRA_ACTIVIDAD
-      ? (UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ?? null)
-      : (actividadPorItem(a.clave)?.unidad ?? null);
+    UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ??
+    (a.clave === CLAVE_OTRA_ACTIVIDAD ? null : (actividadPorItem(a.clave)?.unidad ?? null));
   const { calculada } = resolverCantidad(
     unidad,
     calcularDimensiones({
@@ -295,6 +304,8 @@ type FilaActividad = {
    */
   id: string;
   clave: string;
+  /** El capítulo del presupuesto vigente (spec 031, RF-59); vacío con el catálogo fijo o en las viejas. */
+  capituloId: string;
   texto: string;
   /** La clave de la unidad elegida. Solo en «otra»; en las demás la pone el presupuesto. */
   unidad: string;
@@ -1560,6 +1571,7 @@ function SeccionActividades({
     parte.actividades.map((a) => ({
       id: a.id,
       clave: a.clave,
+      capituloId: a.capituloId ?? "",
       texto: a.clave === CLAVE_OTRA_ACTIVIDAD ? a.nombre : "",
       // Se guarda la etiqueta («m³»); el formulario trabaja con la clave.
       unidad: UNIDADES_DE_ACTIVIDAD.find((u) => u.etiqueta === a.unidad)?.id ?? "",
@@ -1580,6 +1592,23 @@ function SeccionActividades({
     })),
   );
   const [guardando, setGuardando] = useState(false);
+  // Spec 031: el catálogo de la obra. Con presupuesto vigente, cada actividad es un ítem
+  // dentro de su capítulo (RF-59); mientras llega, la lista fija.
+  const lecturaDelCatalogo = useListado<CatalogoDeActividades>(
+    useCallback(async () => [await api.presupuestos.catalogo(parte.obraId)], [parte.obraId]),
+  );
+  const catalogo = lecturaDelCatalogo.datos[0] ?? catalogoFijo();
+  const conPresupuesto = catalogo.origen === "presupuesto";
+
+  /** Elegir una opción: con presupuesto, el valor es «capítulo|ítem» y se guardan los dos. */
+  function elegirActividad(indice: number, valor: string) {
+    const [capituloId, item] = valor.includes("|") ? valor.split("|") : ["", valor];
+    setFilas(
+      filas.map((f, i) =>
+        i === indice ? { ...f, clave: item, capituloId, unidad: item === CLAVE_OTRA_ACTIVIDAD ? f.unidad : "" } : f,
+      ),
+    );
+  }
 
   function cambiar(indice: number, campo: keyof FilaActividad, valor: string) {
     setFilas(
@@ -1622,6 +1651,7 @@ function SeccionActividades({
             : {
                 id: f.id,
                 clave: f.clave,
+                capituloId: f.capituloId || null,
                 texto: f.texto,
                 unidad:
                   f.clave === CLAVE_OTRA_ACTIVIDAD
@@ -1654,13 +1684,38 @@ function SeccionActividades({
   // número delante (RF-78, RF-64). El buscador del selector encuentra por número o
   // por palabras porque busca en la etiqueta (RF-79). El `valor` es el ítem: es la
   // clave que viaja al servidor, no algo que alguien lea.
-  const opciones = [
-    { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
-    ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
-      valor: a.item,
-      etiqueta: etiquetaDeActividad(a),
-    })),
-  ];
+  //
+  // Spec 031: con presupuesto vigente, «ítem · capítulo · vía», con la descripción debajo
+  // y sin precios (RF-59, RF-61); el `valor` lleva el capítulo. Una fila guardada antes del
+  // presupuesto, sin capítulo, conserva su opción para seguir viéndose (RF-62).
+  const opciones = conPresupuesto
+    ? [
+        { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
+        ...catalogo.actividades.map((a) => {
+          const o = opcionDeActividad(a);
+          return { valor: o.clave, etiqueta: o.etiqueta, detalle: o.detalle };
+        }),
+        ...filas
+          .filter((f) => f.clave && f.clave !== CLAVE_OTRA_ACTIVIDAD && !f.capituloId)
+          .map((f) => ({ valor: f.clave, etiqueta: `${f.clave} · sin capítulo (registrada antes del presupuesto)` })),
+        // Guardada con un capítulo cuyo ítem quitó una versión posterior: se ve como se guardó.
+        ...filas
+          .filter((f) => f.capituloId && !actividadDelCatalogo(catalogo, f.clave, f.capituloId))
+          .map((f) => {
+            const guardada = parte.actividades.find((a) => a.id === f.id);
+            return {
+              valor: `${f.capituloId}|${f.clave}`,
+              etiqueta: [f.clave, guardada?.capitulo, guardada?.grupo].filter(Boolean).join(" · ") + " (ya no está en el presupuesto vigente)",
+            };
+          }),
+      ]
+    : [
+        { valor: CLAVE_OTRA_ACTIVIDAD, etiqueta: "Otra actividad" },
+        ...ACTIVIDADES_DEL_PRESUPUESTO.map((a) => ({
+          valor: a.item,
+          etiqueta: etiquetaDeActividad(a),
+        })),
+      ];
   const opcionesDeUnidad = UNIDADES_DE_ACTIVIDAD.map((u) => ({
     valor: u.id,
     etiqueta: u.etiqueta,
@@ -1754,17 +1809,17 @@ function SeccionActividades({
 
             const otra = fila.clave === CLAVE_OTRA_ACTIVIDAD;
             const medidas = medidasDe(fila);
-            const unidad = unidadDe(fila);
-            const cantidad = cantidadDe(fila);
+            const unidad = unidadDe(fila, catalogo);
+            const cantidad = cantidadDe(fila, catalogo);
             const faltas = intentoGuardar ? faltasDe(fila) : {};
             return (
               <FilaDeFormulario key={fila.id} ultima={ultima}>
                 <MarcaWhatsapp origen={origenDe(parte.actividades.find((a) => a.id === fila.id))} />
                 <Selector
                   etiqueta="Actividad"
-                  valor={fila.clave || null}
+                  valor={(fila.capituloId ? `${fila.capituloId}|${fila.clave}` : fila.clave) || null}
                   opciones={opciones}
-                  onChange={(v) => cambiar(indice, "clave", v ?? "")}
+                  onChange={(v) => elegirActividad(indice, v ?? "")}
                   vacio="Elija la actividad"
                   error={faltas.clave}
                   obligatorio
@@ -1889,6 +1944,7 @@ function SeccionActividades({
                   // En blanco (RF-82): una actividad propuesta de antemano se queda
                   // puesta el día que a alguien se le olvida cambiarla.
                   clave: "",
+                  capituloId: "",
                   texto: "",
                   unidad: "",
                   cantidad: "",

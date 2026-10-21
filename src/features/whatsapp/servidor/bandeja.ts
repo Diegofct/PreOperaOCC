@@ -342,6 +342,7 @@ export async function leerDetalle(
             hoy: fechaDeJornada(),
             claseDeMedidor: (vehiculoId) => claseDe.get(vehiculoId) ?? 'horometro',
             almacen: { materiales: opciones.almacen },
+            actividades: catalogos.actividades,
           })
         : [],
     complementosDelMensaje: complementos.map((c) => ({ ...c, enviadoEn: c.enviadoEn.toISOString() })),

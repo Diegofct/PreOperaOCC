@@ -82,6 +82,9 @@ export const MODULOS = [
   // Spec 030. Al final: es consulta de lo que ya guardaron los demás módulos, más el
   // registro de los mantenimientos de las máquinas.
   'reportes',
+  // Spec 031. El contrato y el presupuesto de la obra con su cliente: se arman al
+  // empezar la obra y se consultan después; en el menú van en su grupo, «Cliente».
+  'contrato',
 ] as const;
 export type Modulo = (typeof MODULOS)[number];
 
@@ -251,6 +254,18 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: NADA,
   },
+  // Spec 031, RF-2 y RF-3. El residente arma los borradores de su obra —contrato,
+  // pólizas, documentos, presupuesto y versiones—, pero **aprobar es de la gerencia**
+  // (D1): aprobar fija el valor contra el que se cobra. `aprobar` cubre también volver
+  // un contrato aprobado a borrador.
+  contrato: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar'],
+    supervisor: ['ver', 'listar', 'escribir'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -336,6 +351,7 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
  */
 const QUE_SE_INTENTABA_EN: Partial<Record<Modulo, Partial<Record<Accion, string>>>> = {
   whatsapp: { aprobar: 'aprobar ni descartar este reporte' },
+  contrato: { aprobar: 'aprobar el contrato ni el presupuesto' },
 };
 
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
@@ -406,6 +422,7 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
   laboratorio: 'Laboratorio',
   whatsapp: 'Reportes de WhatsApp',
   reportes: 'Reportes',
+  contrato: 'Contrato y Presupuesto',
 };
 
 /**

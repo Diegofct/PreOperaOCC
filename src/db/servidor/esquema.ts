@@ -67,6 +67,9 @@ import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
 import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
+import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
+import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
+import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
 import type {
   MasasDelEnsayo,
   ResultadoGranulometria,
@@ -120,6 +123,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'bitacora',
   'documento',
   'whatsapp',
+  // Spec 031: las pólizas y los documentos del contrato de una obra.
+  'contrato',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -169,6 +174,13 @@ export const tipoCreadoWhatsapp = pgEnum('tipo_creado_whatsapp', TIPOS_CREADOS);
 export const claseMantenimiento = pgEnum('clase_mantenimiento', CLASES_DE_MANTENIMIENTO);
 export const claseConIntervalo = pgEnum('clase_con_intervalo', CLASES_CON_INTERVALO);
 export const origenMantenimiento = pgEnum('origen_mantenimiento', ['panel', 'whatsapp']);
+
+/** Spec 031: los estados del contrato, del presupuesto y del registro de una póliza. */
+export const estadoContrato = pgEnum('estado_contrato', ['borrador', 'aprobado']);
+export const estadoPresupuesto = pgEnum('estado_presupuesto', ESTADOS_DE_PRESUPUESTO);
+export const estadoPolizaRegistro = pgEnum('estado_poliza_registro', ESTADOS_DE_REGISTRO_DE_POLIZA);
+export const accionContrato = pgEnum('accion_contrato', ['guardado', 'aprobado', 'a_borrador']);
+export const origenPresupuesto = pgEnum('origen_presupuesto', ['excel', 'blanco', 'copia']);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -1513,6 +1525,242 @@ export const mantenimientos = pgTable(
     // Solo un correctivo se resuelve (RF-29).
     check('ck_mantenimiento_resuelto', sql`${t.resueltoEn} is null or ${t.clase} = 'correctivo'`),
     check('ck_mantenimiento_origen', sql`(${t.origen} = 'whatsapp') = (${t.mensajeId} is not null)`),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Contrato y presupuesto de la obra (spec 031, solo del servidor)           */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * El contrato de una obra con su cliente (spec 031, RF-7 a RF-22). Uno por obra.
+ *
+ * Los integrantes del consorcio y los impuestos van en jsonb: se editan con el
+ * formulario entero, son listas cortas y los cortes de la 032 los leen completos (plan,
+ * decisiones). `version` sube en cada guardado: quien guarda con una vieja recibe un
+ * 409 en vez de pisar lo que otra persona cambió.
+ */
+export const contratos = pgTable(
+  'contratos',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    estado: estadoContrato('estado').notNull().default('borrador'),
+    contratanteNombre: text('contratante_nombre').notNull().default(''),
+    contratanteNit: text('contratante_nit').notNull().default(''),
+    contratanteDireccion: text('contratante_direccion').notNull().default(''),
+    contratanteCiudad: text('contratante_ciudad').notNull().default(''),
+    contratanteCorreo: text('contratante_correo').notNull().default(''),
+    contratanteTelefono: text('contratante_telefono').notNull().default(''),
+    representanteNombre: text('representante_nombre').notNull().default(''),
+    representanteIdentificacion: text('representante_identificacion').notNull().default(''),
+    esConsorcio: boolean('es_consorcio').notNull().default(false),
+    nombreConsorcio: text('nombre_consorcio').notNull().default(''),
+    integrantes: jsonb('integrantes').$type<IntegranteDelConsorcio[]>().notNull().default([]),
+    /** Uno de `TIPOS_DE_CONTRATO`; nulo mientras el borrador no lo dice. */
+    tipo: text('tipo'),
+    numero: text('numero').notNull().default(''),
+    objeto: text('objeto').notNull().default(''),
+    fechaInicio: date('fecha_inicio', { mode: 'string' }),
+    fechaFin: date('fecha_fin', { mode: 'string' }),
+    plazoDias: integer('plazo_dias'),
+    /** Pesos, sin decimales. */
+    valor: bigint('valor', { mode: 'number' }),
+    anticipoPorcentaje: numeric('anticipo_porcentaje', { precision: 5, scale: 2, mode: 'number' }),
+    retencionPorcentaje: numeric('retencion_porcentaje', { precision: 5, scale: 2, mode: 'number' }),
+    impuestos: jsonb('impuestos').$type<ImpuestoDelContrato[]>().notNull().default([]),
+    version: integer('version').notNull().default(0),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_contrato_obra').on(t.obraId),
+    check(
+      'ck_contrato_porcentajes',
+      sql`(${t.anticipoPorcentaje} is null or ${t.anticipoPorcentaje} between 0 and 100)
+       and (${t.retencionPorcentaje} is null or ${t.retencionPorcentaje} between 0 and 100)`,
+    ),
+    check(
+      'ck_contrato_fechas',
+      sql`${t.fechaInicio} is null or ${t.fechaFin} is null or ${t.fechaFin} >= ${t.fechaInicio}`,
+    ),
+    check('ck_contrato_aprobado', sql`${t.estado} = 'borrador' or ${t.aprobadoEn} is not null`),
+  ],
+);
+
+/** Quién guardó, aprobó o devolvió a borrador el contrato, y cuándo (RF-6, RF-19). */
+export const contratoEventos = pgTable(
+  'contrato_eventos',
+  {
+    id: text('id').primaryKey(),
+    contratoId: text('contrato_id')
+      .notNull()
+      .references(() => contratos.id),
+    accion: accionContrato('accion').notNull(),
+    /** Obligatorio al volver a borrador (RF-19). */
+    motivo: text('motivo'),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    index('ix_contrato_eventos').on(t.contratoId, t.en),
+    check(
+      'ck_contrato_evento_motivo',
+      sql`${t.accion} <> 'a_borrador' or (${t.motivo} is not null and length(trim(${t.motivo})) > 0)`,
+    ),
+  ],
+);
+
+/**
+ * Las pólizas del contrato (RF-23 a RF-26). Nada se borra: se reemplaza por otra o se
+ * anula con motivo. La vigencia (por vencer, vencida) no se guarda: la calcula
+ * `vigenciaDePoliza` con la fecha de hoy.
+ */
+export const contratoPolizas = pgTable(
+  'contrato_polizas',
+  {
+    id: text('id').primaryKey(),
+    contratoId: text('contrato_id')
+      .notNull()
+      .references(() => contratos.id),
+    /** Uno de `AMPAROS`. */
+    amparo: text('amparo').notNull(),
+    aseguradora: text('aseguradora').notNull(),
+    numero: text('numero').notNull(),
+    valor: bigint('valor', { mode: 'number' }),
+    desde: date('desde', { mode: 'string' }).notNull(),
+    hasta: date('hasta', { mode: 'string' }).notNull(),
+    /** El archivo de la póliza, opcional: una fila de `media` con dueño `contrato`. */
+    mediaId: text('media_id').references(() => media.id),
+    estado: estadoPolizaRegistro('estado').notNull().default('activa'),
+    reemplazadaPor: text('reemplazada_por').references((): AnyPgColumn => contratoPolizas.id),
+    anuladaEn: timestamp('anulada_en', { withTimezone: true, mode: 'date' }),
+    anuladaPor: text('anulada_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    creadaPor: text('creada_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadaEn: timestamp('creada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    index('ix_contrato_polizas').on(t.contratoId, t.hasta),
+    check('ck_poliza_vigencia', sql`${t.hasta} >= ${t.desde}`),
+    check(
+      'ck_poliza_anulada',
+      sql`(${t.estado} = 'anulada') = (${t.anuladaEn} is not null)
+       and (${t.anuladaEn} is null or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0))`,
+    ),
+    check('ck_poliza_reemplazada', sql`(${t.estado} = 'reemplazada') = (${t.reemplazadaPor} is not null)`),
+  ],
+);
+
+/** Los documentos del contrato (RF-27 a RF-30): se anulan con motivo, nunca se borran. */
+export const contratoDocumentos = pgTable(
+  'contrato_documentos',
+  {
+    id: text('id').primaryKey(),
+    contratoId: text('contrato_id')
+      .notNull()
+      .references(() => contratos.id),
+    /** Contrato firmado, acta de inicio, otrosí… */
+    clase: text('clase').notNull(),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    descripcion: text('descripcion').notNull().default(''),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    subidoPor: text('subido_por')
+      .notNull()
+      .references(() => usuarios.id),
+    subidoEn: timestamp('subido_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    index('ix_contrato_documentos').on(t.contratoId, t.fecha),
+    check(
+      'ck_documento_anulacion',
+      sql`${t.anuladoEn} is null
+       or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+  ],
+);
+
+/**
+ * Los presupuestos de una obra, uno por versión (RF-31 a RF-57).
+ *
+ * La estructura entera —grupos, capítulos, ítems, rubros y AIU— va en un jsonb y se
+ * reemplaza entera al guardar, con `where version = ?` (plan, decisiones): Neon por HTTP
+ * no da transacciones, y un cambio del editor tocaría muchas filas. `valor` es la copia
+ * del resumen, para listar sin leer la estructura.
+ *
+ * A lo sumo un vigente y un borrador por obra (RF-49, RF-57): lo garantizan los dos
+ * índices parciales, no la pantalla.
+ */
+export const presupuestos = pgTable(
+  'presupuestos',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    nombre: text('nombre').notNull(),
+    numeroVersion: integer('numero_version').notNull(),
+    /** El motivo de la versión: «Otrosí 1». */
+    notaVersion: text('nota_version').notNull().default(''),
+    estado: estadoPresupuesto('estado').notNull().default('borrador'),
+    estructura: jsonb('estructura').$type<EstructuraDePresupuesto>().notNull(),
+    /** Pesos: obras + rubros. Lo calcula el servidor al guardar. */
+    valor: bigint('valor', { mode: 'number' }).notNull().default(0),
+    /** El «VALOR TOTAL» del Excel importado (RF-43). */
+    valorExcel: bigint('valor_excel', { mode: 'number' }),
+    /** Importado con diferencias (RF-44). */
+    revisar: boolean('revisar').notNull().default(false),
+    origen: origenPresupuesto('origen').notNull(),
+    version: integer('version').notNull().default(0),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    descartadoPor: text('descartado_por').references(() => usuarios.id),
+    motivoDescarte: text('motivo_descarte'),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_presupuesto_version').on(t.obraId, t.numeroVersion),
+    uniqueIndex('ux_presupuesto_vigente')
+      .on(t.obraId)
+      .where(sql`estado = 'vigente'`),
+    uniqueIndex('ux_presupuesto_borrador')
+      .on(t.obraId)
+      .where(sql`estado = 'borrador'`),
+    check(
+      'ck_presupuesto_descarte',
+      sql`(${t.estado} = 'descartado') = (${t.descartadoEn} is not null)
+       and (${t.descartadoEn} is null or (${t.motivoDescarte} is not null and length(trim(${t.motivoDescarte})) > 0))`,
+    ),
+    check(
+      'ck_presupuesto_aprobado',
+      sql`${t.estado} not in ('vigente', 'reemplazado') or ${t.aprobadoEn} is not null`,
+    ),
   ],
 );
 

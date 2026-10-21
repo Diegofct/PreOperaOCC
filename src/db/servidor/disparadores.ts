@@ -37,6 +37,9 @@ const TABLAS_CON_RELOJ = [
   // Spec 030: quién cambió el intervalo y cuándo.
   'mantenimiento_intervalos',
   'mantenimiento_intervalos_vehiculo',
+  // Spec 031: el contrato y el presupuesto llevan quién los cambió y cuándo.
+  'contratos',
+  'presupuestos',
 ];
 
 const FUNCION = `

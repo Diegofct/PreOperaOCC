@@ -83,6 +83,7 @@ import {
 
 import type { Actor } from './actor';
 import { aprobarReporteDeAlmacen } from './almacen';
+import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
 import { idDeterminista } from './ids';
 import { obraDelMensaje } from './obra';
 
@@ -303,6 +304,8 @@ export async function guardarEnBitacora(datos: {
       reporte.actividades.map(async (a, i) => ({
         id: await idDeterminista(id, 'actividades', datos.renglonesOriginales?.actividades[i] ?? i),
         clave: a.clave!,
+        // Spec 031: el capítulo reconocido o elegido (RF-64 a RF-66).
+        capituloId: a.capituloId ?? null,
         texto: a.texto ?? null,
         unidad: a.unidad ?? null,
         cantidad: a.cantidad ?? null,
@@ -316,6 +319,9 @@ export async function guardarEnBitacora(datos: {
       })),
     ),
     [],
+    // Spec 031: el catálogo de la obra. El capítulo de lo que llega por WhatsApp lo
+    // reconoce la T22; hasta entonces, con presupuesto vigente, la actividad pide capítulo.
+    await catalogoDeLaObra(obraId),
   );
   if ('error' in actividades) return errorDePeticion(actividades.error, 400);
 

@@ -17,6 +17,7 @@ import { Panel, Radio } from '@/constants/theme';
 import { NOVEDADES_DE_PERSONAL, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
 import { DESTINO_OBRA, formatearAbscisa, OPCIONES_DE_PR } from '@/shared/rules/cantera';
 import { CLASES_DE_MANTENIMIENTO, NOMBRE_DE_CLASE } from '@/shared/rules/mantenimiento';
+import { opcionDeActividad } from '@/shared/rules/actividades-de-obra';
 import type { UbicacionPorValidar } from '@/shared/rules/parte';
 import { alcanza } from '@/shared/rules/permisos';
 import {
@@ -631,17 +632,38 @@ function CamposDelRenglon({
 
   if (seccion === 'actividades') {
     const a = datos as unknown as ActividadDelReporte;
+    // Spec 031, RF-66: con presupuesto vigente se elige el ítem dentro de su capítulo; el
+    // valor lleva «capítulo|ítem», como en la bitácora.
+    const conPresupuesto = opciones.actividades.origen === 'presupuesto';
     return (
       <>
         {escrito(a.itemEscrito, 'Ítem en el reporte')}
-        <Selector
-          etiqueta="Actividad"
-          valor={a.clave}
-          opciones={OPCIONES_DE_ACTIVIDAD}
-          onChange={(x) => cambiar({ clave: x })}
-          vacio="Elija la actividad"
-          ancho={320}
-        />
+        {escrito(a.capituloEscrito, 'Capítulo en el reporte')}
+        {conPresupuesto ? (
+          <Selector
+            etiqueta="Actividad"
+            valor={a.clave && a.capituloId ? `${a.capituloId}|${a.clave}` : null}
+            opciones={opciones.actividades.actividades.map((x) => {
+              const o = opcionDeActividad(x);
+              return { valor: o.clave, etiqueta: o.etiqueta, detalle: o.detalle };
+            })}
+            onChange={(x) => {
+              const [capituloId, clave] = x ? x.split('|') : [null, null];
+              cambiar({ clave, capituloId });
+            }}
+            vacio={a.itemEscrito ? `Ítem ${a.itemEscrito}: elija el capítulo` : 'Elija la actividad'}
+            ancho={420}
+          />
+        ) : (
+          <Selector
+            etiqueta="Actividad"
+            valor={a.clave}
+            opciones={OPCIONES_DE_ACTIVIDAD}
+            onChange={(x) => cambiar({ clave: x })}
+            vacio="Elija la actividad"
+            ancho={320}
+          />
+        )}
         <CampoNumero etiqueta="Cantidad" valor={a.cantidad} onChange={(n) => cambiar({ cantidad: n })} editable />
       </>
     );

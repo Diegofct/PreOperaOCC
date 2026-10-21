@@ -8,6 +8,7 @@ import {
   tiposVehiculo,
   vehiculos,
 } from '@/db/servidor/esquema';
+import { avisosDePolizas } from '@/features/contratos/servidor/polizas-y-documentos';
 import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
@@ -172,6 +173,8 @@ export async function GET(peticion: Request) {
       minutosPersonal,
       minutosExtra,
       personasContadas,
+      // Spec 031, RF-25: las pólizas por vencer o vencidas de sus obras, si ve el contrato.
+      polizas: await avisosDePolizas(sesion),
     });
   });
 }

@@ -198,6 +198,15 @@ export interface ActividadDelParte {
   unidad?: string;
   /** Cuánto se hizo, en esa unidad; `null` si no se anotó (RF-67 a RF-69, RF-74). */
   cantidad?: number | null;
+  /**
+   * El capítulo del presupuesto vigente de la obra (spec 031, RF-60). Faltan en las
+   * actividades de antes de la 031 y en las de una obra sin presupuesto: esas quedan «sin
+   * capítulo» (RF-62). El nombre del capítulo y del grupo se congelan con el parte, como
+   * `unidad`: una versión posterior que los renombre no cambia lo que dice una bitácora.
+   */
+  capituloId?: string | null;
+  capitulo?: string | null;
+  grupo?: string | null;
   /** Spec 021, RF-46. */
   origen?: OrigenWhatsapp;
 }
