@@ -17,8 +17,22 @@
 import { z } from 'zod';
 
 import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
+import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EnsayoDeObra } from '@/shared/rules/ensayos-de-obra';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '@/shared/rules/mantenimiento';
+import {
+  BASES_DE_IMPUESTO,
+  IDS_CLASE_DE_DOCUMENTO,
+  TIPOS_DE_CONTRATO,
+  type ClaseDeDocumento,
+  type TipoDeContrato,
+} from '@/shared/rules/contrato';
+import { AMPAROS, type Amparo } from '@/shared/rules/polizas';
+import type {
+  EstadoDePresupuesto,
+  EstructuraDePresupuesto,
+  ResumenDelPresupuesto,
+} from '@/shared/rules/presupuesto';
 import type { LecturaAnterior, Periodo } from '@/shared/rules/jornada';
 import type { TipoDePeriodo } from '@/shared/rules/periodos';
 import { IDS_UNIDAD, type UnidadAlmacen } from '@/shared/catalogos/almacen';
@@ -808,6 +822,8 @@ export const actividadDelParte = z.object({
    * «Falta la actividad.» genérico de `textoObligatorio`.
    */
   clave: z.string().trim().max(60),
+  /** El capítulo del presupuesto vigente (spec 031, RF-59). */
+  capituloId: z.string().trim().max(64).nullish().transform((v) => v || null),
   /** Solo cuando la actividad es «otra»: qué fue. */
   texto: textoOpcional(120),
   descripcion: textoOpcional(400).transform((v) => v ?? ''),
@@ -1005,6 +1021,10 @@ export interface ActividadDelParteFila {
   /** La etiqueta: «m³». */
   unidad?: string;
   cantidad?: number | null;
+  /** Spec 031, RF-60: el capítulo y la vía del presupuesto vigente, congelados. */
+  capituloId?: string | null;
+  capitulo?: string | null;
+  grupo?: string | null;
 }
 
 export interface FranjaDeClimaFila {
@@ -1121,6 +1141,18 @@ export interface ResumenFila {
   minutosPersonal: number;
   minutosExtra: number;
   personasContadas: number;
+  /** Spec 031, RF-25: vacía para quien no ve el contrato. */
+  polizas: {
+    id: string;
+    obraId: string;
+    obra: string;
+    amparo: Amparo;
+    aseguradora: string;
+    numero: string;
+    hasta: string;
+    vigencia: 'por_vencer' | 'vencida';
+    texto: string;
+  }[];
 }
 
 /* ------------------------------------------------------------------------ */
@@ -1766,6 +1798,8 @@ export const propuestaDeIa = z.looseObject({
           descripcion: textoDeIa,
           cantidad: numeroDeIa,
           unidad: textoDeIa,
+          /** Spec 031, RF-64: el capítulo o la vía que dice el mensaje, si lo dice. */
+          capitulo: textoDeIa,
         }),
       ),
     }),
@@ -1943,6 +1977,9 @@ export const reporteCorregido = z.object({
       z.object({
         clave: textoDeCorreccion(20),
         itemEscrito: textoDeCorreccion(40),
+        /** Spec 031: el capítulo del presupuesto vigente, reconocido o elegido al atender. */
+        capituloId: z.string().trim().max(64).nullable().optional(),
+        capituloEscrito: textoDeCorreccion(200).optional(),
         texto: textoDeCorreccion(500).optional(),
         unidad: textoDeCorreccion(20).optional(),
         descripcion: z.string().max(1000).optional(),
@@ -2251,6 +2288,11 @@ export interface DetalleDePropuesta extends PropuestaFila {
      * en centésimas (spec 023, RF-26, RF-33). Vacío si la obra no lleva almacén.
      */
     almacen: { id: string; nombre: string; unidad: UnidadAlmacen; stock: number }[];
+    /**
+     * Las actividades de la obra (spec 031, RF-66): con presupuesto vigente, cada ítem en
+     * su capítulo, para elegir el capítulo de una actividad apartada.
+     */
+    actividades: CatalogoDeActividades;
   };
 }
 
@@ -2453,3 +2495,285 @@ export interface ConsultaDeReporte {
   fecha: string;
 }
 
+
+/* ------------------------------------------------------------------------ */
+/* Contrato de la obra (spec 031)                                            */
+/* ------------------------------------------------------------------------ */
+
+const textoDelContrato = (max: number) => z.string().trim().max(max).default('');
+const porcentajeDelContrato = z.number().finite().nullable().default(null);
+
+/**
+ * Guardar el contrato de una obra (RF-7 a RF-22). `version` es la que se leyó: 0 si la
+ * obra todavía no tiene contrato. Se guarda a medias; lo imposible (fechas al revés,
+ * porcentajes fuera de 0–100) lo rechaza `faltasParaGuardarContrato` con su mensaje.
+ */
+export const contratoEditado = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+  version: z.number().int().min(0),
+  contratanteNombre: textoDelContrato(200),
+  contratanteNit: textoDelContrato(40),
+  contratanteDireccion: textoDelContrato(200),
+  contratanteCiudad: textoDelContrato(100),
+  contratanteCorreo: textoDelContrato(200),
+  contratanteTelefono: textoDelContrato(40),
+  representanteNombre: textoDelContrato(200),
+  representanteIdentificacion: textoDelContrato(40),
+  esConsorcio: z.boolean().default(false),
+  nombreConsorcio: textoDelContrato(200),
+  integrantes: z
+    .array(z.object({ nombre: textoDelContrato(200), nit: textoDelContrato(40), porcentaje: porcentajeDelContrato }))
+    .max(10, 'Un consorcio de más de diez integrantes no cabe aquí.')
+    .default([]),
+  tipo: z.enum(TIPOS_DE_CONTRATO as [TipoDeContrato, ...TipoDeContrato[]]).nullable().default(null),
+  numero: textoDelContrato(60),
+  objeto: textoDelContrato(2000),
+  fechaInicio: fechaDeJornadaZod.nullable().default(null),
+  fechaFin: fechaDeJornadaZod.nullable().default(null),
+  valor: z.number().int('El valor va en pesos, sin decimales.').nullable().default(null),
+  anticipoPorcentaje: porcentajeDelContrato,
+  retencionPorcentaje: porcentajeDelContrato,
+  impuestos: z
+    .array(
+      z.object({
+        id: textoObligatorio(64, 'el impuesto'),
+        nombre: textoDelContrato(120),
+        porcentaje: porcentajeDelContrato,
+        base: z.enum(BASES_DE_IMPUESTO),
+      }),
+    )
+    .max(20)
+    .default([]),
+});
+
+export type ContratoEditado = z.input<typeof contratoEditado>;
+
+/** Aprobar el contrato (RF-17), con la versión que se leyó. */
+export const aprobacionDeContrato = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+  version: z.number().int().min(1),
+});
+
+/** Volver a borrador un contrato aprobado exige motivo (RF-19). */
+export const contratoABorrador = aprobacionDeContrato.extend({
+  motivo: z.string().trim().min(1, 'Escriba por qué vuelve a borrador.').max(500),
+});
+
+/** Lo que responde `GET /api/panel/contrato`: el contrato (o nada) y lo que se calcula de él. */
+export interface ContratoDeObra {
+  obraId: string;
+  contrato: (Omit<ContratoEditado, 'obraId'> & {
+    id: string;
+    version: number;
+    estado: 'borrador' | 'aprobado';
+    plazoDias: number | null;
+    aprobadoEn: string | null;
+    aprobadoPor: string | null;
+  }) | null;
+  /** El valor del presupuesto vigente de la obra, o `null` si no tiene (RF-15). */
+  valorDelPresupuesto: number | null;
+  /** RF-16: solo aviso. */
+  diferencia: { diferencia: number; texto: string } | null;
+  /** Lo que todavía impide aprobar (RF-11, RF-17). */
+  faltasParaAprobar: string[];
+  eventos: { accion: 'guardado' | 'aprobado' | 'a_borrador'; motivo: string | null; quien: string; en: string }[];
+  /** De la que vence antes a la que vence después; las reemplazadas y anuladas al final (RF-23 a RF-26). */
+  polizas: PolizaDelContrato[];
+  /** Del más reciente al más antiguo, con los anulados marcados (RF-28, RF-29). */
+  documentos: DocumentoDelContrato[];
+}
+
+/** Una póliza nueva, o la que reemplaza a otra (RF-23, RF-26). */
+export const polizaNueva = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+  amparo: z.enum(AMPAROS.map((a) => a.id) as [Amparo, ...Amparo[]], { error: 'Elija el amparo.' }),
+  aseguradora: textoObligatorio(120, 'la aseguradora'),
+  numero: textoObligatorio(60, 'el número de la póliza'),
+  valor: z.number().int('El valor va en pesos, sin decimales.').min(0).nullable().default(null),
+  desde: fechaDeJornadaZod,
+  hasta: fechaDeJornadaZod,
+  /** El archivo ya subido a `contrato/archivos`, si lo hay. */
+  mediaId: z.string().trim().max(64).nullable().default(null),
+});
+
+export type PolizaNueva = z.input<typeof polizaNueva>;
+
+/** Un documento del contrato (RF-27), con su archivo ya subido. */
+export const documentoNuevo = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+  clase: z.enum(IDS_CLASE_DE_DOCUMENTO as [ClaseDeDocumento, ...ClaseDeDocumento[]], { error: 'Elija la clase de documento.' }),
+  fecha: fechaDeJornadaZod,
+  descripcion: z.string().trim().max(500).default(''),
+  mediaId: textoObligatorio(64, 'el archivo'),
+});
+
+export type DocumentoNuevo = z.input<typeof documentoNuevo>;
+
+/** Anular una póliza o un documento exige motivo (RF-26, RF-29). */
+export const anulacionEnContrato = z.object({
+  motivo: z.string().trim().min(1, 'Escriba por qué lo anula.').max(500),
+});
+
+export interface PolizaDelContrato {
+  id: string;
+  amparo: Amparo;
+  aseguradora: string;
+  numero: string;
+  valor: number | null;
+  desde: string;
+  hasta: string;
+  mediaId: string | null;
+  estado: 'activa' | 'reemplazada' | 'anulada';
+  /** Solo de las activas (RF-24). */
+  vigencia: 'vigente' | 'por_vencer' | 'vencida' | null;
+  texto: string | null;
+  reemplazadaPor: string | null;
+  motivoAnulacion: string | null;
+}
+
+export interface DocumentoDelContrato {
+  id: string;
+  clase: ClaseDeDocumento;
+  fecha: string;
+  descripcion: string;
+  mediaId: string;
+  mime: string;
+  subidoPor: string;
+  subidoEn: string;
+  anulado: { en: string; por: string; motivo: string } | null;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Presupuesto de la obra (spec 031)                                         */
+/* ------------------------------------------------------------------------ */
+
+const idDelPresupuesto = z.string().trim().min(1).max(64);
+const numeroDelPresupuesto = z.number().finite().nullable().default(null);
+
+/**
+ * La estructura entera del presupuesto, como la arma el editor (RF-31 a RF-40). Los
+ * totales que lleguen no cuentan: el servidor los recalcula (`normalizarEstructura`).
+ */
+export const estructuraDePresupuestoZod = z.object({
+  aiu: z.object({
+    administracion: z.number().finite().default(0),
+    imprevistos: z.number().finite().default(0),
+    utilidad: z.number().finite().default(0),
+  }),
+  grupos: z
+    .array(
+      z.object({
+        id: idDelPresupuesto,
+        nombre: z.string().trim().max(200).default(''),
+        capitulos: z
+          .array(
+            z.object({
+              id: idDelPresupuesto,
+              codigo: z.string().trim().max(20).default(''),
+              nombre: z.string().trim().max(200).default(''),
+              items: z
+                .array(
+                  z.object({
+                    id: idDelPresupuesto,
+                    renglon: z.number().int().positive().nullable().default(null),
+                    item: z.string().trim().max(30).default(''),
+                    icociv: z.string().trim().max(40).default(''),
+                    especificaciones: z.string().trim().max(200).default(''),
+                    descripcion: z.string().trim().max(1000).default(''),
+                    unidad: z.enum(IDS_UNIDAD_DE_ACTIVIDAD as [UnidadDeActividad, ...UnidadDeActividad[]]).nullable().default(null),
+                    unidadEscrita: z.string().trim().max(30).default(''),
+                    cantidad: numeroDelPresupuesto,
+                    valorUnitario: numeroDelPresupuesto,
+                    valorTotal: z.number().finite().default(0),
+                    totalDelExcel: z.number().finite().nullable().optional(),
+                  }),
+                )
+                .max(500),
+            }),
+          )
+          .max(200),
+      }),
+    )
+    .max(50),
+  rubros: z
+    .array(
+      z.object({
+        id: idDelPresupuesto,
+        grupoId: z.string().trim().max(64).nullable().default(null),
+        nombre: z.string().trim().min(1, 'Falta el nombre del rubro.').max(300),
+        unidad: z.string().trim().max(30).default(''),
+        cantidad: numeroDelPresupuesto,
+        valorUnitario: numeroDelPresupuesto,
+        valor: z.number().finite().default(0),
+      }),
+    )
+    .max(100),
+});
+
+/** Un presupuesto en blanco (RF-48). */
+export const presupuestoNuevo = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+  nombre: z.string().trim().min(1).max(120).default('Presupuesto'),
+});
+
+/** Guardar un borrador con la versión que se leyó (RF-47). */
+export const presupuestoEditado = z.object({
+  version: z.number().int().min(0),
+  nombre: textoObligatorio(120, 'el nombre del presupuesto'),
+  notaVersion: z.string().trim().max(300).default(''),
+  estructura: estructuraDePresupuestoZod,
+});
+
+export type PresupuestoEditado = z.input<typeof presupuestoEditado>;
+
+/** Descartar un borrador exige motivo (RF-56). */
+export const descarteDePresupuesto = z.object({
+  motivo: z.string().trim().min(1, 'Escriba por qué lo descarta.').max(500),
+});
+
+/** Una fila de la lista de presupuestos de la obra (RF-31), sin la estructura. */
+export interface PresupuestoFila {
+  id: string;
+  nombre: string;
+  numeroVersion: number;
+  notaVersion: string;
+  estado: EstadoDePresupuesto;
+  valor: number;
+  valorExcel: number | null;
+  revisar: boolean;
+  origen: 'excel' | 'blanco' | 'copia';
+  creadoEn: string;
+  aprobadoEn: string | null;
+}
+
+/** Un presupuesto con su estructura, su resumen y lo que falta para aprobarlo. */
+export interface PresupuestoDetalle extends PresupuestoFila {
+  obraId: string;
+  version: number;
+  estructura: EstructuraDePresupuesto;
+  resumen: ResumenDelPresupuesto;
+  /** Solo de un borrador (RF-50). */
+  faltasParaAprobar: string[];
+  motivoDescarte: string | null;
+}
+
+/** Aprobar un borrador (RF-49 a RF-54). `confirmar` acepta quitar ítems con cantidades reportadas. */
+export const aprobacionDePresupuesto = z.object({
+  version: z.number().int().min(0),
+  confirmar: z.boolean().default(false),
+});
+
+/** Una nueva versión del vigente, con el motivo (RF-52): «Otrosí 1». */
+export const nuevaVersionDePresupuesto = z.object({
+  nota: z.string().trim().min(1, 'Escriba el motivo de la nueva versión (p. ej. «Otrosí 1»).').max(300),
+});
+
+/** Lo que responde la vista previa de la importación (RF-43 a RF-45). */
+export interface VistaPreviaDelPresupuesto {
+  conteo: { grupos: number; capitulos: number; items: number; rubros: number };
+  valor: number;
+  valorDelExcel: number;
+  cuadra: boolean;
+  diferencias: { renglon: number; item: string; capitulo: string; calculado: number; delExcel: number }[];
+  resumen: ResumenDelPresupuesto;
+}

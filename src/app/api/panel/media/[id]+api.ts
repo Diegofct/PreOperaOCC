@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { bitacoras, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import { bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
 import { leer } from '@/features/media/servidor/almacen';
 import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
@@ -84,7 +84,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
  * defecto corregido el 2026-10-06.
  */
 async function duenoDeLaImagen(
-  tipo: 'preoperacional' | 'bitacora' | 'documento',
+  tipo: 'preoperacional' | 'bitacora' | 'documento' | 'contrato',
   duenoId: string,
 ): Promise<{ existe: boolean; obraId: string | null }> {
   const db = baseServidor();
@@ -112,6 +112,16 @@ async function duenoDeLaImagen(
       .where(eq(bitacoras.id, duenoId))
       .limit(1);
     return { existe: Boolean(vieja), obraId: vieja?.obraId ?? null };
+  }
+
+  // Spec 031: las pólizas y los documentos cuelgan del contrato, que es de una obra.
+  if (tipo === 'contrato') {
+    const [contrato] = await db
+      .select({ obraId: contratos.obraId })
+      .from(contratos)
+      .where(eq(contratos.id, duenoId))
+      .limit(1);
+    return { existe: Boolean(contrato), obraId: contrato?.obraId ?? null };
   }
 
   // Los documentos todavía no tienen dueño con obra: solo los ve la gerencia.

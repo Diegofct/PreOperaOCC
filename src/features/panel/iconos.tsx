@@ -42,6 +42,14 @@ const DIBUJOS = {
       <Path d="M8 9h8M8 12h5" />
     </>
   ),
+  // Spec 031: una hoja con su firma al pie, como un contrato.
+  contrato: (
+    <>
+      <Path d="M7 3h7l4 4v14H7z" />
+      <Path d="M14 3v4h4M10 11h5M10 14h5" />
+      <Path d="M9 18c1-1.5 2-1.5 2.5 0s1.5 1 3-0.5" />
+    </>
+  ),
   // Spec 030: unas barras sobre su eje, como en una gráfica de un reporte.
   reportes: (
     <>

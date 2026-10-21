@@ -155,7 +155,7 @@ import {
 } from '../src/constants/medidas';
 import { anchoMinimoDeColumna } from '../src/features/panel/columnas';
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
-import { conservarOrigen } from '../src/features/bitacoras/servidor/secciones';
+import { actividadesDelParte, conservarOrigen } from '../src/features/bitacoras/servidor/secciones';
 import {
   hashDeTokenDeIntegracion,
   requerirIntegracion,
@@ -236,6 +236,8 @@ import {
   viajesAgrupados,
   type ParteConPersonal,
   type ParteDelPeriodo,
+  claveDeCantidad,
+  conContratado,
 } from '../src/shared/rules/reportes';
 import {
   avisoDeLecturaDeServicio,
@@ -243,6 +245,43 @@ import {
   intervaloEfectivo,
   rangoDeMantenimiento,
 } from '../src/shared/rules/mantenimiento';
+import {
+  diferenciaConPresupuesto,
+  faltasParaAprobarContrato,
+  faltasParaGuardarContrato,
+  IMPUESTOS_SUGERIDOS,
+  plazoEnDias,
+  porcentajeValido,
+  rechazoDeArchivo as rechazoDeArchivoDelContrato,
+  TIPOS_DE_CONTRATO,
+  type ContratoParaRevisar,
+} from '../src/shared/rules/contrato';
+import { enPesos } from '../src/shared/rules/pesos';
+import { polizasConAviso, vigenciaDePoliza, type PolizaParaAviso } from '../src/shared/rules/polizas';
+import {
+  claveDeItem,
+  copiarParaNuevaVersion,
+  faltasParaAprobarPresupuesto,
+  faltasParaGuardarPresupuesto,
+  itemsQueDesaparecen,
+  normalizarEstructura,
+  resumenDelPresupuesto,
+  totalDelItem,
+  unidadDelPresupuesto,
+  type EstructuraDePresupuesto,
+  type ItemDelPresupuesto,
+} from '../src/shared/rules/presupuesto';
+import { leerFormulario, type Celda } from '../src/shared/rules/formulario-presupuesto';
+import { hojasDelLibro } from '../src/features/presupuestos/servidor/leer-excel';
+import {
+  actividadDelCatalogo,
+  buscarActividad,
+  capitulosDelItem,
+  catalogoDelPresupuesto,
+  catalogoFijo,
+  opcionDeActividad,
+  reconocerCapitulo,
+} from '../src/shared/rules/actividades-de-obra';
 import {
   ensayosDeLosPartes,
   filtrarEnsayosDeObra,
@@ -2386,9 +2425,10 @@ prueba('la gerencia alcanza todos los módulos', () => {
   assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
 });
 
-prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera, laboratorio y WhatsApp', () => {
+prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera, laboratorio, WhatsApp, Reportes y Contrato', () => {
   // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta), por
-  // 018 / RF-7 (laboratorio, donde además aprueba) y por 021 / RF-14 (la bandeja).
+  // 018 / RF-7 (laboratorio, donde además aprueba), por 021 / RF-14 (la bandeja), por
+  // 030 / RF-1 (Reportes) y por 031 / RF-2 (Contrato y Presupuesto).
   assert.deepEqual(modulosVisibles('supervisor'), [
     'inicio',
     'asignaciones',
@@ -2399,6 +2439,7 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
     'laboratorio',
     'whatsapp',
     'reportes',
+    'contrato',
   ]);
 });
 
@@ -2558,6 +2599,7 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
     'laboratorio',
     'whatsapp',
     'reportes',
+    'contrato',
   ]);
 });
 
@@ -2631,11 +2673,12 @@ function menuDe(rol: Rol, modulos = TODOS_LOS_MODULOS) {
   return gruposDelMenu(modulosVisibles(rol, modulos)).map((g) => [g.titulo, g.modulos]);
 }
 
-prueba('el menú de la gerencia lleva los cuatro grupos y los doce módulos (022/RF-3; 030/RF-1)', () => {
+prueba('el menú de la gerencia lleva los cinco grupos y los trece módulos (022/RF-3; 030/RF-1; 031/RF-1)', () => {
   assert.deepEqual(menuDe('admin'), [
     [null, ['inicio']],
     ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
     ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
+    ['Cliente', ['contrato']],
     ['Administración', ['obras', 'personas', 'vehiculos', 'asignaciones']],
   ]);
 });
@@ -2645,6 +2688,7 @@ prueba('el residente ve «Administración» solo con Asignaciones (022/RF-2, RF-
     [null, ['inicio']],
     ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
     ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
+    ['Cliente', ['contrato']],
     ['Administración', ['asignaciones']],
   ]);
 });
@@ -2831,9 +2875,10 @@ prueba('el residente aprueba y anula ensayos, pero no los registra', () => {
   for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
     assert.ok(alcanza('admin', 'laboratorio', accion), accion);
   }
-  // Aprobar no existe fuera del laboratorio y, desde la spec 021, de la bandeja de
-  // WhatsApp, donde aprobar un reporte es lo que lo pasa a la bitácora.
-  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio' && m !== 'whatsapp')) {
+  // Aprobar no existe fuera del laboratorio; desde la spec 021, de la bandeja de
+  // WhatsApp, donde aprobar un reporte es lo que lo pasa a la bitácora; y desde la 031,
+  // de Contrato y Presupuesto, donde aprobar fija el valor contra el que se cobra.
+  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio' && m !== 'whatsapp' && m !== 'contrato')) {
     for (const rol of ROLES) {
       assert.equal(alcanza(rol, modulo, 'aprobar'), false, `${rol} ${modulo}/aprobar`);
     }
@@ -9790,7 +9835,655 @@ prueba('la salida del clasificador con mantenimientos pasa por el contrato (030/
   );
 });
 
+prueba('031/RF-1 a RF-3: Contrato y Presupuesto es de la gerencia y del residente, y solo la gerencia aprueba', () => {
+  for (const rol of ['admin', 'supervisor'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir'] as const) {
+      assert.ok(alcanza(rol, 'contrato', accion), `${rol} contrato/${accion}`);
+    }
+    assert.ok(modulosVisibles(rol).includes('contrato'), rol);
+  }
+  assert.equal(alcanza('admin', 'contrato', 'aprobar'), true);
+  assert.equal(alcanza('supervisor', 'contrato', 'aprobar'), false);
+  for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
+      assert.equal(alcanza(rol, 'contrato', accion), false, `${rol} contrato/${accion}`);
+    }
+    assert.ok(!modulosVisibles(rol).includes('contrato'), rol);
+  }
+  assert.equal(moduloApagado('contrato', { almacen: false, cantera: false, laboratorio: false }), false);
+  assert.deepEqual(gruposDelMenu(modulosVisibles('supervisor')).find((g) => g.titulo === 'Cliente')?.modulos, ['contrato']);
+  assert.equal(moduloDeLaRuta('/panel/contrato'), 'contrato');
+});
+
+// ── Spec 031: el contrato ──
+
+const CONTRATO_VACIO: ContratoParaRevisar = {
+  contratanteNombre: '',
+  esConsorcio: false,
+  nombreConsorcio: '',
+  integrantes: [],
+  tipo: null,
+  numero: '',
+  fechaInicio: null,
+  fechaFin: null,
+  valor: null,
+  anticipoPorcentaje: null,
+  retencionPorcentaje: null,
+  impuestos: [],
+};
+
+const CONTRATO_COMPLETO: ContratoParaRevisar = {
+  contratanteNombre: 'INVIAS',
+  esConsorcio: true,
+  nombreConsorcio: 'Consorcio Magdalena Medio',
+  integrantes: [
+    { nombre: 'OCC', nit: '900.000.001', porcentaje: 60 },
+    { nombre: 'Elemental', nit: '900.000.002', porcentaje: 40 },
+  ],
+  tipo: 'precios_unitarios',
+  numero: '2026-0118',
+  fechaInicio: '2026-10-01',
+  fechaFin: '2026-10-31',
+  valor: 54_441_800_920,
+  anticipoPorcentaje: 20,
+  retencionPorcentaje: 5,
+  impuestos: [{ id: 'i1', nombre: 'Retefuente', porcentaje: 2, base: 'corte' }],
+};
+
+prueba('031/RF-13: el plazo son los días entre el inicio y el fin', () => {
+  assert.equal(plazoEnDias('2026-10-01', '2026-10-31'), 30);
+  assert.equal(plazoEnDias('2026-10-01', '2026-10-01'), 0);
+  // Cruza de año y un febrero bisiesto.
+  assert.equal(plazoEnDias('2027-12-15', '2028-03-01'), 77);
+  assert.equal(plazoEnDias('2026-10-31', '2026-10-01'), null);
+  assert.equal(plazoEnDias(null, '2026-10-01'), null);
+});
+
+prueba('031/RF-14, RF-22: no se guarda con el fin antes del inicio ni un porcentaje imposible', () => {
+  assert.deepEqual(faltasParaGuardarContrato(CONTRATO_VACIO), []);
+  assert.deepEqual(faltasParaGuardarContrato(CONTRATO_COMPLETO), []);
+  assert.equal(porcentajeValido(-1), false);
+  assert.equal(porcentajeValido(0), true);
+  assert.equal(porcentajeValido(100), true);
+  assert.equal(porcentajeValido(101), false);
+  assert.equal(porcentajeValido(null), true);
+  const malo = {
+    ...CONTRATO_COMPLETO,
+    fechaFin: '2026-09-30',
+    anticipoPorcentaje: 101,
+    impuestos: [{ id: 'i1', nombre: 'ReteICA', porcentaje: -1, base: 'corte' as const }],
+  };
+  assert.deepEqual(faltasParaGuardarContrato(malo), [
+    'La fecha de fin es anterior a la de inicio.',
+    'El anticipo debe estar entre 0 % y 100 %.',
+    'ReteICA: el porcentaje debe estar entre 0 % y 100 %.',
+  ]);
+});
+
+prueba('031/RF-11, RF-17: lo que falta para aprobar, con la suma del consorcio', () => {
+  assert.deepEqual(faltasParaAprobarContrato(CONTRATO_COMPLETO), []);
+  assert.deepEqual(faltasParaAprobarContrato(CONTRATO_VACIO), [
+    'Falta el nombre del contratante.',
+    'Falta el tipo de contrato.',
+    'Falta el número del contrato.',
+    'Falta la fecha de inicio.',
+    'Falta la fecha de fin.',
+    'Falta el valor del contrato.',
+  ]);
+  const noventaYNueve = {
+    ...CONTRATO_COMPLETO,
+    integrantes: [
+      { nombre: 'OCC', nit: '', porcentaje: 59 },
+      { nombre: 'Elemental', nit: '', porcentaje: 40 },
+    ],
+  };
+  assert.deepEqual(faltasParaAprobarContrato(noventaYNueve), [
+    'Las participaciones de los integrantes suman 99 %; deben sumar 100 %.',
+  ]);
+  // Sin consorcio, los integrantes no cuentan.
+  assert.deepEqual(faltasParaAprobarContrato({ ...noventaYNueve, esConsorcio: false }), []);
+  // Un impuesto sugerido sin porcentaje (ReteICA) no deja aprobar hasta escribirlo.
+  const conReteIca = {
+    ...CONTRATO_COMPLETO,
+    impuestos: [{ id: 'i2', ...IMPUESTOS_SUGERIDOS[2] }],
+  };
+  assert.deepEqual(faltasParaAprobarContrato(conReteIca), ['ReteICA: falta el porcentaje.']);
+  assert.equal(TIPOS_DE_CONTRATO.length, 13);
+});
+
+prueba('031/RF-16, RF-70: la diferencia con el presupuesto, en pesos', () => {
+  assert.equal(enPesos(54_441_800_920), '$ 54.441.800.920');
+  assert.equal(enPesos(0), '$ 0');
+  assert.equal(enPesos(-1500.4), '-$ 1.500');
+  assert.equal(diferenciaConPresupuesto(100, 100), null);
+  assert.equal(diferenciaConPresupuesto(null, 100), null);
+  assert.deepEqual(diferenciaConPresupuesto(54_441_800_920, 54_000_000_000), {
+    diferencia: 441_800_920,
+    texto: 'El contrato vale $ 441.800.920 más que el presupuesto vigente.',
+  });
+  assert.equal(diferenciaConPresupuesto(1_000, 1_500)?.texto, 'El contrato vale $ 500 menos que el presupuesto vigente.');
+});
+
+prueba('031/RF-30: el contrato acepta PDF o imagen de hasta 20 MB', () => {
+  assert.equal(rechazoDeArchivoDelContrato('application/pdf', 1000), null);
+  assert.equal(rechazoDeArchivoDelContrato('image/jpeg', 20 * 1024 * 1024), null);
+  assert.equal(rechazoDeArchivoDelContrato('image/png', 20 * 1024 * 1024 + 1)?.estado, 413);
+  assert.equal(
+    rechazoDeArchivoDelContrato('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 1000)?.estado,
+    415,
+  );
+  assert.equal(rechazoDeArchivoDelContrato('application/pdf', 0)?.estado, 422);
+});
+
+// ── Spec 031: las pólizas ──
+
+prueba('031/RF-24: vigente, por vencer desde 30 días antes y vencida', () => {
+  assert.deepEqual(vigenciaDePoliza('2026-12-31', '2026-10-20'), { vigencia: 'vigente', dias: 72, texto: 'Vence en 72 días' });
+  // 31 días antes todavía es vigente; 30 ya avisa.
+  assert.equal(vigenciaDePoliza('2026-11-20', '2026-10-20').vigencia, 'vigente');
+  assert.deepEqual(vigenciaDePoliza('2026-11-19', '2026-10-20'), { vigencia: 'por_vencer', dias: 30, texto: 'Vence en 30 días' });
+  assert.equal(vigenciaDePoliza('2026-10-21', '2026-10-20').texto, 'Vence mañana');
+  // El día del fin todavía cubre.
+  assert.deepEqual(vigenciaDePoliza('2026-10-20', '2026-10-20'), { vigencia: 'por_vencer', dias: 0, texto: 'Vence hoy' });
+  assert.deepEqual(vigenciaDePoliza('2026-10-19', '2026-10-20'), { vigencia: 'vencida', dias: 1, texto: 'Venció ayer' });
+  assert.equal(vigenciaDePoliza('2026-10-10', '2026-10-20').texto, 'Venció hace 10 días');
+});
+
+prueba('031/RF-25, RF-26: solo avisan las activas por vencer o vencidas, de la más urgente', () => {
+  const polizas: PolizaParaAviso[] = [
+    { id: 'lejos', amparo: 'cumplimiento', numero: '1', hasta: '2027-06-30', estado: 'activa' },
+    { id: 'pronto', amparo: 'anticipo', numero: '2', hasta: '2026-11-09', estado: 'activa' },
+    { id: 'vencida', amparo: 'rce', numero: '3', hasta: '2026-10-01', estado: 'activa' },
+    { id: 'reemplazada', amparo: 'salarios', numero: '4', hasta: '2026-10-05', estado: 'reemplazada' },
+    { id: 'anulada', amparo: 'estabilidad', numero: '5', hasta: '2026-10-25', estado: 'anulada' },
+  ];
+  assert.deepEqual(
+    polizasConAviso(polizas, '2026-10-20').map((p) => [p.id, p.vigencia, p.texto]),
+    [
+      ['vencida', 'vencida', 'Venció hace 19 días'],
+      ['pronto', 'por_vencer', 'Vence en 20 días'],
+    ],
+  );
+});
+
+// ── Spec 031: el presupuesto ──
+
+function itemDePrueba(id: string, item: string, cantidad: number | null, valorUnitario: number | null): ItemDelPresupuesto {
+  return {
+    id,
+    renglon: null,
+    item,
+    icociv: '',
+    especificaciones: '',
+    descripcion: `Descripción de ${item}`,
+    unidad: 'm3',
+    unidadEscrita: 'm3',
+    cantidad,
+    valorUnitario,
+    valorTotal: 0,
+  };
+}
+
+/** Dos vías con el mismo ítem 4.1.8 en su capítulo de alcantarillas, y tres rubros. */
+const PRESUPUESTO_DE_PRUEBA: EstructuraDePresupuesto = normalizarEstructura({
+  aiu: { administracion: 0.2623, imprevistos: 0.01, utilidad: 0.05 },
+  grupos: [
+    {
+      id: 'g1',
+      nombre: 'Circuito Remedios',
+      capitulos: [
+        {
+          id: 'c1',
+          codigo: '01',
+          nombre: 'Construcción de alcantarillas',
+          items: [itemDePrueba('i1', '4.1.8', 2006, 55525), itemDePrueba('i2', '2.8', 42, 242062)],
+        },
+      ],
+    },
+    {
+      id: 'g2',
+      nombre: 'Vía La Ye–Yondo',
+      capitulos: [
+        { id: 'c2', codigo: '01', nombre: 'Construcción de alcantarillas', items: [itemDePrueba('i3', '4.1.8', 100.12345, 55525)] },
+      ],
+    },
+  ],
+  rubros: [
+    { id: 'r1', grupoId: 'g1', nombre: 'Plan de manejo ambiental', unidad: 'estimado', cantidad: null, valorUnitario: null, valor: 218336960 },
+    { id: 'r2', grupoId: 'g1', nombre: 'Caracterización vial', unidad: 'Km', cantidad: 25, valorUnitario: 1055961, valor: 1 },
+    { id: 'r3', grupoId: null, nombre: 'Actualización de precios', unidad: 'estimado', cantidad: null, valorUnitario: null, valor: 3817063720 },
+  ],
+});
+
+prueba('031/RF-35, RF-69: el total del ítem al peso y las cantidades con tres decimales', () => {
+  assert.equal(totalDelItem(2006, 55525), 111383150);
+  assert.equal(totalDelItem(0.3335, 3), 1);
+  assert.equal(totalDelItem(null, 55525), 0);
+  const [, via2] = PRESUPUESTO_DE_PRUEBA.grupos;
+  assert.equal(via2.capitulos[0].items[0].cantidad, 100.123);
+  assert.equal(via2.capitulos[0].items[0].valorTotal, 5559330);
+  // Un total inventado que llega se recalcula; el rubro con cantidad y precio, también.
+  assert.equal(PRESUPUESTO_DE_PRUEBA.rubros[1].valor, 26399025);
+});
+
+prueba('031/RF-36 a RF-40: subtotales por capítulo y grupo, rubros y valor con el AIU incluido', () => {
+  const r = resumenDelPresupuesto(PRESUPUESTO_DE_PRUEBA);
+  assert.deepEqual(
+    r.grupos.map((g) => [g.nombre, g.subtotal, g.rubros, g.capitulos.map((c) => c.subtotal)]),
+    [
+      ['Circuito Remedios', 111383150 + 10166604, 218336960 + 26399025, [121549754]],
+      ['Vía La Ye–Yondo', 5559330, 0, [5559330]],
+    ],
+  );
+  assert.equal(r.obras, 127109084);
+  assert.equal(r.rubros, 218336960 + 26399025 + 3817063720);
+  assert.equal(r.valor, r.obras + r.rubros);
+  assert.equal(r.items, 3);
+  assert.deepEqual(r.aiu, { administracion: 26.23, imprevistos: 1, utilidad: 5, total: 32.23 });
+  // Sin grupos con nombre (RF-33): el resumen es el mismo, con un grupo vacío.
+  const sinGrupos = resumenDelPresupuesto({ ...PRESUPUESTO_DE_PRUEBA, grupos: [{ ...PRESUPUESTO_DE_PRUEBA.grupos[0], nombre: '' }] });
+  assert.equal(sinGrupos.grupos[0].nombre, '');
+  assert.equal(sinGrupos.obras, 121549754);
+});
+
+prueba('031/RF-47: un borrador no se guarda con ids repetidos ni valores negativos', () => {
+  assert.deepEqual(faltasParaGuardarPresupuesto(PRESUPUESTO_DE_PRUEBA), []);
+  const malo = copiarParaNuevaVersion(PRESUPUESTO_DE_PRUEBA);
+  malo.grupos[1].capitulos[0].id = 'c1';
+  malo.grupos[1].capitulos[0].items[0].cantidad = -1;
+  malo.rubros[0].grupoId = 'g9';
+  malo.aiu.utilidad = 5;
+  assert.deepEqual(faltasParaGuardarPresupuesto(malo), [
+    'Los porcentajes del AIU van entre 0 % y 100 %.',
+    'Hay dos grupos o capítulos con el mismo identificador (c1).',
+    'Ítem 4.1.8: la cantidad no puede ser negativa.',
+    'El rubro «Plan de manejo ambiental» es de un grupo que ya no está.',
+  ]);
+});
+
+prueba('031/RF-50: no se aprueba sin ítems ni con un ítem incompleto', () => {
+  assert.deepEqual(faltasParaAprobarPresupuesto(PRESUPUESTO_DE_PRUEBA), []);
+  assert.deepEqual(faltasParaAprobarPresupuesto({ aiu: PRESUPUESTO_DE_PRUEBA.aiu, grupos: [], rubros: [] }), [
+    'El presupuesto no tiene ítems.',
+  ]);
+  const incompleto = copiarParaNuevaVersion(PRESUPUESTO_DE_PRUEBA);
+  const item = incompleto.grupos[1].capitulos[0].items[0];
+  item.unidad = null;
+  item.unidadEscrita = 'gl';
+  item.cantidad = 0;
+  item.valorUnitario = null;
+  assert.deepEqual(faltasParaAprobarPresupuesto(incompleto), [
+    'Ítem 4.1.8 (Construcción de alcantarillas · Vía La Ye–Yondo): la unidad «gl» no es una de las de la bitácora.',
+    'Ítem 4.1.8 (Construcción de alcantarillas · Vía La Ye–Yondo): falta la cantidad.',
+    'Ítem 4.1.8 (Construcción de alcantarillas · Vía La Ye–Yondo): falta el valor unitario.',
+  ]);
+});
+
+prueba('031/RF-52 a RF-54: la nueva versión conserva los ids y avisa lo reportado que desaparece', () => {
+  const v2 = copiarParaNuevaVersion(PRESUPUESTO_DE_PRUEBA);
+  assert.deepEqual(v2, PRESUPUESTO_DE_PRUEBA);
+  assert.notEqual(v2.grupos[0], PRESUPUESTO_DE_PRUEBA.grupos[0]);
+  // Cambiar la copia no toca la vigente.
+  v2.grupos[0].capitulos[0].items = v2.grupos[0].capitulos[0].items.filter((i) => i.item !== '2.8');
+  v2.grupos[1].capitulos[0].items = [];
+  assert.equal(PRESUPUESTO_DE_PRUEBA.grupos[0].capitulos[0].items.length, 2);
+  // Se van 2.8 de c1 (con 12 m³ reportados) y 4.1.8 de c2 (sin nada reportado).
+  const reportado = new Map([
+    [claveDeItem('c1', '2.8'), 12],
+    [claveDeItem('c1', '4.1.8'), 300],
+  ]);
+  assert.deepEqual(itemsQueDesaparecen(PRESUPUESTO_DE_PRUEBA, v2, reportado), [
+    { item: '2.8', capituloId: 'c1', capitulo: 'Construcción de alcantarillas', grupo: 'Circuito Remedios', reportado: 12 },
+  ]);
+});
+
+prueba('031/RF-34: las unidades del formulario se leen como las de la bitácora', () => {
+  assert.equal(unidadDelPresupuesto('m3'), 'm3');
+  assert.equal(unidadDelPresupuesto('m³'), 'm3');
+  assert.equal(unidadDelPresupuesto('M2'), 'm2');
+  assert.equal(unidadDelPresupuesto('m'), 'm');
+  assert.equal(unidadDelPresupuesto('kg'), 'kg');
+  assert.equal(unidadDelPresupuesto('Und'), 'und');
+  assert.equal(unidadDelPresupuesto('un'), 'und');
+  assert.equal(unidadDelPresupuesto('m3-Km'), 'm3_km');
+  assert.equal(unidadDelPresupuesto('m3-km'), 'm3_km');
+  assert.equal(unidadDelPresupuesto('estimado'), null);
+  assert.equal(unidadDelPresupuesto('Km'), null);
+});
+
+
+// ── Spec 031: las actividades de la obra ──
+
+/** El de PRESUPUESTO_DE_PRUEBA con los nombres del formulario de OCC. */
+const PRESUPUESTO_CON_VIAS: EstructuraDePresupuesto = {
+  ...PRESUPUESTO_DE_PRUEBA,
+  grupos: [
+    {
+      ...PRESUPUESTO_DE_PRUEBA.grupos[0],
+      nombre: 'Circuito Remedios - La Y De La Virgen - Puerto Berrío',
+      capitulos: [
+        { ...PRESUPUESTO_DE_PRUEBA.grupos[0].capitulos[0], nombre: 'CONSTRUCCIÓN DE ALCANTARILLAS' },
+        { id: 'c3', codigo: '02', nombre: 'CONSTRUCCIÓN DE CUNETA', items: [itemDePrueba('i4', '4.1.8', 4345, 55525)] },
+      ],
+    },
+    {
+      ...PRESUPUESTO_DE_PRUEBA.grupos[1],
+      nombre: 'VIA LA YE-YONDO',
+      capitulos: [
+        { ...PRESUPUESTO_DE_PRUEBA.grupos[1].capitulos[0], nombre: 'CONSTRUCCIÓN DE ALCANTARILLAS' },
+        { id: 'c4', codigo: '02', nombre: 'CONSTRUCCIÓN DE CUNETA', items: [itemDePrueba('i5', '4.1.8', 5214, 55525)] },
+      ],
+    },
+  ],
+};
+
+prueba('031/RF-58, RF-59: el catálogo fijo sin capítulo y el del presupuesto con capítulo y grupo', () => {
+  const fijo = catalogoFijo();
+  assert.equal(fijo.origen, 'fijo');
+  assert.equal(fijo.actividades.length, 31);
+  assert.ok(fijo.actividades.every((a) => a.capituloId === null && a.clave === a.item));
+  const catalogo = catalogoDelPresupuesto(PRESUPUESTO_CON_VIAS);
+  assert.equal(catalogo.origen, 'presupuesto');
+  assert.deepEqual(
+    catalogo.actividades.map((a) => [a.clave, a.capitulo, a.grupo?.slice(0, 8)]),
+    [
+      ['c1|4.1.8', 'CONSTRUCCIÓN DE ALCANTARILLAS', 'Circuito'],
+      ['c1|2.8', 'CONSTRUCCIÓN DE ALCANTARILLAS', 'Circuito'],
+      ['c3|4.1.8', 'CONSTRUCCIÓN DE CUNETA', 'Circuito'],
+      ['c2|4.1.8', 'CONSTRUCCIÓN DE ALCANTARILLAS', 'VIA LA Y'],
+      ['c4|4.1.8', 'CONSTRUCCIÓN DE CUNETA', 'VIA LA Y'],
+    ],
+  );
+  // Sin grupos, el grupo es nulo; y un ítem sin unidad no se ofrece.
+  const sinGrupo = copiarParaNuevaVersion(PRESUPUESTO_DE_PRUEBA);
+  sinGrupo.grupos[1].nombre = ' ';
+  sinGrupo.grupos[0].capitulos[0].items[1].unidad = null;
+  const otro = catalogoDelPresupuesto(sinGrupo);
+  assert.equal(otro.actividades.length, 2);
+  assert.equal(otro.actividades[1].grupo, null);
+});
+
+prueba('031/RF-59, RF-61: la etiqueta con capítulo y grupo, sin precios, y la búsqueda sin tildes', () => {
+  const catalogo = catalogoDelPresupuesto(PRESUPUESTO_CON_VIAS);
+  const opcion = opcionDeActividad(catalogo.actividades[3]);
+  assert.equal(opcion.etiqueta, '4.1.8 · CONSTRUCCIÓN DE ALCANTARILLAS · VIA LA YE-YONDO');
+  assert.equal(opcion.detalle, 'Descripción de 4.1.8');
+  assert.doesNotMatch(`${opcion.etiqueta} ${opcion.detalle}`, /\$/);
+  assert.equal(opcionDeActividad(catalogoFijo().actividades[0]).etiqueta.startsWith('2.8 · '), true);
+  // Por número, por capítulo sin tilde y por descripción.
+  assert.equal(buscarActividad(catalogo, '4.1.8').length, 4);
+  assert.deepEqual(buscarActividad(catalogo, 'cuneta yondo').map((a) => a.clave), []);
+  assert.deepEqual(buscarActividad(catalogo, 'cuneta').map((a) => a.clave), ['c3|4.1.8', 'c4|4.1.8']);
+  assert.deepEqual(buscarActividad(catalogo, 'construccion de alcantarillas · via').map((a) => a.clave), ['c2|4.1.8']);
+  assert.equal(buscarActividad(catalogoFijo(), 'excavacion').length > 0, true);
+  assert.equal(actividadDelCatalogo(catalogo, '4.1.8', 'c4')?.capitulo, 'CONSTRUCCIÓN DE CUNETA');
+  assert.equal(actividadDelCatalogo(catalogo, '2.8', 'c4'), undefined);
+  assert.equal(actividadDelCatalogo(catalogoFijo(), '4.1.8', null)?.capitulo, null);
+});
+
+prueba('031/RF-64 a RF-66: el capítulo se reconoce por lo escrito, y sin pista o con empate no', () => {
+  const catalogo = catalogoDelPresupuesto(PRESUPUESTO_CON_VIAS);
+  const posibles = capitulosDelItem(catalogo, '4.1.8');
+  assert.equal(posibles.length, 4);
+  assert.equal(capitulosDelItem(catalogo, '2.8').length, 1);
+  assert.equal(reconocerCapitulo('excavación alcantarilla vía Ye-Yondo K0+120', posibles)?.clave, 'c2|4.1.8');
+  assert.equal(reconocerCapitulo('cuneta sector Remedios', posibles)?.clave, 'c3|4.1.8');
+  // «cuneta» sola está en las dos vías: empate.
+  assert.equal(reconocerCapitulo('excavación para la cuneta', posibles), null);
+  assert.equal(reconocerCapitulo('excavación en el K1+200', posibles), null);
+  assert.equal(reconocerCapitulo('', posibles), null);
+});
+
+prueba('031/RF-58 a RF-63: la actividad de la bitácora con el presupuesto vigente lleva su capítulo', () => {
+  const catalogo = catalogoDelPresupuesto(PRESUPUESTO_CON_VIAS);
+  const base = {
+    id: 'act-031',
+    clave: '4.1.8',
+    descripcion: '',
+    observaciones: '',
+    longitud: null,
+    ancho: null,
+    alto: null,
+    area: null,
+    volumen: null,
+    cantidad: 30,
+  };
+  // Con capítulo: el ítem de ese capítulo, con capítulo y grupo congelados (RF-60).
+  const conCapitulo = construirActividadDelParte({ ...base, capituloId: 'c4' }, catalogo)!;
+  assert.deepEqual(
+    [conCapitulo.item, conCapitulo.unidad, conCapitulo.cantidad, conCapitulo.capituloId, conCapitulo.capitulo, conCapitulo.grupo],
+    ['4.1.8', 'm³', 30, 'c4', 'CONSTRUCCIÓN DE CUNETA', 'VIA LA YE-YONDO'],
+  );
+  assert.doesNotMatch(JSON.stringify(conCapitulo), /valor/i);
+  // Sin capítulo, o con uno donde no está el ítem, no hay actividad.
+  assert.equal(construirActividadDelParte(base, catalogo), null);
+  assert.equal(construirActividadDelParte({ ...base, clave: '2.8', capituloId: 'c4' }, catalogo), null);
+  // Sin presupuesto, la lista fija de siempre, sin capítulo (RF-58).
+  const fija = construirActividadDelParte({ ...base, capituloId: 'c4' })!;
+  assert.equal(fija.item, '4.1.8');
+  assert.equal('capituloId' in fija, false);
+  // «Otra actividad» sigue igual (RF-63).
+  assert.equal(
+    construirActividadDelParte({ ...base, clave: CLAVE_OTRA_ACTIVIDAD, texto: 'Limpieza', unidad: 'm2' }, catalogo)?.nombre,
+    'Limpieza',
+  );
+
+  // En la sección: una nueva sin capítulo se explica; una vieja sin capítulo se conserva (RF-62).
+  const sinCapitulo = actividadesDelParte([{ ...base, id: 'nueva' }], [], catalogo);
+  assert.deepEqual(sinCapitulo, { error: 'Elija el capítulo de la actividad 4.1.8.' });
+  const vieja = construirActividadDelParte({ ...base, id: 'vieja' })!;
+  const seccion = actividadesDelParte([{ ...base, id: 'vieja' }, { ...base, id: 'nueva', capituloId: 'c2' }], [vieja], catalogo);
+  assert.ok('filas' in seccion);
+  if ('filas' in seccion) {
+    assert.deepEqual(
+      seccion.filas.map((f) => [f.id, f.capituloId ?? null]),
+      [
+        ['vieja', null],
+        ['nueva', 'c2'],
+      ],
+    );
+  }
+  assert.deepEqual(actividadesDelParte([{ ...base, id: 'x', capituloId: 'c9' }], [], catalogo), {
+    error: 'La actividad 4.1.8 no está en ese capítulo del presupuesto vigente de la obra.',
+  });
+  // Una guardada con capítulo cuyo ítem quitó una versión posterior se conserva, con su capítulo.
+  const sinEl28 = copiarParaNuevaVersion(PRESUPUESTO_CON_VIAS);
+  sinEl28.grupos[0].capitulos[0].items = sinEl28.grupos[0].capitulos[0].items.filter((i) => i.item !== '2.8');
+  const del28 = construirActividadDelParte({ ...base, id: 'a28', clave: '2.8', capituloId: 'c1', cantidad: 12 }, catalogo)!;
+  const conservada = actividadesDelParte([{ ...base, id: 'a28', clave: '2.8', capituloId: 'c1', cantidad: 12 }], [del28], catalogoDelPresupuesto(sinEl28));
+  assert.ok('filas' in conservada);
+  if ('filas' in conservada) {
+    assert.deepEqual(
+      [conservada.filas[0].item, conservada.filas[0].capituloId, conservada.filas[0].capitulo, conservada.filas[0].cantidad],
+      ['2.8', 'c1', 'CONSTRUCCIÓN DE ALCANTARILLAS', 12],
+    );
+  }
+});
+
+prueba('031/RF-68: Reportes cuenta cada ítem dentro de su capítulo, con lo contratado y el %', () => {
+  const base = { nombre: 'Excavación', descripcion: '', unidad: 'm³' };
+  const partes = [
+    {
+      fecha: '2026-10-05',
+      actividades: [
+        { ...base, item: '4.1.8', cantidad: 100, capituloId: 'c1', capitulo: 'ALCANTARILLAS', grupo: 'Remedios' },
+        { ...base, item: '4.1.8', cantidad: 40, capituloId: 'c4', capitulo: 'CUNETA', grupo: 'Ye-Yondo' },
+        // De antes del presupuesto: sin capítulo, suma aparte por ítem.
+        { ...base, item: '4.1.8', cantidad: 7 },
+      ],
+    },
+    { fecha: '2026-10-06', actividades: [{ ...base, item: '4.1.8', cantidad: 50, capituloId: 'c1', capitulo: 'ALCANTARILLAS', grupo: 'Remedios' }] },
+  ];
+  const { items } = cantidadesPorItem(partes);
+  assert.deepEqual(
+    items.map((i) => [claveDeCantidad(i), i.capitulo, i.cantidad]),
+    [
+      ['4.1.8', null, 7],
+      ['c1|4.1.8', 'ALCANTARILLAS', 150],
+      ['c4|4.1.8', 'CUNETA', 40],
+    ],
+  );
+  // Lo acumulado viene de toda la obra hasta el fin del periodo: aquí, 50 más de antes.
+  const conAvance = conContratado(items, new Map([['c1|4.1.8', 2006], ['c4|4.1.8', 4352]]), new Map([['c1|4.1.8', 200], ['c4|4.1.8', 40]]));
+  assert.deepEqual(
+    conAvance.map((i) => [i.capitulo, i.contratado, i.acumulado, i.porcentaje]),
+    [
+      [null, null, 7, null],
+      ['ALCANTARILLAS', 2006, 200, 10],
+      ['CUNETA', 4352, 40, 0.9],
+    ],
+  );
+});
+
+prueba('031/RF-64 a RF-67: WhatsApp reconoce el capítulo del ítem, y si no puede lo aparta con los posibles', () => {
+  const catalogos = { ...CATALOGOS_DE_PRUEBA, actividades: catalogoDelPresupuesto(PRESUPUESTO_CON_VIAS) };
+  const propuesta = propuestaDeIa.parse({
+    categoria: 'reporte_diario',
+    fecha_evento: '2026-10-01',
+    actividades: [
+      // El 2.8 está en un solo capítulo: ese (RF-65).
+      { descripcion: 'Demolición', items_pago: [{ codigo: '2.8', cantidad: 5 }] },
+      // El 4.1.8 está en cuatro: el mensaje dice cuál (RF-64).
+      { descripcion: 'Excavación', items_pago: [{ codigo: '4.1.8', cantidad: 30, capitulo: 'alcantarilla vía Ye-Yondo' }] },
+      // Sin pista: queda sin capítulo (RF-66).
+      { descripcion: 'Excavación', items_pago: [{ codigo: '4.1.8', cantidad: 10 }] },
+      // Fuera del presupuesto vigente (RF-67).
+      { descripcion: 'Otra cosa', items_pago: [{ codigo: '9.9.9', cantidad: 1 }] },
+    ],
+  });
+  const { reporte } = resolverPropuesta(propuesta, catalogos, { diaDelMensaje: '2026-10-01', destino: 'reporte' });
+  assert.deepEqual(
+    reporte.actividades.map((a) => [a.clave, a.capituloId ?? null]),
+    [
+      ['2.8', 'c1'],
+      ['4.1.8', 'c2'],
+      ['4.1.8', null],
+      [null, null],
+    ],
+  );
+  const faltas = faltasDelReporte(reporte, { ...CONTEXTO_DEL_REPORTE, hoy: '2026-10-05', actividades: catalogos.actividades })
+    .filter((f) => f.seccion === 'actividades')
+    .map((f) => [f.renglon, f.mensaje]);
+  assert.equal(faltas.length, 2);
+  assert.equal(faltas[0][0], 2);
+  assert.match(String(faltas[0][1]), /está en varios capítulos del presupuesto y el mensaje no dice cuál/);
+  assert.match(String(faltas[0][1]), /CONSTRUCCIÓN DE CUNETA · VIA LA YE-YONDO/);
+  assert.equal(faltas[1][0], 3);
+  assert.match(String(faltas[1][1]), /9\.9\.9 no está en el presupuesto/);
+  // Sin presupuesto (catálogo fijo), lo de siempre: sin capítulo y sin faltas por eso.
+  const { reporte: sinPresupuesto } = resolverPropuesta(propuesta, CATALOGOS_DE_PRUEBA, { diaDelMensaje: '2026-10-01', destino: 'reporte' });
+  assert.equal(sinPresupuesto.actividades[1].capituloId, undefined);
+});
+
+/**
+ * Spec 031, T4: el formulario de presupuesto. Asíncrona porque abre el Excel real de OCC
+ * (`docs/preupuesto.xlsx`) con el mismo lector que usa el servidor.
+ */
+async function verificarFormulario() {
+  console.log('\nFormulario de presupuesto (spec 031)\n');
+  let n = 0;
+  const contador = () => `id${++n}`;
+
+  const archivo = readFileSync(path.join(__dirname, '..', 'docs', 'preupuesto.xlsx'));
+  const hojas = await hojasDelLibro(archivo.buffer.slice(archivo.byteOffset, archivo.byteOffset + archivo.byteLength));
+
+  await pruebaAsync('031/RF-41 a RF-43: el formulario de OCC da 2 grupos, 14 capítulos, 76 ítems, 8 rubros y $54.441.800.920', async () => {
+    const leido = leerFormulario(hojas, contador);
+    assert.ok(leido.ok, leido.ok ? '' : leido.error);
+    if (!leido.ok) return;
+    assert.deepEqual(leido.conteo, { grupos: 2, capitulos: 14, items: 76, rubros: 8 });
+    assert.equal(leido.valor, 54_441_800_920);
+    assert.equal(leido.valorDelExcel, 54_441_800_920);
+    assert.equal(leido.cuadra, true);
+    assert.deepEqual(leido.diferencias, []);
+    const { estructura } = leido;
+    assert.deepEqual(estructura.aiu, { administracion: 0.2623, imprevistos: 0.01, utilidad: 0.05 });
+    const [remedios, yondo] = estructura.grupos;
+    assert.match(remedios.nombre, /^Circuito Remedios/);
+    assert.equal(yondo.nombre, 'VIA LA YE-YONDO');
+    assert.deepEqual(
+      yondo.capitulos.map((c) => [c.codigo, c.nombre, c.items.length]),
+      [
+        ['01', 'CONSTRUCCIÓN DE ALCANTARILLAS', 11],
+        ['02', 'CONSTRUCCIÓN DE CUNETA', 5],
+        ['03', 'CONSTRUCCIÓN DE FILTRO PARA CUNETAS', 2],
+        ['04', 'CONSTRUCCIÓN DE BORDILLOS', 3],
+        ['05', 'CONSTRUCCIÓN DE DISIPADORES', 4],
+        ['06', 'ESTABILIZACION CON MATERIAL GRANULAR', 11],
+        ['07', 'SEÑALIZACIÓN VIAL', 2],
+      ],
+    );
+    // El primer capítulo de la primera vía está en la columna «Nº»; los demás, en «DESCRIPCIÓN».
+    assert.equal(remedios.capitulos[0].nombre, 'CONSTRUCCIÓN DE ALCANTARILLAS');
+    // Los subtotales del Excel salen iguales por capítulo.
+    assert.equal(remedios.capitulos[0].items.reduce((s, i) => s + i.valorTotal, 0), 2_171_831_070);
+    assert.equal(yondo.capitulos[5].items.reduce((s, i) => s + i.valorTotal, 0), 9_953_423_055);
+    // 4.1.8 está en cuatro capítulos: alcantarillas y cuneta de cada vía (RF-36).
+    const con418 = estructura.grupos.flatMap((g) => g.capitulos.filter((c) => c.items.some((i) => i.item === '4.1.8')));
+    assert.equal(con418.length, 4);
+    const r5 = remedios.capitulos[0].items[4];
+    assert.deepEqual([r5.renglon, r5.item, r5.icociv, r5.especificaciones, r5.unidad], [5, '5.1.7', '11103', '5.1.7', 'm3']);
+    assert.equal(remedios.capitulos[0].items[0].especificaciones, 'INVIAS 201-22');
+    // Todas las unidades de los ítems se reconocen.
+    assert.ok(estructura.grupos.every((g) => g.capitulos.every((c) => c.items.every((i) => i.unidad !== null))));
+    // Los rubros: tres por vía y dos de todo el contrato (primas y actualización de precios).
+    assert.deepEqual(
+      estructura.rubros.map((r) => [r.grupoId === remedios.id ? 'remedios' : r.grupoId === yondo.id ? 'yondo' : null, r.valor]),
+      [
+        ['remedios', 218_336_960],
+        ['remedios', 223_237_641],
+        ['remedios', 26_399_025],
+        ['yondo', 274_547_283],
+        ['yondo', 264_473_841],
+        ['yondo', 31_678_830],
+        [null, 460_006_797],
+        [null, 3_817_063_720],
+      ],
+    );
+  });
+
+  const ENCABEZADOS: Celda[] = ['Nº', 'ÍTEM DE PAGO', 'DESCRIPCIÓN', 'UND.', 'CANTIDAD', 'VALOR UNITARIO', 'VALOR TOTAL'];
+
+  await pruebaAsync('031/RF-46: sin encabezados, sin ítems o sin valor total no se crea nada', async () => {
+    const sinEncabezados = leerFormulario([[['Item', 'Descripción', 'Cantidad'], ['1', 'Excavación', 3]]], contador);
+    assert.equal(sinEncabezados.ok, false);
+    assert.match(sinEncabezados.ok ? '' : sinEncabezados.error, /No encontré la fila de encabezados/);
+    const sinItems = leerFormulario([[ENCABEZADOS, [null, null, 'VALOR TOTAL', null, null, null, 0]]], contador);
+    assert.match(sinItems.ok ? '' : sinItems.error, /No encontré ítems/);
+    const sinTotal = leerFormulario([[ENCABEZADOS, [1, '4.1.8', 'Excavación', 'm3', 10, 100, 1000]]], contador);
+    assert.match(sinTotal.ok ? '' : sinTotal.error, /VALOR TOTAL/);
+  });
+
+  await pruebaAsync('031/RF-44, RF-45: un total que no cuadra se señala y se crea con el calculado', async () => {
+    const leido = leerFormulario(
+      [
+        [
+          ['Formulario 1'],
+          ENCABEZADOS,
+          [null, null, 'CAPÍTULO ÚNICO', null, null, null, null],
+          [1, '4.1.8', 'Excavación', 'm3', 10, 100, 1000],
+          [2, '2.8', 'Demolición', 'm3', 3, 50, 999],
+          ['Subtotal', 'TOTAL', null, null, null, null, 1999],
+          [null, null, 'VALOR TOTAL', null, null, null, 2000],
+        ],
+      ],
+      contador,
+    );
+    assert.ok(leido.ok);
+    if (!leido.ok) return;
+    // Sin grupo con nombre: un grupo vacío que la pantalla no muestra (RF-33).
+    assert.deepEqual(leido.conteo, { grupos: 0, capitulos: 1, items: 2, rubros: 0 });
+    assert.equal(leido.estructura.grupos[0].nombre, '');
+    assert.deepEqual(leido.diferencias, [{ renglon: 2, item: '2.8', capitulo: 'CAPÍTULO ÚNICO', calculado: 150, delExcel: 999 }]);
+    assert.equal(leido.estructura.grupos[0].capitulos[0].items[1].valorTotal, 150);
+    assert.equal(leido.estructura.grupos[0].capitulos[0].items[1].totalDelExcel, 999);
+    assert.equal(leido.valor, 1150);
+    assert.equal(leido.cuadra, false);
+  });
+}
+
 verificarFirmaS3()
+  .then(verificarFormulario)
   .then(verificarChoques)
   .then(verificarCripto)
   .then(verificarIntegracion)

@@ -42,8 +42,17 @@ import {
   type MaquinaDelParte,
   type PersonaDelParte,
 } from '@/features/bitacoras/tipos';
+import { CLAVE_OTRA_ACTIVIDAD } from '@/shared/catalogos/presupuesto';
+import { actividadDelCatalogo, catalogoFijo, type CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
+
 import { mensajeDeFranja, mensajeDePersona, validarFranjas, validarPersonaDelParte } from '@/shared/rules/horas';
 import { medidorDeClase, mensajeDeAvance, validarAvance } from '@/shared/rules/jornada';
+
+/** La actividad con el capítulo y la vía con que se guardó la primera vez, si los tenía. */
+function conCapituloDe(actividad: ActividadDelParte, guardada: ActividadDelParte): ActividadDelParte {
+  if (!guardada.capituloId) return actividad;
+  return { ...actividad, capituloId: guardada.capituloId, capitulo: guardada.capitulo, grupo: guardada.grupo };
+}
 
 /** Las filas de la sección, o por qué no se pueden guardar. */
 export type Seccion<T> = { filas: T[] } | { error: string };
@@ -195,19 +204,50 @@ export async function personalDelParte(
  * Las actividades (spec 004, RF-64, RF-70, RF-71). Una fila con el id de una
  * actividad heredada se queda como estaba; las demás se construyen, y una que no
  * es del presupuesto ni una «otra» completa no se guarda.
+ *
+ * `catalogo` es el de la obra (spec 031): con presupuesto vigente cada actividad nueva
+ * necesita su capítulo (RF-59, RF-60). Lo ya registrado no cambia (RF-62): una guardada
+ * que vuelve con el mismo ítem y el mismo capítulo (o sin capítulo) y que ya no está en el
+ * catálogo vigente —de antes del presupuesto, o de un ítem que una versión posterior
+ * quitó— se lee con el catálogo fijo y conserva su capítulo; si tampoco está en el fijo,
+ * se queda como estaba.
  */
 export function actividadesDelParte(
   pedidas: readonly (ActividadPedida | { id: string })[],
   guardadas: readonly ActividadDelParte[],
+  catalogo: CatalogoDeActividades = catalogoFijo(),
 ): Seccion<ActividadDelParte> {
+  let error: string | null = null;
+  const construir = (fila: ActividadPedida): ActividadDelParte | null => {
+    const guardada = fila.id ? guardadas.find((g) => g.id === fila.id) : undefined;
+    const anterior =
+      catalogo.origen === 'presupuesto' &&
+      guardada &&
+      guardada.clave === fila.clave &&
+      (guardada.capituloId ?? null) === (fila.capituloId ?? null) &&
+      !actividadDelCatalogo(catalogo, fila.clave, fila.capituloId ?? null);
+    const construida = anterior
+      ? conCapituloDe(construirActividadDelParte(fila) ?? guardada, guardada)
+      : construirActividadDelParte(fila, catalogo);
+    if (!construida && !error) {
+      const otra = fila.clave === CLAVE_OTRA_ACTIVIDAD;
+      error =
+        catalogo.origen === 'presupuesto' && !otra && fila.clave && !fila.capituloId
+          ? `Elija el capítulo de la actividad ${fila.clave}.`
+          : catalogo.origen === 'presupuesto' && !otra
+            ? `La actividad ${fila.clave} no está en ese capítulo del presupuesto vigente de la obra.`
+            : 'Esa actividad no está en la lista.';
+    }
+    return construida;
+  };
   const filas = conservarHeredadas(
     [...pedidas],
     [...guardadas],
     esActividadHeredada,
     // Solo con id y sin ser heredada de este parte no es nada que construir.
-    (fila) => ('clave' in fila ? construirActividadDelParte(fila) : null),
+    (fila) => ('clave' in fila ? construir(fila) : null),
   );
-  if (filas.some((f) => f === null)) return { error: 'Esa actividad no está en la lista.' };
+  if (filas.some((f) => f === null)) return { error: error ?? 'Esa actividad no está en la lista.' };
   return { filas: filas as ActividadDelParte[] };
 }
 

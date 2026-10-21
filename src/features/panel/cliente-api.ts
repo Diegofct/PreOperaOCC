@@ -14,6 +14,7 @@
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
  */
+import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -41,6 +42,14 @@ import type {
   ConsultaDeEnsayos,
   ConsultaDeEnsayosDeObra,
   ConsultaDeReporte,
+  ContratoDeObra,
+  ContratoEditado,
+  DocumentoNuevo,
+  PolizaNueva,
+  PresupuestoDetalle,
+  PresupuestoEditado,
+  PresupuestoFila,
+  VistaPreviaDelPresupuesto,
   IntervaloEditado,
   IntervalosDeTipoFila,
   MantenimientoNuevo,
@@ -416,7 +425,72 @@ export const api = {
    * flujo es su propia ruta y responde el ensayo entero, ya recalculado.
    */
   /** El módulo de Reportes (spec 030). */
-  reportes: {
+  /** Spec 031: los presupuestos de la obra, con versiones. */
+  presupuestos: {
+    listar: (obraId: string | null) => panel<PresupuestoFila[]>(`/presupuestos${conObra(obraId)}`),
+    de: (id: string) => panel<PresupuestoDetalle>(`/presupuestos/${id}`),
+    crearEnBlanco: (obraId: string, nombre: string) =>
+      panelEnviar<PresupuestoDetalle>('/presupuestos', 'POST', { obraId, nombre }),
+    /** Guarda el borrador entero con la versión que se leyó; 409 si otra persona lo cambió (RF-47). */
+    guardar: (id: string, datos: PresupuestoEditado) =>
+      panelEnviar<PresupuestoDetalle>(`/presupuestos/${id}`, 'PUT', datos),
+    /** Solo la gerencia (RF-3). 409 con `desaparecen` si quita ítems reportados y no se confirmó (RF-54). */
+    aprobar: (id: string, version: number, confirmar = false) =>
+      panelEnviar<PresupuestoDetalle>(`/presupuestos/${id}/aprobar`, 'POST', { version, confirmar }),
+    nuevaVersion: (id: string, nota: string) =>
+      panelEnviar<PresupuestoDetalle>(`/presupuestos/${id}/nueva-version`, 'POST', { nota }),
+    descartar: (id: string, motivo: string) =>
+      panelEnviar<PresupuestoDetalle>(`/presupuestos/${id}/descartar`, 'POST', { motivo }),
+    /** La dirección de la descarga en Excel (RF-73): se abre, no se pide por `fetch`. */
+    direccionDelExcel: (id: string) => `/api/panel/presupuestos/${id}/exportar`,
+    /** Las actividades que ofrece la bitácora de la obra: con capítulo si tiene presupuesto vigente (RF-58, RF-59). */
+    catalogo: (obraId: string) => panel<CatalogoDeActividades>(`/presupuestos/catalogo${conObra(obraId)}`),
+    /** Lee el Excel y responde lo que encontró, sin crear nada (RF-43). */
+    vistaPrevia: (obraId: string, archivo: Blob) =>
+      pedir<VistaPreviaDelPresupuesto>(`/api/panel/presupuestos/importar${conObra(obraId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        body: archivo,
+      }),
+    /** Vuelve a leer el mismo Excel y crea el borrador (RF-41). */
+    importar: (obraId: string, nombre: string, archivo: Blob) =>
+      pedir<PresupuestoDetalle>(
+        `/api/panel/presupuestos/importar?${new URLSearchParams({ ...(obraId ? { obraId } : {}), confirmar: '1', nombre })}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          body: archivo,
+        },
+      ),
+  },
+
+  /** Spec 031: el contrato de la obra con su cliente. */
+  contrato: {
+    de: (obraId: string | null) => panel<ContratoDeObra>(`/contrato${conObra(obraId)}`),
+    guardar: (datos: ContratoEditado) => panelEnviar<{ version: number }>('/contrato', 'PUT', datos),
+    aprobar: (obraId: string, version: number) =>
+      panelEnviar<{ version: number }>('/contrato/aprobar', 'POST', { obraId, version }),
+    aBorrador: (obraId: string, version: number, motivo: string) =>
+      panelEnviar<{ version: number }>('/contrato/borrador', 'POST', { obraId, version, motivo }),
+    /** Sube un PDF o una imagen y devuelve su id, que la póliza o el documento citan (RF-30). */
+    subirArchivo: (obraId: string, archivo: Blob) =>
+      pedir<{ mediaId: string }>(`/api/panel/contrato/archivos${conObra(obraId)}`, {
+        method: 'POST',
+        // La misma clave que pone `pedir` («Content-Type»), para reemplazarla y no sumarse a ella.
+        headers: { 'Content-Type': archivo.type },
+        body: archivo,
+      }),
+    crearPoliza: (datos: PolizaNueva) => panelEnviar<{ id: string }>('/contrato/polizas', 'POST', datos),
+    reemplazarPoliza: (id: string, datos: PolizaNueva) =>
+      panelEnviar<{ id: string }>(`/contrato/polizas/${id}/reemplazar`, 'POST', datos),
+    anularPoliza: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/contrato/polizas/${id}/anular`, 'POST', { motivo }),
+    crearDocumento: (datos: DocumentoNuevo) => panelEnviar<{ id: string }>('/contrato/documentos', 'POST', datos),
+    anularDocumento: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/contrato/documentos/${id}/anular`, 'POST', { motivo }),
+  },
+
+reportes: {
     de: <P extends PestanaDeReporte>(pestana: P, consulta: ConsultaDeReporte) =>
       panel<ReporteFila<P>>(`/reportes/${pestana}?${parametrosDeReporte(consulta)}`),
     registrarMantenimiento: (datos: MantenimientoNuevo) =>

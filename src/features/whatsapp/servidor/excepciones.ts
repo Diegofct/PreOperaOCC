@@ -266,6 +266,7 @@ export async function guardarExcepcion(
       hoy: fechaDeJornada(),
       claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',
       lecturaDe: catalogos.lecturaDe,
+      actividades: catalogos.catalogos.actividades,
     }).filter((f) => f.seccion === seccion || f.seccion === 'fecha');
     if (faltas.length > 0) return respuestaDeFaltas(faltas);
     const enBitacora = await guardarEnBitacora({

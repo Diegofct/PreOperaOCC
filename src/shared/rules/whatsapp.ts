@@ -23,6 +23,12 @@ import {
   type NovedadDePersonal,
 } from '@/shared/catalogos/bitacora';
 import { actividadPorItem, CLAVE_OTRA_ACTIVIDAD } from '@/shared/catalogos/presupuesto';
+import {
+  actividadDelCatalogo,
+  capitulosDelItem,
+  reconocerCapitulo,
+  type CatalogoDeActividades,
+} from './actividades-de-obra';
 
 import { abreviaturaDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { TIPOS_VEHICULO } from '@/shared/catalogos/tipos-vehiculo';
@@ -749,6 +755,13 @@ export interface ActividadDelReporte {
   ancho?: number | null;
   alto?: number | null;
   cantidad?: number | null;
+  /**
+   * El capítulo del presupuesto vigente (spec 031, RF-64 a RF-66): el único del ítem, o
+   * el que nombra el mensaje. `null` si la obra no tiene presupuesto o no se supo.
+   */
+  capituloId?: string | null;
+  /** Lo que el mensaje decía del capítulo o la vía, tal cual. */
+  capituloEscrito?: string | null;
 }
 
 export interface MaquinaDelReporte extends MaquinaReconocida {
@@ -858,6 +871,11 @@ export interface ContextoDelReporte {
    */
   lecturaDe?: (vehiculoId: string, clase: ClaseDeMedidor) => LecturaRegistrada;
   /**
+   * Las actividades de la obra (spec 031). Con presupuesto vigente, cada actividad
+   * necesita su capítulo (RF-65 a RF-67). Ausente, la lista fija de siempre.
+   */
+  actividades?: CatalogoDeActividades;
+  /**
    * El almacén de la obra, para revisar un reporte de almacén (spec 023): sus
    * materiales vigentes con su unidad y su stock de hoy, en centésimas. Ausente,
    * es un almacén vacío.
@@ -946,7 +964,27 @@ export function faltasDelReporte(
       );
       return;
     }
-    if (!otra && !actividadPorItem(actividad.clave)) {
+    // Spec 031: con presupuesto vigente, el ítem en su capítulo (RF-65 a RF-67).
+    if (!otra && contexto.actividades?.origen === 'presupuesto') {
+      const posibles = capitulosDelItem(contexto.actividades, actividad.clave);
+      if (posibles.length === 0) {
+        falta('actividades', i, `El ítem ${actividad.clave} no está en el presupuesto vigente de la obra.`);
+        return;
+      }
+      if (!actividad.capituloId) {
+        const cuales = posibles.map((p) => [p.capitulo, p.grupo].filter(Boolean).join(' · ')).join('; ');
+        falta(
+          'actividades',
+          i,
+          `El ítem ${actividad.clave} está en varios capítulos del presupuesto y el mensaje no dice cuál: elija el capítulo (${cuales}).`,
+        );
+        return;
+      }
+      if (!actividadDelCatalogo(contexto.actividades, actividad.clave, actividad.capituloId)) {
+        falta('actividades', i, `El ítem ${actividad.clave} no está en ese capítulo del presupuesto vigente.`);
+        return;
+      }
+    } else if (!otra && !actividadPorItem(actividad.clave)) {
       falta('actividades', i, `El ítem ${actividad.clave} no está en el presupuesto de la obra.`);
       return;
     }
@@ -1405,6 +1443,11 @@ export interface CatalogosDeLaObra {
    */
   materialesAlmacen?: readonly OpcionConNombre[];
   /**
+   * Las actividades de la obra (spec 031): con presupuesto vigente, cada ítem en su
+   * capítulo. Ausente, la lista fija de siempre.
+   */
+  actividades?: CatalogoDeActividades;
+  /**
    * Los preoperacionales de las volquetas de la obra en los días del reporte y el
    * conductor del último viaje vigente de cada una (cambio 2026-10-08, RF-105).
    * Ausentes, esos caminos no proponen a nadie.
@@ -1591,6 +1634,26 @@ export function resolverPropuesta(
     if (items.length === 0) return [{ clave: null, itemEscrito: null, cantidad: null, ...medidas }];
     return items.map((item) => {
       const codigo = textoLimpio(item.codigo);
+      const capituloEscrito = textoLimpio((item as { capitulo?: string | null }).capitulo) || null;
+      // Spec 031: con presupuesto vigente, el ítem va en su capítulo. Si está en uno solo,
+      // ese (RF-65); si está en varios, el que nombra el mensaje —su capítulo o su vía, su
+      // descripción, sus abscisas— (RF-64); si no se sabe, queda sin capítulo y las faltas
+      // lo apartan con los posibles (RF-66).
+      if (catalogos.actividades?.origen === 'presupuesto') {
+        const posibles = codigo ? capitulosDelItem(catalogos.actividades, codigo) : [];
+        const elegido =
+          posibles.length === 1
+            ? posibles[0]
+            : reconocerCapitulo([capituloEscrito, descripcion].filter(Boolean).join(' '), posibles);
+        return {
+          clave: posibles.length > 0 ? codigo : null,
+          itemEscrito: codigo || null,
+          cantidad: numeroONulo(item.cantidad),
+          capituloId: elegido?.capituloId ?? null,
+          capituloEscrito,
+          ...medidas,
+        };
+      }
       return {
         clave: codigo && actividadPorItem(codigo) ? codigo : null,
         itemEscrito: codigo || null,

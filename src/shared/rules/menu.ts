@@ -36,6 +36,9 @@ export const GRUPOS_DEL_MENU: readonly GrupoDelMenu[] = [
   { titulo: null, modulos: ['inicio'] },
   { titulo: 'El día a día', modulos: ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes'] },
   { titulo: 'Módulos de obra', modulos: ['almacen', 'cantera', 'laboratorio'] },
+  // Spec 031, RF-1: lo pactado con el cliente, como en NexusObras. Va antes de la
+  // administración: se consulta más que ella una vez arrancada la obra.
+  { titulo: 'Cliente', modulos: ['contrato'] },
   { titulo: 'Administración', modulos: ['obras', 'personas', 'vehiculos', 'asignaciones'] },
 ];
 

@@ -6,7 +6,7 @@
  * anuladas del periodo con el horario con que se cuentan sus horas, los vehículos de
  * la obra y quién hizo el preoperacional de cada máquina cada día.
  */
-import { and, between, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, between, eq, isNull, lte, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { alias } from 'drizzle-orm/pg-core';
@@ -18,6 +18,7 @@ import {
   obras,
   partesDeObra,
   preoperacionales,
+  presupuestos,
   tiposVehiculo,
   usuarios,
   vehiculos,
@@ -94,6 +95,31 @@ export async function partesDelPeriodo(pedido: PedidoDeReporte) {
 }
 
 export type ParteLeido = Awaited<ReturnType<typeof partesDelPeriodo>>[number];
+
+/**
+ * Las actividades de todas las bitácoras no anuladas de la obra hasta una fecha (spec 031,
+ * RF-68): de ahí sale lo acumulado de cada ítem, no solo lo del periodo.
+ */
+export async function actividadesHasta(obraId: string, hasta: string) {
+  return baseServidor()
+    .select({ fecha: partesDeObra.fecha, actividades: partesDeObra.actividades })
+    .from(partesDeObra)
+    .where(and(eq(partesDeObra.obraId, obraId), isNull(partesDeObra.anuladoEn), lte(partesDeObra.fecha, hasta)));
+}
+
+/** Lo contratado por «capítulo|ítem» en el presupuesto vigente de la obra, o vacío (spec 031, RF-68). */
+export async function contratadoDeLaObra(obraId: string): Promise<Map<string, number>> {
+  const [vigente] = await baseServidor()
+    .select({ estructura: presupuestos.estructura })
+    .from(presupuestos)
+    .where(and(eq(presupuestos.obraId, obraId), eq(presupuestos.estado, 'vigente')))
+    .limit(1);
+  const contratado = new Map<string, number>();
+  for (const g of vigente?.estructura.grupos ?? []) {
+    for (const c of g.capitulos) for (const i of c.items) contratado.set(`${c.id}|${i.item}`, i.cantidad ?? 0);
+  }
+  return contratado;
+}
 
 /** Los vehículos vigentes de la obra, con su tipo, su medidor, su estado y su lectura (RF-11, RF-30). */
 export async function vehiculosDeLaObra(obraId: string) {

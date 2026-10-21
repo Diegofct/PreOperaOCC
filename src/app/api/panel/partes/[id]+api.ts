@@ -20,6 +20,7 @@ import {
   ok,
   responder,
 } from '@/features/servidor/respuestas';
+import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
 import { mensajeDeDiaSinTrabajo, resolverDiaSinTrabajo } from '@/shared/rules/parte';
 
 /**
@@ -136,7 +137,8 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     // leyó: no se pierde nada y no se inventa nada.
 
     if (cambios.actividades) {
-      const seccion = actividadesDelParte(cambios.actividades, guardado!.actividades);
+      // Spec 031: con presupuesto vigente, cada actividad nueva va con su capítulo (RF-59).
+      const seccion = actividadesDelParte(cambios.actividades, guardado!.actividades, await catalogoDeLaObra(estado.obraId));
       if ('error' in seccion) return errorDePeticion(seccion.error, 400);
       set.actividades = conservarOrigen(
         seccion.filas,

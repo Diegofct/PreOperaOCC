@@ -251,6 +251,7 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     hoy: fechaDeJornada(),
     claseDeMedidor: (vehiculoId) => catalogos.claseDe.get(vehiculoId) ?? 'horometro',
     lecturaDe: catalogos.lecturaDe,
+    actividades: catalogos.catalogos.actividades,
   }).filter((f) => f.seccion !== 'viajes' && f.seccion !== 'almacen' && f.seccion !== 'mantenimientos');
   const { guardable, excepciones } = separarRenglones(reporte, faltas);
   await apartar(mensaje.id, excepciones);

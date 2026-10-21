@@ -192,15 +192,29 @@ function hojasDeActividades(datos: ReporteDe<'actividades'>): HojaDeReporte[] {
   return [
     {
       nombre: 'Por ítem',
-      encabezados: ['Ítem', 'Actividad', 'Unidad', 'Cantidad', 'Días'],
-      formatos: { Cantidad: 'numero', Días: 'entero' },
-      filas: datos.items.map((i) => [i.item, i.nombre, i.unidad, i.cantidad, i.dias.length]),
+      // Spec 031, RF-68: el capítulo y la vía, y lo contratado con el acumulado y su %.
+      encabezados: ['Ítem', 'Actividad', 'Capítulo', 'Vía', 'Unidad', 'Cantidad', 'Días', 'Acumulado', 'Contratado', '% ejecutado'],
+      formatos: { Cantidad: 'numero', Días: 'entero', Acumulado: 'numero', Contratado: 'numero', '% ejecutado': 'numero' },
+      filas: datos.items.map((i) => [
+        i.item,
+        i.nombre,
+        i.capitulo ?? '',
+        i.grupo ?? '',
+        i.unidad,
+        i.cantidad,
+        i.dias.length,
+        i.acumulado,
+        i.contratado,
+        i.porcentaje,
+      ]),
     },
     {
       nombre: 'Por día',
-      encabezados: ['Fecha', 'Ítem', 'Actividad', 'Unidad', 'Cantidad'],
+      encabezados: ['Fecha', 'Ítem', 'Actividad', 'Capítulo', 'Unidad', 'Cantidad'],
       formatos: { Cantidad: 'numero' },
-      filas: datos.items.flatMap((i) => i.porDia.map((d) => [d.fecha, i.item, i.nombre, i.unidad, d.cantidad])),
+      filas: datos.items.flatMap((i) =>
+        i.porDia.map((d) => [d.fecha, i.item, i.nombre, i.capitulo ?? '', i.unidad, d.cantidad]),
+      ),
     },
     {
       nombre: 'Fuera del presupuesto',
