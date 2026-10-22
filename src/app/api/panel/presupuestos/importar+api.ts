@@ -10,7 +10,8 @@ import { ok, responder } from '@/features/servidor/respuestas';
  * responde la vista previa sin escribir nada: conteos, valor calculado, «VALOR TOTAL» del
  * Excel, si cuadra y los ítems con diferencias. Con `&confirmar=1` (y `&nombre=`, opcional)
  * vuelve a leer el mismo archivo y crea el borrador: 201, o 200 si era un doble clic.
- * Un archivo que no es el formulario responde 422 con lo que no se encontró.
+ * Un archivo que no es el formulario lo lee la IA (RF-74): 503 si la IA falla (RF-87), y 422 si
+ * tampoco ella encuentra ítems.
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
@@ -23,7 +24,7 @@ export async function POST(peticion: Request) {
 
     const contenido = new Uint8Array(await peticion.arrayBuffer());
     if (parametros.get('confirmar') !== '1') {
-      const previa = await vistaPrevia(contenido);
+      const previa = await vistaPrevia(sesion, contenido);
       return previa instanceof Response ? previa : ok(previa);
     }
 

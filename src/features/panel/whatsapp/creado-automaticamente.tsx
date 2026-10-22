@@ -169,7 +169,10 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
         <Tabla
           columnas={columnas}
           filas={paginaDeCreados.pagina}
-          vacio={`No hay nada creado automáticamente por revisar entre el ${desde} y el ${hasta}.`}
+          // Como en «No se pudo guardar»: sin respuesta todavía no es lo mismo que vacío.
+          vacio={
+            lista.cargando ? 'Cargando…' : `No hay nada creado automáticamente por revisar entre el ${desde} y el ${hasta}.`
+          }
         />
         <Paginacion
           pagina={paginaDeCreados.paginaActual}

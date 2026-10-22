@@ -40,6 +40,10 @@ const TABLAS_CON_RELOJ = [
   // Spec 031: el contrato y el presupuesto llevan quién los cambió y cuándo.
   'contratos',
   'presupuestos',
+  // Spec 028: la conversación sube en la lista al recibir otra pregunta (RF-39), y el
+  // límite dice cuándo lo cambió la gerencia.
+  'asistente_conversaciones',
+  'asistente_limites',
 ];
 
 const FUNCION = `

@@ -20,7 +20,22 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 import type { Modulo } from '@/shared/rules/permisos';
 
-export type NombreDeIcono = Modulo | 'plegar' | 'abrir' | 'clave' | 'salir';
+export type NombreDeIcono =
+  | Modulo
+  | 'plegar'
+  | 'abrir'
+  | 'clave'
+  | 'salir'
+  // Los del asistente tipo chat (spec 028, cambio del 2026-10-22).
+  | 'enviar'
+  | 'detener'
+  | 'adjuntar'
+  | 'copiar'
+  | 'listo'
+  | 'pdf'
+  | 'reintentar'
+  | 'buscar'
+  | 'nueva';
 
 const DIBUJOS = {
   inicio: (
@@ -40,6 +55,14 @@ const DIBUJOS = {
     <>
       <Path d="M4 5h16v11H10l-6 4z" />
       <Path d="M8 9h8M8 12h5" />
+    </>
+  ),
+  // Spec 028: un globo de conversación con un destello, la pregunta que se le hace.
+  asistente: (
+    <>
+      <Path d="M4 5h11v8H9l-4 3v-3H4z" />
+      <Path d="M18 9.5v.01M18 4l.9 2.1L21 7l-2.1.9L18 10l-.9-2.1L15 7l2.1-.9z" />
+      <Path d="M8 9h4" />
     </>
   ),
   // Spec 031: una hoja con su firma al pie, como un contrato.
@@ -138,6 +161,42 @@ const DIBUJOS = {
     <>
       <Path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
       <Path d="m10 16-4-4 4-4M6 12h10" />
+    </>
+  ),
+  // Spec 028, cambio del 2026-10-22: los del campo para preguntar y las acciones de la respuesta.
+  enviar: <Path d="M12 19V5M6 11l6-6 6 6" />,
+  detener: <Rect x={7} y={7} width={10} height={10} rx={1.5} />,
+  adjuntar: <Path d="M12 5v14M5 12h14" />,
+  copiar: (
+    <>
+      <Rect x={8} y={8} width={12} height={12} rx={2} />
+      <Path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  listo: <Path d="m5 12.5 4.5 4.5L19 7.5" />,
+  pdf: (
+    <>
+      <Path d="M7 3h7l4 4v4" />
+      <Path d="M14 3v4h4M7 3v8" />
+      <Path d="M12 14v7M9 18l3 3 3-3" />
+    </>
+  ),
+  reintentar: (
+    <>
+      <Path d="M20 12a8 8 0 1 1-2.34-5.66" />
+      <Path d="M20 4v5h-5" />
+    </>
+  ),
+  buscar: (
+    <>
+      <Circle cx={11} cy={11} r={6} />
+      <Path d="m20 20-4.5-4.5" />
+    </>
+  ),
+  nueva: (
+    <>
+      <Path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" />
+      <Path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z" />
     </>
   ),
 } satisfies Record<NombreDeIcono, ReactNode>;

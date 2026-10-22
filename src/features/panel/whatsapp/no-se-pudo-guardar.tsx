@@ -286,7 +286,9 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
         <Tabla
           columnas={columnas}
           filas={paginaDeExcepciones.pagina}
-          vacio={`No hay nada pendiente entre el ${desde} y el ${hasta}.`}
+          // Mientras llega la primera respuesta la tabla está vacía: decir «no hay nada»
+          // ahí hacía creer que no había pendientes (defecto visto el 2026-10-13).
+          vacio={lista.cargando ? 'Cargando…' : `No hay nada pendiente entre el ${desde} y el ${hasta}.`}
         />
         <Paginacion
           pagina={paginaDeExcepciones.paginaActual}

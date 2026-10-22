@@ -1503,10 +1503,13 @@ export function Modal({
   children,
   onCerrar,
   soloBotonCierra = false,
+  amplia = false,
 }: {
   titulo: string;
   children: ReactNode;
   onCerrar: () => void;
+  /** Más ancha (960 en vez de 720), para revisar algo con columnas, como la vista previa del presupuesto. */
+  amplia?: boolean;
   /**
    * Quita Esc y el clic en el telón, y deja «Cerrar» como única salida
    * (spec 015, RF-31).
@@ -1525,7 +1528,7 @@ export function Modal({
     <CapaFlotante visible alCerrar={soloBotonCierra ? () => {} : onCerrar} telon="oscuro">
       {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
       <View style={[estilos.centroModal, angosto && estilos.centroModalAngosto]}>
-        <View style={[estilos.ventana, angosto && estilos.ventanaAngosta]}>
+        <View style={[estilos.ventana, amplia && estilos.ventanaAmplia, angosto && estilos.ventanaAngosta]}>
           <View style={estilos.ventanaCabecera}>
             <Text style={estilos.ventanaTitulo}>{titulo}</Text>
             <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
@@ -1763,6 +1766,7 @@ const estilos = StyleSheet.create({
   rotuloAngosto: { fontFamily: FuentePanel.rotulo, fontSize: TextoPanel.apoyo + 1 },
   /** En el celular la ventana ocupa la pantalla entera (spec 026, RF-37). */
   centroModalAngosto: { padding: 0 },
+  ventanaAmplia: { maxWidth: 960 },
   ventanaAngosta: { maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0 },
   ventanaCabecera: {
     flexDirection: 'row',

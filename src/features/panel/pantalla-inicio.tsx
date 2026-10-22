@@ -39,6 +39,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Spacing } from '@/constants/theme';
+import { RecuadroDelAsistente } from '@/features/asistente/recuadro-del-inicio';
 import { horasLegibles } from '@/shared/rules/horas';
 import { alcanza, moduloDeEntrada } from '@/shared/rules/permisos';
 import { nombreDeAmparo } from '@/shared/rules/polizas';
@@ -110,6 +111,8 @@ function Portada() {
       cargando={resumen.cargando}
     >
       {datos && datos.polizas.length > 0 ? <AvisoDePolizas polizas={datos.polizas} /> : null}
+      {/* Spec 028, RF-73: el asistente, arriba, para preguntar sin buscarlo en el menú. */}
+      {alcanza(rol, 'asistente', 'ver') ? <RecuadroDelAsistente /> : null}
       {!datos ? null : esGerencia ? (
         <VistaGerencia datos={datos} periodo={periodo} onPeriodo={setPeriodo} />
       ) : (

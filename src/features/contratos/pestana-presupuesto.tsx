@@ -1,6 +1,6 @@
 /**
  * La pestaña Presupuesto (spec 031, RF-31 a RF-46, RF-55), parte 1: la lista de versiones,
- * importar el Excel del formulario con su vista previa, crear uno en blanco y ver uno con
+ * importar el Excel del formulario con su vista previa (o leído con IA, RF-82 a RF-86), crear uno en blanco y ver uno con
  * su resumen. El editor del borrador, aprobar, la nueva versión y el Excel de salida
  * llegan en las partes 2 y 3 (T18, T19).
  *
@@ -8,8 +8,8 @@
  * Sin elegir, se abre el borrador si lo hay —es en lo que se está trabajando— y si no,
  * el vigente.
  */
-import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
@@ -106,6 +106,7 @@ export function PestanaPresupuesto({ obraId, esGerencia }: { obraId: string | nu
         <View style={estilos.etiquetas}>
           <Etiqueta tono={TONO_DE_ESTADO[p.estado]}>{NOMBRE_DE_ESTADO_DE_PRESUPUESTO[p.estado]}</Etiqueta>
           {p.revisar ? <Etiqueta tono="atencion">Revisar</Etiqueta> : null}
+          {p.origen === 'excel_ia' ? <Etiqueta tono="neutro">Excel (IA)</Etiqueta> : null}
         </View>
       ),
     },
@@ -212,6 +213,13 @@ function VentanaDeImportar({
   const [nombre, setNombre] = useState('Presupuesto del contrato');
   const [error, setError] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState<'leyendo' | 'creando' | null>(null);
+  // RF-86: si la lectura pasa de unos segundos, es que la está haciendo la IA.
+  const [tardando, setTardando] = useState(false);
+  useEffect(() => {
+    if (ocupado !== 'leyendo') return;
+    const espera = setTimeout(() => setTardando(true), 6000);
+    return () => clearTimeout(espera);
+  }, [ocupado]);
 
   async function elegir() {
     const f = await elegirArchivo(XLSX);
@@ -219,6 +227,7 @@ function VentanaDeImportar({
     setArchivo(f);
     setPrevia(null);
     setError(null);
+    setTardando(false);
     setOcupado('leyendo');
     try {
       setPrevia(await api.presupuestos.vistaPrevia(obraId, f));
@@ -242,10 +251,10 @@ function VentanaDeImportar({
   }
 
   return (
-    <Modal titulo="Importar el presupuesto desde Excel" onCerrar={alCerrar}>
+    <Modal titulo="Importar el presupuesto desde Excel" onCerrar={alCerrar} amplia>
       <Text style={estilos.nota}>
-        El formulario de propuesta económica (.xlsx): con sus vías, capítulos, ítems, rubros y AIU. Primero se muestra
-        lo que se encontró; nada se crea hasta confirmar.
+        Suba el formulario de propuesta económica (.xlsx). Si el Excel tiene otra forma, lo lee la IA. Primero se
+        muestra lo que se encontró; nada se crea hasta confirmar.
       </Text>
       <Acciones>
         <Boton
@@ -256,31 +265,22 @@ function VentanaDeImportar({
         />
         {archivo ? <Text style={estilos.nota}>{archivo.name}</Text> : null}
       </Acciones>
+      {ocupado === 'leyendo' && tardando ? (
+        <Aviso tono="info">
+          Leyendo con IA… puede tardar un par de minutos. El archivo no tiene la forma del formulario y la IA está
+          leyendo la hoja del presupuesto. No cierre esta ventana.
+        </Aviso>
+      ) : null}
 
+      {previa ? <VistaPreviaLeida previa={previa} /> : null}
       {previa ? (
         <View style={estilos.columna}>
-          <Cifras>
-            <Cifra titulo="Vías" valor={String(previa.conteo.grupos)} pie="grupos" />
-            <Cifra titulo="Capítulos" valor={String(previa.conteo.capitulos)} pie="con ítems" />
-            <Cifra titulo="Ítems" valor={String(previa.conteo.items)} pie="renglones" />
-            <Cifra titulo="Rubros" valor={String(previa.conteo.rubros)} pie="estimados y otros" />
-          </Cifras>
-          <Aviso tono={previa.cuadra ? 'exito' : 'error'}>
-            {previa.cuadra
-              ? `El valor calculado, ${enPesos(previa.valor)}, es el mismo «VALOR TOTAL» del Excel.`
-              : `El valor calculado (${enPesos(previa.valor)}) no coincide con el «VALOR TOTAL» del Excel (${enPesos(previa.valorDelExcel)}): diferencia de ${enPesos(Math.abs(previa.valor - previa.valorDelExcel))}. Se puede crear igual, marcado para revisar.`}
-          </Aviso>
-          {previa.diferencias.length > 0 ? (
-            <Aviso tono="info">
-              {`Ítems cuyo total en el Excel no es cantidad × valor unitario (se usará el calculado):\n${previa.diferencias
-                .map(
-                  (d) =>
-                    `· Renglón ${d.renglon}, ítem ${d.item} (${d.capitulo}): Excel ${enPesos(d.delExcel)}, calculado ${enPesos(d.calculado)}`,
-                )
-                .join('\n')}`}
-            </Aviso>
-          ) : null}
           <Campo etiqueta="Nombre del presupuesto" valor={nombre} onChange={setNombre} />
+          <Text style={estilos.nota}>
+            {previa.leidoPor === 'ia' || !previa.cuadra || previa.diferencias.length > 0
+              ? 'Se creará como borrador, marcado para revisar. Podrá corregirlo en el editor antes de aprobarlo.'
+              : 'Se creará como borrador. Podrá corregirlo en el editor antes de aprobarlo.'}
+          </Text>
         </View>
       ) : null}
 
@@ -294,6 +294,161 @@ function VentanaDeImportar({
         />
       </AccionesFormulario>
     </Modal>
+  );
+}
+
+/**
+ * Lo que se leyó del Excel, antes de crear nada (RF-43 a RF-45, RF-81, RF-82, RF-89), en
+ * tres partes: el estado (quién lo leyó y si cuadra), lo que se encontró (grupo por
+ * grupo, que se abre para ver capítulos y rubros) y lo que hay que revisar.
+ */
+function VistaPreviaLeida({ previa }: { previa: VistaPreviaDelPresupuesto }) {
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+  const alternar = (id: string) =>
+    setAbiertos((a) => {
+      const b = new Set(a);
+      if (b.has(id)) b.delete(id);
+      else b.add(id);
+      return b;
+    });
+  const conIa = previa.leidoPor === 'ia';
+  const { conteo, resumen } = previa;
+  const rubrosDe = (grupoId: string | null) => previa.rubros.filter((r) => r.grupoId === grupoId);
+  const generales = rubrosDe(null);
+  const nadaQueRevisar = previa.rechazados.length === 0 && previa.diferencias.length === 0;
+  const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+
+  const fila = (clave: string, texto: string, valor: number, detalle?: string) => (
+    <View key={clave} style={estilos.filaDetalle}>
+      <Text style={estilos.textoFila}>{texto}</Text>
+      {detalle ? <Text style={estilos.notaPequena}>{detalle}</Text> : null}
+      <Text style={estilos.valorFila}>{enPesos(valor)}</Text>
+    </View>
+  );
+
+  const bloque = (
+    clave: string,
+    nombre: string,
+    nombreCompleto: string,
+    cuantos: string,
+    total: number,
+    contenido: ReactNode,
+  ) => {
+    const abierto = abiertos.has(clave);
+    return (
+      <View key={clave} style={estilos.grupoPrevio}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: abierto }}
+          onPress={() => alternar(clave)}
+          style={({ hovered }) => [estilos.cabeceraPrevia, hovered && estilos.cabeceraPreviaEncima]}
+        >
+          <Text style={estilos.flecha}>{abierto ? '▾' : '▸'}</Text>
+          <View style={estilos.nombrePrevio}>
+            <Text style={estilos.nombreCapitulo}>{nombre}</Text>
+            {nombreCompleto ? (
+              <Text style={estilos.notaPequena} numberOfLines={2}>
+                {nombreCompleto}
+              </Text>
+            ) : null}
+          </View>
+          <Text style={estilos.notaPequena}>{cuantos}</Text>
+          <Text style={estilos.valorFila}>{enPesos(total)}</Text>
+        </Pressable>
+        {abierto ? <View style={estilos.detallePrevio}>{contenido}</View> : null}
+      </View>
+    );
+  };
+
+  return (
+    <View style={estilos.columna}>
+      {/* 1. El estado */}
+      <View style={estilos.etiquetas}>
+        <Etiqueta tono={conIa ? 'atencion' : 'bueno'}>{conIa ? '✦ Leído con IA' : 'Formulario reconocido'}</Etiqueta>
+        <Text style={estilos.nota}>
+          {conIa
+            ? 'Revíselo antes de aprobar: la IA lo leyó y el sistema comprobó cada ítem contra su fila del Excel.'
+            : 'Se leyó con el lector del formulario oficial.'}
+        </Text>
+      </View>
+      <Aviso tono={previa.cuadra ? 'exito' : 'error'}>
+        {previa.cuadra
+          ? `Cuadra: ${enPesos(previa.valor)}, igual al «VALOR TOTAL» del Excel.`
+          : `No cuadra: el sistema calcula ${enPesos(previa.valor)} y el Excel dice ${enPesos(previa.valorDelExcel)} (diferencia de ${enPesos(Math.abs(previa.valor - previa.valorDelExcel))}). Se puede crear igual, marcado para revisar.`}
+      </Aviso>
+      <Text style={estilos.conteo}>
+        {[
+          conteo.grupos > 0 ? plural(conteo.grupos, 'grupo', 'grupos') : null,
+          plural(conteo.capitulos, 'capítulo', 'capítulos'),
+          plural(conteo.items, 'ítem', 'ítems'),
+          plural(conteo.rubros, 'rubro', 'rubros'),
+        ]
+          .filter(Boolean)
+          .join(' · ')}
+      </Text>
+
+      {/* 2. Lo que se encontró */}
+      <Seccion titulo="Lo que se encontró">
+        <Text style={estilos.notaPequena}>Toque un grupo para ver sus capítulos y rubros.</Text>
+        {resumen.grupos.map((g) => {
+          const rubros = rubrosDe(g.id);
+          return bloque(
+            g.id,
+            g.nombre || 'Capítulos',
+            g.nombreCompleto,
+            [plural(g.capitulos.length, 'capítulo', 'capítulos'), rubros.length > 0 ? plural(rubros.length, 'rubro', 'rubros') : null]
+              .filter(Boolean)
+              .join(' · '),
+            g.subtotal + g.rubros,
+            <>
+              {g.capitulos.map((c) => fila(c.id, `${c.codigo} · ${c.nombre}`, c.subtotal, plural(c.items, 'ítem', 'ítems')))}
+              {rubros.map((r) => fila(r.id, `+ ${r.nombre}`, r.valor, 'rubro'))}
+            </>,
+          );
+        })}
+        {generales.length > 0
+          ? bloque(
+              'contrato',
+              'Rubros de todo el contrato',
+              '',
+              plural(generales.length, 'rubro', 'rubros'),
+              generales.reduce((t, r) => t + r.valor, 0),
+              <>{generales.map((r) => fila(r.id, r.nombre, r.valor))}</>,
+            )
+          : null}
+      </Seccion>
+
+      {/* 3. Lo que hay que revisar */}
+      <Seccion titulo="Para revisar">
+        {nadaQueRevisar ? (
+          <View style={estilos.etiquetas}>
+            <Etiqueta tono="bueno">✓ Nada</Etiqueta>
+            <Text style={estilos.nota}>
+              {conIa
+                ? 'Todo lo leído se encontró en su fila del Excel y los totales de los ítems coinciden.'
+                : 'Los totales de los ítems coinciden con cantidad × valor unitario.'}
+            </Text>
+          </View>
+        ) : null}
+        {previa.rechazados.length > 0 ? (
+          <Aviso tono="error">
+            {`No se crearán (la IA los leyó, pero no están en la fila del Excel que citó):\n${previa.rechazados
+              .map((r) => `· ${r.que}: ${r.motivo}`)
+              .join('\n')}`}
+          </Aviso>
+        ) : null}
+        {previa.diferencias.length > 0 ? (
+          <Aviso tono="info">
+            {`Ítems cuyo total en el Excel no es cantidad × valor unitario (se usará el calculado):\n${previa.diferencias
+              .map(
+                (d) =>
+                  `· Renglón ${d.renglon}, ítem ${d.item} (${d.capitulo}): Excel ${enPesos(d.delExcel)}, calculado ${enPesos(d.calculado)}`,
+              )
+              .join('\n')}`}
+          </Aviso>
+        ) : null}
+      </Seccion>
+    </View>
   );
 }
 
@@ -417,7 +572,9 @@ function DetalleDePresupuesto({
       {p.motivoDescarte ? <Text style={estilos.nota}>{`Descartado: ${p.motivoDescarte}`}</Text> : null}
       {p.revisar ? (
         <Aviso tono="info">
-          {`Importado con diferencias: el «VALOR TOTAL» del Excel era ${p.valorExcel !== null ? enPesos(p.valorExcel) : '—'}. Revíselo antes de aprobar.`}
+          {p.origen === 'excel_ia'
+            ? `Leído con IA: el «VALOR TOTAL» del Excel era ${p.valorExcel !== null ? enPesos(p.valorExcel) : '—'}. Revíselo antes de aprobar.`
+            : `Importado con diferencias: el «VALOR TOTAL» del Excel era ${p.valorExcel !== null ? enPesos(p.valorExcel) : '—'}. Revíselo antes de aprobar.`}
         </Aviso>
       ) : null}
 
@@ -445,6 +602,7 @@ function DetalleDePresupuesto({
         return (
           // Sin nombre, un presupuesto sin vías: los capítulos van directos (RF-33).
           <Seccion key={g.id} titulo={g.nombre ? `${g.nombre} · ${enPesos(resumen?.subtotal ?? 0)}` : 'Capítulos'}>
+            {g.nombreCompleto ? <Text style={estilos.notaPequena}>{g.nombreCompleto}</Text> : null}
             {g.capitulos.map((c) => {
               const sub = resumen?.capitulos.find((x) => x.id === c.id);
               const abierto = abiertos.has(c.id);
@@ -492,5 +650,37 @@ const estilos = StyleSheet.create({
     fontSize: TextoPanel.cuerpo,
     color: Panel.texto,
     flexShrink: 1,
+  },
+  notaPequena: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
+  conteo: { fontFamily: FuentePanel.texto, fontWeight: '600', fontSize: TextoPanel.cuerpo, color: Panel.texto },
+  grupoPrevio: { borderBottomWidth: 1, borderBottomColor: Panel.bordeSuave },
+  cabeceraPrevia: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  cabeceraPreviaEncima: { backgroundColor: Panel.fondoHover },
+  flecha: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.seccion, color: Panel.textoApoyo, width: 18 },
+  nombrePrevio: { flex: 1, minWidth: 220, gap: 2 },
+  detallePrevio: { paddingLeft: 34, paddingRight: 8, paddingBottom: 10, gap: 2 },
+  filaDetalle: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  textoFila: {
+    flex: 1,
+    minWidth: 200,
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.texto,
+  },
+  valorFila: {
+    fontFamily: FuentePanel.texto,
+    fontWeight: '600',
+    fontSize: TextoPanel.cuerpo,
+    color: Panel.texto,
+    fontVariant: ['tabular-nums'],
+    minWidth: 150,
+    textAlign: 'right',
   },
 });

@@ -33,7 +33,8 @@ export interface GrupoDelMenu {
  * Una prueba exige que cada módulo de `MODULOS` esté en exactamente un grupo.
  */
 export const GRUPOS_DEL_MENU: readonly GrupoDelMenu[] = [
-  { titulo: null, modulos: ['inicio'] },
+  // Spec 028: el asistente junto al Inicio, porque es otra forma de llegar a todo.
+  { titulo: null, modulos: ['inicio', 'asistente'] },
   { titulo: 'El día a día', modulos: ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes'] },
   { titulo: 'Módulos de obra', modulos: ['almacen', 'cantera', 'laboratorio'] },
   // Spec 031, RF-1: lo pactado con el cliente, como en NexusObras. Va antes de la

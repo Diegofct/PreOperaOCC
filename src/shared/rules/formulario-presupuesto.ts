@@ -71,11 +71,13 @@ function normalizar(celda: Celda): string {
     .trim();
 }
 
-function texto(celda: Celda): string {
+/** El texto de una celda, con los espacios juntos. También lo usa la lectura con IA. */
+export function texto(celda: Celda): string {
   return celda === null ? '' : String(celda).replace(/\s+/g, ' ').trim();
 }
 
-function numero(celda: Celda): number | null {
+/** Un número escrito como número o como texto («$ 1.234,5»); `null` si no es número. */
+export function numero(celda: Celda): number | null {
   if (celda === null || celda === '') return null;
   if (typeof celda === 'number') return Number.isFinite(celda) ? celda : null;
   const limpio = celda.replace(/\s|\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
@@ -163,6 +165,15 @@ function porcentajeDelAiu(filas: readonly (readonly Celda[])[], letra: 'a' | 'i'
 }
 
 /**
+ * Las hojas del libro que tienen la fila de encabezados del presupuesto (RF-76): lo único
+ * que se le manda a la IA. Un libro de planificación trae además «Vista árbol» o «Flujo»,
+ * que no son el presupuesto del contrato.
+ */
+export function hojasDelPresupuesto<H extends readonly (readonly Celda[])[]>(hojas: readonly H[]): H[] {
+  return hojas.filter((hoja) => hoja.some((f) => columnasDe(f) !== null));
+}
+
+/**
  * Lee la primera hoja que tenga la fila de encabezados. `nuevoId` pone los ids de
  * grupos, capítulos, ítems y rubros (el servidor usa uuidv7; las pruebas, un contador).
  */
@@ -223,6 +234,10 @@ export function leerFormulario(
 
   for (let i = inicio; i < filas.length; i++) {
     const fila = filas[i];
+
+    // Una segunda fila de encabezados («GENERAL», «PARTICULAR» bajo «ESPECIFICACIONES»)
+    // repite «VALOR TOTAL»: no es el total ni un título (RF-75).
+    if (columnasDe(fila) !== null) continue;
 
     // Un formulario sin rubros pasa de los ítems al «VALOR TOTAL» sin «SUBTOTAL OBRAS».
     if (!enRubros && contiene(fila, 'valor total')) {

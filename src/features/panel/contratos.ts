@@ -2665,6 +2665,8 @@ export const estructuraDePresupuestoZod = z.object({
       z.object({
         id: idDelPresupuesto,
         nombre: z.string().trim().max(200).default(''),
+        /** RF-88: la frase completa del Excel, solo para mostrar. */
+        nombreCompleto: z.string().trim().max(500).optional(),
         capitulos: z
           .array(
             z.object({
@@ -2741,7 +2743,7 @@ export interface PresupuestoFila {
   valor: number;
   valorExcel: number | null;
   revisar: boolean;
-  origen: 'excel' | 'blanco' | 'copia';
+  origen: 'excel' | 'blanco' | 'copia' | 'excel_ia';
   creadoEn: string;
   aprobadoEn: string | null;
 }
@@ -2776,4 +2778,72 @@ export interface VistaPreviaDelPresupuesto {
   cuadra: boolean;
   diferencias: { renglon: number; item: string; capitulo: string; calculado: number; delExcel: number }[];
   resumen: ResumenDelPresupuesto;
+  /** RF-82: si lo leyó el lector del formulario o la IA. */
+  leidoPor: 'lector' | 'ia';
+  /** RF-81: lo que la IA leyó y no está en la fila que citó. */
+  rechazados: { hoja: number; fila: number; que: string; motivo: string }[];
+  /** RF-89: los rubros, para mostrarlos bajo su grupo o en todo el contrato. */
+  rubros: { id: string; grupoId: string | null; nombre: string; valor: number }[];
+}
+
+/* ------------------------------------------------------------------------ */
+/* Spec 028: el asistente                                                    */
+/* ------------------------------------------------------------------------ */
+
+/** RF-51: lo que le queda hoy a la persona. */
+export interface CupoDelAsistente {
+  limite: number;
+  hechas: number;
+  quedan: number;
+}
+
+/** Una fila de la lista de conversaciones (RF-39, RF-49). */
+export interface ConversacionDelAsistente {
+  id: string;
+  titulo: string;
+  archivada: boolean;
+  /** ISO 8601. */
+  actualizadaEn: string;
+  /** `false`: ya no alcanza lo que consultó; se ve solo el título y la fecha. */
+  visible: boolean;
+}
+
+export interface MensajeDelAsistente {
+  id: string;
+  rol: 'persona' | 'asistente';
+  texto: string;
+  fuentes: { modulo: string; etiqueta: string; fecha: string | null; ruta: string; obra?: string; desde?: string; hasta?: string }[];
+  adjuntos: { mediaId: string; nombre: string; clase: 'imagen' | 'pdf' | 'excel' | 'word'; bytes: number }[];
+  estado: 'respondido' | 'fallido';
+  /** ISO 8601. */
+  creadoEn: string;
+}
+
+/**
+ * Los eventos de `POST /api/panel/asistente/preguntar` (`text/event-stream`), en orden:
+ * `conversacion`, luego `texto`/`borrar`/`consultando`/`fuente` mientras se redacta, y al
+ * final `fin` o `error`.
+ */
+export type EventoDelAsistente =
+  | { evento: 'conversacion'; id: string; titulo: string }
+  | { evento: 'texto'; texto: string }
+  /** Lo que llegó era el camino de la IA antes de consultar, no la respuesta: se borra. */
+  | { evento: 'borrar' }
+  | { evento: 'consultando'; consulta: string }
+  | { evento: 'fuente'; fuente: MensajeDelAsistente['fuentes'][number] }
+  | { evento: 'fin'; mensajeId: string; cupo: CupoDelAsistente }
+  | { evento: 'error'; mensaje: string; cupo: CupoDelAsistente };
+
+/** RF-45. */
+export const archivoDeConversacion = z.object({ archivada: z.boolean() });
+
+/** RF-59: el límite de todos (`usuarioId` nulo) o de una persona; `limite` nulo lo quita. */
+export const limiteDelAsistente = z.object({
+  usuarioId: z.string().min(1).nullable(),
+  limite: z.number().int('El límite es un número entero.').min(0).max(500, 'El límite va de 0 a 500.').nullable(),
+});
+
+export interface UsoDelAsistente {
+  filas: { usuarioId: string; persona: string; obraId: string | null; obra: string | null; preguntas: number; costo: number }[];
+  limites: { todos: number | null; porPersona: { usuarioId: string; persona: string; limite: number }[] };
 }
