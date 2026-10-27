@@ -272,7 +272,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   const { opciones } = detalle;
   const opcionesDeEquipo = opciones.equipos.map((e) => ({
     valor: e.id,
-    etiqueta: e.placa ? `${e.codigoInterno} · ${e.placa}` : e.codigoInterno,
+    etiqueta: e.nombre,
   }));
   const opcionesDePersona = opciones.personas.map((p) => ({
     valor: p.id,
@@ -281,7 +281,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   }));
   const opcionesDeVolqueta = opciones.cantera.volquetas.map((v) => ({
     valor: v.id,
-    etiqueta: v.placa ? `${v.codigoInterno} · ${v.placa}` : v.codigoInterno,
+    etiqueta: v.nombre,
   }));
   const opcionesDeConductor = opciones.cantera.conductores.map((c) => ({
     valor: c.id,

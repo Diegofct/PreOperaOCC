@@ -298,6 +298,13 @@ export function Boton({
 const EnFormulario = createContext(false);
 
 /**
+ * Dentro de la columna final de una `FilaDeSeccion` la observación toma el ancho de esa
+ * columna y no el suyo, para que la casilla caiga en el mismo sitio en todas las
+ * secciones de la bitácora (spec 032, RF-3).
+ */
+const EnColumnaFinal = createContext(false);
+
+/**
  * El ancho de un campo con `ancho` (spec 026):
  *  · en el celular, el renglón entero: un campo por renglón (RF-35);
  *  · en un formulario de alta, ese ancho como base, creciendo hasta el doble (RF-29);
@@ -453,6 +460,7 @@ export function CampoObservacion({
   obligatoria = false,
   error,
   ayuda,
+  accion,
 }: {
   valor: string;
   onChange: (v: string) => void;
@@ -461,11 +469,19 @@ export function CampoObservacion({
   obligatoria?: boolean;
   error?: string;
   ayuda?: string;
+  /**
+   * El «Quitar» de la fila (spec 032, RF-3): al lado de «Sin observación», o debajo del
+   * campo si está abierto. En el renglón de la casilla y no en uno propio, que es lo
+   * que hacía que cada fila ocupara un renglón de más.
+   */
+  accion?: ReactNode;
 }) {
   const [abierta, setAbierta] = useState(() => valor.trim() !== '');
   // Lo escrito antes de desmarcar, para devolverlo si se vuelve a marcar.
   const recordado = useRef('');
-  const anchoDeCampo = useAnchoDeCampo(ANCHO_OBSERVACION);
+  const enColumnaFinal = useContext(EnColumnaFinal);
+  const anchoPropio = useAnchoDeCampo(ANCHO_OBSERVACION);
+  const anchoDeCampo = enColumnaFinal ? estilos.campoLleno : anchoPropio;
   const hayTexto = valor.trim() !== '';
   const marcada = abierta || obligatoria || (!editable && hayTexto);
 
@@ -484,11 +500,17 @@ export function CampoObservacion({
     return (
       <View style={[estilos.campo, anchoDeCampo]}>
         {hayTexto ? (
-          <Campo etiqueta={etiqueta} valor={valor} onChange={() => {}} multilinea compacto soloLectura />
+          <>
+            <Campo etiqueta={etiqueta} valor={valor} onChange={() => {}} multilinea compacto soloLectura />
+            {accion ? <View style={estilos.observacionAccion}>{accion}</View> : null}
+          </>
         ) : (
           <>
             <EtiquetaDeCampo texto={etiqueta} />
-            <Text style={estilos.sinObservacion}>Sin observación</Text>
+            <View style={estilos.observacionVacia}>
+              <Text style={estilos.sinObservacion}>Sin observación</Text>
+              {accion}
+            </View>
           </>
         )}
       </View>
@@ -504,18 +526,24 @@ export function CampoObservacion({
         deshabilitada={obligatoria}
       />
       {marcada ? (
-        <Campo
-          etiqueta={etiqueta}
-          valor={valor}
-          onChange={onChange}
-          multilinea
-          compacto
-          obligatorio={obligatoria}
-          error={error}
-          ayuda={ayuda}
-        />
+        <>
+          <Campo
+            etiqueta={etiqueta}
+            valor={valor}
+            onChange={onChange}
+            multilinea
+            compacto
+            obligatorio={obligatoria}
+            error={error}
+            ayuda={ayuda}
+          />
+          {accion ? <View style={estilos.observacionAccion}>{accion}</View> : null}
+        </>
       ) : (
-        <Text style={estilos.sinObservacion}>Sin observación</Text>
+        <View style={estilos.observacionVacia}>
+          <Text style={estilos.sinObservacion}>Sin observación</Text>
+          {accion}
+        </View>
       )}
     </View>
   );
@@ -999,6 +1027,8 @@ const OPCIONES_DE_HORA: Opcion[] = HORAS_DEL_DIA.map((h) => ({ valor: h, etiquet
 /** Lo justo para «hh ▼» y «mm ▼»: dos cifras no piden más. */
 const ANCHO_HORA = 96;
 const ANCHO_MINUTO = 88;
+const ANCHO_HORA_COMPACTA = 66;
+const ANCHO_MINUTO_COMPACTO = 70;
 
 /**
  * Una hora del día en dos desplegables: la hora y los minutos (spec 016, RF-30).
@@ -1021,6 +1051,7 @@ export function SelectorDeHora({
   onChange,
   error,
   obligatorio,
+  compacta = false,
 }: {
   etiqueta: string;
   /** «HH:MM», o `''` sin elegir. */
@@ -1028,6 +1059,11 @@ export function SelectorDeHora({
   onChange: (hora: string) => void;
   error?: string;
   obligatorio?: boolean;
+  /**
+   * Los dos desplegables a lo justo para «hh ▼» y «mm ▼» sin holgura: la hora de un
+   * ensayo de la bitácora, que comparte renglón con otros campos (spec 032, RF-6).
+   */
+  compacta?: boolean;
 }) {
   const [partes, setPartes] = useState(() => partirHora(valor));
   const [valorVisto, setValorVisto] = useState(valor);
@@ -1055,7 +1091,7 @@ export function SelectorDeHora({
         onChange={(hora) => elegir({ ...partes, hora })}
         vacio="hh"
         error={error}
-        ancho={ANCHO_HORA}
+        ancho={compacta ? ANCHO_HORA_COMPACTA : ANCHO_HORA}
       />
       <Text style={estilos.horaSeparador}>:</Text>
       <Selector
@@ -1064,7 +1100,7 @@ export function SelectorDeHora({
         opciones={minutosOfrecidos(valor).map((m) => ({ valor: m, etiqueta: m }))}
         onChange={(minuto) => elegir({ ...partes, minuto })}
         vacio="mm"
-        ancho={ANCHO_MINUTO}
+        ancho={compacta ? ANCHO_MINUTO_COMPACTO : ANCHO_MINUTO}
       />
     </View>
   );
@@ -1387,6 +1423,66 @@ export function FilaDeFormulario({
   );
 }
 
+/** El ancho de la columna del nombre de una fila de la bitácora (spec 032, RF-2). */
+export const ANCHO_NOMBRE_DE_FILA = 200;
+/** El de la columna final: la casilla de observación y el «Quitar» (spec 032, RF-3). */
+export const ANCHO_FINAL_DE_FILA = 240;
+
+/**
+ * Una fila de Maquinaria, Personal, Actividades o Control de calidad (spec 032, RF-1 a
+ * RF-7), en tres columnas que caen en el mismo sitio en las cuatro secciones:
+ *
+ *  · el nombre (máquina, persona, actividad o ensayo), de ancho fijo, con lo que va
+ *    debajo de él —el responsable del ensayo, la foto de la actividad—;
+ *  · los campos propios de la sección, en uno o dos `RenglonDeCampos`;
+ *  · la observación con el «Quitar», de ancho fijo.
+ *
+ * Antes cada sección echaba sus campos en una fila que envolvía donde le tocaba: la
+ * casilla caía a un segundo renglón y el «Quitar» a un tercero, y nada quedaba debajo
+ * de nada. En el celular las columnas se apilan (RF-7).
+ *
+ * `debajo` es lo que no es un campo y necesita el ancho entero: avisos, el desglose de
+ * las horas. Solo se pinta si hay algo.
+ */
+export function FilaDeSeccion({
+  nombre,
+  children,
+  final,
+  debajo,
+  ultima = false,
+}: {
+  nombre: ReactNode;
+  children?: ReactNode;
+  final?: ReactNode;
+  debajo?: ReactNode;
+  ultima?: boolean;
+}) {
+  const angosto = useEsAngosto();
+  return (
+    <View style={[estilos.filaSeccion, !ultima && estilos.filaConLinea]}>
+      <View style={[estilos.filaSeccionColumnas, angosto && estilos.filaSeccionApilada]}>
+        <View style={[estilos.filaSeccionNombre, angosto && estilos.filaSeccionColumnaAngosta]}>
+          {nombre}
+        </View>
+        <View style={[estilos.filaSeccionCampos, angosto && estilos.filaSeccionColumnaAngosta]}>
+          {children}
+        </View>
+        <EnColumnaFinal.Provider value={true}>
+          <View style={[estilos.filaSeccionFinal, angosto && estilos.filaSeccionColumnaAngosta]}>
+            {final}
+          </View>
+        </EnColumnaFinal.Provider>
+      </View>
+      {debajo}
+    </View>
+  );
+}
+
+/** Un renglón de campos dentro de una `FilaDeSeccion`. */
+export function RenglonDeCampos({ children }: { children: ReactNode }) {
+  return <View style={estilos.renglonDeCampos}>{children}</View>;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Cifras y medidores                                                        */
 /* ------------------------------------------------------------------------ */
@@ -1503,10 +1599,13 @@ export function Modal({
   children,
   onCerrar,
   soloBotonCierra = false,
+  amplia = false,
 }: {
   titulo: string;
   children: ReactNode;
   onCerrar: () => void;
+  /** Más ancha (960 en vez de 720), para revisar algo con columnas, como la vista previa del presupuesto. */
+  amplia?: boolean;
   /**
    * Quita Esc y el clic en el telón, y deja «Cerrar» como única salida
    * (spec 015, RF-31).
@@ -1525,7 +1624,7 @@ export function Modal({
     <CapaFlotante visible alCerrar={soloBotonCierra ? () => {} : onCerrar} telon="oscuro">
       {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
       <View style={[estilos.centroModal, angosto && estilos.centroModalAngosto]}>
-        <View style={[estilos.ventana, angosto && estilos.ventanaAngosta]}>
+        <View style={[estilos.ventana, amplia && estilos.ventanaAmplia, angosto && estilos.ventanaAngosta]}>
           <View style={estilos.ventanaCabecera}>
             <Text style={estilos.ventanaTitulo}>{titulo}</Text>
             <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
@@ -1681,6 +1780,29 @@ const estilos = StyleSheet.create({
   },
   filaConLinea: { borderBottomWidth: 1, borderBottomColor: Panel.bordeSuave },
 
+  // Sin relleno a los lados: el marco de la sección ya lo pone, y esos 32 px son los
+  // que dejan Maquinaria y Personal en un renglón a 1280 px (spec 032, RF-4, RF-5).
+  filaSeccion: { gap: Spacing.two, paddingVertical: Spacing.three },
+  filaSeccionColumnas: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
+  filaSeccionApilada: { flexDirection: 'column', gap: Spacing.two },
+  filaSeccionNombre: { width: ANCHO_NOMBRE_DE_FILA, gap: Spacing.two },
+  filaSeccionCampos: { flex: 1, minWidth: 0, gap: Spacing.two },
+  filaSeccionFinal: { width: ANCHO_FINAL_DE_FILA, gap: Spacing.two },
+  filaSeccionColumnaAngosta: { width: '100%', flex: undefined },
+  renglonDeCampos: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
+  observacionVacia: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  observacionAccion: { flexDirection: 'row', justifyContent: 'flex-end' },
+
   cifras: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
   cifra: {
     flexGrow: 1,
@@ -1763,6 +1885,7 @@ const estilos = StyleSheet.create({
   rotuloAngosto: { fontFamily: FuentePanel.rotulo, fontSize: TextoPanel.apoyo + 1 },
   /** En el celular la ventana ocupa la pantalla entera (spec 026, RF-37). */
   centroModalAngosto: { padding: 0 },
+  ventanaAmplia: { maxWidth: 960 },
   ventanaAngosta: { maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0 },
   ventanaCabecera: {
     flexDirection: 'row',

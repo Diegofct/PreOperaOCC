@@ -12,6 +12,7 @@
  */
 import { useCallback, useState } from 'react';
 
+import { identificacionDeFila } from '@/shared/rules/vehiculos';
 import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 
 import { api } from './cliente-api';
@@ -144,7 +145,7 @@ export default function PantallaAsignaciones() {
             valor={vehiculoId}
             opciones={vehiculos.datos.map((v) => ({
               valor: v.id,
-              etiqueta: v.codigoInterno,
+              etiqueta: identificacionDeFila(v),
               detalle: `${v.tipoNombre}${v.obraNombre ? ` · ${v.obraNombre}` : ''}`,
             }))}
             onChange={setVehiculoId}

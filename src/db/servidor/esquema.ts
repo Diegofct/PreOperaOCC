@@ -69,6 +69,8 @@ import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas'
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
 import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
+import type { AdjuntoGuardado, FuenteDeRespuesta, ModuloConsultable } from '../../shared/rules/asistente';
+import type { LecturaDeIa } from '../../shared/rules/formulario-presupuesto-ia';
 import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
 import type {
   MasasDelEnsayo,
@@ -125,6 +127,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'whatsapp',
   // Spec 031: las pólizas y los documentos del contrato de una obra.
   'contrato',
+  // Spec 028, RF-71: los archivos adjuntos a una pregunta al asistente.
+  'asistente',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -180,7 +184,8 @@ export const estadoContrato = pgEnum('estado_contrato', ['borrador', 'aprobado']
 export const estadoPresupuesto = pgEnum('estado_presupuesto', ESTADOS_DE_PRESUPUESTO);
 export const estadoPolizaRegistro = pgEnum('estado_poliza_registro', ESTADOS_DE_REGISTRO_DE_POLIZA);
 export const accionContrato = pgEnum('accion_contrato', ['guardado', 'aprobado', 'a_borrador']);
-export const origenPresupuesto = pgEnum('origen_presupuesto', ['excel', 'blanco', 'copia']);
+/** `excel_ia`: el Excel lo leyó la IA porque el lector no lo entendió (031/RF-83). */
+export const origenPresupuesto = pgEnum('origen_presupuesto', ['excel', 'blanco', 'copia', 'excel_ia']);
 
 /** Columna de reloj del servidor, presente en toda tabla que el celular replica. */
 const actualizadoEn = () =>
@@ -315,6 +320,13 @@ export const vehiculos = pgTable(
     id: text('id').primaryKey(),
     codigoInterno: text('codigo_interno').notNull(),
     placa: text('placa'),
+    /**
+     * El código que tenía antes de la spec 032, cuando `codigo_interno` pasó a ser la
+     * placa normalizada. Solo para que un reporte de WhatsApp que todavía diga
+     * «VOL-MAG-04» lo reconozca (RF-19); no se muestra en ninguna pantalla. Nulo en
+     * lo creado después del cambio.
+     */
+    codigoAnterior: text('codigo_anterior'),
     tipoVehiculoId: text('tipo_vehiculo_id')
       .notNull()
       .references(() => tiposVehiculo.id),
@@ -666,6 +678,17 @@ export const partesDeObra = pgTable(
      */
     sinTrabajo: boolean('sin_trabajo').notNull().default(false),
     motivoSinTrabajo: text('motivo_sin_trabajo'),
+    /**
+     * Un día con trabajo en que no se ejecutó ninguna actividad o no se hizo ningún
+     * ensayo (spec 032, RF-21 a RF-35): con la marca y su motivo la sección cuenta
+     * como llena al cerrar. Columnas y no una fila especial dentro de la lista,
+     * porque esas listas se cuentan, se fusionan con WhatsApp y se exportan. El
+     * default `false` deja como estaban las bitácoras anteriores (RF-38).
+     */
+    sinActividades: boolean('sin_actividades').notNull().default(false),
+    motivoSinActividades: text('motivo_sin_actividades'),
+    sinEnsayos: boolean('sin_ensayos').notNull().default(false),
+    motivoSinEnsayos: text('motivo_sin_ensayos'),
 
     cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
     anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
@@ -1760,6 +1783,137 @@ export const presupuestos = pgTable(
     check(
       'ck_presupuesto_aprobado',
       sql`${t.estado} not in ('vigente', 'reemplazado') or ${t.aprobadoEn} is not null`,
+    ),
+  ],
+);
+
+/**
+ * Lo que leyó la IA de un Excel de presupuesto, por la huella del archivo (031/RF-84,
+ * RF-85). La vista previa la guarda y al confirmar se crea el borrador con esta misma
+ * lectura: no se paga dos veces y la vista previa y el borrador salen iguales. Se guarda
+ * lo que devolvió la IA, no la estructura: la comprobación contra las filas se repite
+ * con el archivo cada vez, y es pura.
+ */
+export const presupuestoLecturasIa = pgTable('presupuesto_lecturas_ia', {
+  /** SHA-256 en hexadecimal del archivo tal como se subió. */
+  huella: text('huella').primaryKey(),
+  lectura: jsonb('lectura').$type<LecturaDeIa>().notNull(),
+  modelo: text('modelo').notNull(),
+  tokensEntrada: integer('tokens_entrada').notNull(),
+  tokensSalida: integer('tokens_salida').notNull(),
+  creadoPor: text('creado_por')
+    .notNull()
+    .references(() => usuarios.id),
+  creadoEn: creadoEn(),
+});
+
+/* ------------------------------------------------------------------------ */
+/* Spec 028: el asistente                                                    */
+/* ------------------------------------------------------------------------ */
+
+export const rolMensajeAsistente = pgEnum('rol_mensaje_asistente', ['persona', 'asistente']);
+export const estadoMensajeAsistente = pgEnum('estado_mensaje_asistente', ['respondido', 'fallido']);
+
+/**
+ * Las conversaciones con el asistente (RF-38 a RF-49). De una sola persona, que es la
+ * única que las ve (RF-40); nadie las borra (RF-48), solo se archivan (RF-45).
+ *
+ * `obras` y `modulos` son lo que consultó en todas sus preguntas: con eso se decide si
+ * la persona todavía alcanza su contenido (RF-49, `conversacionVisible`).
+ */
+export const asistenteConversaciones = pgTable(
+  'asistente_conversaciones',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    titulo: text('titulo').notNull(),
+    obras: jsonb('obras').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    modulos: jsonb('modulos').$type<ModuloConsultable[]>().notNull().default(sql`'[]'::jsonb`),
+    archivada: boolean('archivada').notNull().default(false),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [index('ix_asistente_conversaciones_usuario').on(t.usuarioId, t.archivada, t.actualizadoEn)],
+);
+
+/**
+ * Las preguntas y las respuestas, en orden (RF-38, RF-42). Una respuesta se guarda como
+ * se dio, con sus fuentes, y no se vuelve a calcular (RF-27, RF-42). Una que falló queda
+ * `fallido` para poder reintentarla (RF-61, RF-62) y no cuenta en el día (RF-55).
+ */
+export const asistenteMensajes = pgTable(
+  'asistente_mensajes',
+  {
+    id: text('id').primaryKey(),
+    conversacionId: text('conversacion_id')
+      .notNull()
+      .references(() => asistenteConversaciones.id),
+    rol: rolMensajeAsistente('rol').notNull(),
+    texto: text('texto').notNull(),
+    fuentes: jsonb('fuentes').$type<FuenteDeRespuesta[]>().notNull().default(sql`'[]'::jsonb`),
+    adjuntos: jsonb('adjuntos').$type<AdjuntoGuardado[]>().notNull().default(sql`'[]'::jsonb`),
+    estado: estadoMensajeAsistente('estado').notNull().default('respondido'),
+    modelo: text('modelo'),
+    tokensEntrada: integer('tokens_entrada').notNull().default(0),
+    tokensSalida: integer('tokens_salida').notNull().default(0),
+    creadoEn: creadoEn(),
+  },
+  (t) => [
+    index('ix_asistente_mensajes_conversacion').on(t.conversacionId, t.creadoEn),
+    check('ck_asistente_mensaje_tokens', sql`${t.tokensEntrada} >= 0 and ${t.tokensSalida} >= 0`),
+  ],
+);
+
+/**
+ * El uso por persona, día de Colombia y obra (RF-50 a RF-57). Solo suma lo que se
+ * respondió bien (RF-55). La obra es la que consultó la pregunta, o nula si consultó
+ * varias o ninguna. `id` es «usuario|día|obra», porque una llave con una columna nula no
+ * sirve para sumar con `on conflict`.
+ */
+export const asistenteUso = pgTable(
+  'asistente_uso',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    dia: date('dia', { mode: 'string' }).notNull(),
+    obraId: text('obra_id').references(() => obras.id),
+    preguntas: integer('preguntas').notNull().default(0),
+    tokensEntrada: integer('tokens_entrada').notNull().default(0),
+    tokensSalida: integer('tokens_salida').notNull().default(0),
+    /** RF-57, en microdólares (`costoEstimado`). */
+    costo: bigint('costo', { mode: 'number' }).notNull().default(0),
+  },
+  (t) => [
+    index('ix_asistente_uso_dia').on(t.dia),
+    index('ix_asistente_uso_usuario').on(t.usuarioId, t.dia),
+    check('ck_asistente_uso_positivo', sql`${t.preguntas} >= 0 and ${t.costo} >= 0`),
+  ],
+);
+
+/**
+ * Los límites que pone la gerencia (RF-59): `clave` es «todos» o el id de la persona.
+ * Sin fila, vale `LIMITE_DEL_DIA` (30).
+ */
+export const asistenteLimites = pgTable(
+  'asistente_limites',
+  {
+    clave: text('clave').primaryKey(),
+    usuarioId: text('usuario_id').references(() => usuarios.id),
+    limite: integer('limite').notNull(),
+    actualizadoPor: text('actualizado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    check('ck_asistente_limite_rango', sql`${t.limite} between 0 and 500`),
+    check(
+      'ck_asistente_limite_clave',
+      sql`(${t.clave} = 'todos' and ${t.usuarioId} is null) or (${t.clave} = ${t.usuarioId})`,
     ),
   ],
 );

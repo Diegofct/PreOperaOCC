@@ -230,3 +230,48 @@ Demo en Chrome (dev, «Pruebas spec 018 (laboratorio)»): el recorrido de los cr
 - **Aprobar el primer presupuesto de MAGDALENA cambia lo que exige la bitácora y WhatsApp.** Más actividades irán a «No se pudo guardar» por capítulo ambiguo. Se mide después de aprobar. Se revierte poniendo el presupuesto en `reemplazado`, sin borrarlo: la obra vuelve al catálogo fijo.
 - **El esquema de la IA** está en el máximo de 16 `anyOf`. `capitulo` va como texto con `""`, no como nulo, para no sumar otro.
 - **Despliegue:** migración 0028 (aditiva y con `ADD VALUE` al enum) antes de la imagen; clasificador después de probarlo en el PC.
+
+## Cambio del 2026-10-21: leer con IA un Excel de otra forma (RF-74 a RF-87)
+
+**Archivos:**
+- `src/shared/rules/formulario-presupuesto.ts`:
+  - «VALOR TOTAL» en una fila de encabezados no corta la lectura (la 2.ª fila de encabezado del Excel de planificación);
+  - nueva `hojasDelPresupuesto(hojas)`: las que tienen la fila de encabezados (RF-76).
+- `src/shared/rules/formulario-presupuesto-ia.ts`, regla pura con sus casos «031/IA»:
+  - `textoParaLaIa(hojas)`: solo filas con contenido, cada una como `F<n>` + celdas separadas por tabulador, con el número de fila real; `null` si pasa de 1 500 filas (RF-77);
+  - `LecturaDeIa`: la forma que devuelve la IA (grupos con nombre ya unido vía · sección, capítulos, ítems con `fila`, rubros con `grupo` por nombre o `null`, AIU y `valorTotalDelExcel`);
+  - `estructuraDeLaIa(lectura, hojas, nuevoId)`: comprueba cada ítem contra su fila (RF-80, RF-81: la cantidad y el valor unitario tienen que estar entre los números de esa fila, con tolerancia de redondeo), arma la estructura con `normalizarEstructura`, calcula `diferencias` y `cuadra` como `leerFormulario` y devuelve `FormularioLeido & { rechazados }`.
+- `src/features/servidor/ia.ts`: el cliente de Anthropic, uno solo para el panel (la 028 lo reutiliza). Lee `ANTHROPIC_API_KEY`; sin ella, la IA queda apagada y RF-87 responde «no se pudo leer con IA».
+- `src/features/presupuestos/servidor/leer-con-ia.ts`:
+  - llamada con `client.beta.messages.stream(...).finalMessage()`, modelo `claude-opus-5-5`, effort `medium`, salida estructurada con `zodOutputFormat` (zod ya está en el proyecto) y `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`);
+  - `timeout` de 3 min y `maxRetries` 1;
+  - errores tipados del SDK (saldo, límite, conexión) → mensaje de RF-87;
+  - `stop_reason` `refusal` o `max_tokens` → RF-87;
+  - devuelve la lectura y los tokens.
+- `src/features/presupuestos/servidor/importar.ts`: `leer()` intenta primero `leerFormulario`. Si falla o `!cuadra`, busca por huella en `presupuesto_lecturas_ia` (RF-84, RF-85) y, si no está, llama a la IA y guarda. `VistaPrevia` y el borrador ganan `leidoPor` y `rechazados`; con IA, `origen = 'excel_ia'` y `revisar = true` (RF-83).
+- Migración 0029 en `src/db/servidor/esquema.ts`:
+  - `origen_presupuesto` + `'excel_ia'`;
+  - tabla `presupuesto_lecturas_ia` (`huella` pk, `lectura` jsonb, `modelo`, `tokens_entrada`, `tokens_salida`, `creado_por`, `creado_en`).
+- Panel, `pestana-presupuesto.tsx`: el texto de espera (RF-86), el aviso «Leído con IA, revíselo» y la lista de no encontrados (RF-82), y la etiqueta «Excel (IA)» en las versiones.
+- `compose.yaml`: `ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}`, opcional como la de WhatsApp.
+
+**Decisiones:**
+- **Lector primero y la IA solo de respaldo.** Se descartó «siempre IA»: el formulario de OCC ya se lee exacto y gratis.
+- **La IA no inventa ítems: cada uno cita su fila y se comprueba.** Se descartó confiar en la suma total. Un número mal leído y un ítem omitido se compensan y pueden cuadrar por casualidad.
+- **La IA devuelve los nombres de grupo ya unidos (vía · sección).** Se descartó un tercer nivel en la estructura, que habría cambiado la bitácora, los reportes, WhatsApp y el editor (031 entera).
+- **Salida estructurada (`output_config.format`) y no tool use**, porque se quiere un JSON, no una acción. El esquema no lleva uniones: lo vacío va como `""` o `0`.
+- **Lectura guardada por huella del archivo.** Confirmar y volver a subir no cobran (RF-84, RF-85). Además, la vista previa y el borrador son idénticos.
+
+**Verificación:**
+- Casos «031/IA» en el verificador:
+  - texto de la hoja con número de fila;
+  - tope de 1 500;
+  - ítem con número que no está en su fila → rechazado;
+  - grupo «VÍA · SECCIÓN»;
+  - IVA como rubro de su grupo;
+  - el formulario de OCC sigue saliendo por el lector.
+- La llamada real se prueba en dev con el Excel de planificación: conteo, valor contra «VALOR TOTAL DEL CONTRATO» y una sola fila en `presupuesto_lecturas_ia` tras vista previa + confirmar.
+
+**Riesgos:**
+- **Tiempo:** una lectura de unos 100 ítems puede tardar de 1 a 3 min. Hay que comprobar que el proxy del VPS no corte la petición antes; si corta, se sube su tiempo de espera solo para `presupuestos/importar`.
+- **Costo:** unas 20 000 fichas de entrada y 15 000 de salida por archivo (≈ US$0,40 con Opus 5.5), una sola vez por archivo.

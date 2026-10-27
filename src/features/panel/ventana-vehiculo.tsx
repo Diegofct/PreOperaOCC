@@ -17,6 +17,8 @@
  */
 import { useState } from 'react';
 
+import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
+
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -49,28 +51,27 @@ export function VentanaCorregirVehiculo({
   onCerrar: () => void;
   onGuardado: (codigo: string) => void;
 }) {
-  const [codigoInterno, setCodigoInterno] = useState(vehiculo.codigoInterno);
   const [placa, setPlaca] = useState(vehiculo.placa ?? '');
   const [marca, setMarca] = useState(vehiculo.marca ?? '');
   const [modelo, setModelo] = useState(vehiculo.modelo ?? '');
   const [obraId, setObraId] = useState<string | null>(vehiculo.obraId);
   const [estado, setEstado] = useState<EstadoVehiculo>(vehiculo.estado);
   /*
-   * Un choque en el código se queda en la ventana, bajo su campo, y cualquier
+   * Un choque en la placa se queda en la ventana, bajo su campo, y cualquier
    * otro fallo arriba de ella: el aviso de la página queda detrás del telón y no
    * se vería (spec 015, RF-25 y RF-27). Antes esto se resolvía aquí, leyendo
-   * `ErrorApi.campos.codigoInterno` a mano; ahora lo hace el hook para todos los
+   * `ErrorApi.campos` a mano; ahora lo hace el hook para todos los
    * campos, que es lo mismo sin tener que acordarse en cada ventana.
    */
   const accion = useAccionDeVentana();
 
-  const faltaCodigo = codigoInterno.trim().length === 0;
+  // Spec 032, RF-9: la placa no se puede borrar; sin placa, la serie.
+  const faltaPlaca = placa.trim().length === 0;
 
   async function guardar() {
-    if (faltaCodigo) return;
+    if (faltaPlaca) return;
 
     const cambios: Partial<VehiculoNuevo> = {};
-    if (codigoInterno !== vehiculo.codigoInterno) cambios.codigoInterno = codigoInterno;
     if (placa !== (vehiculo.placa ?? '')) cambios.placa = placa;
     if (marca !== (vehiculo.marca ?? '')) cambios.marca = marca;
     if (modelo !== (vehiculo.modelo ?? '')) cambios.modelo = modelo;
@@ -85,11 +86,14 @@ export function VentanaCorregirVehiculo({
     }
 
     const bien = await accion.ejecutar(() => api.vehiculos.editar(vehiculo.id, cambios));
-    if (bien) onGuardado(codigoInterno);
+    if (bien) onGuardado(placa.trim().toUpperCase());
   }
 
   return (
-    <Modal titulo={`Corregir ${vehiculo.codigoInterno}`} onCerrar={onCerrar}>
+    <Modal
+      titulo={`Corregir ${identificacionDelVehiculo({ placa: vehiculo.placa, tipo: vehiculo.tipoNombre, marca: vehiculo.marca, modelo: vehiculo.modelo })}`}
+      onCerrar={onCerrar}
+    >
       <Aviso tono="info">
         El tipo de equipo no se corrige: decide el formato del preoperacional y el medidor, y
         cambiarlo dejaría sin sentido las actas ya firmadas de esta máquina.
@@ -97,14 +101,14 @@ export function VentanaCorregirVehiculo({
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo
-          etiqueta="Código interno"
+          etiqueta="Placa / identificación"
           obligatorio
-          valor={codigoInterno}
-          onChange={setCodigoInterno}
-          error={faltaCodigo ? 'El código no puede quedar vacío.' : accion.campoConError('codigoInterno')}
+          valor={placa}
+          onChange={setPlaca}
+          ayuda="Sin placa: la serie"
+          error={faltaPlaca ? 'La placa / identificación no puede quedar vacía.' : accion.campoConError('placa')}
           ancho={180}
         />
-        <Campo etiqueta="Placa" valor={placa} onChange={setPlaca} ancho={140} />
         <Campo etiqueta="Marca" valor={marca} onChange={setMarca} ancho={160} />
         <Campo etiqueta="Modelo" valor={modelo} onChange={setModelo} ancho={160} />
         <Selector
@@ -131,7 +135,7 @@ export function VentanaCorregirVehiculo({
             <Boton
               titulo={accion.ejecutando ? 'Guardando…' : 'Guardar cambios'}
               onPress={guardar}
-              deshabilitado={accion.ejecutando || faltaCodigo}
+              deshabilitado={accion.ejecutando || faltaPlaca}
             />
             <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
           </Acciones>

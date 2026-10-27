@@ -85,6 +85,9 @@ export const MODULOS = [
   // Spec 031. El contrato y el presupuesto de la obra con su cliente: se arman al
   // empezar la obra y se consultan después; en el menú van en su grupo, «Cliente».
   'contrato',
+  // Spec 028. Una conversación que consulta lo de los demás módulos: va junto al Inicio,
+  // porque es una forma de llegar a todo lo demás.
+  'asistente',
 ] as const;
 export type Modulo = (typeof MODULOS)[number];
 
@@ -266,6 +269,18 @@ const TABLA: Record<Modulo, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: NADA,
   },
+  // Spec 028, RF-1, RF-2 y RF-59. Lo usan los cinco roles del panel; lo que alcanza cada
+  // uno lo decide `alcanceDelAsistente` (rules/asistente.ts) con sus módulos y su obra.
+  // `escribir` es poner los límites del día y ver el uso: solo la gerencia. El operador
+  // no: el asistente no está en el celular.
+  asistente: {
+    admin: ['ver', 'listar', 'escribir'],
+    supervisor: ['ver', 'listar'],
+    operador: NADA,
+    almacenista: ['ver', 'listar'],
+    encargado_planta: ['ver', 'listar'],
+    laboratorista: ['ver', 'listar'],
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -352,6 +367,7 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
 const QUE_SE_INTENTABA_EN: Partial<Record<Modulo, Partial<Record<Accion, string>>>> = {
   whatsapp: { aprobar: 'aprobar ni descartar este reporte' },
   contrato: { aprobar: 'aprobar el contrato ni el presupuesto' },
+  asistente: { escribir: 'cambiar los límites del asistente ni ver su uso' },
 };
 
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
@@ -423,6 +439,7 @@ const NOMBRE_DE_MODULO: Record<Modulo, string> = {
   whatsapp: 'Reportes de WhatsApp',
   reportes: 'Reportes',
   contrato: 'Contrato y Presupuesto',
+  asistente: 'Asistente',
 };
 
 /**

@@ -24,10 +24,12 @@ import {
   vehiculos,
 } from '@/db/servidor/esquema';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { errorDePeticion } from '@/features/servidor/respuestas';
 import { horarioEfectivo } from '@/shared/rules/horas';
 import { fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
 import { diasDe, esTipoDePeriodo, periodoDe, type PeriodoDeReporte } from '@/shared/rules/periodos';
+import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -74,6 +76,10 @@ export async function partesDelPeriodo(pedido: PedidoDeReporte) {
       laboratorio: partesDeObra.laboratorio,
       sinTrabajo: partesDeObra.sinTrabajo,
       motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+      sinActividades: partesDeObra.sinActividades,
+      motivoSinActividades: partesDeObra.motivoSinActividades,
+      sinEnsayos: partesDeObra.sinEnsayos,
+      motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
       notas: partesDeObra.notas,
       horario: partesDeObra.horario,
       horarioDeLaObra: obras.horario,
@@ -126,8 +132,9 @@ export async function vehiculosDeLaObra(obraId: string) {
   const filas = await baseServidor()
     .select({
       id: vehiculos.id,
-      codigo: vehiculos.codigoInterno,
       placa: vehiculos.placa,
+      marca: vehiculos.marca,
+      modelo: vehiculos.modelo,
       tipoId: vehiculos.tipoVehiculoId,
       tipo: tiposVehiculo.nombre,
       clase: tiposVehiculo.claseMedidor,
@@ -142,6 +149,8 @@ export async function vehiculosDeLaObra(obraId: string) {
     const claseMedidor = medidorDeClase(v.clase);
     return {
       ...v,
+      // Spec 032, RF-13: la máquina por su placa, o su descripción si no tiene.
+      codigo: identificacionDelVehiculo(v),
       claseMedidor,
       lectura: (claseMedidor === 'odometro' ? v.odometroKm : v.horometroH) ?? null,
     };
@@ -187,8 +196,7 @@ export async function viajesDelPeriodo(pedido: PedidoDeReporte) {
   const filas = await baseServidor()
     .select({
       fecha: canteraViajes.fecha,
-      placa: vehiculos.placa,
-      codigo: vehiculos.codigoInterno,
+      nombrable: columnasParaNombrar,
       material: canteraMateriales.nombre,
       origen: origen.nombre,
       destino: destino.nombre,
@@ -206,9 +214,9 @@ export async function viajesDelPeriodo(pedido: PedidoDeReporte) {
         between(canteraViajes.fecha, pedido.periodo.desde, pedido.periodo.hasta),
       ),
     );
-  return filas.map((v) => ({
+  return conNombreDelVehiculo(filas, 'volqueta').map((v) => ({
     fecha: v.fecha,
-    volqueta: v.placa || v.codigo,
+    volqueta: v.volqueta,
     material: v.material,
     origen: v.origen,
     // A la obra van a muchas abscisas; contadas una por una partirían la tabla.

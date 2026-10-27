@@ -89,7 +89,10 @@ export function construirActividad(nueva: ActividadNueva): ActividadBitacora {
 export interface MaquinaDelParte {
   id: string;
   vehiculoId: string;
-  /** Código interno tal como estaba el día del parte: VOL-01. */
+  /**
+   * Cómo se llamaba la máquina el día del parte, congelado. Hasta la spec 032 era
+   * el código interno (VOL-01); desde ella, la placa o, sin placa, su descripción.
+   */
   codigo: string;
   /**
    * En qué se mide este equipo. Se congela con el parte: si mañana un tipo de

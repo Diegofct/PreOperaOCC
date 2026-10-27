@@ -7,6 +7,7 @@ import { bitacoras, obras, tiposVehiculo, usuarios, vehiculos } from '@/db/servi
 import { bitacoraNueva, fechaDeJornadaZod } from '@/features/panel/contratos';
 import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -45,7 +46,7 @@ export async function GET(peticion: Request) {
       .select({
         id: bitacoras.id,
         vehiculoId: bitacoras.vehiculoId,
-        vehiculoCodigo: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         tipoNombre: tiposVehiculo.nombre,
         tipoVehiculoId: vehiculos.tipoVehiculoId,
         obraId: bitacoras.obraId,
@@ -73,7 +74,7 @@ export async function GET(peticion: Request) {
     const flota = await db
       .select({
         vehiculoId: vehiculos.id,
-        codigoInterno: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         tipoNombre: tiposVehiculo.nombre,
         tipoVehiculoId: vehiculos.tipoVehiculoId,
         obraNombre: obras.nombre,
@@ -93,8 +94,12 @@ export async function GET(peticion: Request) {
 
     return ok({
       fecha,
-      bitacoras: filas,
-      pendientes: flota.filter((maquina) => !conBitacora.has(maquina.vehiculoId)),
+      // Spec 032, RF-13: con la placa, o la descripción si no tiene.
+      bitacoras: conNombreDelVehiculo(filas, 'vehiculoCodigo'),
+      pendientes: conNombreDelVehiculo(
+        flota.filter((maquina) => !conBitacora.has(maquina.vehiculoId)),
+        'codigoInterno',
+      ),
     });
   });
 }

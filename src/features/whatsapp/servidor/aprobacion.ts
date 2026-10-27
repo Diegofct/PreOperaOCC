@@ -72,6 +72,7 @@ import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { DESTINO_OBRA, valeLimpio } from '@/shared/rules/cantera';
 import { DESFASE_COLOMBIA_MS, fechaDeJornada, medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
+import { resolverSeccionSinRegistro } from '@/shared/rules/parte';
 import {
   claveDeMaterialNuevo,
   destinoDeCategoria,
@@ -387,6 +388,10 @@ export async function guardarEnBitacora(datos: {
           clima: partesDeObra.clima,
           laboratorio: partesDeObra.laboratorio,
           notas: partesDeObra.notas,
+          sinActividades: partesDeObra.sinActividades,
+          motivoSinActividades: partesDeObra.motivoSinActividades,
+          sinEnsayos: partesDeObra.sinEnsayos,
+          motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
           cerradoEn: partesDeObra.cerradoEn,
           // Como texto y no como `Date`: Postgres guarda microsegundos y un `Date`
           // solo milisegundos, así que comparar el `Date` leído nunca coincidiría.
@@ -416,6 +421,18 @@ export async function guardarEnBitacora(datos: {
       }
 
       const fusion = fusionarReporteEnParte(parte, delReporte);
+      // Spec 032 (RF-27, RF-34): una actividad o un ensayo que llega a una sección
+      // marcada «Hoy no se realizaron…» la desmarca; la misma regla que el panel.
+      const actividadesMarcadas = resolverSeccionSinRegistro(
+        { marcada: parte.sinActividades, motivo: parte.motivoSinActividades },
+        {},
+        fusion.actividades.length,
+      );
+      const ensayosMarcados = resolverSeccionSinRegistro(
+        { marcada: parte.sinEnsayos, motivo: parte.motivoSinEnsayos },
+        {},
+        fusion.laboratorio.length,
+      );
       const [escrita] = await db
         .update(partesDeObra)
         .set({
@@ -425,6 +442,10 @@ export async function guardarEnBitacora(datos: {
           clima: fusion.clima,
           laboratorio: fusion.laboratorio,
           notas: fusion.notas,
+          sinActividades: actividadesMarcadas.marcada,
+          motivoSinActividades: actividadesMarcadas.motivo,
+          sinEnsayos: ensayosMarcados.marcada,
+          motivoSinEnsayos: ensayosMarcados.motivo,
         })
         .where(
           and(

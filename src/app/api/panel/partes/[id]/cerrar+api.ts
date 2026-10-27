@@ -50,6 +50,11 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         // Con la marca de día sin trabajo, la regla exige menos (004/RF-54).
         sinTrabajo: partesDeObra.sinTrabajo,
         motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+        // Una sección vacía a propósito cuenta como llena con su motivo (spec 032).
+        sinActividades: partesDeObra.sinActividades,
+        motivoSinActividades: partesDeObra.motivoSinActividades,
+        sinEnsayos: partesDeObra.sinEnsayos,
+        motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
       })
       .from(partesDeObra)
       .where(eq(partesDeObra.id, id))

@@ -19,6 +19,11 @@ import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
 import type {
+  ConversacionDelAsistente,
+  CupoDelAsistente,
+  EventoDelAsistente,
+  MensajeDelAsistente,
+  UsoDelAsistente,
   PersonasDesdeLaBandeja,
   Aprobacion,
   ReporteEsperadoFila,
@@ -704,6 +709,24 @@ reportes: {
     },
   },
 
+  /** El asistente (spec 028). Preguntar va aparte: `preguntarAlAsistente`, porque responde a medida que redacta. */
+  asistente: {
+    conversaciones: (archivadas = false) =>
+      panel<{ conversaciones: ConversacionDelAsistente[]; cupo: CupoDelAsistente }>(
+        `/asistente/conversaciones${archivadas ? '?archivadas=1' : ''}`,
+      ),
+    conversacion: (id: string) =>
+      panel<{ conversacion: ConversacionDelAsistente; mensajes: MensajeDelAsistente[] }>(
+        `/asistente/conversaciones/${encodeURIComponent(id)}`,
+      ),
+    archivar: (id: string, archivada: boolean) =>
+      panelEnviar<{ archivada: boolean }>(`/asistente/conversaciones/${encodeURIComponent(id)}`, 'PATCH', { archivada }),
+    uso: (desde: string, hasta: string) =>
+      panel<UsoDelAsistente>(`/asistente/uso?${new URLSearchParams({ desde, hasta }).toString()}`),
+    ponerLimite: (usuarioId: string | null, limite: number | null) =>
+      panelEnviar<UsoDelAsistente['limites']>('/asistente/limites', 'PUT', { usuarioId, limite }),
+  },
+
   asignaciones: {
     listar: () => panel<AsignacionFila[]>('/asignaciones'),
     crear: (datos: AsignacionNueva) => panelEnviar<AsignacionFila>('/asignaciones', 'POST', datos),
@@ -711,6 +734,54 @@ reportes: {
       panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'cerrar' }),
   },
 };
+
+/**
+ * Pregunta al asistente y entrega la respuesta a medida que llega (spec 028, RF-13).
+ *
+ * Con `fetch` y su lector, no con `EventSource`: hay que mandar un `POST` con archivos.
+ * Los fallos de antes de empezar (sin cupo, adjunto que no sirve…) llegan como cualquier
+ * otro: `ErrorApi` con el mensaje del servidor. Los de durante, como evento `error`.
+ */
+export async function preguntarAlAsistente(
+  datos: { pregunta: string; conversacionId: string | null; archivos: readonly File[] },
+  alEvento: (evento: EventoDelAsistente) => void,
+  senal?: AbortSignal,
+): Promise<void> {
+  const formulario = new FormData();
+  formulario.append('pregunta', datos.pregunta);
+  if (datos.conversacionId) formulario.append('conversacionId', datos.conversacionId);
+  for (const archivo of datos.archivos) formulario.append('archivo', archivo, archivo.name);
+
+  let respuesta: Response;
+  try {
+    // Sin `Content-Type`: el navegador pone el de multipart con su separador.
+    respuesta = await fetch('/api/panel/asistente/preguntar', { method: 'POST', body: formulario as unknown as BodyInit, signal: senal });
+  } catch (fallo) {
+    if (senal?.aborted) return;
+    throw new ErrorApi('No se pudo contactar al servidor. ¿Está corriendo `npm run web`?', 0, undefined, fallo);
+  }
+  if (!respuesta.ok || !respuesta.body) {
+    const detalle = (await respuesta.json().catch(() => null)) as { error?: string } | null;
+    throw new ErrorApi(detalle?.error ?? `El servidor respondió ${respuesta.status}.`, respuesta.status);
+  }
+
+  const lector = respuesta.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pendiente = '';
+  for (;;) {
+    const { value, done } = await lector.read();
+    if (done) break;
+    pendiente += value;
+    // Cada evento termina en una línea en blanco: «event: …», «data: …» y una vacía.
+    let corte: number;
+    while ((corte = pendiente.indexOf('\n\n')) >= 0) {
+      const bloque = pendiente.slice(0, corte);
+      pendiente = pendiente.slice(corte + 2);
+      const nombre = /^event: (.+)$/m.exec(bloque)?.[1];
+      const datosDelEvento = /^data: (.+)$/m.exec(bloque)?.[1];
+      if (nombre && datosDelEvento) alEvento({ evento: nombre, ...JSON.parse(datosDelEvento) } as EventoDelAsistente);
+    }
+  }
+}
 
 function parametrosDeReporte({ obraId, tipo, fecha }: ConsultaDeReporte): string {
   const parametros = new URLSearchParams({ tipo, fecha });

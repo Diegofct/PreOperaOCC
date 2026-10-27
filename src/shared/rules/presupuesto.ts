@@ -62,6 +62,11 @@ export interface GrupoDelPresupuesto {
   id: string;
   /** Vacío en un presupuesto sin grupos (RF-33). */
   nombre: string;
+  /**
+   * La frase completa del Excel cuando `nombre` es el corto que puso la IA (RF-88): «VIA
+   * 90A01 DEL CORREDOR CARTAGENA - BARRANQUILLA… · SITIOS CRITICOS». Solo para mostrar.
+   */
+  nombreCompleto?: string;
   capitulos: CapituloDelPresupuesto[];
 }
 
@@ -153,6 +158,8 @@ export interface ResumenDelPresupuesto {
   grupos: {
     id: string;
     nombre: string;
+    /** RF-88; vacío si no hay otro nombre que el corto. */
+    nombreCompleto: string;
     subtotal: number;
     capitulos: { id: string; codigo: string; nombre: string; subtotal: number; items: number }[];
     rubros: number;
@@ -183,6 +190,7 @@ export function resumenDelPresupuesto(e: EstructuraDePresupuesto): ResumenDelPre
     return {
       id: g.id,
       nombre: g.nombre,
+      nombreCompleto: g.nombreCompleto ?? '',
       subtotal: capitulos.reduce((s, c) => s + c.subtotal, 0),
       capitulos,
       rubros: e.rubros.filter((r) => r.grupoId === g.id).reduce((s, r) => s + r.valor, 0),

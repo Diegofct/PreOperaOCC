@@ -122,7 +122,7 @@ export async function crearBorrador(
     nombre: string;
     notaVersion?: string;
     estructura: EstructuraDePresupuesto;
-    origen: 'excel' | 'blanco' | 'copia';
+    origen: 'excel' | 'blanco' | 'copia' | 'excel_ia';
     valorExcel?: number | null;
     revisar?: boolean;
   },

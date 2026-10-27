@@ -17,6 +17,7 @@ import { alias } from 'drizzle-orm/pg-core';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { filtroDeModulo } from '@/features/servidor/alcance';
+import { columnasParaNombrar, conNombreDelVehiculo, nombrarVehiculo } from '@/features/servidor/placas';
 import {
   canteraMateriales,
   canteraSitios,
@@ -59,7 +60,8 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
       materialId: canteraViajes.materialId,
       material: canteraMateriales.nombre,
       vehiculoId: canteraViajes.vehiculoId,
-      volqueta: vehiculos.codigoInterno,
+      // Spec 032, RF-13: la volqueta por su placa.
+      nombrable: columnasParaNombrar,
       conductorId: canteraViajes.conductorId,
       conductor: conductor.nombreCompleto,
       origenId: canteraViajes.origenId,
@@ -91,7 +93,7 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
     .where(and(filtroDeModulo('cantera', canteraViajes.obraId), condicion))
     .orderBy(desc(canteraViajes.fecha), desc(canteraViajes.hora), desc(canteraViajes.creadoEn));
 
-  return filas.map(({ creadoEn, anuladoEn, ...fila }) => ({
+  return conNombreDelVehiculo(filas, 'volqueta').map(({ creadoEn, anuladoEn, ...fila }) => ({
     ...fila,
     registradoEn: creadoEn.toISOString(),
     anulado: anuladoEn !== null,
@@ -145,7 +147,7 @@ export async function viajesConVale(obraId: string, vale: string) {
       vale: canteraViajes.vale,
       fecha: canteraViajes.fecha,
       hora: canteraViajes.hora,
-      volqueta: vehiculos.codigoInterno,
+      nombrable: columnasParaNombrar,
     })
     .from(canteraViajes)
     .innerJoin(vehiculos, eq(vehiculos.id, canteraViajes.vehiculoId))
@@ -157,7 +159,7 @@ export async function viajesConVale(obraId: string, vale: string) {
       ),
     )
     .orderBy(canteraViajes.fecha, canteraViajes.hora);
-  return filas.map((f) => ({ ...f, anulado: false }));
+  return conNombreDelVehiculo(filas, 'volqueta').map((f) => ({ ...f, anulado: false }));
 }
 
 /**
@@ -172,7 +174,7 @@ export async function opcionesDeLaObra(obraId: string): Promise<OpcionesDeCanter
     baseServidor()
       .select({
         id: vehiculos.id,
-        codigoInterno: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         placa: vehiculos.placa,
         obraId: vehiculos.obraId,
         tipoVehiculoId: vehiculos.tipoVehiculoId,
@@ -181,7 +183,7 @@ export async function opcionesDeLaObra(obraId: string): Promise<OpcionesDeCanter
       })
       .from(vehiculos)
       .where(eq(vehiculos.obraId, obraId))
-      .orderBy(vehiculos.codigoInterno),
+      .orderBy(vehiculos.placa),
     baseServidor()
       .select({
         id: usuarios.id,
@@ -201,7 +203,7 @@ export async function opcionesDeLaObra(obraId: string): Promise<OpcionesDeCanter
     materiales,
     volquetas: flota
       .filter((v) => volquetaElegible({ ...v, dadoDeBaja: v.eliminadoEn !== null }, obraId))
-      .map(({ id, codigoInterno, placa }) => ({ id, codigoInterno, placa })),
+      .map(({ id, nombrable, placa }) => ({ id, nombre: nombrarVehiculo(nombrable), placa })),
     conductores: personas
       .filter((p) => conductorElegible({ ...p, dadoDeBaja: p.eliminadoEn !== null }, obraId))
       .map(({ id, nombreCompleto, cargo }) => ({ id, nombreCompleto, cargo })),

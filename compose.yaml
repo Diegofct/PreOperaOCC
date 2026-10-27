@@ -48,6 +48,9 @@ services:
       # Spec 024. `1` guarda solo lo que llega por WhatsApp; cualquier otro valor deja
       # todo pendiente en la bandeja, como en la 021: es la vuelta atrás.
       WHATSAPP_GUARDADO_AUTOMATICO: ${WHATSAPP_GUARDADO_AUTOMATICO:-0}
+      # Spec 031 (cambio del 2026-10-21) y, después, el asistente (028). Opcional: sin
+      # ella el panel funciona igual y lo que necesita la IA dice que no está disponible.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
 
     # Informativo: `docker ps` dice si está sano. No reinicia nada por sí solo,
     # pero es la forma rápida de contestar «¿volvió bien?» después de un

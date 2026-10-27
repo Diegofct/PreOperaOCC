@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import { asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
 import { leer } from '@/features/media/servidor/almacen';
 import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
@@ -54,6 +54,9 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     // que no le tocan.
     if (fila.duenoTipo === 'whatsapp') {
       if (!(await alcanzaElMensaje(sesion, fila.duenoId))) return noEncontrado('esa imagen');
+    } else if (fila.duenoTipo === 'asistente') {
+      // Spec 028, RF-40 y RF-71: un adjunto al asistente lo ve solo quien hizo la pregunta.
+      if (!(await esSuConversacion(sesion, fila.duenoId))) return noEncontrado('esa imagen');
     } else if (!alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId))) {
       return noEncontrado('esa imagen');
     }
@@ -145,4 +148,14 @@ async function alcanzaElMensaje(sesion: PersonaEnSesion, mensajeId: string): Pro
   // la obra donde se decidió; lo demás, en la de su grupo.
   const obraId = await obraDeUnMensaje(mensajeId);
   return Boolean(obraId && sesion.obraId && obraId === sesion.obraId);
+}
+
+/** El adjunto cuelga de la conversación; solo su dueño lo ve, tampoco la gerencia (028/RF-40). */
+async function esSuConversacion(sesion: PersonaEnSesion, conversacionId: string): Promise<boolean> {
+  const [fila] = await baseServidor()
+    .select({ usuarioId: asistenteConversaciones.usuarioId })
+    .from(asistenteConversaciones)
+    .where(eq(asistenteConversaciones.id, conversacionId))
+    .limit(1);
+  return fila?.usuarioId === sesion.id;
 }

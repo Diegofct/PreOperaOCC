@@ -218,6 +218,10 @@ async function reporteDeClima(pedido: PedidoDeReporte) {
       clima: p.clima,
       sinTrabajo: p.sinTrabajo,
       motivoSinTrabajo: p.motivoSinTrabajo,
+      sinActividades: p.sinActividades,
+      motivoSinActividades: p.motivoSinActividades,
+      sinEnsayos: p.sinEnsayos,
+      motivoSinEnsayos: p.motivoSinEnsayos,
       notas: p.notas,
     })),
   });

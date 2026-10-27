@@ -39,6 +39,7 @@ import {
 import type { CreadoFila } from '@/features/panel/contratos';
 import { veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { columnasParaNombrar, nombrarVehiculo } from '@/features/servidor/placas';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { TIPOS_CREADOS, type TipoCreado } from '@/shared/rules/whatsapp-automatico';
 
@@ -56,7 +57,10 @@ async function nombres(tipo: TipoCreado, ids: string[]): Promise<Map<string, { n
     tipo === 'persona'
       ? (await db.select({ id: usuarios.id, nombre: usuarios.nombreCompleto, detalle: usuarios.cargo }).from(usuarios).where(inArray(usuarios.id, ids)))
       : tipo === 'vehiculo'
-        ? (await db.select({ id: vehiculos.id, nombre: vehiculos.codigoInterno, detalle: vehiculos.placa }).from(vehiculos).where(inArray(vehiculos.id, ids)))
+        ? // Spec 032, RF-13: por la placa, o la descripción si no tiene; el detalle, el tipo.
+          (await db.select({ id: vehiculos.id, nombrable: columnasParaNombrar }).from(vehiculos).where(inArray(vehiculos.id, ids))).map(
+            (f) => ({ id: f.id, nombre: nombrarVehiculo(f.nombrable), detalle: f.nombrable.tipo }),
+          )
         : tipo === 'material_cantera'
           ? (await db.select({ id: canteraMateriales.id, nombre: canteraMateriales.nombre, detalle: sql<string | null>`null` }).from(canteraMateriales).where(inArray(canteraMateriales.id, ids)))
           : tipo === 'sitio_cantera'
@@ -165,7 +169,10 @@ async function otroValido(tipo: TipoCreado, otroId: string, obraId: string): Pro
     tipo === 'persona'
       ? await db.select({ nombre: usuarios.nombreCompleto }).from(usuarios).where(and(eq(usuarios.id, otroId), eq(usuarios.obraId, obraId), isNull(usuarios.eliminadoEn)))
       : tipo === 'vehiculo'
-        ? await db.select({ nombre: vehiculos.codigoInterno }).from(vehiculos).where(and(eq(vehiculos.id, otroId), eq(vehiculos.obraId, obraId), isNull(vehiculos.eliminadoEn)))
+        ? // El nombre va al `codigo` de las máquinas del parte: la placa (spec 032, RF-15).
+          (await db.select({ nombrable: columnasParaNombrar }).from(vehiculos).where(and(eq(vehiculos.id, otroId), eq(vehiculos.obraId, obraId), isNull(vehiculos.eliminadoEn)))).map(
+            (f) => ({ nombre: nombrarVehiculo(f.nombrable) }),
+          )
         : tipo === 'material_cantera'
           ? await db.select({ nombre: canteraMateriales.nombre }).from(canteraMateriales).where(and(eq(canteraMateriales.id, otroId), eq(canteraMateriales.obraId, obraId), isNull(canteraMateriales.eliminadoEn)))
           : tipo === 'sitio_cantera'

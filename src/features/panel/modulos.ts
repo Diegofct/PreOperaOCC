@@ -26,6 +26,7 @@ export const ENLACES_DE_MODULO = {
   whatsapp: { ruta: '/panel/whatsapp', titulo: 'Reportes de WhatsApp' },
   reportes: { ruta: '/panel/reportes', titulo: 'Reportes' },
   contrato: { ruta: '/panel/contrato', titulo: 'Contrato y Presupuesto' },
+  asistente: { ruta: '/panel/asistente', titulo: 'Asistente' },
   // `as const` conserva las rutas como literales, que es lo que exigen las
   // rutas tipadas de Expo Router; `satisfies` obliga a que estén todos.
 } as const satisfies Record<Modulo, { ruta: string; titulo: string }>;

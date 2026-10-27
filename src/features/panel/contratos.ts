@@ -28,6 +28,7 @@ import {
   type TipoDeContrato,
 } from '@/shared/rules/contrato';
 import { AMPAROS, type Amparo } from '@/shared/rules/polizas';
+import { normalizarPlaca } from '@/shared/rules/vehiculos';
 import type {
   EstadoDePresupuesto,
   EstructuraDePresupuesto,
@@ -59,6 +60,7 @@ import {
 import {
   faltaObservacionDelEnsayo,
   faltasDeActividad,
+  LARGO_DEL_MOTIVO_SIN_REGISTRO,
   MENSAJES_DE_ENSAYO,
   METROS_MAXIMOS_DEL_ENSAYO,
 } from '@/shared/rules/parte';
@@ -326,10 +328,18 @@ export const ETIQUETA_ESTADO_VEHICULO: Record<EstadoVehiculo, string> = {
   no_apto: 'No apto',
 };
 
+/**
+ * La placa o, en la maquinaria sin placa, su serie (spec 032, RF-9, RF-11). Ya no se
+ * pide código interno: el servidor lo iguala a la placa.
+ */
+const placaObligatoria = z
+  .string({ error: 'Falta la placa / identificación.' })
+  .max(32, 'La placa / identificación tiene más de 32 caracteres.')
+  .transform((v) => normalizarPlaca(v))
+  .refine((v): v is string => v !== null, 'Falta la placa / identificación.');
+
 export const vehiculoNuevo = z.object({
-  /** El número con el que OCC lo llama en obra: VOL-01, CAM-03… */
-  codigoInterno: textoObligatorio(32, 'el código interno'),
-  placa: textoOpcional(16).transform((v) => v?.toUpperCase() ?? null),
+  placa: placaObligatoria,
   tipoVehiculoId: textoObligatorio(40, 'el tipo de equipo'),
   marca: textoOpcional(80),
   modelo: textoOpcional(80),
@@ -966,6 +976,14 @@ export const parteEditado = z.object({
   /** Día sin trabajo (spec 004, RF-53 a RF-55). Ausente no toca la marca. */
   sinTrabajo: z.boolean().optional(),
   motivoSinTrabajo: textoParcial(500),
+  /**
+   * «Hoy no se realizaron actividades / ensayos» y su motivo de un renglón (spec 032,
+   * RF-22, RF-30). Ausente no toca la marca.
+   */
+  sinActividades: z.boolean().optional(),
+  motivoSinActividades: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
+  sinEnsayos: z.boolean().optional(),
+  motivoSinEnsayos: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
 });
 
 export type ParteEditado = z.input<typeof parteEditado>;
@@ -1084,6 +1102,11 @@ export interface ParteFila {
   notas: string | null;
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
+  /** Spec 032: la sección vacía a propósito, con su motivo. */
+  sinActividades: boolean;
+  motivoSinActividades: string | null;
+  sinEnsayos: boolean;
+  motivoSinEnsayos: string | null;
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;
@@ -1468,7 +1491,8 @@ export interface OpcionesDeCantera {
   sitios: SitioDeCanteraFila[];
   materiales: MaterialDeCanteraFila[];
   /** Solo las volquetas operativas de la obra (RF-8). */
-  volquetas: { id: string; codigoInterno: string; placa: string | null }[];
+  /** `nombre`: la placa, o la descripción si no tiene (spec 032, RF-13). */
+  volquetas: { id: string; nombre: string; placa: string | null }[];
   /** Solo quien conduce u opera, activo y de la obra (RF-35). */
   conductores: { id: string; nombreCompleto: string; cargo: string | null }[];
 }
@@ -2280,7 +2304,8 @@ export interface DetalleDePropuesta extends PropuestaFila {
    * rechazaría al aprobar.
    */
   opciones: {
-    equipos: { id: string; codigoInterno: string; placa: string | null }[];
+    /** `nombre`: la placa, o la descripción si no tiene (spec 032, RF-13). */
+    equipos: { id: string; nombre: string; placa: string | null }[];
     personas: { id: string; nombreCompleto: string; cargo: string | null }[];
     cantera: OpcionesDeCantera;
     /**
@@ -2665,6 +2690,8 @@ export const estructuraDePresupuestoZod = z.object({
       z.object({
         id: idDelPresupuesto,
         nombre: z.string().trim().max(200).default(''),
+        /** RF-88: la frase completa del Excel, solo para mostrar. */
+        nombreCompleto: z.string().trim().max(500).optional(),
         capitulos: z
           .array(
             z.object({
@@ -2741,7 +2768,7 @@ export interface PresupuestoFila {
   valor: number;
   valorExcel: number | null;
   revisar: boolean;
-  origen: 'excel' | 'blanco' | 'copia';
+  origen: 'excel' | 'blanco' | 'copia' | 'excel_ia';
   creadoEn: string;
   aprobadoEn: string | null;
 }
@@ -2776,4 +2803,72 @@ export interface VistaPreviaDelPresupuesto {
   cuadra: boolean;
   diferencias: { renglon: number; item: string; capitulo: string; calculado: number; delExcel: number }[];
   resumen: ResumenDelPresupuesto;
+  /** RF-82: si lo leyó el lector del formulario o la IA. */
+  leidoPor: 'lector' | 'ia';
+  /** RF-81: lo que la IA leyó y no está en la fila que citó. */
+  rechazados: { hoja: number; fila: number; que: string; motivo: string }[];
+  /** RF-89: los rubros, para mostrarlos bajo su grupo o en todo el contrato. */
+  rubros: { id: string; grupoId: string | null; nombre: string; valor: number }[];
+}
+
+/* ------------------------------------------------------------------------ */
+/* Spec 028: el asistente                                                    */
+/* ------------------------------------------------------------------------ */
+
+/** RF-51: lo que le queda hoy a la persona. */
+export interface CupoDelAsistente {
+  limite: number;
+  hechas: number;
+  quedan: number;
+}
+
+/** Una fila de la lista de conversaciones (RF-39, RF-49). */
+export interface ConversacionDelAsistente {
+  id: string;
+  titulo: string;
+  archivada: boolean;
+  /** ISO 8601. */
+  actualizadaEn: string;
+  /** `false`: ya no alcanza lo que consultó; se ve solo el título y la fecha. */
+  visible: boolean;
+}
+
+export interface MensajeDelAsistente {
+  id: string;
+  rol: 'persona' | 'asistente';
+  texto: string;
+  fuentes: { modulo: string; etiqueta: string; fecha: string | null; ruta: string; obra?: string; desde?: string; hasta?: string }[];
+  adjuntos: { mediaId: string; nombre: string; clase: 'imagen' | 'pdf' | 'excel' | 'word'; bytes: number }[];
+  estado: 'respondido' | 'fallido';
+  /** ISO 8601. */
+  creadoEn: string;
+}
+
+/**
+ * Los eventos de `POST /api/panel/asistente/preguntar` (`text/event-stream`), en orden:
+ * `conversacion`, luego `texto`/`borrar`/`consultando`/`fuente` mientras se redacta, y al
+ * final `fin` o `error`.
+ */
+export type EventoDelAsistente =
+  | { evento: 'conversacion'; id: string; titulo: string }
+  | { evento: 'texto'; texto: string }
+  /** Lo que llegó era el camino de la IA antes de consultar, no la respuesta: se borra. */
+  | { evento: 'borrar' }
+  | { evento: 'consultando'; consulta: string }
+  | { evento: 'fuente'; fuente: MensajeDelAsistente['fuentes'][number] }
+  | { evento: 'fin'; mensajeId: string; cupo: CupoDelAsistente }
+  | { evento: 'error'; mensaje: string; cupo: CupoDelAsistente };
+
+/** RF-45. */
+export const archivoDeConversacion = z.object({ archivada: z.boolean() });
+
+/** RF-59: el límite de todos (`usuarioId` nulo) o de una persona; `limite` nulo lo quita. */
+export const limiteDelAsistente = z.object({
+  usuarioId: z.string().min(1).nullable(),
+  limite: z.number().int('El límite es un número entero.').min(0).max(500, 'El límite va de 0 a 500.').nullable(),
+});
+
+export interface UsoDelAsistente {
+  filas: { usuarioId: string; persona: string; obraId: string | null; obra: string | null; preguntas: number; costo: number }[];
+  limites: { todos: number | null; porPersona: { usuarioId: string; persona: string; limite: number }[] };
 }

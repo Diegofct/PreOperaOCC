@@ -4,6 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { media, obras, plantillas, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 
 /**
@@ -28,7 +29,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       .select({
         id: preoperacionales.id,
         vehiculoId: preoperacionales.vehiculoId,
-        vehiculoCodigo: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         placa: vehiculos.placa,
         tipoNombre: tiposVehiculo.nombre,
         obraId: preoperacionales.obraId,
@@ -101,6 +102,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       disponible: claveR2 !== null,
     }));
 
-    return ok({ ...fila, anuladoPorNombre, plantilla: plantilla?.esquema ?? null, imagenes });
+    // Spec 032, RF-17a: el acta se ve con la placa actual del vehículo.
+    return ok({ ...conNombreDelVehiculo([fila], 'vehiculoCodigo')[0], anuladoPorNombre, plantilla: plantilla?.esquema ?? null, imagenes });
   });
 }

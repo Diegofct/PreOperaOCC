@@ -21,7 +21,13 @@ import {
   responder,
 } from '@/features/servidor/respuestas';
 import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
-import { mensajeDeDiaSinTrabajo, resolverDiaSinTrabajo } from '@/shared/rules/parte';
+import { granulometriasVigentes } from '@/features/laboratorio/servidor/parte';
+import {
+  mensajeDeDiaSinTrabajo,
+  mensajeDeSeccionConRegistros,
+  resolverDiaSinTrabajo,
+  resolverSeccionSinRegistro,
+} from '@/shared/rules/parte';
 
 /**
  * Guardado del parte. `PATCH /api/panel/partes/:id`.
@@ -53,6 +59,10 @@ const COLUMNAS = {
   notas: partesDeObra.notas,
   sinTrabajo: partesDeObra.sinTrabajo,
   motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+  sinActividades: partesDeObra.sinActividades,
+  motivoSinActividades: partesDeObra.motivoSinActividades,
+  sinEnsayos: partesDeObra.sinEnsayos,
+  motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,
@@ -74,7 +84,13 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     // trabajo, para conservar las filas heredadas de actividades y control de
     // calidad (RF-63, RF-71) —que no se pueden reconstruir desde ningún catálogo— y
     // para que lo que vino de WhatsApp conserve su marca (021/RF-47).
+    const tocaLasMarcas =
+      cambios.sinActividades !== undefined ||
+      cambios.motivoSinActividades !== undefined ||
+      cambios.sinEnsayos !== undefined ||
+      cambios.motivoSinEnsayos !== undefined;
     const leeLoGuardado =
+      tocaLasMarcas ||
       cambios.sinTrabajo !== undefined ||
       cambios.motivoSinTrabajo !== undefined ||
       cambios.maquinaria !== undefined ||
@@ -88,6 +104,10 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
             .select({
               sinTrabajo: partesDeObra.sinTrabajo,
               motivoSinTrabajo: partesDeObra.motivoSinTrabajo,
+              sinActividades: partesDeObra.sinActividades,
+              motivoSinActividades: partesDeObra.motivoSinActividades,
+              sinEnsayos: partesDeObra.sinEnsayos,
+              motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
               maquinaria: partesDeObra.maquinaria,
               personal: partesDeObra.personal,
               actividades: partesDeObra.actividades,
@@ -178,6 +198,35 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
         set.sinTrabajo = dia.sinTrabajo;
         set.motivoSinTrabajo = dia.motivoSinTrabajo;
       }
+    }
+
+    // «Hoy no se realizaron actividades / ensayos» (spec 032, RF-21 a RF-35). Como el
+    // día sin trabajo, se valida cómo queda la bitácora: la marca y las filas pueden
+    // llegar en peticiones distintas. Agregar filas a una sección marcada la desmarca.
+    if (tocaLasMarcas || cambios.actividades !== undefined || cambios.laboratorio !== undefined) {
+      const actividades = (set.actividades as unknown[] | undefined) ?? guardado!.actividades;
+      const marcaDeActividades = resolverSeccionSinRegistro(
+        { marcada: guardado!.sinActividades, motivo: guardado!.motivoSinActividades },
+        { marcada: cambios.sinActividades, motivo: cambios.motivoSinActividades },
+        actividades.length,
+      );
+      if (marcaDeActividades.error) return errorDePeticion(mensajeDeSeccionConRegistros('actividades'), 400);
+
+      // Los ensayos del módulo de Laboratorio llenan la sección como una fila (018/RF-110).
+      const laboratorio = (set.laboratorio as unknown[] | undefined) ?? guardado!.laboratorio;
+      const pideMarcarEnsayos = cambios.sinEnsayos === true && laboratorio.length === 0;
+      const delModulo = pideMarcarEnsayos ? (await granulometriasVigentes(estado.obraId, estado.fecha)).length : 0;
+      const marcaDeEnsayos = resolverSeccionSinRegistro(
+        { marcada: guardado!.sinEnsayos, motivo: guardado!.motivoSinEnsayos },
+        { marcada: cambios.sinEnsayos, motivo: cambios.motivoSinEnsayos },
+        laboratorio.length + delModulo,
+      );
+      if (marcaDeEnsayos.error) return errorDePeticion(mensajeDeSeccionConRegistros('ensayos'), 400);
+
+      set.sinActividades = marcaDeActividades.marcada;
+      set.motivoSinActividades = marcaDeActividades.motivo;
+      set.sinEnsayos = marcaDeEnsayos.marcada;
+      set.motivoSinEnsayos = marcaDeEnsayos.motivo;
     }
 
     if (Object.keys(set).length === 0) return errorDePeticion('No llegó nada que guardar.', 400);

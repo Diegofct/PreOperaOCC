@@ -27,14 +27,17 @@ function celda(valor: ExcelJS.CellValue): Celda {
 export async function hojasDelLibro(contenido: ArrayBuffer): Promise<Celda[][][]> {
   const libro = new ExcelJS.Workbook();
   await libro.xlsx.load(contenido);
+  // Solo se recorren las celdas con contenido: pedir cada celda con `getCell` la crea, y
+  // un libro de planificación con un APU por ítem tardaba minutos (RF-74). La matriz
+  // queda igual, con `null` donde no hay nada.
   return libro.worksheets.map((hoja) => {
-    const filas: Celda[][] = [];
-    for (let r = 1; r <= hoja.rowCount; r++) {
-      const fila = hoja.getRow(r);
-      const celdas: Celda[] = [];
-      for (let c = 1; c <= hoja.columnCount; c++) celdas.push(celda(fila.getCell(c).value));
-      filas.push(celdas);
-    }
+    const columnas = hoja.columnCount;
+    const filas: Celda[][] = Array.from({ length: hoja.rowCount }, () => new Array<Celda>(columnas).fill(null));
+    hoja.eachRow({ includeEmpty: false }, (fila, r) => {
+      fila.eachCell({ includeEmpty: false }, (c, col) => {
+        if (col <= columnas) filas[r - 1][col - 1] = celda(c.value);
+      });
+    });
     return filas;
   });
 }

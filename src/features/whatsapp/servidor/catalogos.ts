@@ -24,6 +24,8 @@ import {
   usuarios,
   vehiculos,
 } from '@/db/servidor/esquema';
+import { columnasParaNombrar } from '@/features/servidor/placas';
+import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 import { materialesConStock } from '@/features/almacen-obra/servidor/materiales';
 import { opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
 import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
@@ -105,6 +107,8 @@ export async function catalogosDeLaObra(
         id: vehiculos.id,
         codigoInterno: vehiculos.codigoInterno,
         placa: vehiculos.placa,
+        // Spec 032, RF-19: los reportes que aún dicen el código viejo.
+        codigoAnterior: vehiculos.codigoAnterior,
         obraId: vehiculos.obraId,
         clase: tiposVehiculo.claseMedidor,
         // Spec 026: para reconocer por tipo y marca, y comparar con la última lectura.
@@ -115,6 +119,8 @@ export async function catalogosDeLaObra(
         horometroH: vehiculos.horometroH,
         medidorActualizadoEn: vehiculos.medidorActualizadoEn,
         medidorDia: vehiculos.medidorDia,
+        // Spec 032, RF-13: el tipo, para nombrar en las listas a la que no tiene placa.
+        tipoNombre: columnasParaNombrar.tipo,
       })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
@@ -175,8 +181,12 @@ export async function catalogosDeLaObra(
     opciones: {
       almacen,
       equipos: equipos
-        .map(({ id, codigoInterno, placa }) => ({ id, codigoInterno, placa }))
-        .sort((a, b) => a.codigoInterno.localeCompare(b.codigoInterno, 'es')),
+        .map((e) => ({
+          id: e.id,
+          nombre: identificacionDelVehiculo({ placa: e.placa, tipo: e.tipoNombre, marca: e.marca, modelo: e.modelo }),
+          placa: e.placa,
+        }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
       personas: personas
         .map(({ id, nombreCompleto, cargo }) => ({
           id,

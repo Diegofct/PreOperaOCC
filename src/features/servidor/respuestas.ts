@@ -150,7 +150,7 @@ function esTablaInexistente(fallo: unknown): boolean {
  * Qué índice único se violó: el mensaje y **el campo del formulario** culpable.
  *
  * El campo va con el nombre del contrato del panel (`codigo`, `usuario`,
- * `codigoInterno`), no con el del índice, para que la pantalla pinte el mensaje
+ * `placa`), no con el del índice, para que la pantalla pinte el mensaje
  * debajo de ese campo sin traducir nada (spec 007, RF-18). Hasta el 2026-09-15
  * solo devolvía el mensaje, y un código repetido se leía arriba de la página,
  * lejos del campo que había que corregir.
@@ -164,7 +164,9 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
     case 'ux_usuarios_usuario':
       return { mensaje: 'Ese nombre de usuario ya está en uso.', campo: 'usuario' };
     case 'ux_vehiculos_codigo':
-      return { mensaje: 'Ya existe un vehículo con ese código interno.', campo: 'codigoInterno' };
+      // Spec 032: el código interno es la placa normalizada (RF-10). Las rutas de
+      // vehículos lo miran antes para nombrar la placa; esto es el respaldo.
+      return { mensaje: 'Ya hay un vehículo con esa placa.', campo: 'placa' };
     case 'ux_almacen_material_nombre':
       // Spec 009, RF-3. El índice compara el nombre sin tildes ni mayúsculas.
       return {

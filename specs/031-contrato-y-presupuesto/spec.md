@@ -1,6 +1,7 @@
 # Spec 031 — Contrato y Presupuesto por obra
 
-> Estado: **Aprobada** el 2026-10-20 · Fecha: 2026-10-20
+> Estado: **Cumplida** el 2026-10-21 (aprobada el 2026-10-20) · Fecha: 2026-10-20
+> Cambio del 2026-10-21 (**cumplido** y en producción el 2026-10-21; RF-74 a RF-89): leer con IA un Excel de presupuesto de otra forma. RF-88 y RF-89 (vista previa más clara) añadidos el mismo día a pedido del usuario.
 
 ## Contexto y objetivo
 
@@ -171,6 +172,28 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
 - RF-45: SI un ítem trae un valor total distinto de cantidad por valor unitario, ENTONCES EL SISTEMA lo señala en la vista previa con los dos valores.
 - RF-46: SI el archivo no tiene el formato del formulario, ENTONCES EL SISTEMA no crea nada y explica qué no encontró: la fila de encabezados, los ítems o el valor total.
 
+#### Leer con IA un Excel de otra forma (cambio del 2026-10-21)
+
+- RF-74: SI el lector del formulario no encuentra los ítems o el valor total, o el valor calculado no coincide con el «VALOR TOTAL» del Excel, ENTONCES EL SISTEMA le pide la lectura del presupuesto a la IA en vez de rechazar el archivo (RF-46 aplica solo si la IA tampoco lo lee).
+- RF-75: CUANDO el lector del formulario lee el archivo y el valor cuadra, EL SISTEMA no usa la IA.
+- RF-76: EL SISTEMA le manda a la IA solo las hojas que tienen la fila de encabezados del presupuesto (ítem, unidad, cantidad y valor unitario), y de ellas solo las filas con contenido.
+- RF-77: SI esas hojas pasan de 1 500 filas con contenido, ENTONCES EL SISTEMA no llama a la IA y pide dejar en el archivo solo la hoja del presupuesto.
+- RF-78: CUANDO el Excel tiene más de dos niveles de títulos (vía, sección y capítulo), EL SISTEMA une los niveles de arriba en el nombre del grupo («VÍA 90A01 · SITIOS CRÍTICOS») y deja el último como capítulo.
+- RF-79: EL SISTEMA toma como rubros el IVA, las provisiones, los estudios y la gestión social que vengan después de los ítems, cada uno en su grupo o en todo el contrato, con el valor que trae el Excel. Los subtotales no los toma.
+- RF-80: EL SISTEMA crea cada ítem leído por la IA solo si en la fila del Excel que la IA cita están su cantidad y su valor unitario.
+- RF-81: SI la fila citada no tiene la cantidad o el valor unitario del ítem, ENTONCES EL SISTEMA no crea ese ítem y lo lista en la vista previa como «no encontrado en la fila N».
+- RF-82: CUANDO el presupuesto lo leyó la IA, EL SISTEMA lo dice en la vista previa («Leído con IA, revíselo»), con lo mismo de RF-43 a RF-45.
+- RF-83: EL SISTEMA crea marcado para revisar todo presupuesto leído por la IA, y lo identifica como «Excel (IA)» en sus versiones.
+- RF-84: EL SISTEMA guarda la lectura de la IA de cada archivo, y al confirmar crea el borrador con esa misma lectura, sin volver a llamar a la IA.
+- RF-85: SI se sube otra vez el mismo archivo, ENTONCES EL SISTEMA usa la lectura guardada en vez de volver a llamar a la IA.
+- RF-86: MIENTRAS la IA lee el archivo, EL SISTEMA muestra «Leyendo con IA… puede tardar un par de minutos».
+- RF-87: SI la IA no responde, no tiene saldo o pasa de 3 minutos, ENTONCES EL SISTEMA no crea nada, dice que no se pudo leer con IA y deja reintentar.
+- RF-88: CUANDO la IA une los niveles de títulos en el nombre del grupo (RF-78), EL SISTEMA usa para la vía un nombre corto («VÍA 90A01 · SITIOS CRÍTICOS») y guarda debajo, en letra pequeña, la frase completa del Excel.
+- RF-89: EL SISTEMA muestra la vista previa de la importación en tres partes:
+  - el estado: si lo leyó la IA y si el valor cuadra con el del Excel;
+  - lo que se encontró: cada grupo con su subtotal, que se abre para ver sus capítulos (con el número de ítems y el subtotal de cada uno) y sus rubros, más los rubros de todo el contrato;
+  - lo que hay que revisar: los no encontrados (RF-81) y los totales distintos (RF-45), o que no hay nada que revisar.
+
 ### Presupuesto: edición, aprobación y versiones (H3)
 
 - RF-47: MIENTRAS un presupuesto está en borrador, EL SISTEMA deja agregar, cambiar, mover y quitar grupos, capítulos, ítems y rubros, y cambiar el AIU.
@@ -218,7 +241,7 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
 - [ ] **Móvil**: no cambia. El operador no registra actividades.
 - [x] **Panel web**:
   - sección «Cliente» en el menú, con el módulo «Contrato y Presupuesto» y sus pestañas Contrato y Presupuesto;
-  - importar Excel con vista previa;
+  - importar Excel con vista previa, y la marca «Leído con IA, revíselo» con los ítems no encontrados (RF-82);
   - editor del presupuesto y versiones;
   - selector de ítem y capítulo en la actividad de la bitácora;
   - aviso de pólizas en el Inicio;
@@ -232,10 +255,12 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
   - presupuestos con versiones, grupos, capítulos, ítems y rubros;
   - el capítulo en las actividades de la bitácora;
   - permiso nuevo del módulo;
+  - las lecturas de la IA por archivo y el origen «Excel (IA)» (RF-83, RF-84);
   - archivos en el almacén de evidencia.
 - [x] **Reglas**:
   - cálculo de totales y valor del presupuesto;
   - lectura del formulario Excel;
+  - qué se le manda a la IA y la comprobación de cada ítem contra su fila (RF-76, RF-80);
   - qué se exige para aprobar;
   - el mismo ítem entre versiones;
   - estado de las pólizas;
@@ -249,6 +274,8 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
 - El presupuesto de 76 ítems abre y se edita sin esperas mayores de 1 s por cambio.
 - El selector de ítem de la bitácora encuentra un ítem escribiendo parte de su número o de su descripción, sin tildes, en menos de 300 ms con 200 ítems.
 - El Excel descargado abre en Excel con tildes bien y los números como números.
+- La lectura con IA de un presupuesto de unos 100 ítems tarda 3 minutos o menos (RF-87).
+- A la IA solo va la hoja del presupuesto (RF-76). La llave de la API vive en el `.env` del servidor y nunca llega al navegador.
 
 ## Casos límite
 
@@ -262,6 +289,13 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
 - **Dos personas a la vez**: el residente y gerencia editan el mismo borrador. El segundo en guardar recibe un aviso de que cambió y vuelve a cargar, como en la bandeja de WhatsApp (spec 021); no se pisan cambios en silencio.
 - **Ítem que se mueve de capítulo en una versión nueva**: no es el mismo (RF-53). Lo ejecutado queda en el capítulo viejo, y el aviso de RF-54 lo muestra.
 - **Excel con otra forma** (columnas corridas, otra hoja primero): se busca la fila de encabezados («ÍTEM DE PAGO», «UND.», «CANTIDAD», «VALOR UNITARIO»). Si no está, falla con explicación (RF-46).
+- **Excel de planificación** (como `docs/Planificación CONSORCIO CARTAGENA (V4…).xlsx`):
+  - lo que pasa: dos filas de encabezado, tres niveles de títulos, títulos repetidos en celdas combinadas, subtotales e IVA por sección y numeración «Nº» que se reinicia;
+  - lo que hace el sistema: lo lee la IA (RF-74) y solo se toma la hoja del presupuesto;
+  - «Vista árbol» (medidas reales, costo) y «Flujo» (programación mensual) no se importan.
+- **La IA se equivoca en un número**: la fila citada no lo tiene y el ítem no se crea (RF-80, RF-81). Si se salta un ítem, el valor no cuadra con el del Excel y se ve la diferencia (RF-44).
+- **El mismo archivo dos veces**: la segunda usa la lectura guardada, sin costo (RF-85).
+- **Un formulario que el lector ya leía**: sigue sin pasar por la IA (RF-75), con los mismos totales de antes.
 - **Un ítem de pago con distinta unidad en dos capítulos**: se respeta la unidad de cada renglón.
 - **Bitácora abierta cuando se aprueba el primer presupuesto**: las actividades ya escritas quedan sin capítulo. Las nuevas de ese mismo día ya piden capítulo.
 
@@ -269,7 +303,8 @@ Referencia: `specs/_referencias/nexusobras.md` y el formulario de OCC `docs/preu
 
 - APU (análisis de precio unitario) por insumos y catálogo de APU de la empresa.
 - AIU sumado sobre el costo directo, e IVA sobre la utilidad, al estilo NexusObras (D2): se agrega cuando aparezca un contrato que lo use.
-- Importar con IA desde PDF o CSV, e importar desde Revit (BIM).
+- Importar con IA desde PDF o CSV, e importar desde Revit (BIM). La IA solo lee Excel (RF-74).
+- Importar de un Excel de planificación las medidas reales, el costo o la programación por meses: specs 032 y 033.
 - Cortes de obra, avances, actas de pago, amortización del anticipo y cálculo de retenciones en cada corte: spec 032.
 - Cronograma, Gantt, flujo de caja y valor ganado: spec 033.
 - Subcontratos, compras, tesorería y control de costos de NexusObras.

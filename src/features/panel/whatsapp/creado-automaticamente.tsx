@@ -13,6 +13,7 @@
  */
 import { useCallback, useState } from 'react';
 
+import { identificacionDeFila } from '@/shared/rules/vehiculos';
 import { alcanza } from '@/shared/rules/permisos';
 import type { TipoCreado } from '@/shared/rules/whatsapp-automatico';
 
@@ -169,7 +170,10 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
         <Tabla
           columnas={columnas}
           filas={paginaDeCreados.pagina}
-          vacio={`No hay nada creado automáticamente por revisar entre el ${desde} y el ${hasta}.`}
+          // Como en «No se pudo guardar»: sin respuesta todavía no es lo mismo que vacío.
+          vacio={
+            lista.cargando ? 'Cargando…' : `No hay nada creado automáticamente por revisar entre el ${desde} y el ${hasta}.`
+          }
         />
         <Paginacion
           pagina={paginaDeCreados.paginaActual}
@@ -208,7 +212,7 @@ function useCandidatos(creado: CreadoFila): { opciones: Opcion[]; cargando: bool
       const vehiculos = await api.vehiculos.listar();
       return vehiculos
         .filter((v) => v.obraId === creado.obraId)
-        .map((v) => ({ valor: v.id, etiqueta: v.placa ? `${v.codigoInterno} · ${v.placa}` : v.codigoInterno }))
+        .map((v) => ({ valor: v.id, etiqueta: identificacionDeFila(v) }))
         .filter(fuera);
     }
     const { opciones } = await api.whatsapp.propuestas.ver(creado.mensajeId);

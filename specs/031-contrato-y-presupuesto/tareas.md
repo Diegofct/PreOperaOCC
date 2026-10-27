@@ -191,9 +191,33 @@ en verde, mirando el código de salida.
 
       Con permiso del usuario. Si el modo automático lo bloquea, él corre los comandos con `!`.
       Hecho cuando producción responde con la imagen nueva, las tablas existen y el módulo abre.
-- [ ] T26. Validación final: `validacion.md` RF por RF y spec Cumplida. (Todos)
+- [x] T26. Validación final: `validacion.md` RF por RF y spec Cumplida. (Todos)
       Hecho cuando cada RF tiene su comprobación con resultado, los tres comandos están en verde
       y la spec queda marcada como Cumplida.
+
+### Cambio del 2026-10-21: leer con IA (RF-74 a RF-87)
+
+- [x] T27. Lector: «VALOR TOTAL» en una fila de encabezados no corta, y `hojasDelPresupuesto`. (RF-75, RF-76)
+      Hecho cuando el verificador cubre las dos filas de encabezado y el Excel de OCC sigue dando
+      2 / 14 / 76 / 8 / $54.441.800.920.
+- [x] T28. Regla `formulario-presupuesto-ia.ts`: `textoParaLaIa`, `LecturaDeIa` y `estructuraDeLaIa`
+      con la comprobación por fila. (RF-76 a RF-81)
+      Hecho cuando el verificador cubre: tope de 1 500, ítem rechazado, grupo «VÍA · SECCIÓN» e IVA como rubro.
+- [x] T29. Migración 0029: `excel_ia` y `presupuesto_lecturas_ia`, aplicada en neondb (dev). (RF-83, RF-84)
+      Hecho cuando la tabla y el valor del enum existen en dev y el esquema local coincide.
+- [x] T30. Servidor: `features/servidor/ia.ts`, `leer-con-ia.ts` e `importar.ts` con el respaldo de la IA
+      y la lectura guardada. (RF-74, RF-82 a RF-85, RF-87)
+      Hecho cuando, en dev, el Excel de planificación da una vista previa leída con IA; al confirmar
+      se crea el borrador «Excel (IA)» marcado para revisar; y queda una sola fila en `presupuesto_lecturas_ia`.
+- [x] T31. Panel: espera, aviso «Leído con IA, revíselo», no encontrados y etiqueta en las versiones. (RF-82, RF-83, RF-86)
+      Hecho cuando, en Chrome (dev), se importa el Excel de planificación y se ve todo eso. Después,
+      el borrador de prueba se descarta.
+- [x] T32. Despliegue: llave en `/opt/preoperaocc/.env` (el usuario), `compose.yaml`, migración 0029 e imagen
+      con respaldo; comprobar el tiempo del proxy con una importación real.
+      Con permiso del usuario. Si el modo automático lo bloquea, él corre los comandos con `!`.
+      Hecho cuando producción lee el Excel de planificación con IA en la vista previa.
+- [x] T33. Validación del cambio en `validacion.md`, RF-74 a RF-89. (RF-74 a RF-89)
+      Hecho cuando cada RF nuevo tiene su comprobación y los tres comandos están en verde.
 
 ## Notas de ejecución
 - T1 (2026-10-20): `src/shared/rules/contrato.ts`.
@@ -612,3 +636,86 @@ en verde, mirando el código de salida.
   - Comprobado en producción, solo lectura: 29 migraciones; existen `contratos`, `contrato_polizas`, `contrato_documentos`, `contrato_eventos` y `presupuestos`.
   - Falta del usuario: importar el presupuesto real de CONSORCIO MAGDALENA y decidir cuándo aprobarlo. El módulo con sesión no se miró en Chrome (no hay sesión de producción).
   - Pendiente aparte: que `generar_workflow_clasificar.py` escriba el `id` en el json, para que no vuelva a pasar.
+- T26 (2026-10-21): `validacion.md` completo con la sección de producción y el veredicto. Los tres comandos otra vez en verde después del commit `818e1fe` (536 verificaciones). Spec 031 marcada Cumplida.
+- T27 (2026-10-21):
+  - `formulario-presupuesto.ts`: una fila que vuelve a ser de encabezados (`columnasDe` ≠ null) se salta, así su «VALOR TOTAL» no corta la lectura. Nueva `hojasDelPresupuesto`.
+  - Hallazgo: el libro de planificación tiene **79 hojas** (un APU por ítem, flujos, gastos). `hojasDelLibro` pedía cada celda con `getCell`, que la crea: unos 8 s por hoja, ~10 min en total. Ahora recorre solo las celdas con contenido (`eachRow`/`eachCell`) y devuelve la misma matriz. El libro abre en 2,3 s y el formulario de OCC en 0,3 s, con los mismos 2 / 14 / 76 / 8 / $54.441.800.920.
+  - Con el arreglo, el lector llega más lejos en el libro de planificación, pero termina en «No encontré el VALOR TOTAL» (el total se llama «VALOR TOTAL DEL CONTRATO» y hay subtotales con IVA por sección): le toca a la IA (RF-74).
+  - 2 casos «031/», 538 verificaciones, los tres comandos en verde.
+- T28 (2026-10-21): `src/shared/rules/formulario-presupuesto-ia.ts`.
+  - `textoParaLaIa`: solo las hojas de `hojasDelPresupuesto`, una línea por fila con contenido: `H<hoja>F<fila> | celda | …`, sin las vacías del final. `null` si pasa de `FILAS_MAXIMAS_PARA_LA_IA` (1 500) o si no hay hoja del presupuesto. El libro de planificación da 174 filas, unos 45 500 caracteres.
+  - `LecturaDeIa`: la forma que devolverá la IA, sin nulos ni uniones (vacío = `''` o `0`). Ítems y rubros citan `hoja` y `fila`; el grupo trae el nombre ya unido (vía · sección).
+  - `estructuraDeLaIa`:
+    - un ítem se crea solo si su cantidad (±0,0005) y su valor unitario (±1 peso) están entre los números de la fila citada; un rubro, si su valor está en su fila. Lo demás va a `rechazados` con «no encontrado en la fila N»;
+    - el total del Excel de un ítem solo se usa para RF-45 si también está en la fila;
+    - un rubro cuyo grupo no es uno de los grupos (las provisiones de toda la vía) queda en todo el contrato;
+    - capítulos y grupos sin ítems comprobados no se crean; sin ningún ítem → error.
+  - Devuelve la misma forma que `leerFormulario`, más `rechazados`.
+  - `texto` y `numero` de `formulario-presupuesto.ts` pasan a exportarse.
+  - 2 casos «031/», 540 verificaciones, los tres comandos en verde.
+- T29 (2026-10-21): migración `0029_heavy_kid_colt` aplicada en neondb (dev), con 30 migraciones; producción va en la T32.
+  - `origen_presupuesto` gana `excel_ia`.
+  - Tabla `presupuesto_lecturas_ia`:
+    - columnas: `huella` (pk, SHA-256 del archivo), `lectura` jsonb (`LecturaDeIa`), `modelo`, `tokens_entrada`, `tokens_salida`, `creado_por` → usuarios, `creado_en`;
+    - se guarda lo que devolvió la IA, no la estructura: la comprobación por fila es pura y se repite con el archivo.
+  - Tipos de `origen` ampliados en `contratos.ts` y `presupuestos.ts`. La etiqueta «Excel (IA)» en la pantalla va en la T31.
+  - Comprobado en dev: el enum tiene `{excel,blanco,copia,excel_ia}` y la tabla tiene sus 7 columnas NOT NULL. 540 verificaciones, los tres comandos en verde.
+- T30 (2026-10-21): servidor.
+  - `src/features/servidor/ia.ts`: `clienteDeIa()` (null sin `ANTHROPIC_API_KEY`), `MODELO_DE_IA = claude-opus-5-5`, `mensajeDeFalloDeIa` por clase de error del SDK.
+  - `presupuestos/servidor/leer-con-ia.ts`:
+    - `beta.messages.stream(...).finalMessage()` con `betaZodOutputFormat`, effort `medium`, `fallbacks: "default"` y 64 000 tokens de salida como máximo;
+    - 3 min de tiempo máximo y sin reintentos;
+    - `refusal` y `max_tokens` son error, y lo que llega se valida otra vez con zod.
+  - `importar.ts`:
+    - lector → si falla o no cuadra, `textoParaLaIa` → lectura guardada por huella o `leerConIa` y se guarda → `estructuraDeLaIa`;
+    - sin texto para la IA, el resultado del lector si lo hay (RF-44) o el error de tope (RF-77) o el del lector (RF-46);
+    - la IA caída responde 503 «No se pudo leer con IA: … Puede reintentarlo»;
+    - con la IA, `origen = excel_ia` y `revisar = true`.
+    - `vistaPrevia` recibe la sesión (para `creado_por`) y la ruta se la pasa; `VistaPrevia`/`VistaPreviaDelPresupuesto` ganan `leidoPor` y `rechazados`.
+  - **Prueba real en dev** con el libro de planificación, sesión de Diego y obra «Pruebas spec 018 (laboratorio)»:
+    - 1.ª vista previa: 100 s, leído por IA. 7 grupos, 17 capítulos, 68 ítems y 19 rubros. Valor **$24.225.015.373 = «VALOR TOTAL DEL CONTRATO» del Excel**, que cuadra; 0 diferencias y 0 rechazados.
+    - Los 7 subtotales de sección son iguales a los «SUBTOTAL BÁSICO DE OBRAS» del Excel.
+    - 2.ª vista previa: 5,5 s, sin llamar a la IA. Importar: 6,1 s.
+    - Borrador `xlsx-e2a6adbfc446ee422a96ef3b441ee9a9` (v1, `excel_ia`, revisar). **Queda para la T31** y luego se descarta.
+    - Una sola fila en `presupuesto_lecturas_ia`: 31 812 tokens de entrada y 13 750 de salida (≈ US$0,40).
+  - Observación: los nombres de grupo salen largos, porque el título de la vía es la frase completa del contrato. Se muestra al usuario en la T31.
+  - 540 verificaciones, los tres comandos en verde.
+- T31 (2026-10-21): `pestana-presupuesto.tsx`.
+  - Etiqueta «Excel (IA)» en la lista de versiones.
+  - En la ventana de importar:
+    - «Leyendo con IA… puede tardar un par de minutos» si la lectura pasa de 6 s (RF-86);
+    - en la vista previa, el aviso «Leído con IA, revíselo» (RF-82) y la lista de no encontrados (RF-81).
+  - En el detalle, «Leído con IA: el VALOR TOTAL del Excel era…».
+  - **Hallazgo:** el dev server encendido antes de `npm install @anthropic-ai/sdk` no resolvía `./resources/beta/beta.mjs` (Metro no conoce archivos nuevos de node_modules) y la ruta respondía 500 en HTML → «No se pudo contactar al servidor». También le faltaba la llave del `.env`. Se arregla reiniciando el servidor; en producción la imagen nueva ya lo trae.
+  - Probado en Chrome (dev, gerencia, «Pruebas spec 018 (laboratorio)»), con el Excel servido un momento desde `public/` y entregado al selector por JavaScript:
+    - etiqueta y aviso del borrador de la T30;
+    - descartar con motivo;
+    - aviso de espera (con la respuesta demorada 8 s a propósito, porque la lectura ya estaba guardada);
+    - vista previa «Leído con IA» con 7 / 17 / 68 / 19 y $24.225.015.373 que cuadra;
+    - crear la v2 desde la ventana: siguió una sola fila en `presupuesto_lecturas_ia`, sin otra llamada a la IA.
+  - Los dos borradores de prueba (v1 descartada y v2) se borraron de la base de dev y el archivo de `public/` también. La lectura guardada se deja, para la T33.
+  - 540 verificaciones, los tres comandos en verde.
+- T31, mejora de diseño (2026-10-21, a pedido del usuario; RF-88 y RF-89 añadidos a la spec):
+  - Vista previa en tres partes, en una ventana más ancha (`Modal amplia`, 960 px):
+    - el estado: insignia «✦ Leído con IA» o «Formulario reconocido», bloque «Cuadra / No cuadra» y una línea con el conteo;
+    - «Lo que se encontró»: cada grupo con nombre corto, la frase completa debajo y su subtotal (obras + rubros); se abre para ver capítulos (ítems y subtotal) y rubros. Al final, «Rubros de todo el contrato»;
+    - «Para revisar»: «✓ Nada» o los no encontrados y los totales distintos.
+  - Debajo, el nombre y «Se creará como borrador, marcado para revisar».
+  - RF-88: la IA devuelve `nombre` corto («VÍA 90A01 · SITIOS CRÍTICOS») y `nombreCompleto`. `GrupoDelPresupuesto.nombreCompleto?` (opcional en el jsonb y en el zod del editor), `resumen.grupos[].nombreCompleto`, y se muestra también bajo el título del grupo en el detalle. Una lectura guardada antes de esto no lo trae y sigue funcionando.
+  - `VistaPrevia.rubros` para pintarlos bajo su grupo.
+  - Lectura de dev rehecha con IA (98 s, 32 170 / 13 363 tokens, cuadra, 0 rechazados).
+  - **Hallazgo:** las dos secciones «SEÑALIZACIÓN Y SEGURIDAD VIAL», que no tienen capítulos propios, quedaron como grupo «VÍA 90A01» / «VÍA 9007A» a secas. Se añadió a las instrucciones que esa sección use su título en el grupo y como capítulo. **No se ha vuelto a leer**: se comprueba con la primera lectura de producción (T32), que no tiene lectura guardada.
+  - Probado en Chrome: abrir y cerrar grupos, «Para revisar: ✓ Nada»; se cerró sin crear nada. Flecha ▸ agrandada.
+  - 540 verificaciones, los tres comandos en verde.
+- T32 (2026-10-21), desplegado:
+  - llave en `/opt/preoperaocc/.env` (la puso el usuario, sin mostrarla);
+  - `compose.yaml` con `ANTHROPIC_API_KEY`;
+  - migración 0029 en `preoperaocc` (30 migraciones);
+  - imagen `715f68ba57ab`, con la anterior `2b15c4db3d4c` como respaldo; salud OK y 401 sin sesión.
+  - El proxy (Caddy) no tiene tiempo máximo de respuesta. Registro en `n8n-evolutionapi/DESPLIEGUE_VPS.md`.
+  - **Falta para cerrar la T32:** una importación real en producción, que hace el usuario con su sesión (no se escriben contraseñas). Con ella se comprueba el tiempo a través del proxy y que Señalización salga como «VÍA … · SEÑALIZACIÓN Y SEGURIDAD VIAL».
+- T33 (2026-10-21): `validacion.md`, sección «Cambio del 2026-10-21».
+  - RF-74 a RF-89 en verde, con observación en RF-78 y RF-88 (Señalización, a confirmar en la primera lectura de producción) y en RF-87 (el fallo de la API no se provocó a propósito).
+  - Comprobado en la imagen `715f68ba57ab`: `dist/client` sin el SDK ni ningún `sk-ant-`.
+  - El usuario pidió cerrar la T32 sin esperar la importación real en producción.
+  - 540 verificaciones, los tres comandos en verde. **Cambio de la 031 cumplido.**

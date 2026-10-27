@@ -248,7 +248,7 @@ export function VentanaViaje({
               valor={vehiculoId}
               opciones={opciones.volquetas.map((v) => ({
                 valor: v.id,
-                etiqueta: v.codigoInterno,
+                etiqueta: v.nombre,
                 detalle: v.placa ?? undefined,
               }))}
               onChange={setVehiculoId}

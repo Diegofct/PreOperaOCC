@@ -257,6 +257,7 @@ import {
   type ContratoParaRevisar,
 } from '../src/shared/rules/contrato';
 import { enPesos } from '../src/shared/rules/pesos';
+import { AVISO_FALTA_PLACA, identificacionDelVehiculo, normalizarPlaca } from '../src/shared/rules/vehiculos';
 import { polizasConAviso, vigenciaDePoliza, type PolizaParaAviso } from '../src/shared/rules/polizas';
 import {
   claveDeItem,
@@ -271,7 +272,34 @@ import {
   type EstructuraDePresupuesto,
   type ItemDelPresupuesto,
 } from '../src/shared/rules/presupuesto';
-import { leerFormulario, type Celda } from '../src/shared/rules/formulario-presupuesto';
+import { hojasDelPresupuesto, leerFormulario, type Celda } from '../src/shared/rules/formulario-presupuesto';
+import {
+  alcanceDelAsistente,
+  claseDeAdjunto,
+  conversacionVisible,
+  costoEstimado,
+  diaDelConteo,
+  faltaDelPeriodo,
+  faltasDeLosAdjuntos,
+  limiteDelDia,
+  agruparPorFecha,
+  conversacionesQueCoinciden,
+  ejemplosDePregunta,
+  grupoDeFecha,
+  MODULOS_CONSULTABLES,
+  modulosDeAnulados,
+  obraAlAlcance,
+  preguntasQueQuedan,
+  resumenDeRegistrados,
+  ROLES_DEL_ASISTENTE,
+  tituloDeConversacion,
+} from '../src/shared/rules/asistente';
+import {
+  estructuraDeLaIa,
+  FILAS_MAXIMAS_PARA_LA_IA,
+  textoParaLaIa,
+  type ItemLeidoPorIa,
+} from '../src/shared/rules/formulario-presupuesto-ia';
 import { hojasDelLibro } from '../src/features/presupuestos/servidor/leer-excel';
 import {
   actividadDelCatalogo,
@@ -367,6 +395,7 @@ import {
 } from '../src/shared/rules/jornada';
 import {
   bloqueosDelCierre,
+  faltaElMotivoSinRegistro,
   faltaObservacionDelEnsayo,
   faltasDeActividad,
   faltasDelEnsayo,
@@ -375,6 +404,7 @@ import {
   mensajeDeDiaSinTrabajo,
   mensajeDelRechazoDeCierre,
   resolverDiaSinTrabajo,
+  resolverSeccionSinRegistro,
   seccionesDelParte,
   validarDiaSinTrabajo,
   type ConteosDelParte,
@@ -2425,10 +2455,11 @@ prueba('la gerencia alcanza todos los módulos', () => {
   assert.deepEqual(modulosVisibles('admin'), [...MODULOS]);
 });
 
-prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera, laboratorio, WhatsApp, Reportes y Contrato', () => {
+prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales, almacén, cantera, laboratorio, WhatsApp, Reportes, Contrato y Asistente', () => {
   // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta), por
   // 018 / RF-7 (laboratorio, donde además aprueba), por 021 / RF-14 (la bandeja), por
-  // 030 / RF-1 (Reportes) y por 031 / RF-2 (Contrato y Presupuesto).
+  // 030 / RF-1 (Reportes), por 031 / RF-2 (Contrato y Presupuesto) y por 028 / RF-1
+  // (el asistente).
   assert.deepEqual(modulosVisibles('supervisor'), [
     'inicio',
     'asignaciones',
@@ -2440,6 +2471,7 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
     'whatsapp',
     'reportes',
     'contrato',
+    'asistente',
   ]);
 });
 
@@ -2530,12 +2562,12 @@ prueba('nadie reparte más permisos de los que tiene', () => {
 
 prueba('el almacenista solo entra al almacén', () => {
   // Spec 008 / RF-2.
-  assert.deepEqual(modulosVisibles('almacenista'), ['almacen']);
+  assert.deepEqual(modulosVisibles('almacenista'), ['almacen', 'asistente']); // y el asistente (028/RF-1)
 });
 
 prueba('el encargado de planta solo entra a control cantera', () => {
   // Spec 008 / RF-3.
-  assert.deepEqual(modulosVisibles('encargado_planta'), ['cantera']);
+  assert.deepEqual(modulosVisibles('encargado_planta'), ['cantera', 'asistente']); // y el asistente (028/RF-1)
 });
 
 prueba('los roles nuevos no tocan nada de los módulos que ya había', () => {
@@ -2600,6 +2632,7 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
     'whatsapp',
     'reportes',
     'contrato',
+    'asistente',
   ]);
 });
 
@@ -2673,9 +2706,9 @@ function menuDe(rol: Rol, modulos = TODOS_LOS_MODULOS) {
   return gruposDelMenu(modulosVisibles(rol, modulos)).map((g) => [g.titulo, g.modulos]);
 }
 
-prueba('el menú de la gerencia lleva los cinco grupos y los trece módulos (022/RF-3; 030/RF-1; 031/RF-1)', () => {
+prueba('el menú de la gerencia lleva los cinco grupos y los catorce módulos (022/RF-3; 030/RF-1; 031/RF-1; 028/RF-1)', () => {
   assert.deepEqual(menuDe('admin'), [
-    [null, ['inicio']],
+    [null, ['inicio', 'asistente']],
     ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
     ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
     ['Cliente', ['contrato']],
@@ -2685,7 +2718,7 @@ prueba('el menú de la gerencia lleva los cinco grupos y los trece módulos (022
 
 prueba('el residente ve «Administración» solo con Asignaciones (022/RF-2, RF-4)', () => {
   assert.deepEqual(menuDe('supervisor'), [
-    [null, ['inicio']],
+    [null, ['inicio', 'asistente']],
     ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
     ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
     ['Cliente', ['contrato']],
@@ -2693,14 +2726,14 @@ prueba('el residente ve «Administración» solo con Asignaciones (022/RF-2, RF-
   ]);
 });
 
-prueba('los roles de un solo módulo ven un solo grupo, con su módulo (022/RF-4)', () => {
+prueba('los roles de un solo módulo ven su módulo y el asistente (022/RF-4; 028/RF-1)', () => {
   const esperado: [Rol, Modulo][] = [
     ['almacenista', 'almacen'],
     ['encargado_planta', 'cantera'],
     ['laboratorista', 'laboratorio'],
   ];
   for (const [rol, modulo] of esperado) {
-    assert.deepEqual(menuDe(rol), [['Módulos de obra', [modulo]]], rol);
+    assert.deepEqual(menuDe(rol), [[null, ['asistente']], ['Módulos de obra', [modulo]]], rol);
   }
 });
 
@@ -2838,14 +2871,15 @@ prueba('cada rol entra por su módulo', () => {
 
 prueba('el laboratorista solo entra a laboratorio, y por ahí entra', () => {
   // Spec 018 / RF-4 y RF-5.
-  assert.deepEqual(modulosVisibles('laboratorista'), ['laboratorio']);
+  assert.deepEqual(modulosVisibles('laboratorista'), ['laboratorio', 'asistente']); // y el asistente (028/RF-1)
   assert.equal(moduloDeEntrada('laboratorista'), 'laboratorio');
   assert.equal(ETIQUETA_ROL.laboratorista, 'Laboratorista');
 });
 
 prueba('el laboratorista no toca nada fuera de su módulo', () => {
-  // Spec 018 / RF-4: ni ver, ni listar, ni el inicio.
-  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio')) {
+  // Spec 018 / RF-4: ni ver, ni listar, ni el inicio. El asistente sí (028/RF-1), y
+  // con él solo alcanza el laboratorio (028/T1).
+  for (const modulo of MODULOS.filter((m) => m !== 'laboratorio' && m !== 'asistente')) {
     for (const accion of ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar'] as const) {
       assert.equal(alcanza('laboratorista', modulo, accion), false, `${modulo}/${accion}`);
     }
@@ -2955,10 +2989,11 @@ prueba('el menú de cada quien depende de su cargo y de los módulos de su obra'
   const sinCantera = { ...TODOS_LOS_MODULOS, cantera: false };
   const sinNada = { almacen: false, cantera: false, laboratorio: false };
 
-  assert.deepEqual(modulosVisibles('almacenista', TODOS_LOS_MODULOS), ['almacen']);
-  assert.deepEqual(modulosVisibles('almacenista', sinAlmacen), []);
-  assert.deepEqual(modulosVisibles('encargado_planta', TODOS_LOS_MODULOS), ['cantera']);
-  assert.deepEqual(modulosVisibles('encargado_planta', sinCantera), []);
+  // El asistente no depende de la obra (028/RF-1); sin su módulo, no alcanza nada (028/T1).
+  assert.deepEqual(modulosVisibles('almacenista', TODOS_LOS_MODULOS), ['almacen', 'asistente']);
+  assert.deepEqual(modulosVisibles('almacenista', sinAlmacen), ['asistente']);
+  assert.deepEqual(modulosVisibles('encargado_planta', TODOS_LOS_MODULOS), ['cantera', 'asistente']);
+  assert.deepEqual(modulosVisibles('encargado_planta', sinCantera), ['asistente']);
 
   // El residente pierde lo que su obra no lleva y conserva lo suyo.
   const residente = modulosVisibles('supervisor', sinNada);
@@ -2970,7 +3005,7 @@ prueba('el menú de cada quien depende de su cargo y de los módulos de su obra'
   // que a ella le esconde las obras apagadas, no el módulo).
   assert.equal(modulosVisibles('admin', sinNada).length, MODULOS.length);
   // Sin decir nada de la obra, como antes de la spec 017.
-  assert.deepEqual(modulosVisibles('almacenista'), ['almacen']);
+  assert.deepEqual(modulosVisibles('almacenista'), ['almacen', 'asistente']); // y el asistente (028/RF-1)
 });
 
 prueba('no se da el acceso de un módulo que la obra no lleva', () => {
@@ -3020,8 +3055,9 @@ prueba('el laboratorio se enciende por obra, y apagado nadie de la obra lo ve', 
   assert.equal(moduloApagado('almacen', sinLaboratorio), false);
   assert.equal(moduloApagado('laboratorio', { ...TODOS_LOS_MODULOS, almacen: false }), false);
 
-  assert.deepEqual(modulosVisibles('laboratorista', TODOS_LOS_MODULOS), ['laboratorio']);
-  assert.deepEqual(modulosVisibles('laboratorista', sinLaboratorio), []);
+  // Y el asistente, que no depende de la obra (028/RF-1).
+  assert.deepEqual(modulosVisibles('laboratorista', TODOS_LOS_MODULOS), ['laboratorio', 'asistente']);
+  assert.deepEqual(modulosVisibles('laboratorista', sinLaboratorio), ['asistente']);
   assert.ok(modulosVisibles('supervisor', TODOS_LOS_MODULOS).includes('laboratorio'));
   assert.ok(!modulosVisibles('supervisor', sinLaboratorio).includes('laboratorio'));
   // La gerencia lo ve siempre: a ella se le esconden las obras apagadas (RF-8).
@@ -4189,9 +4225,10 @@ prueba('un duplicado dice qué campo del formulario lo causó', () => {
     mensaje: 'Ese nombre de usuario ya está en uso.',
     campo: 'usuario',
   });
+  // Spec 032, RF-10: el código interno es la placa, y el choque se pinta bajo ella.
   assert.deepEqual(duplicadoDe('ux_vehiculos_codigo'), {
-    mensaje: 'Ya existe un vehículo con ese código interno.',
-    campo: 'codigoInterno',
+    mensaje: 'Ya hay un vehículo con esa placa.',
+    campo: 'placa',
   });
   // Spec 009 / RF-3: el material repetido se pinta bajo su nombre.
   assert.deepEqual(duplicadoDe('ux_almacen_material_nombre'), {
@@ -9543,6 +9580,33 @@ prueba('030/RF-55: clima, días con lluvia, sin trabajo y notas', () => {
   assert.deepEqual([diasConLluvia, diasSinTrabajo, diasConBitacora], [2, 1, 2]);
 });
 
+prueba('032/RF-36, RF-37: Reportes dice qué día no hubo actividades o ensayos, y por qué', () => {
+  const { dias } = climaDelPeriodo({
+    dias: ['2026-10-05', '2026-10-06', '2026-10-07'],
+    partes: [
+      {
+        fecha: '2026-10-05',
+        abierta: false,
+        clima: [],
+        sinTrabajo: false,
+        motivoSinTrabajo: null,
+        sinActividades: true,
+        motivoSinActividades: ' Lluvia toda la tarde ',
+        sinEnsayos: true,
+        motivoSinEnsayos: null,
+        notas: null,
+      },
+      // Día sin trabajo: ya lo dice su columna, las marcas no se repiten (RF-37).
+      { fecha: '2026-10-06', abierta: true, clima: [], sinTrabajo: true, motivoSinTrabajo: 'Domingo', sinActividades: true, notas: null },
+    ],
+  });
+  assert.deepEqual(dias.map((d) => d.sinRegistro), [
+    ['No se realizaron actividades — Lluvia toda la tarde', 'No se realizaron ensayos — sin motivo escrito'],
+    [],
+    [],
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // Spec 030: el módulo de Reportes
 // ---------------------------------------------------------------------------
@@ -10375,6 +10439,240 @@ prueba('031/RF-64 a RF-67: WhatsApp reconoce el capítulo del ítem, y si no pue
   assert.equal(sinPresupuesto.actividades[1].capituloId, undefined);
 });
 
+console.log('\nAsistente (spec 028)\n');
+
+prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente también vehículos y personas', () => {
+  const de = (rol: Rol, obraId: string | null = 'obra-a', modulosDeObra = TODOS_LOS_MODULOS) =>
+    alcanceDelAsistente({ rol, obraId, modulosDeObra });
+  const gerencia = de('admin', null);
+  assert.equal(gerencia.usa, true);
+  assert.equal(gerencia.obras, 'todas');
+  assert.deepEqual(gerencia.modulos, [...MODULOS_CONSULTABLES]);
+  assert.deepEqual(de('supervisor'), {
+    usa: true,
+    obras: ['obra-a'],
+    modulos: ['bitacoras', 'preoperacionales', 'almacen', 'cantera', 'laboratorio', 'whatsapp', 'reportes', 'contrato', 'vehiculos', 'personas'],
+  });
+  assert.deepEqual(de('almacenista').modulos, ['almacen']);
+  assert.deepEqual(de('encargado_planta').modulos, ['cantera']);
+  assert.deepEqual(de('laboratorista').modulos, ['laboratorio']);
+  // RF-2: el operador no lo usa.
+  assert.deepEqual(de('operador'), { usa: false, obras: [], modulos: [] });
+  // Solo gerencia alcanza todas las obras; los demás, la suya.
+  assert.deepEqual(de('almacenista').obras, ['obra-a']);
+});
+
+prueba('028/RF-5, RF-10: un módulo apagado en la obra queda fuera, y sin obra no hay nada', () => {
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: sinAlmacen });
+  assert.ok(!residente.modulos.includes('almacen'));
+  assert.ok(residente.modulos.includes('cantera'));
+  // El almacenista de una obra sin almacén no alcanza nada, pero sigue siendo usuario.
+  assert.deepEqual(alcanceDelAsistente({ rol: 'almacenista', obraId: 'obra-a', modulosDeObra: sinAlmacen }).modulos, []);
+  // La gerencia no se filtra por los módulos de una obra (017/RF-10).
+  assert.ok(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: sinAlmacen }).modulos.includes('almacen'));
+  // RF-10: residente sin obra.
+  assert.deepEqual(alcanceDelAsistente({ rol: 'supervisor', obraId: null, modulosDeObra: TODOS_LOS_MODULOS }), {
+    usa: true,
+    obras: [],
+    modulos: [],
+  });
+});
+
+prueba('028/RF-4, RF-6: la obra se decide por quién pregunta', () => {
+  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
+  assert.equal(obraAlAlcance(residente, 'obra-a'), true);
+  assert.equal(obraAlAlcance(residente, 'obra-b'), false);
+  assert.equal(obraAlAlcance(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: TODOS_LOS_MODULOS }), 'obra-b'), true);
+});
+
+prueba('028/RF-9, RF-49: una conversación se muestra entera solo si todavía se alcanza lo que consultó', () => {
+  const residenteA = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
+  const deCantera = { obras: ['obra-a'], modulos: ['cantera' as const] };
+  assert.equal(conversacionVisible(deCantera, residenteA), true);
+  // Le cambiaron la obra: lo de la obra A ya no.
+  const residenteB = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-b', modulosDeObra: TODOS_LOS_MODULOS });
+  assert.equal(conversacionVisible(deCantera, residenteB), false);
+  // Le apagaron Cantera en su obra.
+  const sinCantera = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: { ...TODOS_LOS_MODULOS, cantera: false } });
+  assert.equal(conversacionVisible(deCantera, sinCantera), false);
+  // Una conversación sin consultas (p. ej. «hola») se ve siempre que use el asistente.
+  assert.equal(conversacionVisible({ obras: [], modulos: [] }, residenteB), true);
+  // Pasó a operador: ya no usa el asistente.
+  const operador = alcanceDelAsistente({ rol: 'operador', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
+  assert.equal(conversacionVisible({ obras: [], modulos: [] }, operador), false);
+});
+
+prueba('028/RF-1, RF-2, RF-59: el asistente es de los cinco roles del panel, y los límites de la gerencia', () => {
+  for (const rol of ROLES) {
+    const usa = ROLES_DEL_ASISTENTE.includes(rol);
+    // La tabla de permisos y la regla del asistente dicen lo mismo.
+    assert.equal(alcanza(rol, 'asistente', 'ver'), usa, `${rol} asistente/ver`);
+    assert.equal(modulosVisibles(rol).includes('asistente'), usa, rol);
+    assert.equal(alcanceDelAsistente({ rol, obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS }).usa, usa, rol);
+    // RF-59: cambiar los límites y ver el uso, solo la gerencia.
+    assert.equal(alcanza(rol, 'asistente', 'escribir'), rol === 'admin', `${rol} asistente/escribir`);
+  }
+  assert.equal(alcanza('operador', 'asistente', 'ver'), false);
+  // No depende de los módulos que lleve la obra.
+  assert.equal(moduloApagado('asistente', { almacen: false, cantera: false, laboratorio: false }), false);
+  // Junto al Inicio; el almacenista, que no tiene Inicio, lo ve arriba de su módulo.
+  assert.deepEqual(gruposDelMenu(modulosVisibles('supervisor'))[0].modulos, ['inicio', 'asistente']);
+  assert.deepEqual(gruposDelMenu(modulosVisibles('almacenista'))[0].modulos, ['asistente']);
+  assert.equal(moduloDeLaRuta('/panel/asistente'), 'asistente');
+  assert.match(motivoDeRechazo('asistente', 'escribir'), /cambiar los límites del asistente/);
+});
+
+prueba('028/RF-50, RF-51, RF-59: el límite del día, el de la persona sobre el de todos', () => {
+  assert.equal(limiteDelDia('ana', []), 30);
+  assert.equal(limiteDelDia('ana', [{ usuarioId: null, limite: 20 }]), 20);
+  assert.equal(limiteDelDia('ana', [{ usuarioId: null, limite: 20 }, { usuarioId: 'ana', limite: 50 }]), 50);
+  assert.equal(limiteDelDia('beto', [{ usuarioId: null, limite: 20 }, { usuarioId: 'ana', limite: 50 }]), 20);
+  // La 30.ª todavía entra (le queda 1 antes de hacerla); después, 0, y nunca negativo.
+  assert.equal(preguntasQueQuedan(30, 29), 1);
+  assert.equal(preguntasQueQuedan(30, 30), 0);
+  assert.equal(preguntasQueQuedan(30, 31), 0);
+});
+
+prueba('028/RF-54: el conteo cambia de día a la medianoche de Colombia, no a la de UTC', () => {
+  // 23:59 del 21-oct en Bogotá = 04:59 UTC del 22-oct.
+  assert.equal(diaDelConteo(Date.parse('2026-10-22T04:59:00Z')), '2026-10-21');
+  // 00:00 del 22-oct en Bogotá = 05:00 UTC.
+  assert.equal(diaDelConteo(Date.parse('2026-10-22T05:00:00Z')), '2026-10-22');
+});
+
+prueba('028/RF-64: hasta 3 meses (92 días) por pregunta', () => {
+  assert.equal(faltaDelPeriodo('2026-07-01', '2026-09-30'), null); // 92 días
+  assert.match(faltaDelPeriodo('2026-07-01', '2026-10-01') ?? '', /93 días.*3 meses o menos/);
+  assert.equal(faltaDelPeriodo('2026-10-21', '2026-10-21'), null);
+  assert.match(faltaDelPeriodo('2026-10-22', '2026-10-21') ?? '', /al revés/);
+});
+
+prueba('028/RF-66 a RF-68: tipos, cantidad y tamaño de los adjuntos', () => {
+  const MB = 1024 * 1024;
+  assert.equal(claseDeAdjunto('vale.jpg', 'image/jpeg'), 'imagen');
+  assert.equal(claseDeAdjunto('informe.pdf', 'application/pdf'), 'pdf');
+  // Sin tipo (algunos .xlsx en Windows): por la extensión.
+  assert.equal(claseDeAdjunto('Horas.XLSX', ''), 'excel');
+  assert.equal(claseDeAdjunto('acta.docx', 'application/octet-stream'), 'word');
+  assert.equal(claseDeAdjunto('viejo.xls', 'application/vnd.ms-excel'), null);
+  assert.equal(claseDeAdjunto('video.mp4', 'video/mp4'), null);
+  const foto = (nombre: string, bytes = MB) => ({ nombre, tipo: 'image/jpeg', bytes });
+  assert.deepEqual(faltasDeLosAdjuntos([1, 2, 3, 4, 5].map((n) => foto(`f${n}.jpg`))), []);
+  assert.match(faltasDeLosAdjuntos([1, 2, 3, 4, 5, 6].map((n) => foto(`f${n}.jpg`)))[0], /hasta 5 archivos por pregunta; hay 6/);
+  assert.deepEqual(faltasDeLosAdjuntos([foto('justo.jpg', 10 * MB)]), []);
+  assert.match(faltasDeLosAdjuntos([foto('grande.jpg', 10.1 * MB)])[0], /«grande.jpg» pesa 10,1 MB; el máximo es 10 MB/);
+  assert.match(faltasDeLosAdjuntos([{ nombre: 'nota.mp3', tipo: 'audio/mpeg', bytes: MB }])[0], /«nota.mp3»: solo se aceptan/);
+  assert.match(faltasDeLosAdjuntos([foto('vacio.jpg', 0)])[0], /llegó vacío/);
+});
+
+prueba('028/RF-44: el título sale de la primera pregunta', () => {
+  assert.equal(tituloDeConversacion('  ¿Cuántos viajes\nhubo ayer?  '), '¿Cuántos viajes hubo ayer?');
+  const larga = '¿Cuántos metros cúbicos de sub-base se colocaron la semana pasada y con qué volquetas, por día?';
+  const titulo = tituloDeConversacion(larga);
+  assert.ok(titulo.length <= 61 && titulo.endsWith('…'), titulo);
+  assert.ok(!titulo.includes(' …'));
+  assert.equal(tituloDeConversacion('', true), 'Archivo adjunto');
+  assert.equal(tituloDeConversacion('   '), 'Conversación');
+});
+
+prueba('028/RF-57: el costo estimado, en microdólares', () => {
+  // 30 000 de entrada y 2 000 de salida: 0,12 + 0,04 = 0,16 USD.
+  assert.equal(costoEstimado({ entrada: 30_000, salida: 2_000 }), 160_000);
+  // Con caché: 10 000 leídos y 5 000 escritos suman 0,002 + 0,025.
+  assert.equal(costoEstimado({ entrada: 0, salida: 0, cacheLeida: 10_000, cacheEscrita: 5_000 }), 27_000);
+});
+
+prueba('028/RF-83: la consulta de anulados solo nombra los módulos que la persona alcanza', () => {
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: sinAlmacen });
+  assert.deepEqual(modulosDeAnulados(residente.modulos), ['bitacoras', 'cantera', 'preoperacionales', 'laboratorio']);
+  assert.deepEqual(modulosDeAnulados(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: sinAlmacen }).modulos), [
+    'bitacoras',
+    'cantera',
+    'almacen',
+    'preoperacionales',
+    'laboratorio',
+  ]);
+  // El laboratorista solo ve los de laboratorio; el almacenista sin almacén, ninguno.
+  assert.deepEqual(
+    modulosDeAnulados(alcanceDelAsistente({ rol: 'laboratorista', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS }).modulos),
+    ['laboratorio'],
+  );
+  assert.deepEqual(modulosDeAnulados(alcanceDelAsistente({ rol: 'almacenista', obraId: 'obra-a', modulosDeObra: sinAlmacen }).modulos), []);
+});
+
+prueba('028/RF-84: lo registrado de WhatsApp se cuenta por día y por tipo', () => {
+  assert.deepEqual(
+    resumenDeRegistrados([
+      { dia: '2026-10-02', categoria: 'bitacora' },
+      { dia: '2026-10-01', categoria: 'viajes' },
+      { dia: '2026-10-01', categoria: 'bitacora' },
+      { dia: '2026-10-01', categoria: 'viajes' },
+      { dia: '2026-10-01', categoria: null },
+    ]),
+    [
+      { dia: '2026-10-01', categoria: 'bitacora', mensajes: 1 },
+      { dia: '2026-10-01', categoria: 'sin tipo', mensajes: 1 },
+      { dia: '2026-10-01', categoria: 'viajes', mensajes: 2 },
+      { dia: '2026-10-02', categoria: 'bitacora', mensajes: 1 },
+    ],
+  );
+  assert.deepEqual(resumenDeRegistrados([]), []);
+});
+
+prueba('028/RF-81: los grupos por fecha van por el día de Colombia', () => {
+  // Hoy: 22-oct a las 10 a. m. de Colombia (15:00 UTC).
+  const ahora = Date.parse('2026-10-22T15:00:00Z');
+  assert.equal(grupoDeFecha('2026-10-22T05:00:00Z', ahora), 'Hoy'); // medianoche de Colombia
+  assert.equal(grupoDeFecha('2026-10-22T04:59:00Z', ahora), 'Ayer'); // 11:59 p. m. del 21 en Colombia, ya 22 en UTC
+  assert.equal(grupoDeFecha('2026-10-21T12:00:00Z', ahora), 'Ayer');
+  assert.equal(grupoDeFecha('2026-10-20T12:00:00Z', ahora), 'Últimos 7 días');
+  assert.equal(grupoDeFecha('2026-10-16T12:00:00Z', ahora), 'Últimos 7 días'); // hace 6 días: 7 días con hoy
+  assert.equal(grupoDeFecha('2026-10-15T12:00:00Z', ahora), 'Anteriores'); // hace 7 días
+  const grupos = agruparPorFecha(
+    [
+      { id: 'a', actualizadaEn: '2026-10-22T14:00:00Z' },
+      { id: 'b', actualizadaEn: '2026-10-01T14:00:00Z' },
+      { id: 'c', actualizadaEn: '2026-10-22T13:00:00Z' },
+    ],
+    ahora,
+  );
+  assert.deepEqual(
+    grupos.map((g) => [g.grupo, g.conversaciones.map((c) => c.id)]),
+    [
+      ['Hoy', ['a', 'c']],
+      ['Anteriores', ['b']],
+    ],
+  );
+});
+
+prueba('028/RF-81: el buscador no distingue mayúsculas ni tildes', () => {
+  const lista = [{ titulo: '¿Cuántos viajes de cantera hubo?' }, { titulo: 'Ensayos de compresión' }];
+  assert.deepEqual(conversacionesQueCoinciden(lista, 'CUANTOS'), [lista[0]]);
+  assert.deepEqual(conversacionesQueCoinciden(lista, 'compresion'), [lista[1]]);
+  assert.deepEqual(conversacionesQueCoinciden(lista, '  '), lista);
+  assert.deepEqual(conversacionesQueCoinciden(lista, 'almacén'), []);
+});
+
+prueba('028/RF-74: los ejemplos son solo de los módulos que la persona alcanza', () => {
+  const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
+  const modulosDe = (rol: Rol, modulosDeObra = TODOS_LOS_MODULOS) => alcanceDelAsistente({ rol, obraId: 'obra-a', modulosDeObra }).modulos;
+  const gerencia = ejemplosDePregunta(modulosDe('admin'));
+  assert.equal(gerencia.length, 3);
+  assert.ok(gerencia[0].includes('reporte'));
+  for (const rol of ROLES_DEL_ASISTENTE) {
+    const ejemplos = ejemplosDePregunta(modulosDe(rol));
+    assert.ok(ejemplos.length >= 1 && ejemplos.length <= 3, rol);
+  }
+  assert.ok(ejemplosDePregunta(modulosDe('almacenista')).every((p) => /almac|stock/i.test(p)));
+  assert.ok(ejemplosDePregunta(modulosDe('encargado_planta')).every((p) => /cantera/i.test(p)));
+  assert.ok(ejemplosDePregunta(modulosDe('laboratorista')).every((p) => /ensayo|granulometr/i.test(p)));
+  // Módulo apagado: el almacenista no recibe ejemplos, y el residente ninguno de almacén.
+  assert.deepEqual(ejemplosDePregunta(modulosDe('almacenista', sinAlmacen)), []);
+  assert.ok(ejemplosDePregunta(modulosDe('supervisor', sinAlmacen)).every((p) => !/almac|stock/i.test(p)));
+});
+
 /**
  * Spec 031, T4: el formulario de presupuesto. Asíncrona porque abre el Excel real de OCC
  * (`docs/preupuesto.xlsx`) con el mismo lector que usa el servidor.
@@ -10480,7 +10778,300 @@ async function verificarFormulario() {
     assert.equal(leido.valor, 1150);
     assert.equal(leido.cuadra, false);
   });
+
+  await pruebaAsync('031/RF-75: una segunda fila de encabezados con «VALOR TOTAL» no corta la lectura', async () => {
+    const leido = leerFormulario(
+      [
+        [
+          ['Nº', 'ÍTEM DE PAGO', 'ESPECIFICACIONES', 'ESPECIFICACIONES', 'DESCRIPCIÓN', 'UND.', 'CANTIDAD', 'VALOR UNITARIO', 'VALOR TOTAL'],
+          ['Nº', 'ÍTEM DE PAGO', 'GENERAL', 'PARTICULAR', 'DESCRIPCIÓN', 'UND.', 'CANTIDAD', 'VALOR UNITARIO', 'VALOR TOTAL'],
+          ['EXPLANACIONES'],
+          [1, '201.7.1', '201 - 22', null, 'Demolición estructuras', 'm3', 100, 137989, 13798900],
+          [null, null, null, null, 'VALOR TOTAL', null, null, null, 13798900],
+        ],
+      ],
+      contador,
+    );
+    assert.ok(leido.ok, leido.ok ? '' : leido.error);
+    if (!leido.ok) return;
+    assert.deepEqual(leido.conteo, { grupos: 0, capitulos: 1, items: 1, rubros: 0 });
+    assert.equal(leido.estructura.grupos[0].capitulos[0].nombre, 'EXPLANACIONES');
+    assert.equal(leido.cuadra, true);
+  });
+
+  const libro = readFileSync(
+    path.join(__dirname, '..', 'docs', 'Planificación CONSORCIO CARTAGENA (V4-CON AJUSTE DEL CANAL Y LA VIA) 26-09-2026.xlsx'),
+  );
+  const hojasDelLibroDePlanificacion = await hojasDelLibro(libro.buffer.slice(libro.byteOffset, libro.byteOffset + libro.byteLength));
+
+  await pruebaAsync('031/RF-74, RF-76: el libro de planificación va a la IA y solo con la hoja del presupuesto', async () => {
+    // 79 hojas (datos, propuesta, vista árbol, flujos, gastos y un APU por ítem): solo la
+    // segunda, «PROPUESTA ECONOMICA», es el presupuesto.
+    assert.equal(hojasDelLibroDePlanificacion.length, 79);
+    const delPresupuesto = hojasDelPresupuesto(hojasDelLibroDePlanificacion);
+    assert.equal(delPresupuesto.length, 1);
+    assert.equal(delPresupuesto[0], hojasDelLibroDePlanificacion[1]);
+    // Tres niveles, subtotales e IVA por sección: el lector no lo cuadra y le toca a la IA.
+    const leido = leerFormulario(hojasDelLibroDePlanificacion, contador);
+    assert.ok(!leido.ok || !leido.cuadra);
+  });
+
+  await pruebaAsync('031/RF-76, RF-77: a la IA va solo la hoja del presupuesto, fila por fila, con tope', async () => {
+    const paraLaIa = textoParaLaIa(hojasDelLibroDePlanificacion);
+    assert.ok(paraLaIa);
+    if (!paraLaIa) return;
+    assert.ok(paraLaIa.filas > 150 && paraLaIa.filas < FILAS_MAXIMAS_PARA_LA_IA, String(paraLaIa.filas));
+    const lineas = paraLaIa.texto.split('\n');
+    // El ítem 1 está en la fila 17 de «PROPUESTA ECONOMICA», con su número real.
+    const f17 = lineas.find((l) => l.startsWith('H1F17 |'));
+    assert.ok(f17 && f17.includes('201.7.1') && f17.includes('137989') && f17.includes('13798900'), f17 ?? 'sin fila 17');
+    // Ni las filas vacías ni las otras hojas (la «Vista árbol» dice «Precio contractual»).
+    assert.ok(lineas.every((l) => !/^H\d+F\d+ \|[ |]*$/.test(l)));
+    assert.ok(!paraLaIa.texto.includes('Precio contractual'));
+    // Más de 1 500 filas: no se manda (RF-77). Sin hoja del presupuesto, tampoco.
+    const grande: Celda[][] = [ENCABEZADOS, ...Array.from({ length: FILAS_MAXIMAS_PARA_LA_IA }, (_, i): Celda[] => [i + 1, '1.1', 'x', 'm3', 1, 1, 1])];
+    assert.equal(textoParaLaIa([grande]), null);
+    assert.equal(textoParaLaIa([[['Item', 'Descripción'], [1, 'x']]]), null);
+  });
+
+  await pruebaAsync('031/RF-78 a RF-81, RF-88: lo que lee la IA se comprueba contra su fila', async () => {
+    const item = (fila: number, cantidad: number, valorUnitario: number, valorTotal = 0): ItemLeidoPorIa => ({
+      hoja: 1, fila, numero: '1', item: '201.7.1', icociv: '11601', especificaciones: '201 - 22',
+      descripcion: 'Demolicion estructuras', unidad: 'm3', cantidad, valorUnitario, valorTotal,
+    });
+    const SITIOS = 'VÍA 90A01 · SITIOS CRÍTICOS';
+    const SITIOS_COMPLETO = 'VIA 90A01 DEL CORREDOR CARTAGENA - BARRANQUILLA EN LOS DEPARTAMENTOS DE ATLANTICO Y BOLIVAR · SITIOS CRITICOS';
+    const leido = estructuraDeLaIa(
+      {
+        grupos: [
+          {
+            nombre: SITIOS,
+            nombreCompleto: SITIOS_COMPLETO,
+            capitulos: [
+              {
+                nombre: 'EXPLANACIONES',
+                // Fila 17: bien. Fila 18: la IA le puso la cantidad de otra fila. Fila 9999: no existe.
+                items: [item(17, 100, 137989, 13798900), item(18, 100, 94272), item(9999, 1, 1)],
+              },
+            ],
+          },
+          // Un capítulo y un grupo que se quedan sin ítems comprobados no se crean.
+          { nombre: 'VÍA 90A01 · REHABILITACIÓN', nombreCompleto: '', capitulos: [{ nombre: 'BASES', items: [item(47, 1, 1)] }] },
+        ],
+        rubros: [
+          // El IVA de la sección, en su grupo.
+          { hoja: 1, fila: 41, grupo: SITIOS, nombre: 'VALOR IVA (OBRA)', unidad: '', cantidad: 0, valorUnitario: 0, valor: 57151345 },
+          // Las provisiones son de la vía, que no es un grupo: quedan en todo el contrato.
+          { hoja: 1, fila: 77, grupo: 'VIA 90A01', nombre: 'PROVISIÓN PARA AJUSTES', unidad: '', cantidad: 0, valorUnitario: 0, valor: 638117062 },
+          // Un valor que no está en su fila.
+          { hoja: 1, fila: 78, grupo: '', nombre: 'INVENTADO', unidad: '', cantidad: 0, valorUnitario: 0, valor: 1 },
+        ],
+        aiu: { administracion: 0, imprevistos: 0, utilidad: 0 },
+        valorTotalDelExcel: 13798900 + 57151345 + 638117062,
+      },
+      hojasDelLibroDePlanificacion,
+      contador,
+    );
+    assert.ok(leido.ok, leido.ok ? '' : leido.error);
+    if (!leido.ok) return;
+    assert.deepEqual(leido.conteo, { grupos: 1, capitulos: 1, items: 1, rubros: 2 });
+    const [sitios] = leido.estructura.grupos;
+    assert.equal(sitios.nombre, SITIOS);
+    // RF-88: la frase completa queda para mostrarla, y el resumen la lleva.
+    assert.equal(sitios.nombreCompleto, SITIOS_COMPLETO);
+    assert.equal(resumenDelPresupuesto(leido.estructura).grupos[0].nombreCompleto, SITIOS_COMPLETO);
+    assert.deepEqual(
+      sitios.capitulos[0].items.map((i) => [i.renglon, i.item, i.unidad, i.cantidad, i.valorUnitario, i.valorTotal]),
+      [[1, '201.7.1', 'm3', 100, 137989, 13798900]],
+    );
+    assert.deepEqual(
+      leido.estructura.rubros.map((r) => [r.nombre, r.grupoId === sitios.id ? 'sitios' : r.grupoId, r.valor]),
+      [
+        ['VALOR IVA (OBRA)', 'sitios', 57151345],
+        ['PROVISIÓN PARA AJUSTES', null, 638117062],
+      ],
+    );
+    assert.deepEqual(
+      leido.rechazados.map((r) => [r.fila, r.motivo]),
+      [
+        [18, 'no encontrado en la fila 18'],
+        [9999, 'no encontrado en la fila 9999'],
+        [47, 'no encontrado en la fila 47'],
+        [78, 'no encontrado en la fila 78'],
+      ],
+    );
+    assert.deepEqual(leido.diferencias, []);
+    assert.equal(leido.cuadra, true);
+    // Si la IA no deja ningún ítem comprobable, no se crea nada.
+    const vacio = estructuraDeLaIa(
+      { grupos: [{ nombre: '', nombreCompleto: '', capitulos: [{ nombre: 'X', items: [item(18, 100, 94272)] }] }], rubros: [], aiu: { administracion: 0, imprevistos: 0, utilidad: 0 }, valorTotalDelExcel: 0 },
+      hojasDelLibroDePlanificacion,
+      contador,
+    );
+    assert.match(vacio.ok ? '' : vacio.error, /La IA no encontró ítems/);
+  });
 }
+
+prueba('032/RF-11: la placa se guarda en mayúsculas, solo con letras y cifras', () => {
+  assert.equal(normalizarPlaca('tay-076'), 'TAY076');
+  assert.equal(normalizarPlaca(' TAY 076 '), 'TAY076');
+  assert.equal(normalizarPlaca('mc.770.197'), 'MC770197');
+  assert.equal(normalizarPlaca('03WR0166'), '03WR0166');
+  assert.equal(normalizarPlaca('  - '), null);
+  assert.equal(normalizarPlaca(''), null);
+  assert.equal(normalizarPlaca(null), null);
+});
+
+prueba('032/RF-13, RF-20: el equipo se nombra por su placa o, sin ella, con el aviso', () => {
+  assert.equal(identificacionDelVehiculo({ placa: 'llq 375', tipo: 'Volqueta' }), 'LLQ375');
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Motoniveladora', marca: 'KOMATSU', modelo: 'Motoniveladora Komatsu alquilada GD555' }),
+    `Motoniveladora Komatsu alquilada GD555 · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(
+    identificacionDelVehiculo({ placa: '', tipo: 'Vibro Compactadora', marca: 'VOLVO', modelo: null }),
+    `Vibro Compactadora VOLVO · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(identificacionDelVehiculo({ placa: null }), `Equipo · ${AVISO_FALTA_PLACA}`);
+  // El modelo que escribió WhatsApp ya dice el tipo, con tilde y sin plural.
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Vibro Compactadora', marca: 'VOLVO', modelo: 'Vibrócompactador Volvo' }),
+    `Vibrócompactador Volvo · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Montacargas', marca: null, modelo: 'Montacarga a Diesel' }),
+    `Montacarga a Diesel · ${AVISO_FALTA_PLACA}`,
+  );
+});
+
+prueba('032/RF-18, RF-19: WhatsApp reconoce la máquina por su placa y por su código de antes', () => {
+  // Así queda un equipo después del script de la spec 032: el código es la placa.
+  const flota: VehiculoConocido[] = [
+    { id: 'tay076', codigoInterno: 'TAY076', placa: 'TAY076', codigoAnterior: 'VOL-MAG-04', obraId: 'obra-a' },
+    { id: 'llq375', codigoInterno: 'LLQ375', placa: 'LLQ375', codigoAnterior: 'WA-LLQ375', obraId: 'obra-a' },
+    { id: 'nuevo', codigoInterno: 'PRB032', placa: 'PRB032', codigoAnterior: null, obraId: 'obra-a' },
+  ];
+  assert.equal(reconocerVehiculo('VOL-MAG-04', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('Volqueta vol mag 04', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('Volqueta TAY 076', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('WA-LLQ375', flota, 'obra-a'), 'llq375');
+  assert.equal(reconocerVehiculo('prb-032', flota, 'obra-a'), 'nuevo');
+  // El código viejo de otra obra no se toma: solo cuentan los equipos de la obra.
+  assert.equal(reconocerVehiculo('VOL-MAG-04', flota, 'obra-b'), null);
+});
+
+const PARTE_SIN_ACTIVIDADES_032 = {
+  maquinaria: [{ codigo: 'TAY076', claseMedidor: 'odometro' as const, medidorInicial: 100, medidorFinal: 150 }],
+  personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: '17:00' }],
+  actividades: [],
+  clima: [{}],
+  laboratorio: [],
+  notas: 'Sin novedad.',
+};
+const FOTO_DEL_DIA_032 = { delDia: 1, itemsConFoto: [] };
+
+prueba('032/RF-24, RF-25, RF-32: con la marca y su motivo, la sección vacía deja cerrar', () => {
+  // Sin marcas: faltan las dos secciones.
+  assert.deepEqual(bloqueosDelCierre(PARTE_SIN_ACTIVIDADES_032, FOTO_DEL_DIA_032), [
+    'Falta llenar: Actividades y Control Calidad de Obra.',
+  ]);
+  // Con las dos marcas y su motivo: nada, ni siquiera la foto de una actividad (RF-25).
+  assert.deepEqual(
+    bloqueosDelCierre(
+      {
+        ...PARTE_SIN_ACTIVIDADES_032,
+        sinActividades: true,
+        motivoSinActividades: 'Lluvia toda la tarde, solo mantenimiento.',
+        sinEnsayos: true,
+        motivoSinEnsayos: 'No hubo material para ensayar.',
+      },
+      FOTO_DEL_DIA_032,
+    ),
+    [],
+  );
+  // Un ensayo del módulo de Laboratorio llena la sección: la marca de ensayos sobra.
+  assert.deepEqual(
+    bloqueosDelCierre(
+      { ...PARTE_SIN_ACTIVIDADES_032, sinActividades: true, motivoSinActividades: 'Lluvia.', ensayosDelModulo: 1 },
+      FOTO_DEL_DIA_032,
+    ),
+    [],
+  );
+});
+
+prueba('032/RF-23, RF-31: la marca sin motivo no deja cerrar, y lo dice', () => {
+  assert.deepEqual(
+    bloqueosDelCierre(
+      { ...PARTE_SIN_ACTIVIDADES_032, sinActividades: true, motivoSinActividades: '  ', sinEnsayos: true },
+      FOTO_DEL_DIA_032,
+    ),
+    [faltaElMotivoSinRegistro('actividades'), faltaElMotivoSinRegistro('ensayos')],
+  );
+  assert.equal(faltaElMotivoSinRegistro('actividades'), 'Actividades: falta el motivo de por qué no se realizaron.');
+  assert.equal(faltaElMotivoSinRegistro('ensayos'), 'Control de calidad: falta el motivo de por qué no se realizaron.');
+  // Lo que falta en otras secciones se sigue diciendo junto.
+  assert.deepEqual(
+    bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, notas: null, sinActividades: true }, FOTO_DEL_DIA_032),
+    ['Falta llenar: Control Calidad de Obra y Notas.', faltaElMotivoSinRegistro('actividades')],
+  );
+});
+
+prueba('032/RF-37, RF-38: en día sin trabajo las marcas no cuentan; sin marcas, todo igual', () => {
+  const domingo = {
+    maquinaria: [],
+    personal: [],
+    actividades: [],
+    clima: [{}],
+    laboratorio: [],
+    notas: 'Domingo.',
+    sinTrabajo: true,
+    motivoSinTrabajo: 'Domingo.',
+    // Marcada sin motivo: en un día sin trabajo no se mira.
+    sinActividades: true,
+  };
+  assert.deepEqual(bloqueosDelCierre(domingo, FOTO_DEL_DIA_032), []);
+  // Un parte de antes del cambio (sin las marcas) se evalúa como siempre.
+  assert.deepEqual(bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, actividades: [{ id: 'a' }] }, { delDia: 1, itemsConFoto: ['a'] }), [
+    'Falta llenar: Control Calidad de Obra.',
+  ]);
+});
+
+prueba('032: en el índice, la sección vacía con su marca y su motivo «no aplica»', () => {
+  const conMarcas = seccionesDelParte({ ...PARTE_VACIO, actividadesNoAplican: true, ensayosNoAplican: true });
+  assert.equal(conMarcas.find((s) => s.id === 'actividades')?.estado, 'no_aplica');
+  assert.equal(conMarcas.find((s) => s.id === 'laboratorio')?.estado, 'no_aplica');
+  // Sin la marca, la sección vacía sigue «sin registrar»; con filas, se cuentan.
+  assert.notEqual(seccionesDelParte(PARTE_VACIO).find((s) => s.id === 'actividades')?.estado, 'no_aplica');
+  const conFilas = seccionesDelParte({ ...PARTE_VACIO, actividades: 2, actividadesNoAplican: true });
+  assert.equal(conFilas.find((s) => s.id === 'actividades')?.cuantos, 2);
+});
+
+prueba('032/RF-27, RF-28, RF-34, RF-35: cómo queda la marca tras un guardado', () => {
+  const sin = { marcada: false, motivo: null };
+  const con = { marcada: true, motivo: 'Lluvia.' };
+  // Marcar con motivo, en una sección vacía.
+  assert.deepEqual(resolverSeccionSinRegistro(sin, { marcada: true, motivo: '  Lluvia.  ' }, 0), {
+    marcada: true,
+    motivo: 'Lluvia.',
+    error: null,
+  });
+  // Marcar sin motivo se deja guardar; lo que no deja es cerrar.
+  assert.deepEqual(resolverSeccionSinRegistro(sin, { marcada: true }, 0), { marcada: true, motivo: null, error: null });
+  // Solo el motivo, con la marca ya guardada.
+  assert.deepEqual(resolverSeccionSinRegistro({ marcada: true, motivo: null }, { motivo: 'Paro.' }, 0), {
+    marcada: true,
+    motivo: 'Paro.',
+    error: null,
+  });
+  // Desmarcar borra el motivo (RF-28, RF-35).
+  assert.deepEqual(resolverSeccionSinRegistro(con, { marcada: false }, 0), { marcada: false, motivo: null, error: null });
+  // Marcar una sección con filas es contradecirse.
+  assert.equal(resolverSeccionSinRegistro(sin, { marcada: true, motivo: 'x' }, 2).error, 'con_registros');
+  // Llega una actividad (WhatsApp) sin tocar la marca: se desmarca sola (RF-27, RF-34).
+  assert.deepEqual(resolverSeccionSinRegistro(con, {}, 1), { marcada: false, motivo: null, error: null });
+  // Sin cambios y sin filas, queda como estaba.
+  assert.deepEqual(resolverSeccionSinRegistro(con, {}, 0), { ...con, error: null });
+});
 
 verificarFirmaS3()
   .then(verificarFormulario)

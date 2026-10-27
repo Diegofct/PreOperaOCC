@@ -286,7 +286,9 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
         <Tabla
           columnas={columnas}
           filas={paginaDeExcepciones.pagina}
-          vacio={`No hay nada pendiente entre el ${desde} y el ${hasta}.`}
+          // Mientras llega la primera respuesta la tabla está vacía: decir «no hay nada»
+          // ahí hacía creer que no había pendientes (defecto visto el 2026-10-13).
+          vacio={lista.cargando ? 'Cargando…' : `No hay nada pendiente entre el ${desde} y el ${hasta}.`}
         />
         <Paginacion
           pagina={paginaDeExcepciones.paginaActual}
@@ -459,7 +461,7 @@ function CamposDelRenglon({
   const personas = opciones.personas.map((p) => ({ valor: p.id, etiqueta: p.nombreCompleto, detalle: p.cargo ?? undefined }));
   const equipos = opciones.equipos.map((e) => ({
     valor: e.id,
-    etiqueta: e.placa ? `${e.codigoInterno} · ${e.placa}` : e.codigoInterno,
+    etiqueta: e.nombre,
   }));
   const escrito = (texto: string | null | undefined, que: string) => (texto ? <Ayuda>{`${que}: «${texto}»`}</Ayuda> : null);
 
@@ -474,7 +476,7 @@ function CamposDelRenglon({
           valor={v.vehiculoId}
           opciones={opciones.cantera.volquetas.map((q) => ({
             valor: q.id,
-            etiqueta: q.placa ? `${q.codigoInterno} · ${q.placa}` : q.codigoInterno,
+            etiqueta: q.nombre,
           }))}
           onChange={(x) => cambiar({ vehiculoId: x })}
           vacio="Elija la volqueta"

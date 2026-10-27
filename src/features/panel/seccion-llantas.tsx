@@ -15,6 +15,8 @@
  */
 import { useCallback, useState } from 'react';
 
+import { identificacionDeFila } from '@/shared/rules/vehiculos';
+
 import {
   hayQueCambiar,
   nombreDePosicion,
@@ -224,7 +226,7 @@ export function SeccionLlantas({ vehiculos }: { vehiculos: VehiculoFila[] }) {
           valor={vehiculoId}
           opciones={vehiculos.map((v) => ({
             valor: v.id,
-            etiqueta: v.codigoInterno,
+            etiqueta: identificacionDeFila(v),
             detalle: v.tipoNombre,
           }))}
           onChange={(v) => {

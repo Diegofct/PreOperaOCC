@@ -8,6 +8,7 @@
  */
 import { horasDeLaPersona, MAXIMO_MINUTOS_EXTRA_POR_DIA, type HorarioDeObra, type PersonaConHoras } from './horas';
 import { avanceDeMedidor, type ClaseDeMedidor } from './jornada';
+import { textosSinRegistro } from './parte';
 import { periodoDe } from './periodos';
 import type { EnsayoDeObra } from './ensayos-de-obra';
 
@@ -533,6 +534,11 @@ export interface ParteConClima {
   clima: readonly FranjaLeida[];
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
+  /** «Hoy no se realizaron actividades / ensayos» (spec 032). Ausente es no marcado. */
+  sinActividades?: boolean;
+  motivoSinActividades?: string | null;
+  sinEnsayos?: boolean;
+  motivoSinEnsayos?: string | null;
   notas: string | null;
 }
 
@@ -544,6 +550,8 @@ export interface ClimaDelDia {
   lluvia: boolean;
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
+  /** «No se realizaron actividades — motivo», y lo mismo de ensayos (032/RF-36). */
+  sinRegistro: string[];
   notas: string;
   abierta: boolean;
 }
@@ -564,7 +572,17 @@ export function climaDelPeriodo(datos: {
   const dias: ClimaDelDia[] = datos.dias.map((fecha) => {
     const parte = parteDe.get(fecha);
     if (!parte) {
-      return { fecha, conBitacora: false, franjas: [], lluvia: false, sinTrabajo: false, motivoSinTrabajo: null, notas: '', abierta: false };
+      return {
+        fecha,
+        conBitacora: false,
+        franjas: [],
+        lluvia: false,
+        sinTrabajo: false,
+        motivoSinTrabajo: null,
+        sinRegistro: [],
+        notas: '',
+        abierta: false,
+      };
     }
     const franjas = [...parte.clima].sort((a, b) => a.desde.localeCompare(b.desde));
     return {
@@ -574,6 +592,7 @@ export function climaDelPeriodo(datos: {
       lluvia: franjas.some((f) => f.condicion === CONDICION_LLUVIA),
       sinTrabajo: parte.sinTrabajo,
       motivoSinTrabajo: parte.motivoSinTrabajo,
+      sinRegistro: textosSinRegistro(parte),
       notas: parte.notas?.trim() ?? '',
       abierta: parte.abierta,
     };
