@@ -28,6 +28,7 @@ import {
   type TipoDeContrato,
 } from '@/shared/rules/contrato';
 import { AMPAROS, type Amparo } from '@/shared/rules/polizas';
+import { normalizarPlaca } from '@/shared/rules/vehiculos';
 import type {
   EstadoDePresupuesto,
   EstructuraDePresupuesto,
@@ -59,6 +60,7 @@ import {
 import {
   faltaObservacionDelEnsayo,
   faltasDeActividad,
+  LARGO_DEL_MOTIVO_SIN_REGISTRO,
   MENSAJES_DE_ENSAYO,
   METROS_MAXIMOS_DEL_ENSAYO,
 } from '@/shared/rules/parte';
@@ -326,10 +328,18 @@ export const ETIQUETA_ESTADO_VEHICULO: Record<EstadoVehiculo, string> = {
   no_apto: 'No apto',
 };
 
+/**
+ * La placa o, en la maquinaria sin placa, su serie (spec 032, RF-9, RF-11). Ya no se
+ * pide código interno: el servidor lo iguala a la placa.
+ */
+const placaObligatoria = z
+  .string({ error: 'Falta la placa / identificación.' })
+  .max(32, 'La placa / identificación tiene más de 32 caracteres.')
+  .transform((v) => normalizarPlaca(v))
+  .refine((v): v is string => v !== null, 'Falta la placa / identificación.');
+
 export const vehiculoNuevo = z.object({
-  /** El número con el que OCC lo llama en obra: VOL-01, CAM-03… */
-  codigoInterno: textoObligatorio(32, 'el código interno'),
-  placa: textoOpcional(16).transform((v) => v?.toUpperCase() ?? null),
+  placa: placaObligatoria,
   tipoVehiculoId: textoObligatorio(40, 'el tipo de equipo'),
   marca: textoOpcional(80),
   modelo: textoOpcional(80),
@@ -966,6 +976,14 @@ export const parteEditado = z.object({
   /** Día sin trabajo (spec 004, RF-53 a RF-55). Ausente no toca la marca. */
   sinTrabajo: z.boolean().optional(),
   motivoSinTrabajo: textoParcial(500),
+  /**
+   * «Hoy no se realizaron actividades / ensayos» y su motivo de un renglón (spec 032,
+   * RF-22, RF-30). Ausente no toca la marca.
+   */
+  sinActividades: z.boolean().optional(),
+  motivoSinActividades: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
+  sinEnsayos: z.boolean().optional(),
+  motivoSinEnsayos: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
 });
 
 export type ParteEditado = z.input<typeof parteEditado>;
@@ -1084,6 +1102,11 @@ export interface ParteFila {
   notas: string | null;
   sinTrabajo: boolean;
   motivoSinTrabajo: string | null;
+  /** Spec 032: la sección vacía a propósito, con su motivo. */
+  sinActividades: boolean;
+  motivoSinActividades: string | null;
+  sinEnsayos: boolean;
+  motivoSinEnsayos: string | null;
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;
@@ -1468,7 +1491,8 @@ export interface OpcionesDeCantera {
   sitios: SitioDeCanteraFila[];
   materiales: MaterialDeCanteraFila[];
   /** Solo las volquetas operativas de la obra (RF-8). */
-  volquetas: { id: string; codigoInterno: string; placa: string | null }[];
+  /** `nombre`: la placa, o la descripción si no tiene (spec 032, RF-13). */
+  volquetas: { id: string; nombre: string; placa: string | null }[];
   /** Solo quien conduce u opera, activo y de la obra (RF-35). */
   conductores: { id: string; nombreCompleto: string; cargo: string | null }[];
 }
@@ -2280,7 +2304,8 @@ export interface DetalleDePropuesta extends PropuestaFila {
    * rechazaría al aprobar.
    */
   opciones: {
-    equipos: { id: string; codigoInterno: string; placa: string | null }[];
+    /** `nombre`: la placa, o la descripción si no tiene (spec 032, RF-13). */
+    equipos: { id: string; nombre: string; placa: string | null }[];
     personas: { id: string; nombreCompleto: string; cargo: string | null }[];
     cantera: OpcionesDeCantera;
     /**

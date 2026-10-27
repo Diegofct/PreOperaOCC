@@ -19,6 +19,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { identificacionDeFila } from '@/shared/rules/vehiculos';
 import { fechaDeJornada, type Periodo, sumarDias } from '@/shared/rules/jornada';
 
 import { api } from './cliente-api';
@@ -315,7 +316,7 @@ export default function PantallaPreoperacionales() {
         valor={vehiculoId}
         opciones={vehiculos.datos.map((v) => ({
           valor: v.id,
-          etiqueta: v.codigoInterno,
+          etiqueta: identificacionDeFila(v),
           detalle: v.tipoNombre,
         }))}
         onChange={setVehiculoId}

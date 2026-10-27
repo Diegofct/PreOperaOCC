@@ -92,14 +92,19 @@ import {
   opcionDeActividad,
   type CatalogoDeActividades,
 } from "@/shared/rules/actividades-de-obra";
+import { identificacionDeFila } from "@/shared/rules/vehiculos";
 import { alcanza } from "@/shared/rules/permisos";
 import {
   bloqueosDelCierre,
   faltasDeActividad,
   faltasDelEnsayo,
+  LARGO_DEL_MOTIVO_SIN_REGISTRO,
+  rotuloSinRegistro,
   seccionesDelParte,
+  textoSinRegistro,
   TITULO_DE_SECCION,
   type CampoDeActividad,
+  type SeccionSinRegistro,
   type CampoDeEnsayo,
   type UbicacionPorValidar,
 } from "@/shared/rules/parte";
@@ -110,6 +115,8 @@ import {
   Ayuda,
   AccionesFormulario,
   FilaDeFormulario,
+  FilaDeSeccion,
+  RenglonDeCampos,
   Aviso,
   Boton,
   Campo,
@@ -144,6 +151,7 @@ import type {
   FotosDelDiaFila,
   JornadaFila,
   ObraFila,
+  ParteEditado,
   ParteFila,
   PersonaFila,
   VehiculoFila,
@@ -543,6 +551,9 @@ export default function PantallaPartes() {
     notas: parte?.notas ?? "",
     // Con la marca, lo que no se exige sale como «no aplica» (RF-54).
     sinTrabajo: parte?.sinTrabajo ?? false,
+    // Spec 032: la sección vacía a propósito, con su motivo guardado.
+    actividadesNoAplican: Boolean(parte?.sinActividades && parte.motivoSinActividades),
+    ensayosNoAplican: Boolean(parte?.sinEnsayos && parte.motivoSinEnsayos),
     // Todavía no se iza el conteo de fotos: lo hace T17. Hasta entonces es
     // `null`, que la regla traduce a «comprobando» y nunca a «sin registrar».
     fotos: seccionDeFotos.cargando ? null : fotosDelDia.length,
@@ -1025,6 +1036,29 @@ function origenDe(fila: object | undefined): OrigenWhatsapp | undefined {
   return fila && "origen" in fila ? (fila.origen as OrigenWhatsapp | undefined) : undefined;
 }
 
+/**
+ * Cómo se lee la máquina en su fila (spec 032). Abierta, con la placa de hoy del
+ * vehículo (RF-15). Cerrada, con lo que quedó guardado en la bitácora, que es
+ * evidencia y no cambia aunque después cambie la placa (RF-17).
+ */
+function nombreDeLaMaquina(
+  equipo: VehiculoFila | undefined,
+  guardado: string | undefined,
+  editable: boolean,
+): string {
+  if (!editable && guardado) return guardado;
+  if (!equipo) return guardado ?? "Equipo";
+  return equipo.placa ? `${identificacionDeFila(equipo)} · ${equipo.tipoNombre}` : identificacionDeFila(equipo);
+}
+
+/**
+ * Los anchos de los campos de una máquina: con la columna del nombre y la final, suman
+ * el ancho de la fila a 1280 px con unos píxeles de holgura, para que quepa en un
+ * renglón (spec 032, RF-4). La lectura, lo justo para «Odómetro inicial (km)».
+ */
+const ANCHO_OPERADOR = 151;
+const ANCHO_LECTURA = 137;
+
 function SeccionMaquinaria({
   parte,
   vehiculos,
@@ -1114,95 +1148,104 @@ function SeccionMaquinaria({
               ? avisoDeLecturaInicial(inicial, parte.lecturasAnteriores[fila.vehiculoId] ?? null)
               : {};
 
+            // Todo en un renglón a 1280 px (spec 032, RF-4): máquina | operador y
+            // lecturas | observación con el «Quitar».
             return (
-              <FilaDeFormulario
+              <FilaDeSeccion
                 key={`${fila.vehiculoId}-${indice}`}
                 ultima={indice === filas.length - 1}
-              >
-                <MarcaWhatsapp
-                  origen={origenDe(parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId))}
-                />
-                <Campo
-                  etiqueta="Equipo"
-                  valor={`${equipo?.codigoInterno ?? fila.vehiculoId}${equipo ? ` · ${equipo.tipoNombre}` : ""}`}
-                  onChange={() => {}}
-                  // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
-                  soloLectura
-                  ancho={240}
-                />
-                {/* Quién la operó (spec 021, RF-73, RF-76). Opcional: se cierra sin él (RF-91). */}
-                <Selector
-                  etiqueta="Operador"
-                  valor={fila.operadorId}
-                  opciones={personas.map((p) => ({
-                    valor: p.id,
-                    etiqueta: p.nombreCompleto,
-                    detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
-                  }))}
-                  onChange={(v) =>
-                    setFilas(filas.map((f, i) => (i === indice ? { ...f, operadorId: v } : f)))
-                  }
-                  vacio="Sin operador"
-                  permiteVacio
-                  ancho={240}
-                />
-                <Campo
-                  etiqueta={`${rotulo} inicial (${unidad})`}
-                  valor={fila.inicial}
-                  onChange={(v) => cambiar(indice, "inicial", v)}
-                  soloNumeros
-                  ancho={170}
-                  ayuda={lectura.ayuda}
-                />
-                <Campo
-                  etiqueta={`${rotulo} final (${unidad})`}
-                  valor={fila.final}
-                  onChange={(v) => cambiar(indice, "final", v)}
-                  soloNumeros
-                  ancho={170}
-                  // Mientras se llena, faltar una lectura no es un error: solo se
-                  // marca lo imposible, que escrito se queda.
-                  error={
-                    error === "final_menor" || error === "salto_enorme"
-                      ? mensajeDeAvance(clase, error, inicial)
-                      : undefined
-                  }
-                  ayuda={
-                    avance === null
-                      ? undefined
-                      : clase === "odometro"
-                        ? `${avance} km recorridos`
-                        : `${avance} horas de máquina`
-                  }
-                />
-                {/* Detrás de la casilla y alineada con las lecturas (spec 029, RF-10 a
-                    RF-14). Ya no hace falta para cerrar (RF-15). Se sigue viendo con la
-                    bitácora cerrada, con «Sin observación» si no hay (RF-18). */}
-                <CampoObservacion
-                  etiqueta="Observaciones del día"
-                  valor={fila.observaciones}
-                  onChange={(v) => cambiar(indice, "observaciones", v)}
-                  editable={editable}
-                  ayuda="Qué pasó con la máquina: fallas, tiempos muertos, traslados."
-                />
-                {/* Avisa y no impide: la escrita manda (spec 029, RF-5). */}
-                {lectura.aviso ? (
-                  <View style={estilos.avisoEnRenglon}>
-                    <Aviso tono="info">{lectura.aviso}</Aviso>
-                  </View>
-                ) : null}
-                {editable ? (
-                  <AccionesFormulario>
-                    <Boton
-                      titulo="Quitar"
-                      tono="peligro"
-                      onPress={() =>
-                        setFilas(filas.filter((_, i) => i !== indice))
-                      }
+                nombre={
+                  <>
+                    <Campo
+                      etiqueta="Equipo"
+                      valor={nombreDeLaMaquina(
+                        equipo,
+                        parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId)?.codigo,
+                        editable,
+                      )}
+                      onChange={() => {}}
+                      // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
+                      soloLectura
                     />
-                  </AccionesFormulario>
-                ) : null}
-              </FilaDeFormulario>
+                    <MarcaWhatsapp
+                      origen={origenDe(parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId))}
+                    />
+                  </>
+                }
+                final={
+                  // Detrás de la casilla (spec 029, RF-10 a RF-14). Ya no hace falta para
+                  // cerrar (RF-15). Se sigue viendo con la bitácora cerrada, con «Sin
+                  // observación» si no hay (RF-18).
+                  <CampoObservacion
+                    etiqueta="Observaciones del día"
+                    valor={fila.observaciones}
+                    onChange={(v) => cambiar(indice, "observaciones", v)}
+                    editable={editable}
+                    ayuda="Qué pasó con la máquina: fallas, tiempos muertos, traslados."
+                    accion={
+                      editable ? (
+                        <Boton
+                          titulo="Quitar"
+                          tono="peligro"
+                          onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+                        />
+                      ) : null
+                    }
+                  />
+                }
+                debajo={
+                  // Avisa y no impide: la escrita manda (spec 029, RF-5).
+                  lectura.aviso ? <Aviso tono="info">{lectura.aviso}</Aviso> : null
+                }
+              >
+                <RenglonDeCampos>
+                  {/* Quién la operó (spec 021, RF-73, RF-76). Opcional: se cierra sin él (RF-91). */}
+                  <Selector
+                    etiqueta="Operador"
+                    valor={fila.operadorId}
+                    opciones={personas.map((p) => ({
+                      valor: p.id,
+                      etiqueta: p.nombreCompleto,
+                      detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
+                    }))}
+                    onChange={(v) =>
+                      setFilas(filas.map((f, i) => (i === indice ? { ...f, operadorId: v } : f)))
+                    }
+                    vacio="Sin operador"
+                    permiteVacio
+                    ancho={ANCHO_OPERADOR}
+                  />
+                  <Campo
+                    etiqueta={`${rotulo} inicial (${unidad})`}
+                    valor={fila.inicial}
+                    onChange={(v) => cambiar(indice, "inicial", v)}
+                    soloNumeros
+                    ancho={ANCHO_LECTURA}
+                    ayuda={lectura.ayuda}
+                  />
+                  <Campo
+                    etiqueta={`${rotulo} final (${unidad})`}
+                    valor={fila.final}
+                    onChange={(v) => cambiar(indice, "final", v)}
+                    soloNumeros
+                    ancho={ANCHO_LECTURA}
+                    // Mientras se llena, faltar una lectura no es un error: solo se
+                    // marca lo imposible, que escrito se queda.
+                    error={
+                      error === "final_menor" || error === "salto_enorme"
+                        ? mensajeDeAvance(clase, error, inicial)
+                        : undefined
+                    }
+                    ayuda={
+                      avance === null
+                        ? undefined
+                        : clase === "odometro"
+                          ? `${avance} km recorridos`
+                          : `${avance} horas de máquina`
+                    }
+                  />
+                </RenglonDeCampos>
+              </FilaDeSeccion>
             );
           })}
         </>
@@ -1215,7 +1258,7 @@ function SeccionMaquinaria({
             valor={null}
             opciones={libres.map((v) => ({
               valor: v.id,
-              etiqueta: v.codigoInterno,
+              etiqueta: identificacionDeFila(v),
               detalle: v.tipoNombre,
             }))}
             onChange={(v) => {
@@ -1350,163 +1393,187 @@ function SeccionPersonal({
             const verHoras =
               editable || Boolean(fila.horasLaboradas || fila.extraDiurnas || fila.extraNocturnas);
 
+            // El cargo, debajo del nombre (spec 032, RF-5): el guardado en la fila, que ya
+            // viene con su nombre, o el de la persona si la fila es nueva.
+            const cargo =
+              parte.personal.find((p) => p.usuarioId === fila.usuarioId)?.cargo ??
+              (quien?.cargo ? nombreDeCargo(quien.cargo) : null);
+            // Lo que cuelga de las horas va en su propio renglón y solo si dice algo que
+            // los campos no dicen ya: las extra o la novedad (spec 032, RF-5).
+            const desgloseReportado =
+              horas?.fuente === "reportadas" && (horas.extraDiurna > 0 || horas.extraNocturna > 0);
+            const hayDebajo = desgloseReportado || Boolean(fila.novedad) || Boolean(desglose) || noCuadra ||
+              Boolean(horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA);
+
+            // Todo en un renglón a 1280 px (spec 032, RF-5): persona y cargo | horas y
+            // novedad | observación con el «Quitar».
             return (
-              <FilaDeFormulario
+              <FilaDeSeccion
                 key={`${fila.usuarioId}-${indice}`}
                 ultima={indice === filas.length - 1}
-              >
-                <MarcaWhatsapp
-                  origen={origenDe(parte.personal.find((p) => p.usuarioId === fila.usuarioId))}
-                />
-                <Campo
-                  etiqueta="Persona"
-                  valor={quien?.nombreCompleto ?? fila.usuarioId}
-                  onChange={() => {}}
-                  // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
-                  soloLectura
-                  ancho={240}
-                />
-                {/* La obra reporta horas, no la hora de entrada y de salida: ya no se
-                    piden (spec 029, RF-19, RF-20). Una fila de antes que las trae las
-                    conserva y las muestra tal cual, con su cálculo debajo (RF-22). */}
-                {fila.entrada || fila.salida ? (
-                  <Campo
-                    etiqueta="Entrada y salida (registro anterior)"
-                    valor={`${fila.entrada || "—"} a ${fila.salida || "—"}`}
-                    onChange={() => {}}
-                    soloLectura
-                    ancho={200}
-                  />
-                ) : null}
-                {verHoras ? (
+                nombre={
                   <>
                     <Campo
-                      etiqueta="Laboradas (L)"
-                      valor={fila.horasLaboradas}
-                      onChange={(v) => cambiar(indice, "horasLaboradas", v)}
-                      soloNumeros
-                      ancho={110}
+                      etiqueta="Persona"
+                      valor={quien?.nombreCompleto ?? fila.usuarioId}
+                      onChange={() => {}}
+                      // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
+                      soloLectura
+                      ayuda={cargo ?? undefined}
                     />
-                    <Campo
-                      etiqueta="Extra diurnas (ED)"
-                      valor={fila.extraDiurnas}
-                      onChange={(v) => cambiar(indice, "extraDiurnas", v)}
-                      soloNumeros
-                      ancho={130}
-                    />
-                    <Campo
-                      etiqueta="Extra nocturnas (EN)"
-                      valor={fila.extraNocturnas}
-                      onChange={(v) => cambiar(indice, "extraNocturnas", v)}
-                      soloNumeros
-                      ancho={140}
+                    <MarcaWhatsapp
+                      origen={origenDe(parte.personal.find((p) => p.usuarioId === fila.usuarioId))}
                     />
                   </>
-                ) : null}
-                {editable || fila.novedad ? (
-                  <Selector
-                    etiqueta="Novedad"
-                    valor={fila.novedad}
-                    opciones={OPCIONES_DE_NOVEDAD}
-                    onChange={(v) => cambiar(indice, "novedad", (v as NovedadDePersonal | null) ?? null)}
-                    permiteVacio
-                    vacio="Sin novedad"
-                    ancho={170}
+                }
+                final={
+                  // No hace falta para cerrar (RF-27): casi siempre no hay nada que
+                  // explicar. Detrás de la casilla (spec 029, RF-10 a RF-14), y se sigue
+                  // viendo con la bitácora cerrada o anulada (RF-28, 029/RF-18).
+                  <CampoObservacion
+                    etiqueta="Observaciones"
+                    valor={fila.observaciones}
+                    onChange={(v) => cambiar(indice, "observaciones", v)}
+                    editable={editable}
+                    ayuda="Lo que explica sus horas: llegó tarde, salió a una cita, hizo turno de noche."
+                    accion={
+                      editable ? (
+                        <Boton
+                          titulo="Quitar"
+                          tono="peligro"
+                          onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+                        />
+                      ) : null
+                    }
                   />
-                ) : null}
-                {horas?.fuente === "reportadas" ? (
-                  <View style={estilos.desglose}>
-                    {/* Tal como se reportaron (RF-13): las laboradas ya traen las extra. */}
-                    <Text style={estilos.apoyo}>
-                      {`${horasLegibles(horas.trabajados)} laboradas (reportadas)`}
-                    </Text>
-                    {horas.extraDiurna > 0 ? (
-                      <Etiqueta tono="atencion">
-                        {horasLegibles(horas.extraDiurna)} extra diurnas
-                      </Etiqueta>
-                    ) : null}
-                    {horas.extraNocturna > 0 ? (
-                      <Etiqueta tono="atencion">
-                        {horasLegibles(horas.extraNocturna)} extra nocturnas
-                      </Etiqueta>
-                    ) : null}
-                  </View>
-                ) : null}
-                {fila.novedad ? (
-                  <View style={estilos.desglose}>
-                    <Etiqueta tono="atencion">{nombreDeNovedad(fila.novedad)}</Etiqueta>
-                  </View>
-                ) : null}
-                {desglose ? (
-                  <View style={estilos.desglose}>
-                    {/* Trabajadas y ordinarias siempre; las demás solo si hay:
-                        tres «0 min» por persona tapan la cifra que importa (RF-20). */}
-                    <Text style={estilos.apoyo}>
-                      {`${horasLegibles(desglose.trabajados)} trabajadas, ` +
-                        `${horasLegibles(desglose.ordinarios)} ordinarias`}
-                    </Text>
-                    {desglose.extraDiurna > 0 ? (
-                      <Etiqueta tono="atencion">
-                        {horasLegibles(desglose.extraDiurna)} extra diurnas
-                      </Etiqueta>
-                    ) : null}
-                    {desglose.extraNocturna > 0 ? (
-                      <Etiqueta tono="atencion">
-                        {horasLegibles(desglose.extraNocturna)} extra nocturnas
-                      </Etiqueta>
-                    ) : null}
-                    {desglose.nocturnosOrdinarios > 0 ? (
-                      <Etiqueta tono="neutro">
-                        {horasLegibles(desglose.nocturnosOrdinarios)} nocturnas
-                        ordinarias
-                      </Etiqueta>
-                    ) : null}
-                    {desglose.dominicalOFestivo ? (
-                      <Etiqueta tono="atencion">Domingo o festivo</Etiqueta>
-                    ) : null}
-                  </View>
-                ) : null}
-                {/* Avisa y no impide (025/RF-16). */}
-                {noCuadra ? (
-                  <View style={estilos.avisoEnRenglon}>
-                    <Aviso tono="info">
-                      {"Las horas reportadas no cuadran con la entrada y la salida según el horario de la obra. " +
-                        "Mandan las reportadas; se puede guardar y cerrar igual."}
-                    </Aviso>
-                  </View>
-                ) : null}
-                {/* No hace falta para cerrar (RF-27): casi siempre no hay nada que
-                    explicar. Detrás de la casilla (spec 029, RF-10 a RF-14), y se sigue
-                    viendo con la bitácora cerrada o anulada (RF-28, 029/RF-18). */}
-                <CampoObservacion
-                  etiqueta="Observaciones"
-                  valor={fila.observaciones}
-                  onChange={(v) => cambiar(indice, "observaciones", v)}
-                  editable={editable}
-                  ayuda="Lo que explica sus horas: llegó tarde, salió a una cita, hizo turno de noche."
-                />
-                {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
-                {horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA ? (
-                  <View style={estilos.avisoEnRenglon}>
-                    <Aviso tono="info">
-                      {`${horasLegibles(horas.extra)} extra en el día: pasa de las ` +
-                        `${MAXIMO_MINUTOS_EXTRA_POR_DIA / 60} que permite la ley. ` +
-                        "Se puede guardar igual."}
-                    </Aviso>
-                  </View>
-                ) : null}
-                {editable ? (
-                  <AccionesFormulario>
-                    <Boton
-                      titulo="Quitar"
-                      tono="peligro"
-                      onPress={() =>
-                        setFilas(filas.filter((_, i) => i !== indice))
-                      }
+                }
+                debajo={
+                  hayDebajo ? (
+                    <>
+                      {desgloseReportado && horas ? (
+                        <View style={estilos.desglose}>
+                          {/* Tal como se reportaron (RF-13): las laboradas ya traen las extra. */}
+                          <Text style={estilos.apoyo}>
+                            {`${horasLegibles(horas.trabajados)} laboradas (reportadas)`}
+                          </Text>
+                          {horas.extraDiurna > 0 ? (
+                            <Etiqueta tono="atencion">
+                              {horasLegibles(horas.extraDiurna)} extra diurnas
+                            </Etiqueta>
+                          ) : null}
+                          {horas.extraNocturna > 0 ? (
+                            <Etiqueta tono="atencion">
+                              {horasLegibles(horas.extraNocturna)} extra nocturnas
+                            </Etiqueta>
+                          ) : null}
+                        </View>
+                      ) : null}
+                      {fila.novedad ? (
+                        <View style={estilos.desglose}>
+                          <Etiqueta tono="atencion">{nombreDeNovedad(fila.novedad)}</Etiqueta>
+                        </View>
+                      ) : null}
+                      {desglose ? (
+                        <View style={estilos.desglose}>
+                          {/* Trabajadas y ordinarias siempre; las demás solo si hay:
+                              tres «0 min» por persona tapan la cifra que importa (RF-20). */}
+                          <Text style={estilos.apoyo}>
+                            {`${horasLegibles(desglose.trabajados)} trabajadas, ` +
+                              `${horasLegibles(desglose.ordinarios)} ordinarias`}
+                          </Text>
+                          {desglose.extraDiurna > 0 ? (
+                            <Etiqueta tono="atencion">
+                              {horasLegibles(desglose.extraDiurna)} extra diurnas
+                            </Etiqueta>
+                          ) : null}
+                          {desglose.extraNocturna > 0 ? (
+                            <Etiqueta tono="atencion">
+                              {horasLegibles(desglose.extraNocturna)} extra nocturnas
+                            </Etiqueta>
+                          ) : null}
+                          {desglose.nocturnosOrdinarios > 0 ? (
+                            <Etiqueta tono="neutro">
+                              {horasLegibles(desglose.nocturnosOrdinarios)} nocturnas
+                              ordinarias
+                            </Etiqueta>
+                          ) : null}
+                          {desglose.dominicalOFestivo ? (
+                            <Etiqueta tono="atencion">Domingo o festivo</Etiqueta>
+                          ) : null}
+                        </View>
+                      ) : null}
+                      {/* Avisa y no impide (025/RF-16). */}
+                      {noCuadra ? (
+                        <Aviso tono="info">
+                          {"Las horas reportadas no cuadran con la entrada y la salida según el horario de la obra. " +
+                            "Mandan las reportadas; se puede guardar y cerrar igual."}
+                        </Aviso>
+                      ) : null}
+                      {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
+                      {horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA ? (
+                        <Aviso tono="info">
+                          {`${horasLegibles(horas.extra)} extra en el día: pasa de las ` +
+                            `${MAXIMO_MINUTOS_EXTRA_POR_DIA / 60} que permite la ley. ` +
+                            "Se puede guardar igual."}
+                        </Aviso>
+                      ) : null}
+                    </>
+                  ) : null
+                }
+              >
+                <RenglonDeCampos>
+                  {/* La obra reporta horas, no la hora de entrada y de salida: ya no se
+                      piden (spec 029, RF-19, RF-20). Una fila de antes que las trae las
+                      conserva y las muestra tal cual, con su cálculo debajo (RF-22). */}
+                  {fila.entrada || fila.salida ? (
+                    <Campo
+                      etiqueta="Entrada y salida (registro anterior)"
+                      valor={`${fila.entrada || "—"} a ${fila.salida || "—"}`}
+                      onChange={() => {}}
+                      soloLectura
+                      ancho={200}
                     />
-                  </AccionesFormulario>
-                ) : null}
-              </FilaDeFormulario>
+                  ) : null}
+                  {verHoras ? (
+                    <>
+                      {/* Sin «(L)», «(ED)», «(EN)»: con ellas no cabían en el renglón
+                          (spec 032, RF-5), y el nombre entero dice lo mismo. */}
+                      <Campo
+                        etiqueta="Laboradas"
+                        valor={fila.horasLaboradas}
+                        onChange={(v) => cambiar(indice, "horasLaboradas", v)}
+                        soloNumeros
+                        ancho={88}
+                      />
+                      <Campo
+                        etiqueta="Extra diurnas"
+                        valor={fila.extraDiurnas}
+                        onChange={(v) => cambiar(indice, "extraDiurnas", v)}
+                        soloNumeros
+                        ancho={92}
+                      />
+                      <Campo
+                        etiqueta="Extra nocturnas"
+                        valor={fila.extraNocturnas}
+                        onChange={(v) => cambiar(indice, "extraNocturnas", v)}
+                        soloNumeros
+                        ancho={108}
+                      />
+                    </>
+                  ) : null}
+                  {editable || fila.novedad ? (
+                    <Selector
+                      etiqueta="Novedad"
+                      valor={fila.novedad}
+                      opciones={OPCIONES_DE_NOVEDAD}
+                      onChange={(v) => cambiar(indice, "novedad", (v as NovedadDePersonal | null) ?? null)}
+                      permiteVacio
+                      vacio="Sin novedad"
+                      ancho={129}
+                    />
+                  ) : null}
+                </RenglonDeCampos>
+              </FilaDeSeccion>
             );
           })}
         </>
@@ -1547,12 +1614,25 @@ function SeccionPersonal({
 /* Actividades                                                               */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Los anchos de los campos de una actividad: en dos renglones a 1280 px, la unidad, la
+ * descripción y la cantidad en el primero y las cinco medidas en el segundo (spec 032,
+ * RF-6), con unos píxeles de holgura.
+ */
+const ANCHO_UNIDAD = 64;
+const ANCHO_UNIDAD_A_ELEGIR = 100;
+const ANCHO_DESCRIPCION = 236;
+const ANCHO_DESCRIPCION_CON_UNIDAD_A_ELEGIR = 200;
+const ANCHO_CANTIDAD = 125;
+const ANCHO_MEDIDA = 81;
+
 function SeccionActividades({
   parte,
   editable,
   alGuardar,
   alMedir,
 }: PropsSeccion) {
+  const sinActividades = useMarcaSinRegistro(parte, "actividades");
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -1645,6 +1725,9 @@ function SeccionActividades({
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
+        // El «Guardar» de la sección también guarda la marca, si cambió: dos botones
+        // que guardan cosas distintas de la misma sección perderían una (spec 032).
+        ...cambiosDeLaMarca(sinActividades),
         actividades: filas.map((f) =>
           f.heredada
             ? { id: f.id }
@@ -1734,6 +1817,13 @@ function SeccionActividades({
         ) : null
       }
     >
+      <SinRegistro
+        estado={sinActividades}
+        parte={parte}
+        editable={editable}
+        hayFilas={filas.length > 0}
+        alGuardar={alGuardar}
+      />
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => {
@@ -1759,13 +1849,11 @@ function SeccionActividades({
               />
             );
             const quitar = editable ? (
-              <AccionesFormulario>
-                <Boton
-                  titulo="Quitar actividad"
-                  tono="peligro"
-                  onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
-                />
-              </AccionesFormulario>
+              <Boton
+                titulo="Quitar"
+                tono="peligro"
+                onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+              />
             ) : null;
 
             // Guardada con la lista anterior: se ve como se guardó y no se toca
@@ -1774,36 +1862,48 @@ function SeccionActividades({
               const h = fila.heredada;
               const numero = (v: number | null) => (v === null ? "" : String(v));
               return (
-                <FilaDeFormulario key={fila.id} ultima={ultima}>
-                  <Campo
-                    etiqueta="Actividad"
-                    valor={h.nombre}
-                    onChange={sinEscribir}
-                    soloLectura
-                    ayuda="De la lista anterior: se conserva como se guardó."
-                    ancho={460}
-                  />
-                  <Campo
-                    etiqueta="Descripción"
-                    valor={h.descripcion}
-                    onChange={sinEscribir}
-                    soloLectura
-                    ancho={300}
-                  />
-                  <Campo etiqueta="Longitud" valor={numero(h.longitud)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <Campo etiqueta="Ancho" valor={numero(h.ancho)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <Campo etiqueta="Alto" valor={numero(h.alto)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <Campo etiqueta="Área" valor={numero(h.area)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <Campo etiqueta="Volumen" valor={numero(h.volumen)} onChange={sinEscribir} soloLectura ancho={110} />
-                  <CampoObservacion
-                    etiqueta="Observaciones"
-                    valor={h.observaciones}
-                    onChange={sinEscribir}
-                    editable={false}
-                  />
-                  {fotoDeLaFila}
-                  {quitar}
-                </FilaDeFormulario>
+                <FilaDeSeccion
+                  key={fila.id}
+                  ultima={ultima}
+                  nombre={
+                    <>
+                      <Campo
+                        etiqueta="Actividad"
+                        valor={h.nombre}
+                        onChange={sinEscribir}
+                        soloLectura
+                        ayuda="De la lista anterior: se conserva como se guardó."
+                      />
+                      {fotoDeLaFila}
+                    </>
+                  }
+                  final={
+                    <CampoObservacion
+                      etiqueta="Observaciones"
+                      valor={h.observaciones}
+                      onChange={sinEscribir}
+                      editable={false}
+                      accion={quitar}
+                    />
+                  }
+                >
+                  <RenglonDeCampos>
+                    <Campo
+                      etiqueta="Descripción"
+                      valor={h.descripcion}
+                      onChange={sinEscribir}
+                      soloLectura
+                      ancho={ANCHO_DESCRIPCION}
+                    />
+                  </RenglonDeCampos>
+                  <RenglonDeCampos>
+                    <Campo etiqueta="Longitud" valor={numero(h.longitud)} onChange={sinEscribir} soloLectura ancho={ANCHO_MEDIDA} />
+                    <Campo etiqueta="Ancho" valor={numero(h.ancho)} onChange={sinEscribir} soloLectura ancho={ANCHO_MEDIDA} />
+                    <Campo etiqueta="Alto" valor={numero(h.alto)} onChange={sinEscribir} soloLectura ancho={ANCHO_MEDIDA} />
+                    <Campo etiqueta="Área" valor={numero(h.area)} onChange={sinEscribir} soloLectura ancho={ANCHO_MEDIDA} />
+                    <Campo etiqueta="Volumen" valor={numero(h.volumen)} onChange={sinEscribir} soloLectura ancho={ANCHO_MEDIDA} />
+                  </RenglonDeCampos>
+                </FilaDeSeccion>
               );
             }
 
@@ -1812,29 +1912,56 @@ function SeccionActividades({
             const unidad = unidadDe(fila, catalogo);
             const cantidad = cantidadDe(fila, catalogo);
             const faltas = intentoGuardar ? faltasDe(fila) : {};
+            // Dos renglones a 1280 px (spec 032, RF-6): la actividad, «¿Cuál?» y la foto en
+            // la columna del nombre | unidad, descripción y cantidad, y debajo las medidas |
+            // observación con el «Quitar».
             return (
-              <FilaDeFormulario key={fila.id} ultima={ultima}>
-                <MarcaWhatsapp origen={origenDe(parte.actividades.find((a) => a.id === fila.id))} />
-                <Selector
-                  etiqueta="Actividad"
-                  valor={(fila.capituloId ? `${fila.capituloId}|${fila.clave}` : fila.clave) || null}
-                  opciones={opciones}
-                  onChange={(v) => elegirActividad(indice, v ?? "")}
-                  vacio="Elija la actividad"
-                  error={faltas.clave}
-                  obligatorio
-                  ancho={460}
-                />
-                {otra ? (
+              <FilaDeSeccion
+                key={fila.id}
+                ultima={ultima}
+                nombre={
                   <>
-                    <Campo
-                      etiqueta="¿Cuál?"
-                      valor={fila.texto}
-                      onChange={(v) => cambiar(indice, "texto", v)}
-                      error={faltas.texto}
+                    <Selector
+                      etiqueta="Actividad"
+                      valor={(fila.capituloId ? `${fila.capituloId}|${fila.clave}` : fila.clave) || null}
+                      opciones={opciones}
+                      onChange={(v) => elegirActividad(indice, v ?? "")}
+                      vacio="Elija la actividad"
+                      error={faltas.clave}
                       obligatorio
-                      ancho={220}
                     />
+                    {otra ? (
+                      <Campo
+                        etiqueta="¿Cuál?"
+                        valor={fila.texto}
+                        onChange={(v) => cambiar(indice, "texto", v)}
+                        error={faltas.texto}
+                        obligatorio
+                      />
+                    ) : null}
+                    <MarcaWhatsapp origen={origenDe(parte.actividades.find((a) => a.id === fila.id))} />
+                    {fotoDeLaFila}
+                  </>
+                }
+                final={
+                  // Detrás de la casilla (spec 029, RF-10 a RF-14, RF-18).
+                  <CampoObservacion
+                    etiqueta="Observaciones"
+                    valor={fila.observaciones}
+                    onChange={(v) => cambiar(indice, "observaciones", v)}
+                    editable={editable}
+                    accion={quitar}
+                  />
+                }
+              >
+                <RenglonDeCampos>
+                  <Campo
+                    etiqueta="Descripción"
+                    valor={fila.descripcion}
+                    onChange={(v) => cambiar(indice, "descripcion", v)}
+                    ancho={otra ? ANCHO_DESCRIPCION_CON_UNIDAD_A_ELEGIR : ANCHO_DESCRIPCION}
+                  />
+                  {otra ? (
                     <Selector
                       etiqueta="Unidad"
                       valor={fila.unidad || null}
@@ -1843,95 +1970,83 @@ function SeccionActividades({
                       vacio="Elija"
                       error={faltas.unidad}
                       obligatorio
-                      ancho={110}
+                      ancho={ANCHO_UNIDAD_A_ELEGIR}
                     />
-                  </>
-                ) : (
-                  // La unidad del presupuesto se ve, pero no se elige (RF-66).
+                  ) : (
+                    // La unidad del presupuesto se ve, pero no se elige (RF-66).
+                    <Campo
+                      etiqueta="Unidad"
+                      valor={unidad ? etiquetaDeUnidad(unidad) : ""}
+                      onChange={sinEscribir}
+                      soloLectura
+                      ancho={ANCHO_UNIDAD}
+                    />
+                  )}
+                  {/* Cuánto se hizo, en la unidad de la actividad. Se escribe siempre;
+                      vacía, sale de su medida (m³, m² o m), y la calculada se muestra
+                      debajo para que se note si la escrita es otra (021/RF-99 a RF-101). */}
                   <Campo
-                    etiqueta="Unidad"
-                    valor={unidad ? etiquetaDeUnidad(unidad) : ""}
-                    onChange={sinEscribir}
-                    soloLectura
-                    ancho={110}
+                    etiqueta={unidad ? `Cantidad (${etiquetaDeUnidad(unidad)})` : "Cantidad"}
+                    valor={fila.cantidad}
+                    onChange={(v) => cambiar(indice, "cantidad", v)}
+                    soloNumeros
+                    ayuda={ayudaDeCantidad(cantidad)}
+                    ancho={ANCHO_CANTIDAD}
                   />
-                )}
-                <Campo
-                  etiqueta="Descripción"
-                  valor={fila.descripcion}
-                  onChange={(v) => cambiar(indice, "descripcion", v)}
-                  ancho={300}
-                />
-                <Campo
-                  etiqueta="Longitud"
-                  valor={fila.longitud}
-                  onChange={(v) => cambiar(indice, "longitud", v)}
-                  soloNumeros
-                  ancho={110}
-                />
-                <Campo
-                  etiqueta="Ancho"
-                  valor={fila.ancho}
-                  onChange={(v) => cambiar(indice, "ancho", v)}
-                  soloNumeros
-                  ancho={110}
-                />
-                <Campo
-                  etiqueta="Alto"
-                  valor={fila.alto}
-                  onChange={(v) => cambiar(indice, "alto", v)}
-                  soloNumeros
-                  ancho={110}
-                />
-                {/* Con sus factores escritos, área y volumen se calculan y no se
-                    dejan escribir: escribir ahí no serviría de nada. Sin ellos,
-                    se escriben a mano, y lo escrito se conserva aunque luego se
-                    añada el factor y se vuelva a quitar (RF-58 a RF-60). */}
-                <Campo
-                  etiqueta="Área"
-                  valor={medidas.areaCalculada ? String(medidas.area) : fila.area}
-                  onChange={(v) => cambiar(indice, "area", v)}
-                  soloNumeros
-                  soloLectura={medidas.areaCalculada}
-                  ayuda={medidas.areaCalculada ? "Largo × ancho" : undefined}
-                  ancho={110}
-                />
-                <Campo
-                  etiqueta="Volumen"
-                  valor={medidas.volumenCalculado ? String(medidas.volumen) : fila.volumen}
-                  onChange={(v) => cambiar(indice, "volumen", v)}
-                  soloNumeros
-                  soloLectura={medidas.volumenCalculado}
-                  ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
-                  ancho={110}
-                />
-                {/* Cuánto se hizo, en la unidad de la actividad. Se escribe siempre;
-                    vacía, sale de su medida (m³, m² o m), y la calculada se muestra
-                    debajo para que se note si la escrita es otra (021/RF-99 a RF-101). */}
-                <Campo
-                  etiqueta={unidad ? `Cantidad (${etiquetaDeUnidad(unidad)})` : "Cantidad"}
-                  valor={fila.cantidad}
-                  onChange={(v) => cambiar(indice, "cantidad", v)}
-                  soloNumeros
-                  ayuda={ayudaDeCantidad(cantidad)}
-                  ancho={150}
-                />
-                {/* Detrás de la casilla (spec 029, RF-10 a RF-14, RF-18). */}
-                <CampoObservacion
-                  etiqueta="Observaciones"
-                  valor={fila.observaciones}
-                  onChange={(v) => cambiar(indice, "observaciones", v)}
-                  editable={editable}
-                />
-                {fotoDeLaFila}
-                {quitar}
-              </FilaDeFormulario>
+                </RenglonDeCampos>
+                <RenglonDeCampos>
+                  <Campo
+                    etiqueta="Longitud"
+                    valor={fila.longitud}
+                    onChange={(v) => cambiar(indice, "longitud", v)}
+                    soloNumeros
+                    ancho={ANCHO_MEDIDA}
+                  />
+                  <Campo
+                    etiqueta="Ancho"
+                    valor={fila.ancho}
+                    onChange={(v) => cambiar(indice, "ancho", v)}
+                    soloNumeros
+                    ancho={ANCHO_MEDIDA}
+                  />
+                  <Campo
+                    etiqueta="Alto"
+                    valor={fila.alto}
+                    onChange={(v) => cambiar(indice, "alto", v)}
+                    soloNumeros
+                    ancho={ANCHO_MEDIDA}
+                  />
+                  {/* Con sus factores escritos, área y volumen se calculan y no se
+                      dejan escribir: escribir ahí no serviría de nada. Sin ellos,
+                      se escriben a mano, y lo escrito se conserva aunque luego se
+                      añada el factor y se vuelva a quitar (RF-58 a RF-60). */}
+                  <Campo
+                    etiqueta="Área"
+                    valor={medidas.areaCalculada ? String(medidas.area) : fila.area}
+                    onChange={(v) => cambiar(indice, "area", v)}
+                    soloNumeros
+                    soloLectura={medidas.areaCalculada}
+                    ayuda={medidas.areaCalculada ? "Largo × ancho" : undefined}
+                    ancho={ANCHO_MEDIDA}
+                  />
+                  <Campo
+                    etiqueta="Volumen"
+                    valor={medidas.volumenCalculado ? String(medidas.volumen) : fila.volumen}
+                    onChange={(v) => cambiar(indice, "volumen", v)}
+                    soloNumeros
+                    soloLectura={medidas.volumenCalculado}
+                    ayuda={medidas.volumenCalculado ? "Largo × ancho × alto" : undefined}
+                    ancho={ANCHO_MEDIDA}
+                  />
+                </RenglonDeCampos>
+              </FilaDeSeccion>
             );
           })}
         </>
       ) : null}
 
-      {editable ? (
+      {/* Con «Hoy no se realizaron actividades» marcada no se añade (032/RF-26). */}
+      {editable && !sinActividades.marcada ? (
         <PieDeSeccion>
           <Boton
             titulo="Añadir actividad"
@@ -1963,10 +2078,112 @@ function SeccionActividades({
         </PieDeSeccion>
       ) : null}
 
-      {filas.length === 0 && !editable ? (
+      {filas.length === 0 && !editable && !parte.sinActividades ? (
         <Aviso tono="info">Ese día no se registró ninguna actividad.</Aviso>
       ) : null}
     </SeccionEnMarco>
+  );
+}
+
+/* ------------------------------------------------------------------------ */
+/* Sección sin registro (spec 032)                                           */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * La marca «Hoy no se realizaron actividades / ensayos» de una sección, mientras se
+ * edita. Arranca de lo guardado y a partir de ahí manda lo que se marca, como el día
+ * sin trabajo. Vive en la sección y no en la casilla porque la sección la necesita
+ * para esconder su botón de añadir (RF-26, RF-33).
+ */
+function useMarcaSinRegistro(parte: ParteFila, seccion: SeccionSinRegistro) {
+  const guardada =
+    seccion === "actividades"
+      ? { marcada: parte.sinActividades, motivo: parte.motivoSinActividades ?? "" }
+      : { marcada: parte.sinEnsayos, motivo: parte.motivoSinEnsayos ?? "" };
+  const [marcada, setMarcada] = useState(guardada.marcada);
+  const [motivo, setMotivo] = useState(guardada.motivo);
+  const cambiada =
+    marcada !== guardada.marcada || (marcada && motivo.trim() !== guardada.motivo);
+  return { seccion, guardada, marcada, setMarcada, motivo, setMotivo, cambiada };
+}
+
+/** Lo que se manda de la marca: nada si no cambió. */
+function cambiosDeLaMarca(estado: ReturnType<typeof useMarcaSinRegistro>): ParteEditado {
+  if (!estado.cambiada) return {};
+  const motivo = estado.marcada ? estado.motivo : null;
+  return estado.seccion === "actividades"
+    ? { sinActividades: estado.marcada, motivoSinActividades: motivo }
+    : { sinEnsayos: estado.marcada, motivoSinEnsayos: motivo };
+}
+
+/**
+ * La casilla y su motivo (RF-21, RF-22, RF-29, RF-30), o, en una bitácora que ya no
+ * se edita, el aviso con el motivo (RF-36). No sale en un día sin trabajo (RF-37) ni
+ * en una sección que tiene filas: ahí no hay nada que declarar vacío.
+ */
+function SinRegistro({
+  estado,
+  parte,
+  editable,
+  hayFilas,
+  alGuardar,
+}: {
+  estado: ReturnType<typeof useMarcaSinRegistro>;
+  parte: ParteFila;
+  editable: boolean;
+  hayFilas: boolean;
+  alGuardar: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const { seccion, guardada, marcada, setMarcada, motivo, setMotivo, cambiada } = estado;
+
+  if (parte.sinTrabajo) return null;
+
+  if (!editable) {
+    if (!guardada.marcada) return null;
+    return <Aviso tono="info">{textoSinRegistro(seccion, guardada.motivo)}</Aviso>;
+  }
+
+  if (hayFilas) return null;
+
+  async function guardar() {
+    setGuardando(true);
+    try {
+      await api.partes.guardar(parte.id, cambiosDeLaMarca(estado));
+      setError(null);
+      alGuardar();
+    } catch (fallo) {
+      setError(mensajeDe(fallo));
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <Formulario>
+      <Casilla etiqueta={rotuloSinRegistro(seccion)} marcada={marcada} onChange={setMarcada} />
+      {marcada ? (
+        <Campo
+          etiqueta="Motivo"
+          obligatorio
+          valor={motivo}
+          onChange={(texto) => setMotivo(texto.slice(0, LARGO_DEL_MOTIVO_SIN_REGISTRO))}
+          ayuda={`Una frase, hasta ${LARGO_DEL_MOTIVO_SIN_REGISTRO} caracteres. Con la marca guardada, la sección cuenta como llena al cerrar.`}
+          error={
+            !motivo.trim() && guardada.marcada
+              ? "Sin motivo no se puede cerrar la bitácora."
+              : undefined
+          }
+        />
+      ) : null}
+      {error ? <Aviso tono="error">{error}</Aviso> : null}
+      {cambiada ? (
+        <Acciones>
+          <Boton titulo="Guardar" tono="secundario" onPress={guardar} deshabilitado={guardando} />
+        </Acciones>
+      ) : null}
+    </Formulario>
   );
 }
 
@@ -2227,6 +2444,7 @@ function SeccionLaboratorio({
   granulometrias: GranulometriaDelParteFila | null;
 }) {
   const delModulo = granulometrias?.ensayos ?? [];
+  const sinEnsayos = useMarcaSinRegistro(parte, "ensayos");
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -2299,6 +2517,7 @@ function SeccionLaboratorio({
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
+        ...cambiosDeLaMarca(sinEnsayos),
         laboratorio: filas.map((f) =>
           f.heredado
             ? { id: f.id }
@@ -2350,16 +2569,16 @@ function SeccionLaboratorio({
       pintar: (f) => <Celda>{f.nombre}</Celda>,
     },
     {
-      clave: "cuandoYDonde",
-      titulo: "Cuándo y dónde",
-      ancho: 180,
-      pintar: (f) => <Celda lineas={3}>{cuandoYDonde(f)}</Celda>,
-    },
-    {
       clave: "responsable",
       titulo: "Responsable",
       ancho: 140,
       pintar: (f) => <Celda lineas={3}>{("responsable" in f && f.responsable) || "—"}</Celda>,
+    },
+    {
+      clave: "cuandoYDonde",
+      titulo: "Cuándo y dónde",
+      ancho: 180,
+      pintar: (f) => <Celda lineas={3}>{cuandoYDonde(f)}</Celda>,
     },
     {
       clave: "detalle",
@@ -2387,228 +2606,262 @@ function SeccionLaboratorio({
         ) : null
       }
     >
+      <SinRegistro
+        estado={sinEnsayos}
+        parte={parte}
+        editable={editable}
+        // Los ensayos del módulo de Laboratorio también llenan la sección (018/RF-110).
+        hayFilas={filas.length + delModulo.length > 0}
+        alGuardar={alGuardar}
+      />
       {editable ? (
         <>
           {filas.map((fila, indice) => {
             const ultima = indice === filas.length - 1;
             const quitar = (
-              <AccionesFormulario>
-                <Boton
-                  titulo="Quitar"
-                  tono="peligro"
-                  onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
-                />
-              </AccionesFormulario>
+              <Boton
+                titulo="Quitar"
+                tono="peligro"
+                onPress={() => setFilas(filas.filter((_, i) => i !== indice))}
+              />
             );
 
             // Registrado antes de que la sección fuera de ensayos: se ve como se
             // guardó y no se toca; quitarlo sí (RF-63).
             if (fila.heredado) {
               return (
-                <FilaDeFormulario key={fila.id} ultima={ultima}>
-                  <Campo
-                    etiqueta="Material"
-                    valor={fila.heredado.nombre}
-                    onChange={sinEscribir}
-                    soloLectura
-                    ayuda="De la lista anterior: se conserva como se guardó."
-                    ancho={300}
-                  />
-                  <Campo
-                    etiqueta="Cantidad"
-                    valor={`${fila.heredado.cantidad} ${fila.heredado.unidad}`}
-                    onChange={sinEscribir}
-                    soloLectura
-                    ancho={180}
-                  />
-                  {quitar}
-                </FilaDeFormulario>
+                <FilaDeSeccion
+                  key={fila.id}
+                  ultima={ultima}
+                  nombre={
+                    <Campo
+                      etiqueta="Material"
+                      valor={fila.heredado.nombre}
+                      onChange={sinEscribir}
+                      soloLectura
+                      ayuda="De la lista anterior: se conserva como se guardó."
+                    />
+                  }
+                  final={<View style={estilos.quitarSolo}>{quitar}</View>}
+                >
+                  <RenglonDeCampos>
+                    <Campo
+                      etiqueta="Cantidad"
+                      valor={`${fila.heredado.cantidad} ${fila.heredado.unidad}`}
+                      onChange={sinEscribir}
+                      soloLectura
+                      ancho={180}
+                    />
+                  </RenglonDeCampos>
+                </FilaDeSeccion>
               );
             }
 
             const faltas = intentoGuardar ? faltasDe(fila) : {};
             // Sin resultado ni «cumple», la observación es obligatoria (025/RF-38, 029/RF-16).
             const sinResultado = aNumero(fila.resultado.replace(",", ".")) === null && !fila.cumple;
+            // A 1280 px (spec 032, RF-6): ensayo y responsable en la columna del nombre |
+            // horas y «¿Cumple?», y debajo dónde y el resultado | observación con el
+            // «Quitar». Con «Otro lugar», dos renglones; con PR y metros o un tramo, el
+            // segundo se parte en dos.
             return (
-              <FilaDeFormulario key={fila.id} ultima={ultima}>
-                <MarcaWhatsapp origen={origenDe(parte.laboratorio.find((e) => e.id === fila.id))} />
-                <Selector
-                  etiqueta="Ensayo"
-                  valor={fila.ensayo || null}
-                  opciones={opciones}
-                  onChange={(v) => cambiar(indice, "ensayo", v ?? "")}
-                  vacio="Elija el ensayo"
-                  error={faltas.ensayo}
-                  obligatorio
-                  ancho={300}
-                />
-                {fila.anterior ? (
-                  <View style={estilos.avisoEnRenglon}>
+              <FilaDeSeccion
+                key={fila.id}
+                ultima={ultima}
+                nombre={
+                  <>
+                    <Selector
+                      etiqueta="Ensayo"
+                      valor={fila.ensayo || null}
+                      opciones={opciones}
+                      onChange={(v) => cambiar(indice, "ensayo", v ?? "")}
+                      vacio="Elija el ensayo"
+                      error={faltas.ensayo}
+                      obligatorio
+                    />
+                    {fila.anterior ? null : (
+                      <Campo
+                        etiqueta="Responsable"
+                        valor={fila.responsable}
+                        onChange={(v) => cambiar(indice, "responsable", v)}
+                        error={faltas.responsable}
+                        obligatorio
+                      />
+                    )}
+                    <MarcaWhatsapp origen={origenDe(parte.laboratorio.find((e) => e.id === fila.id))} />
+                  </>
+                }
+                final={
+                  // Si no hay resultado ni «cumple», obligatoria: la casilla queda marcada y
+                  // fija (RF-72; 025/RF-38, RF-39; 029/RF-16). Con uno de los dos, opcional y
+                  // detrás de la casilla como en las demás secciones (029/RF-10).
+                  <CampoObservacion
+                    valor={fila.observacion}
+                    onChange={(v) => cambiar(indice, "observacion", v)}
+                    editable={editable}
+                    obligatoria={sinResultado}
+                    ayuda={
+                      sinResultado && !faltas.observacion
+                        ? "Sin resultado ni «cumple», la observación es obligatoria. Si no hay nada que anotar, escriba «Sin observaciones»."
+                        : undefined
+                    }
+                    error={faltas.observacion}
+                    accion={quitar}
+                  />
+                }
+                debajo={
+                  fila.anterior ? (
                     <Aviso tono="info">
                       Registrado antes de que se pidieran las horas, el responsable y el
                       lugar: se conserva así.
                     </Aviso>
-                  </View>
-                ) : null}
+                  ) : null
+                }
+              >
                 {/* Cuándo, quién y dónde (RF-84 a RF-87): obligatorios en todo
                     ensayo nuevo. Las horas con los desplegables de todo el panel. */}
                 {fila.anterior ? null : (
                   <>
-                    <SelectorDeHora
-                      etiqueta="Inicio"
-                      valor={fila.horaInicio}
-                      onChange={(v) => cambiar(indice, "horaInicio", v)}
-                      error={faltas.horaInicio}
-                      obligatorio
-                    />
-                    {/* Opcional desde la spec 025 (RF-29). */}
-                    <SelectorDeHora
-                      etiqueta="Fin"
-                      valor={fila.horaFin}
-                      onChange={(v) => cambiar(indice, "horaFin", v)}
-                      error={faltas.horaFin}
-                    />
-                    <Campo
-                      etiqueta="Responsable"
-                      valor={fila.responsable}
-                      onChange={(v) => cambiar(indice, "responsable", v)}
-                      error={faltas.responsable}
-                      obligatorio
-                      ancho={260}
-                    />
-                    <Selector
-                      etiqueta="Ubicación"
-                      valor={fila.tipoUbicacion}
-                      opciones={OPCIONES_DE_UBICACION}
-                      onChange={(v) =>
-                        cambiar(indice, "tipoUbicacion", v === "lugar" || v === "tramo" ? v : "pr")
-                      }
-                      obligatorio
-                      ancho={200}
-                    />
-                    {fila.tipoUbicacion !== "lugar" ? (
-                      <>
-                        <Selector
-                          etiqueta={fila.tipoUbicacion === "tramo" ? "PR inicial" : "PR"}
-                          valor={fila.pr === null ? null : String(fila.pr)}
-                          opciones={OPCIONES_DE_PR_DEL_ENSAYO}
-                          onChange={(v) => cambiar(indice, "pr", v === null ? null : Number(v))}
-                          vacio="Elija el PR"
-                          error={faltas.pr}
-                          obligatorio
-                          ancho={150}
-                        />
-                        {/* Cualquier valor de 0 a 999, no de 25 en 25 (025/RF-32). */}
-                        <Campo
-                          etiqueta={fila.tipoUbicacion === "tramo" ? "Metros iniciales" : "Metros"}
-                          valor={fila.metros}
-                          onChange={(v) => cambiar(indice, "metros", v)}
-                          soloNumeros
-                          error={faltas.metros}
-                          obligatorio
-                          ancho={130}
-                        />
-                        {fila.tipoUbicacion === "tramo" ? (
-                          <>
-                            <Selector
-                              etiqueta="PR final"
-                              valor={fila.prHasta === null ? null : String(fila.prHasta)}
-                              opciones={OPCIONES_DE_PR_DEL_ENSAYO}
-                              onChange={(v) => cambiar(indice, "prHasta", v === null ? null : Number(v))}
-                              vacio="Elija el PR"
-                              error={faltas.tramo}
-                              obligatorio
-                              ancho={150}
-                            />
-                            <Campo
-                              etiqueta="Metros finales"
-                              valor={fila.metrosHasta}
-                              onChange={(v) => cambiar(indice, "metrosHasta", v)}
-                              soloNumeros
-                              obligatorio
-                              ancho={130}
-                            />
-                          </>
-                        ) : null}
-                      </>
-                    ) : (
-                      <Campo
-                        etiqueta="Lugar"
-                        valor={fila.lugar}
-                        onChange={(v) => cambiar(indice, "lugar", v)}
-                        ayuda={faltas.lugar ? undefined : "Por ejemplo, planta de trituración o laboratorio."}
-                        error={faltas.lugar}
+                    <RenglonDeCampos>
+                      <SelectorDeHora
+                        etiqueta="Inicio"
+                        valor={fila.horaInicio}
+                        onChange={(v) => cambiar(indice, "horaInicio", v)}
+                        error={faltas.horaInicio}
                         obligatorio
-                        ancho={260}
+                        compacta
                       />
-                    )}
+                      {/* Opcional desde la spec 025 (RF-29). */}
+                      <SelectorDeHora
+                        etiqueta="Fin"
+                        valor={fila.horaFin}
+                        onChange={(v) => cambiar(indice, "horaFin", v)}
+                        error={faltas.horaFin}
+                        compacta
+                      />
+                      <Selector
+                        etiqueta="¿Cumple?"
+                        valor={fila.cumple}
+                        opciones={OPCIONES_DE_CUMPLE}
+                        onChange={(v) => cambiar(indice, "cumple", v === "si" || v === "no" ? v : null)}
+                        permiteVacio
+                        vacio="No se sabe"
+                        ancho={128}
+                      />
+                    </RenglonDeCampos>
+                    <RenglonDeCampos>
+                      <Selector
+                        etiqueta="Ubicación"
+                        valor={fila.tipoUbicacion}
+                        opciones={OPCIONES_DE_UBICACION}
+                        onChange={(v) =>
+                          cambiar(indice, "tipoUbicacion", v === "lugar" || v === "tramo" ? v : "pr")
+                        }
+                        obligatorio
+                        ancho={116}
+                      />
+                      {fila.tipoUbicacion !== "lugar" ? (
+                        <>
+                          <Selector
+                            etiqueta={fila.tipoUbicacion === "tramo" ? "PR inicial" : "PR"}
+                            valor={fila.pr === null ? null : String(fila.pr)}
+                            opciones={OPCIONES_DE_PR_DEL_ENSAYO}
+                            onChange={(v) => cambiar(indice, "pr", v === null ? null : Number(v))}
+                            vacio="Elija el PR"
+                            error={faltas.pr}
+                            obligatorio
+                            ancho={120}
+                          />
+                          {/* Cualquier valor de 0 a 999, no de 25 en 25 (025/RF-32). */}
+                          <Campo
+                            etiqueta={fila.tipoUbicacion === "tramo" ? "Metros iniciales" : "Metros"}
+                            valor={fila.metros}
+                            onChange={(v) => cambiar(indice, "metros", v)}
+                            soloNumeros
+                            error={faltas.metros}
+                            obligatorio
+                            ancho={fila.tipoUbicacion === "tramo" ? 110 : 72}
+                          />
+                          {fila.tipoUbicacion === "tramo" ? (
+                            <>
+                              <Selector
+                                etiqueta="PR final"
+                                valor={fila.prHasta === null ? null : String(fila.prHasta)}
+                                opciones={OPCIONES_DE_PR_DEL_ENSAYO}
+                                onChange={(v) => cambiar(indice, "prHasta", v === null ? null : Number(v))}
+                                vacio="Elija el PR"
+                                error={faltas.tramo}
+                                obligatorio
+                                ancho={120}
+                              />
+                              <Campo
+                                etiqueta="Metros finales"
+                                valor={fila.metrosHasta}
+                                onChange={(v) => cambiar(indice, "metrosHasta", v)}
+                                soloNumeros
+                                obligatorio
+                                ancho={110}
+                              />
+                            </>
+                          ) : null}
+                        </>
+                      ) : (
+                        <Campo
+                          etiqueta="Lugar"
+                          valor={fila.lugar}
+                          onChange={(v) => cambiar(indice, "lugar", v)}
+                          ayuda={faltas.lugar ? undefined : "Ej.: la planta"}
+                          error={faltas.lugar}
+                          obligatorio
+                          ancho={104}
+                        />
+                      )}
+                      {/* En casillas propias (025/RF-34 a RF-36). */}
+                      <Campo
+                        etiqueta="Edad (días)"
+                        valor={fila.edadDias}
+                        onChange={(v) => cambiar(indice, "edadDias", v)}
+                        soloNumeros
+                        ancho={70}
+                      />
+                      <Campo
+                        etiqueta="Resultado"
+                        valor={fila.resultado}
+                        onChange={(v) => cambiar(indice, "resultado", v)}
+                        soloNumeros
+                        ancho={66}
+                      />
+                      <Campo
+                        etiqueta="Unidad"
+                        valor={fila.unidad}
+                        onChange={(v) => cambiar(indice, "unidad", v)}
+                        ancho={52}
+                      />
+                    </RenglonDeCampos>
                   </>
                 )}
-                {fila.anterior ? null : (
-                  <>
-                    {/* En casillas propias (025/RF-34 a RF-36). */}
-                    <Campo
-                      etiqueta="Edad (días)"
-                      valor={fila.edadDias}
-                      onChange={(v) => cambiar(indice, "edadDias", v)}
-                      soloNumeros
-                      ancho={110}
-                    />
-                    <Campo
-                      etiqueta="Resultado"
-                      valor={fila.resultado}
-                      onChange={(v) => cambiar(indice, "resultado", v)}
-                      soloNumeros
-                      ancho={110}
-                    />
-                    <Campo
-                      etiqueta="Unidad"
-                      valor={fila.unidad}
-                      onChange={(v) => cambiar(indice, "unidad", v)}
-                      ayuda="MPa, %…"
-                      ancho={100}
-                    />
-                    <Selector
-                      etiqueta="¿Cumple?"
-                      valor={fila.cumple}
-                      opciones={OPCIONES_DE_CUMPLE}
-                      onChange={(v) => cambiar(indice, "cumple", v === "si" || v === "no" ? v : null)}
-                      permiteVacio
-                      vacio="No se sabe"
-                      ancho={150}
-                    />
-                  </>
-                )}
-                {/* Si no hay resultado ni «cumple», obligatoria: la casilla queda marcada y
-                    fija (RF-72; 025/RF-38, RF-39; 029/RF-16). Con uno de los dos, opcional y
-                    detrás de la casilla como en las demás secciones (029/RF-10). */}
-                <CampoObservacion
-                  valor={fila.observacion}
-                  onChange={(v) => cambiar(indice, "observacion", v)}
-                  editable={editable}
-                  obligatoria={sinResultado}
-                  ayuda={
-                    sinResultado && !faltas.observacion
-                      ? "Sin resultado ni «cumple», la observación es obligatoria. Si no hay nada que anotar, escriba «Sin observaciones»."
-                      : undefined
-                  }
-                  error={faltas.observacion}
-                />
-                {quitar}
-              </FilaDeFormulario>
+              </FilaDeSeccion>
             );
           })}
-          <PieDeSeccion>
-            <Boton
-              titulo="Añadir ensayo"
-              tono="secundario"
-              onPress={() =>
-                setFilas([...filas, { ...ENSAYO_EN_BLANCO, id: idDeFila(), heredado: null }])
-              }
-            />
-          </PieDeSeccion>
+          {/* Con «Hoy no se realizaron ensayos» marcada no se añade (032/RF-33). */}
+          {sinEnsayos.marcada ? null : (
+            <PieDeSeccion>
+              <Boton
+                titulo="Añadir ensayo"
+                tono="secundario"
+                onPress={() =>
+                  setFilas([...filas, { ...ENSAYO_EN_BLANCO, id: idDeFila(), heredado: null }])
+                }
+              />
+            </PieDeSeccion>
+          )}
         </>
-      ) : (
+      ) : parte.sinEnsayos &&
+        !parte.sinTrabajo &&
+        parte.laboratorio.length === 0 &&
+        delModulo.length === 0 ? null : (
+        // Marcada sin ensayos, el aviso de arriba ya lo dice: en lugar de la tabla
+        // vacía, no además de ella (spec 032, RF-36).
         <Tabla
           columnas={columnas}
           filas={parte.laboratorio}
@@ -3025,7 +3278,6 @@ const estilos = StyleSheet.create({
     gap: Spacing.two,
     flexWrap: "wrap",
   },
-  // Renglón propio dentro de la fila: al lado de los campos no se leería. Lo usan
-  // el aviso de horas extra de Personal y el del ensayo anterior.
-  avisoEnRenglon: { width: "100%" },
+  // El «Quitar» de una fila sin observación, a la derecha como en las demás (spec 032, RF-3).
+  quitarSolo: { flexDirection: "row", justifyContent: "flex-end" },
 });

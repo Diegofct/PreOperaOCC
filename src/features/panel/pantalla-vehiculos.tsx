@@ -14,6 +14,7 @@
 import { useCallback, useState } from 'react';
 
 import { formatoPendiente, formatoPrestadoDe } from '@/shared/catalogos/tipos-vehiculo';
+import { AVISO_FALTA_PLACA, identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
 import { api } from './cliente-api';
 import {
@@ -64,12 +65,16 @@ function diaCorto(iso: string): string {
   return new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short' });
 }
 
+/** Cómo se nombra el equipo en los avisos de esta pantalla (spec 032, RF-13). */
+function nombreDe(v: VehiculoFila): string {
+  return identificacionDelVehiculo({ placa: v.placa, tipo: v.tipoNombre, marca: v.marca, modelo: v.modelo });
+}
+
 export default function PantallaVehiculos() {
   const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
   const tipos = useListado<TipoVehiculoFila>(useCallback(() => api.tiposVehiculo.listar(), []));
   const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
 
-  const [codigoInterno, setCodigoInterno] = useState('');
   const [placa, setPlaca] = useState('');
   const [tipoVehiculoId, setTipoVehiculoId] = useState<string | null>(null);
   const [marca, setMarca] = useState('');
@@ -96,7 +101,9 @@ export default function PantallaVehiculos() {
 
   const filtrado = useListadoFiltrado(
     vehiculos.datos,
-    (v) => [v.codigoInterno, v.placa, v.marca, v.modelo, v.tipoNombre, v.obraNombre],
+    // El código interno ya es la placa (spec 032); se sigue buscando por él porque
+    // los equipos sin placa conservan su código «WA-…» y así se encuentran.
+    (v) => [v.placa, v.codigoInterno, v.marca, v.modelo, v.tipoNombre, v.obraNombre],
     useCallback(
       (v: VehiculoFila) =>
         (obraFiltro === null || v.obraId === obraFiltro) &&
@@ -114,7 +121,6 @@ export default function PantallaVehiculos() {
 
     const creado = await vehiculos.ejecutar(() =>
       api.vehiculos.crear({
-        codigoInterno,
         placa,
         tipoVehiculoId,
         marca,
@@ -127,8 +133,7 @@ export default function PantallaVehiculos() {
     );
 
     if (creado) {
-      setHecho(codigoInterno + ' quedó registrado.');
-      setCodigoInterno('');
+      setHecho(placa.trim().toUpperCase() + ' quedó registrado.');
       setPlaca('');
       setMarca('');
       setModelo('');
@@ -138,19 +143,21 @@ export default function PantallaVehiculos() {
   }
 
   const columnas: Columna<VehiculoFila>[] = [
+    // Spec 032 (RF-12, RF-20): la placa es la identificación; sin columna «Código».
+    // Sin placa, el aviso, para que se vea qué equipos falta completar.
     {
-      clave: 'codigo',
-      titulo: 'Código',
-      ancho: 105,
+      clave: 'placa',
+      titulo: 'Placa / identificación',
+      ancho: 150,
       pintar: (v) => (
         <>
-          <Celda>{v.codigoInterno}</Celda>
+          <Celda>{v.placa ?? '—'}</Celda>
+          {v.placa ? null : <Etiqueta tono="atencion">{AVISO_FALTA_PLACA}</Etiqueta>}
           {v.desdeWhatsapp ? <Etiqueta tono="neutro">Desde WhatsApp</Etiqueta> : null}
         </>
       ),
     },
     { clave: 'tipo', titulo: 'Tipo', ancho: 145, pintar: (v) => <Celda>{v.tipoNombre}</Celda> },
-    { clave: 'placa', titulo: 'Placa', ancho: 95, pintar: (v) => <Celda>{v.placa ?? '—'}</Celda> },
     {
       clave: 'maquina',
       titulo: 'Marca y modelo',
@@ -234,14 +241,16 @@ export default function PantallaVehiculos() {
     >
       <Seccion titulo="Registrar un vehículo">
         <Formulario>
+          {/* Spec 032 (RF-9, RF-12): sin código interno; la placa, o la serie en la
+              maquinaria que no tiene, es la identificación del equipo. */}
           <Campo
-            etiqueta="Código interno"
+            etiqueta="Placa / identificación"
             obligatorio
-            valor={codigoInterno}
-            onChange={setCodigoInterno}
-            ayuda="Ej. VOL-01"
-            error={vehiculos.errorDe('codigoInterno')}
-            ancho={160}
+            valor={placa}
+            onChange={setPlaca}
+            ayuda="Sin placa: la serie"
+            error={vehiculos.errorDe('placa')}
+            ancho={180}
           />
           <Selector
             etiqueta="Tipo de equipo"
@@ -252,7 +261,6 @@ export default function PantallaVehiculos() {
             vacio="Elige un tipo"
             ancho={200}
           />
-          <Campo etiqueta="Placa" valor={placa} onChange={setPlaca} ancho={140} />
           <Campo etiqueta="Marca" valor={marca} onChange={setMarca} ancho={160} />
           <Campo etiqueta="Modelo" valor={modelo} onChange={setModelo} ancho={160} />
           <Selector
@@ -298,7 +306,7 @@ export default function PantallaVehiculos() {
             <Boton
               titulo="Registrar vehículo"
               onPress={crear}
-              deshabilitado={!codigoInterno || !tipoVehiculoId}
+              deshabilitado={!placa.trim() || !tipoVehiculoId}
             />
           </AccionesFormulario>
         </Formulario>
@@ -308,7 +316,7 @@ export default function PantallaVehiculos() {
 
       {porDarDeBaja ? (
         <Confirmacion
-          aviso={porDarDeBaja.codigoInterno + ' deja de aparecer en la flota y de poder asignarse. No se borra: los preoperacionales firmados y las bitácoras cerradas de esa máquina siguen apuntándole.'}
+          aviso={nombreDe(porDarDeBaja) + ' deja de aparecer en la flota y de poder asignarse. No se borra: los preoperacionales firmados y las bitácoras cerradas de esa máquina siguen apuntándole.'}
           confirmar="Dar de baja"
           onConfirmar={async () => {
             // Sin `vehiculos.ejecutar`: se traga el error y la ventana nunca se
@@ -317,7 +325,7 @@ export default function PantallaVehiculos() {
             await api.vehiculos.darDeBaja(equipo.id);
             setPorDarDeBaja(null);
             vehiculos.recargar();
-            setHecho(equipo.codigoInterno + ' quedó dado de baja.');
+            setHecho(nombreDe(equipo) + ' quedó dado de baja.');
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />

@@ -20,7 +20,7 @@
  * Quien decide **si** crear —la regla `decisionDePersona`, la tolerancia de placa de
  * `reconocerVehiculo`, `placaRegistrable`— va antes y es pura. Aquí solo se escribe.
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import {
@@ -32,6 +32,7 @@ import {
 } from '@/db/servidor/esquema';
 import type { Cargo } from '@/shared/catalogos/cargos';
 import { normalizar } from '@/shared/rules/texto';
+import { normalizarPlaca } from '@/shared/rules/vehiculos';
 import { usuarioDeLaBandeja } from '@/shared/rules/whatsapp';
 import type { TipoCreado } from '@/shared/rules/whatsapp-automatico';
 
@@ -114,11 +115,15 @@ export async function crearPersona(datos: {
 
 /**
  * Registra una volqueta en la obra con una placa que no se parece a ninguna (RF-30):
- * tipo volqueta, operativa, y con el código interno «WA-» + placa para que se note
- * de dónde salió. `placa` ya viene de `placaRegistrable`. Devuelve su id.
+ * tipo volqueta, operativa. Desde la spec 032 su código interno es la placa, como el
+ * de cualquier vehículo; que salió de WhatsApp lo dice `whatsapp_creados`. `placa` ya
+ * viene de `placaRegistrable`. Devuelve su id.
  *
- * Si el código ya lo tiene otra volqueta vigente —la misma placa creada antes en
- * otra obra—, se usa esa: el código es único en toda la flota.
+ * Si la placa ya la tiene otra volqueta vigente —la misma placa creada antes en otra
+ * obra—, se usa esa: la placa es única en toda la flota (032/RF-10). Se busca antes de
+ * escribir, por el código y por la placa escrita, porque un vehículo de antes del
+ * script de la spec 032 puede tener la placa en su columna y otro código; insertar sin
+ * mirar le crearía un gemelo.
  */
 export async function crearVolqueta(datos: {
   obraId: string;
@@ -132,14 +137,32 @@ export async function crearVolqueta(datos: {
   marca?: string | null;
 }): Promise<string> {
   const db = baseServidor();
+  const placa = normalizarPlaca(datos.placa) ?? datos.placa;
+  const conEsaPlaca = () =>
+    db
+      .select({ id: vehiculos.id })
+      .from(vehiculos)
+      .where(
+        and(
+          or(
+            eq(vehiculos.codigoInterno, placa),
+            sql`regexp_replace(upper(${vehiculos.placa}), '[^A-Z0-9]', '', 'g') = ${placa}`,
+          ),
+          isNull(vehiculos.eliminadoEn),
+        ),
+      )
+      .limit(1);
+
+  const [yaEstaba] = await conEsaPlaca();
+  if (yaEstaba) return siSeUnio('vehiculo', yaEstaba.id);
+
   const id = await idDeterminista(datos.obraId, 'vehiculo', datos.placa);
-  const codigoInterno = `WA-${datos.placa}`;
   await db
     .insert(vehiculos)
     .values({
       id,
-      codigoInterno,
-      placa: datos.placa,
+      codigoInterno: placa,
+      placa,
       tipoVehiculoId: datos.tipoId ?? 'volqueta',
       marca: datos.marca ? nombreLimpio(datos.marca).toUpperCase() : null,
       obraId: datos.obraId,
@@ -147,11 +170,8 @@ export async function crearVolqueta(datos: {
     })
     .onConflictDoNothing();
 
-  const [creada] = await db
-    .select({ id: vehiculos.id })
-    .from(vehiculos)
-    .where(and(eq(vehiculos.codigoInterno, codigoInterno), isNull(vehiculos.eliminadoEn)))
-    .limit(1);
+  // Releída: si otro reporte la creó a la vez, el índice único dejó la suya.
+  const [creada] = await conEsaPlaca();
   const vehiculoId = creada?.id ?? id;
   if (vehiculoId === id) {
     await anotarCreado({ tipo: 'vehiculo', registroId: id, obraId: datos.obraId, mensajeId: datos.mensajeId });
@@ -162,8 +182,8 @@ export async function crearVolqueta(datos: {
 /**
  * Registra en la obra una máquina que el reporte nombra y que no existe (spec 026,
  * RF-8 a RF-12, RF-14): con su tipo, la marca que trae el reporte, y lo escrito como
- * modelo, que es como el siguiente reporte la reconoce (`reconocerMaquina`). Sin placa;
- * el código interno es automático. El id sale de la obra y lo escrito: dos reportes con
+ * modelo, que es como el siguiente reporte la reconoce (`reconocerMaquina`). Sin placa
+ * —en las listas sale «Falta la placa» (032/RF-20a)—; el código interno es automático. El id sale de la obra y lo escrito: dos reportes con
  * el mismo renglón no la crean dos veces.
  */
 export async function crearMaquina(datos: {

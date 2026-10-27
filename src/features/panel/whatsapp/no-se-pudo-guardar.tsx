@@ -461,7 +461,7 @@ function CamposDelRenglon({
   const personas = opciones.personas.map((p) => ({ valor: p.id, etiqueta: p.nombreCompleto, detalle: p.cargo ?? undefined }));
   const equipos = opciones.equipos.map((e) => ({
     valor: e.id,
-    etiqueta: e.placa ? `${e.codigoInterno} · ${e.placa}` : e.codigoInterno,
+    etiqueta: e.nombre,
   }));
   const escrito = (texto: string | null | undefined, que: string) => (texto ? <Ayuda>{`${que}: «${texto}»`}</Ayuda> : null);
 
@@ -476,7 +476,7 @@ function CamposDelRenglon({
           valor={v.vehiculoId}
           opciones={opciones.cantera.volquetas.map((q) => ({
             valor: q.id,
-            etiqueta: q.placa ? `${q.codigoInterno} · ${q.placa}` : q.codigoInterno,
+            etiqueta: q.nombre,
           }))}
           onChange={(x) => cambiar({ vehiculoId: x })}
           vacio="Elija la volqueta"

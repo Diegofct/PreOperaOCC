@@ -235,6 +235,7 @@ export function PestanaCalidad({ consulta }: { consulta: ConsultaDeReporte }) {
   const columnasNoCumplen: Columna<NoCumple>[] = [
     { clave: 'fecha', titulo: 'Día', ancho: 80, pintar: (e) => <Celda>{diaCorto(e.fecha)}</Celda> },
     { clave: 'ensayo', titulo: 'Ensayo', ancho: 180, pintar: (e) => <Celda lineas={2}>{e.nombre}</Celda> },
+    { clave: 'responsable', titulo: 'Responsable', ancho: 150, pintar: (e) => <Celda lineas={2}>{e.responsable ?? '—'}</Celda> },
     { clave: 'ubicacion', titulo: 'Ubicación', ancho: 180, pintar: (e) => <Celda lineas={2}>{e.ubicacion ?? '—'}</Celda> },
     {
       clave: 'resultado',
@@ -242,7 +243,6 @@ export function PestanaCalidad({ consulta }: { consulta: ConsultaDeReporte }) {
       ancho: 110,
       pintar: (e) => <Celda>{e.resultado === null ? '—' : `${cifra(e.resultado, 2)} ${e.unidad ?? ''}`}</Celda>,
     },
-    { clave: 'responsable', titulo: 'Responsable', ancho: 150, pintar: (e) => <Celda lineas={2}>{e.responsable ?? '—'}</Celda> },
     {
       clave: 'ver',
       titulo: '',
@@ -329,6 +329,22 @@ export function PestanaClima({ consulta }: { consulta: ConsultaDeReporte }) {
           </View>
         ) : (
           <Celda>{d.conBitacora ? 'Se trabajó' : '—'}</Celda>
+        ),
+    },
+    {
+      // Spec 032, RF-36: el día con trabajo en que no hubo actividades o ensayos.
+      clave: 'sinRegistro',
+      titulo: 'Sin actividades / ensayos',
+      ancho: 240,
+      pintar: (d) =>
+        d.sinRegistro.length > 0 ? (
+          <View style={estilos.celda}>
+            {d.sinRegistro.map((texto) => (
+              <Text key={texto} style={estilos.texto}>{texto}</Text>
+            ))}
+          </View>
+        ) : (
+          <Celda>—</Celda>
         ),
     },
     { clave: 'notas', titulo: 'Notas', ancho: 320, pintar: (d) => <Celda lineas={3}>{d.notas || '—'}</Celda> },

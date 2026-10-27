@@ -5,6 +5,7 @@ import { vehiculos } from '@/db/servidor/esquema';
 import { vehiculoEditado } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso, type PersonaEnSesion } from '@/features/servidor/guardia';
+import { placaOcupada } from '@/features/servidor/placas';
 import {
   cuerpoJson,
   errorDePeticion,
@@ -14,6 +15,7 @@ import {
 } from '@/features/servidor/respuestas';
 import { validarMedidor } from '@/shared/rules/inspeccion';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { normalizarPlaca } from '@/shared/rules/vehiculos';
 
 /** Editar y dar de baja un vehículo. `PATCH` y `DELETE /api/panel/vehiculos/:id`. */
 
@@ -87,9 +89,38 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       }
     }
 
+    // Spec 032 (RF-9 a RF-11): cambiar la placa cambia el código interno, que es la
+    // placa. Un código que no era la placa —VOL-MAG-04, WA-MOTONIVELADORA-0FEF— se
+    // guarda como anterior para que WhatsApp lo siga reconociendo (RF-19); si ya
+    // había uno guardado, ese se queda: es el que la obra escribía en sus reportes.
+    const deLaPlaca: Partial<typeof vehiculos.$inferInsert> = {};
+    if (cambios.placa !== undefined) {
+      const ocupada = await placaOcupada(cambios.placa, id);
+      if (ocupada) return ocupada;
+
+      const [actual] = await baseServidor()
+        .select({
+          codigoInterno: vehiculos.codigoInterno,
+          placa: vehiculos.placa,
+          codigoAnterior: vehiculos.codigoAnterior,
+        })
+        .from(vehiculos)
+        .where(and(eq(vehiculos.id, id), isNull(vehiculos.eliminadoEn)))
+        .limit(1);
+      if (actual && actual.codigoInterno !== cambios.placa) {
+        deLaPlaca.codigoInterno = cambios.placa;
+        const eraUnCodigoPropio = actual.codigoInterno !== normalizarPlaca(actual.placa);
+        if (!actual.codigoAnterior && eraUnCodigoPropio) deLaPlaca.codigoAnterior = actual.codigoInterno;
+      }
+    }
+
     const [fila] = await baseServidor()
       .update(vehiculos)
-      .set(tocaMedidor ? { ...cambios, medidorActualizadoEn: new Date(), medidorDia: fechaDeJornada() } : cambios)
+      .set({
+        ...cambios,
+        ...deLaPlaca,
+        ...(tocaMedidor ? { medidorActualizadoEn: new Date(), medidorDia: fechaDeJornada() } : {}),
+      })
       .where(and(eq(vehiculos.id, id), isNull(vehiculos.eliminadoEn)))
       .returning(COLUMNAS);
 

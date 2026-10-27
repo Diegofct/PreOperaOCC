@@ -6,6 +6,7 @@ import { asignaciones, obras, usuarios, vehiculos } from '@/db/servidor/esquema'
 import { asignacionNueva } from '@/features/panel/contratos';
 import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 
@@ -34,7 +35,8 @@ export async function GET(peticion: Request) {
       .select({
         id: asignaciones.id,
         vehiculoId: asignaciones.vehiculoId,
-        vehiculoCodigo: vehiculos.codigoInterno,
+        // Spec 032, RF-13: la placa, o la descripción si no tiene.
+        nombrable: columnasParaNombrar,
         usuarioId: asignaciones.usuarioId,
         usuarioNombre: persona.nombreCompleto,
         obraId: asignaciones.obraId,
@@ -55,7 +57,7 @@ export async function GET(peticion: Request) {
       // de lo que se quiere: `hasta = null` es una asignación abierta.
       .orderBy(sql`${asignaciones.hasta} asc nulls first`, desc(asignaciones.desde));
 
-    return ok(filas);
+    return ok(conNombreDelVehiculo(filas, 'vehiculoCodigo'));
   });
 }
 

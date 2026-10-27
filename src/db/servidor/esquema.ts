@@ -320,6 +320,13 @@ export const vehiculos = pgTable(
     id: text('id').primaryKey(),
     codigoInterno: text('codigo_interno').notNull(),
     placa: text('placa'),
+    /**
+     * El código que tenía antes de la spec 032, cuando `codigo_interno` pasó a ser la
+     * placa normalizada. Solo para que un reporte de WhatsApp que todavía diga
+     * «VOL-MAG-04» lo reconozca (RF-19); no se muestra en ninguna pantalla. Nulo en
+     * lo creado después del cambio.
+     */
+    codigoAnterior: text('codigo_anterior'),
     tipoVehiculoId: text('tipo_vehiculo_id')
       .notNull()
       .references(() => tiposVehiculo.id),
@@ -671,6 +678,17 @@ export const partesDeObra = pgTable(
      */
     sinTrabajo: boolean('sin_trabajo').notNull().default(false),
     motivoSinTrabajo: text('motivo_sin_trabajo'),
+    /**
+     * Un día con trabajo en que no se ejecutó ninguna actividad o no se hizo ningún
+     * ensayo (spec 032, RF-21 a RF-35): con la marca y su motivo la sección cuenta
+     * como llena al cerrar. Columnas y no una fila especial dentro de la lista,
+     * porque esas listas se cuentan, se fusionan con WhatsApp y se exportan. El
+     * default `false` deja como estaban las bitácoras anteriores (RF-38).
+     */
+    sinActividades: boolean('sin_actividades').notNull().default(false),
+    motivoSinActividades: text('motivo_sin_actividades'),
+    sinEnsayos: boolean('sin_ensayos').notNull().default(false),
+    motivoSinEnsayos: text('motivo_sin_ensayos'),
 
     cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
     anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),

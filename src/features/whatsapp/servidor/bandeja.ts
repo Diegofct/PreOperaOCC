@@ -33,6 +33,7 @@ import {
 import { reporteCorregido, type DetalleDePropuesta, type PropuestaFila } from '@/features/panel/contratos';
 import { filtroDeObraEstricto, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { avisoDeValeRepetido } from '@/shared/rules/cantera';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -151,7 +152,7 @@ async function avisosDeValeDelReporte(
       vale: canteraViajes.vale,
       fecha: canteraViajes.fecha,
       hora: canteraViajes.hora,
-      volqueta: vehiculos.codigoInterno,
+      nombrable: columnasParaNombrar,
     })
     .from(canteraViajes)
     .innerJoin(vehiculos, eq(vehiculos.id, canteraViajes.vehiculoId))
@@ -163,7 +164,7 @@ async function avisosDeValeDelReporte(
         sql`${canteraViajes.mensajeWhatsappId} is distinct from ${mensajeId}`,
       ),
     );
-  const vigentes = enLaObra.map((v) => ({ ...v, anulado: false }));
+  const vigentes = conNombreDelVehiculo(enLaObra, 'volqueta').map((v) => ({ ...v, anulado: false }));
 
   return reporte.viajes.flatMap((viaje, renglon) => {
     if (!viaje.vale) return [];

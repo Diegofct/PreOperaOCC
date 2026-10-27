@@ -320,6 +320,13 @@ export interface ConteosDelParte {
    */
   sinTrabajo?: boolean;
   /**
+   * «Hoy no se realizaron actividades / ensayos» **con su motivo** (spec 032): la
+   * sección vacía sale «no aplica», como en el día sin trabajo. Sin motivo no: el
+   * cierre todavía la pide, y el índice no puede decir que está resuelta.
+   */
+  actividadesNoAplican?: boolean;
+  ensayosNoAplican?: boolean;
+  /**
    * Cuántos viajes de cantera tiene ese día (010/RF-28): `null` mientras cargan.
    * **Ausente es que la pantalla todavía no los pide**, y entonces la sección no
    * sale en el índice: una entrada «comprobando» que nunca termina sería peor que
@@ -394,20 +401,21 @@ export function seccionesDelParte(conteos: ConteosDelParte): SeccionDelParte[] {
    * algo, se enseña lo que tiene — la bitácora no esconde datos por una marca, y es
    * el cierre quien rechaza la contradicción (004/RF-55).
    */
-  const exigible = (id: string, titulo: string, cuantos: number): SeccionDelParte =>
-    conteos.sinTrabajo && cuantos === 0
+  const exigible = (id: string, titulo: string, cuantos: number, noAplica = false): SeccionDelParte =>
+    (conteos.sinTrabajo || noAplica) && cuantos === 0
       ? { id, titulo, estado: 'no_aplica', cuantos: null }
       : porCuantos(id, titulo, cuantos);
 
   const secciones: SeccionDelParte[] = [
     exigible('maquinaria', TITULO_DE_SECCION.maquinaria, conteos.maquinaria),
     exigible('personal', TITULO_DE_SECCION.personal, conteos.personal),
-    exigible('actividades', TITULO_DE_SECCION.actividades, conteos.actividades),
+    exigible('actividades', TITULO_DE_SECCION.actividades, conteos.actividades, conteos.actividadesNoAplican),
     porCuantos('clima', TITULO_DE_SECCION.clima, conteos.clima),
     exigible(
       'laboratorio',
       TITULO_DE_SECCION.laboratorio,
       conteos.laboratorio + (conteos.ensayosDelModulo ?? 0),
+      conteos.ensayosNoAplican,
     ),
     ...seccionDeCantera(conteos.cantera),
     {
@@ -496,6 +504,11 @@ export interface ParteEvaluable {
   /** Ausente es no marcado, como en todos los partes anteriores al cambio. */
   sinTrabajo?: boolean;
   motivoSinTrabajo?: string | null;
+  /** «Hoy no se realizaron actividades / ensayos» (spec 032). Ausente es no marcado. */
+  sinActividades?: boolean;
+  motivoSinActividades?: string | null;
+  sinEnsayos?: boolean;
+  motivoSinEnsayos?: string | null;
 }
 
 /**
@@ -605,6 +618,109 @@ export function mensajeDeDiaSinTrabajo(error: ErrorDeDiaSinTrabajo): string {
     : 'Escriba por qué no se trabajó ese día.';
 }
 
+/* ── Una sección sin registro (spec 032) ─────────────────────────────── */
+
+/**
+ * Las dos secciones que un día **con** trabajo puede dejar sin filas, con su marca y
+ * su motivo: un día en que hubo máquinas y personal pero no se ejecutó ninguna
+ * actividad del contrato, o no se hizo ningún ensayo (RF-21 a RF-35).
+ *
+ * Es distinto del día sin trabajo (004/RF-53), que no exige maquinaria, personal ni
+ * actividades: aquí el resto de la bitácora se exige igual, y solo esa sección se da
+ * por llena. Con el día sin trabajo marcado, estas marcas no cuentan (RF-37).
+ */
+export type SeccionSinRegistro = 'actividades' | 'ensayos';
+
+/** El motivo es un renglón (RF-22, RF-30). */
+export const LARGO_DEL_MOTIVO_SIN_REGISTRO = 200;
+
+const NOMBRE_SIN_REGISTRO: Record<SeccionSinRegistro, { seccion: string; marca: string }> = {
+  actividades: { seccion: 'Actividades', marca: 'Hoy no se realizaron actividades' },
+  ensayos: { seccion: 'Control de calidad', marca: 'Hoy no se realizaron ensayos' },
+};
+
+/** El rótulo de la casilla: «Hoy no se realizaron actividades». */
+export function rotuloSinRegistro(seccion: SeccionSinRegistro): string {
+  return NOMBRE_SIN_REGISTRO[seccion].marca;
+}
+
+/**
+ * Lo que se lee de una sección vacía a propósito en la bitácora que ya no se edita y
+ * en Reportes (RF-36): «No se realizaron actividades — Lluvia toda la tarde».
+ */
+export function textoSinRegistro(seccion: SeccionSinRegistro, motivo: string | null | undefined): string {
+  const que = seccion === 'actividades' ? 'actividades' : 'ensayos';
+  return `No se realizaron ${que} — ${hayTexto(motivo) ? motivo!.trim() : 'sin motivo escrito'}`;
+}
+
+/**
+ * Los textos de RF-36 de una bitácora, en el orden de sus secciones. Vacío si no
+ * tiene marcas o si es día sin trabajo, que ya lo dice todo (RF-37).
+ */
+export function textosSinRegistro(parte: {
+  sinTrabajo?: boolean;
+  sinActividades?: boolean;
+  motivoSinActividades?: string | null;
+  sinEnsayos?: boolean;
+  motivoSinEnsayos?: string | null;
+}): string[] {
+  if (parte.sinTrabajo) return [];
+  const textos: string[] = [];
+  if (parte.sinActividades) textos.push(textoSinRegistro('actividades', parte.motivoSinActividades));
+  if (parte.sinEnsayos) textos.push(textoSinRegistro('ensayos', parte.motivoSinEnsayos));
+  return textos;
+}
+
+/** El bloqueo del cierre con la marca puesta y sin motivo (RF-23, RF-31). */
+export function faltaElMotivoSinRegistro(seccion: SeccionSinRegistro): string {
+  return `${NOMBRE_SIN_REGISTRO[seccion].seccion}: falta el motivo de por qué no se realizaron.`;
+}
+
+/** El rechazo al guardar una marca en una sección que tiene filas. */
+export function mensajeDeSeccionConRegistros(seccion: SeccionSinRegistro): string {
+  return seccion === 'actividades'
+    ? 'Esa bitácora tiene actividades registradas: quítelas antes de marcar que no se realizaron.'
+    : 'Esa bitácora tiene ensayos registrados: quítelos antes de marcar que no se realizaron.';
+}
+
+/** Una marca de la bitácora tal como se guarda. */
+export interface MarcaSinRegistro {
+  marcada: boolean;
+  motivo: string | null;
+}
+
+/**
+ * Cómo queda la marca de una sección después de un guardado parcial, y si es válida.
+ *
+ * Como `resolverDiaSinTrabajo`: se valida **cómo queda la bitácora**, mezclando lo que
+ * llega con lo guardado, porque la marca y las filas pueden llegar en peticiones
+ * distintas.
+ *
+ *  · Desmarcar borra el motivo (RF-28, RF-35).
+ *  · Marcar una sección que tiene filas es contradecirse: `con_registros`.
+ *  · Agregar filas a una sección marcada, sin tocar la marca, la quita: es lo que
+ *    pasa cuando llega la actividad por WhatsApp (RF-27, RF-34); a mano no se llega,
+ *    porque la casilla oculta el botón de agregar (RF-26, RF-33).
+ *  · Marcada y sin motivo **se deja guardar**: el motivo se puede escribir después;
+ *    lo que no se deja es cerrar así (RF-23, RF-31).
+ *
+ * `filas` es cuántas tiene la sección después del guardado; en ensayos, contando los
+ * del módulo de Laboratorio, que llenan la sección igual que una fila (018/RF-110).
+ */
+export function resolverSeccionSinRegistro(
+  guardada: MarcaSinRegistro,
+  cambios: { marcada?: boolean; motivo?: string | null },
+  filas: number,
+): MarcaSinRegistro & { error: 'con_registros' | null } {
+  if (cambios.marcada === true && filas > 0) return { ...guardada, error: 'con_registros' };
+
+  const marcada = filas > 0 ? false : (cambios.marcada ?? guardada.marcada);
+  if (!marcada) return { marcada: false, motivo: null, error: null };
+
+  const motivo = cambios.motivo !== undefined ? cambios.motivo : guardada.motivo;
+  return { marcada: true, motivo: hayTexto(motivo) ? motivo!.trim() : null, error: null };
+}
+
 /* ── El cierre ──────────────────────────────────────────────────────────── */
 
 /** «A, B y C», que es como se lee una lista en español. */
@@ -637,6 +753,10 @@ function faltaLlenar(titulos: readonly string[]): string {
  * actividades que registrar; con la marca y su motivo se exigen solo el clima,
  * las notas y la foto del día (RF-53, RF-54).
  *
+ * Un día **con** trabajo puede quedar sin actividades o sin ensayos: con su marca
+ * y su motivo esa sección cuenta como llena (spec 032, RF-24, RF-32). En el día
+ * sin trabajo esas marcas no se miran (RF-37): esa rama ya no pide esas secciones.
+ *
  * ── Por qué una lista, y en este orden ──
  *
  * El residente está mirando el documento entero en el índice y le sirve saber
@@ -664,17 +784,37 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
     return bloqueos;
   }
 
+  // Spec 032: una sección vacía con su marca y su motivo cuenta como llena (RF-24,
+  // RF-32). Con la marca y sin motivo, el bloqueo nombra el motivo y no la sección:
+  // «Falta llenar: Actividades» invitaría a agregar una, que es lo contrario.
+  const sinMotivo: string[] = [];
+  const vaciaSinMarca = (
+    seccion: SeccionSinRegistro,
+    filas: number,
+    marcada: boolean | undefined,
+    motivo: string | null | undefined,
+  ) => {
+    if (filas > 0) return false;
+    if (!marcada) return true;
+    if (!hayTexto(motivo)) sinMotivo.push(faltaElMotivoSinRegistro(seccion));
+    return false;
+  };
+
   const faltan: string[] = [];
   if (parte.maquinaria.length === 0) faltan.push(TITULO_DE_SECCION.maquinaria);
   if (parte.personal.length === 0) faltan.push(TITULO_DE_SECCION.personal);
-  if (parte.actividades.length === 0) faltan.push(TITULO_DE_SECCION.actividades);
+  if (vaciaSinMarca('actividades', parte.actividades.length, parte.sinActividades, parte.motivoSinActividades)) {
+    faltan.push(TITULO_DE_SECCION.actividades);
+  }
   if (parte.clima.length === 0) faltan.push(TITULO_DE_SECCION.clima);
-  if (parte.laboratorio.length + (parte.ensayosDelModulo ?? 0) === 0) {
+  const ensayos = parte.laboratorio.length + (parte.ensayosDelModulo ?? 0);
+  if (vaciaSinMarca('ensayos', ensayos, parte.sinEnsayos, parte.motivoSinEnsayos)) {
     faltan.push(TITULO_DE_SECCION.laboratorio);
   }
   if (!hayTexto(parte.notas)) faltan.push(TITULO_DE_SECCION.notas);
   if (fotos.delDia === 0) faltan.push(TITULO_DE_SECCION.fotografia);
   if (faltan.length > 0) bloqueos.push(faltaLlenar(faltan));
+  bloqueos.push(...sinMotivo);
 
   for (const maquina of parte.maquinaria) {
     const error = validarAvance(maquina.claseMedidor, maquina.medidorInicial, maquina.medidorFinal);
@@ -698,7 +838,8 @@ export function bloqueosDelCierre(parte: ParteEvaluable, fotos: FotosDelParte): 
   }
 
   // Sin actividades ya lo dice «Falta llenar»; pedirle además la foto a una
-  // actividad que no existe sería decir lo mismo dos veces.
+  // actividad que no existe sería decir lo mismo dos veces. Y marcado «Hoy no se
+  // realizaron actividades», no hay actividad a la que pedirle foto (032/RF-25).
   if (parte.actividades.length > 0) {
     const conFoto = new Set(fotos.itemsConFoto);
     if (!parte.actividades.some((actividad) => conFoto.has(actividad.id))) {

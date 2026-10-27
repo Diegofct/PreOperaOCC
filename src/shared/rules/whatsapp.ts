@@ -178,6 +178,11 @@ export interface VehiculoConocido {
   id: string;
   codigoInterno: string;
   placa: string | null;
+  /**
+   * El código de antes de la spec 032, cuando el código interno pasó a ser la placa:
+   * la obra lo sigue escribiendo en sus reportes («VOL-MAG-04») y se reconoce (RF-19).
+   */
+  codigoAnterior?: string | null;
   /** Nula en un equipo aún sin asignar a obra, como en `alcance.ts`. */
   obraId: string | null;
   /** Para reconocer la maquinaria por su nombre (spec 026, RF-1 a RF-3, RF-14). */
@@ -215,8 +220,8 @@ function sinConfusiones(compactado: string): string {
 }
 
 /**
- * El equipo de la obra que nombra el reporte, por su placa o su código interno
- * (RF-70). «Volqueta Foton LLQ 375» reconoce la placa `LLQ375`.
+ * El equipo de la obra que nombra el reporte, por su placa, su código interno o el
+ * código que tenía antes de la spec 032 (RF-70; 032/RF-18, RF-19). «Volqueta Foton LLQ 375» reconoce la placa `LLQ375`.
  *
  * Primero se busca lo escrito igual a una placa o un código; si no, una placa o
  * un código contenidos en lo escrito. Si tampoco, lo mismo tomando como iguales
@@ -252,7 +257,7 @@ export function candidatosDeVehiculo(
 
   const deLaObra = vehiculos.filter((v) => v.obraId === null || v.obraId === obraId);
   const clavesDe = (v: VehiculoConocido) =>
-    [v.placa, v.codigoInterno].filter((c): c is string => !!c).map(compacto);
+    [v.placa, v.codigoInterno, v.codigoAnterior].filter((c): c is string => !!c).map(compacto);
 
   const ids = (lista: VehiculoConocido[]) => lista.map((v) => v.id);
 

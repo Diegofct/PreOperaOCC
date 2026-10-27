@@ -218,6 +218,13 @@
       "when": 1792618443081,
       "tag": "0030_furry_eternity",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793056676408,
+      "tag": "0031_icy_omega_red",
+      "breakpoints": true
     }
   ]
 }

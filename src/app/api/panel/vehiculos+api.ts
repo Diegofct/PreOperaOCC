@@ -7,6 +7,7 @@ import { vehiculoNuevo } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { DESGASTE_PARA_CAMBIO } from '@/shared/catalogos/llantas';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { placaOcupada } from '@/features/servidor/placas';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
@@ -92,6 +93,10 @@ export async function POST(peticion: Request) {
       datos.obraId ??= sesion.obraId;
     }
 
+    // Spec 032, RF-10: la placa no se repite entre vehículos vigentes.
+    const ocupada = await placaOcupada(datos.placa);
+    if (ocupada) return ocupada;
+
     // Si se registra un medidor de partida, queda fechado: `medidorActualizadoEn`
     // es lo que el móvil compara para decidir si una lectura es plausible.
     const traeMedidor = datos.odometroKm !== null || datos.horometroH !== null;
@@ -101,11 +106,14 @@ export async function POST(peticion: Request) {
       .values({
         id: uuidv7(),
         ...datos,
+        // Spec 032: el código interno es la placa. Lo leen el celular y el índice
+        // único, así que no desaparece; solo deja de pedirse y de verse.
+        codigoInterno: datos.placa,
         medidorActualizadoEn: traeMedidor ? new Date() : null,
         medidorDia: traeMedidor ? fechaDeJornada() : null,
       })
       .returning({ id: vehiculos.id });
 
-    return ok({ ...datos, id: creado.id }, 201);
+    return ok({ ...datos, codigoInterno: datos.placa, id: creado.id }, 201);
   });
 }

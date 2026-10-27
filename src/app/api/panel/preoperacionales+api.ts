@@ -5,6 +5,7 @@ import { obras, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/d
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { ok, responder } from '@/features/servidor/respuestas';
 import {
   DESFASE_COLOMBIA_MS,
@@ -90,7 +91,7 @@ export async function GET(peticion: Request) {
       .select({
         id: preoperacionales.id,
         vehiculoId: preoperacionales.vehiculoId,
-        vehiculoCodigo: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         tipoNombre: tiposVehiculo.nombre,
         obraNombre: obras.nombre,
         operadorNombre: operador.nombreCompleto,
@@ -136,7 +137,7 @@ export async function GET(peticion: Request) {
     const flota = await baseServidor()
       .select({
         vehiculoId: vehiculos.id,
-        codigoInterno: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         tipoNombre: tiposVehiculo.nombre,
       })
       .from(vehiculos)
@@ -171,8 +172,12 @@ export async function GET(peticion: Request) {
       desde: primerDia,
       hasta: ultimoDia,
       // NO APTO primero: es el único que obliga a alguien a hacer algo hoy.
-      preoperacionales: [...filas].sort(porUrgencia),
-      pendientes: flota.filter((m) => !conFormato.has(m.vehiculoId)),
+      // Spec 032 (RF-13, RF-17a): con la placa actual del vehículo.
+      preoperacionales: conNombreDelVehiculo([...filas].sort(porUrgencia), 'vehiculoCodigo'),
+      pendientes: conNombreDelVehiculo(
+        flota.filter((m) => !conFormato.has(m.vehiculoId)),
+        'codigoInterno',
+      ),
       /**
        * Por qué está vacío, cuando lo está.
        *

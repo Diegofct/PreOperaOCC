@@ -17,6 +17,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
+import { columnasParaNombrar, nombrarVehiculo } from '@/features/servidor/placas';
 import {
   conservarHeredadas,
   construirActividadDelParte,
@@ -103,7 +104,9 @@ export async function maquinariaDelParte(
     ? await db
         .select({
           id: vehiculos.id,
-          codigo: vehiculos.codigoInterno,
+          // Spec 032 (RF-15, RF-16): la máquina se guarda con su placa. Se recalcula en
+          // cada guardado, así que una bitácora abierta la toma al volver a guardarla.
+          ...columnasParaNombrar,
           obraId: vehiculos.obraId,
           clase: tiposVehiculo.claseMedidor,
         })
@@ -155,7 +158,7 @@ export async function maquinariaDelParte(
       const equipo = porId.get(m.vehiculoId)!;
       return construirMaquina(
         m,
-        equipo.codigo,
+        nombrarVehiculo(equipo),
         m.claseMedidor ?? medidorDeClase(equipo.clase),
         m.operadorId ? (nombreDe.get(m.operadorId) ?? null) : null,
       );

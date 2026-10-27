@@ -250,9 +250,9 @@ function hojasDeCalidad(datos: ReporteDe<'calidad'>): HojaDeReporte[] {
     },
     {
       nombre: 'No cumplen',
-      encabezados: ['Fecha', 'Ensayo', 'Ubicación', 'Edad (días)', 'Resultado', 'Unidad', 'Responsable', 'Observación'],
+      encabezados: ['Fecha', 'Ensayo', 'Responsable', 'Ubicación', 'Edad (días)', 'Resultado', 'Unidad', 'Observación'],
       formatos: { 'Edad (días)': 'entero', Resultado: 'numero' },
-      filas: datos.noCumplen.map((e) => [e.fecha, e.nombre, e.ubicacion, e.edadDias, e.resultado, e.unidad, e.responsable, e.observacion || null]),
+      filas: datos.noCumplen.map((e) => [e.fecha, e.nombre, e.responsable, e.ubicacion, e.edadDias, e.resultado, e.unidad, e.observacion || null]),
     },
   ];
 }
@@ -261,7 +261,7 @@ function hojasDeClima(datos: ReporteDe<'clima'>): HojaDeReporte[] {
   return [
     {
       nombre: 'Clima y novedades',
-      encabezados: ['Fecha', 'Bitácora', 'Clima', 'Lluvia', 'Sin trabajo', 'Motivo', 'Notas'],
+      encabezados: ['Fecha', 'Bitácora', 'Clima', 'Lluvia', 'Sin trabajo', 'Motivo', 'Sin actividades / ensayos', 'Notas'],
       filas: datos.dias.map((d) => [
         d.fecha,
         d.conBitacora ? (d.abierta ? 'Abierta' : 'Cerrada') : 'Sin bitácora',
@@ -269,6 +269,7 @@ function hojasDeClima(datos: ReporteDe<'clima'>): HojaDeReporte[] {
         d.conBitacora ? (d.lluvia ? 'Sí' : 'No') : null,
         d.conBitacora ? (d.sinTrabajo ? 'Sí' : 'No') : null,
         d.motivoSinTrabajo,
+        d.sinRegistro.join(' · ') || null,
         d.notas || null,
       ]),
     },

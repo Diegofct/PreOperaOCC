@@ -51,6 +51,7 @@ import { leerEnsayos } from '@/features/laboratorio/servidor/ensayos';
 import { detalleDe, listarPresupuestos } from '@/features/presupuestos/servidor/presupuestos';
 import { TITULO_DE_PESTANA } from '@/features/reportes/exportar';
 import { partesDelPeriodo, vehiculosDeLaObra } from '@/features/reportes/servidor/datos';
+import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { reporteDe, type PestanaDeReporte, type ReporteDe } from '@/features/reportes/servidor/reportes';
 import { diaDelMensaje, obraDelMensaje } from '@/features/whatsapp/servidor/obra';
 import { ensayosDeLosPartes, type FilaDeCalidadLeida } from '@/shared/rules/ensayos-de-obra';
@@ -507,8 +508,7 @@ const preoperacionalesDelPeriodo = herramienta({
     const filas = await baseServidor()
       .select({
         dia: DIA_DEL_PREOPERACIONAL,
-        placa: vehiculos.placa,
-        codigo: vehiculos.codigoInterno,
+        nombrable: columnasParaNombrar,
         operador: usuarios.nombreCompleto,
         resultado: p.resultado,
         inmovilizantes: p.cantidadInmovilizantes,
@@ -531,10 +531,8 @@ const preoperacionalesDelPeriodo = herramienta({
       datos: {
         obra: obra.codigo,
         total: filas.length,
-        preoperacionales: filas.map(({ placa, codigo, ...f }) => ({
-          ...f,
-          maquina: placa || codigo,
-        })),
+        // Spec 032, RF-13: la máquina por su placa, o su descripción si no tiene.
+        preoperacionales: conNombreDelVehiculo(filas, 'maquina'),
       },
       fuentes: [
         {
@@ -816,8 +814,7 @@ const anulados = herramienta({
         db
           .select({
             dia: DIA_DEL_PREOPERACIONAL,
-            placa: vehiculos.placa,
-            codigo: vehiculos.codigoInterno,
+            nombrable: columnasParaNombrar,
             motivo: p.motivoAnulacion,
             por: anulador.nombreCompleto,
             en: p.anuladoEn,
@@ -833,10 +830,10 @@ const anulados = herramienta({
             ),
           )
           .then((filas) =>
-            filas.map((f) => ({
+            conNombreDelVehiculo(filas, 'maquina').map((f) => ({
               modulo: 'preoperacionales' as const,
               fecha: f.dia,
-              que: `Preoperacional de ${f.placa || f.codigo}`,
+              que: `Preoperacional de ${f.maquina}`,
               motivo: f.motivo,
               anuladoPor: f.por,
               anuladoEn: cuando(f.en),

@@ -257,6 +257,7 @@ import {
   type ContratoParaRevisar,
 } from '../src/shared/rules/contrato';
 import { enPesos } from '../src/shared/rules/pesos';
+import { AVISO_FALTA_PLACA, identificacionDelVehiculo, normalizarPlaca } from '../src/shared/rules/vehiculos';
 import { polizasConAviso, vigenciaDePoliza, type PolizaParaAviso } from '../src/shared/rules/polizas';
 import {
   claveDeItem,
@@ -394,6 +395,7 @@ import {
 } from '../src/shared/rules/jornada';
 import {
   bloqueosDelCierre,
+  faltaElMotivoSinRegistro,
   faltaObservacionDelEnsayo,
   faltasDeActividad,
   faltasDelEnsayo,
@@ -402,6 +404,7 @@ import {
   mensajeDeDiaSinTrabajo,
   mensajeDelRechazoDeCierre,
   resolverDiaSinTrabajo,
+  resolverSeccionSinRegistro,
   seccionesDelParte,
   validarDiaSinTrabajo,
   type ConteosDelParte,
@@ -4222,9 +4225,10 @@ prueba('un duplicado dice qué campo del formulario lo causó', () => {
     mensaje: 'Ese nombre de usuario ya está en uso.',
     campo: 'usuario',
   });
+  // Spec 032, RF-10: el código interno es la placa, y el choque se pinta bajo ella.
   assert.deepEqual(duplicadoDe('ux_vehiculos_codigo'), {
-    mensaje: 'Ya existe un vehículo con ese código interno.',
-    campo: 'codigoInterno',
+    mensaje: 'Ya hay un vehículo con esa placa.',
+    campo: 'placa',
   });
   // Spec 009 / RF-3: el material repetido se pinta bajo su nombre.
   assert.deepEqual(duplicadoDe('ux_almacen_material_nombre'), {
@@ -9576,6 +9580,33 @@ prueba('030/RF-55: clima, días con lluvia, sin trabajo y notas', () => {
   assert.deepEqual([diasConLluvia, diasSinTrabajo, diasConBitacora], [2, 1, 2]);
 });
 
+prueba('032/RF-36, RF-37: Reportes dice qué día no hubo actividades o ensayos, y por qué', () => {
+  const { dias } = climaDelPeriodo({
+    dias: ['2026-10-05', '2026-10-06', '2026-10-07'],
+    partes: [
+      {
+        fecha: '2026-10-05',
+        abierta: false,
+        clima: [],
+        sinTrabajo: false,
+        motivoSinTrabajo: null,
+        sinActividades: true,
+        motivoSinActividades: ' Lluvia toda la tarde ',
+        sinEnsayos: true,
+        motivoSinEnsayos: null,
+        notas: null,
+      },
+      // Día sin trabajo: ya lo dice su columna, las marcas no se repiten (RF-37).
+      { fecha: '2026-10-06', abierta: true, clima: [], sinTrabajo: true, motivoSinTrabajo: 'Domingo', sinActividades: true, notas: null },
+    ],
+  });
+  assert.deepEqual(dias.map((d) => d.sinRegistro), [
+    ['No se realizaron actividades — Lluvia toda la tarde', 'No se realizaron ensayos — sin motivo escrito'],
+    [],
+    [],
+  ]);
+});
+
 // ---------------------------------------------------------------------------
 // Spec 030: el módulo de Reportes
 // ---------------------------------------------------------------------------
@@ -10880,6 +10911,167 @@ async function verificarFormulario() {
     assert.match(vacio.ok ? '' : vacio.error, /La IA no encontró ítems/);
   });
 }
+
+prueba('032/RF-11: la placa se guarda en mayúsculas, solo con letras y cifras', () => {
+  assert.equal(normalizarPlaca('tay-076'), 'TAY076');
+  assert.equal(normalizarPlaca(' TAY 076 '), 'TAY076');
+  assert.equal(normalizarPlaca('mc.770.197'), 'MC770197');
+  assert.equal(normalizarPlaca('03WR0166'), '03WR0166');
+  assert.equal(normalizarPlaca('  - '), null);
+  assert.equal(normalizarPlaca(''), null);
+  assert.equal(normalizarPlaca(null), null);
+});
+
+prueba('032/RF-13, RF-20: el equipo se nombra por su placa o, sin ella, con el aviso', () => {
+  assert.equal(identificacionDelVehiculo({ placa: 'llq 375', tipo: 'Volqueta' }), 'LLQ375');
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Motoniveladora', marca: 'KOMATSU', modelo: 'Motoniveladora Komatsu alquilada GD555' }),
+    `Motoniveladora Komatsu alquilada GD555 · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(
+    identificacionDelVehiculo({ placa: '', tipo: 'Vibro Compactadora', marca: 'VOLVO', modelo: null }),
+    `Vibro Compactadora VOLVO · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(identificacionDelVehiculo({ placa: null }), `Equipo · ${AVISO_FALTA_PLACA}`);
+  // El modelo que escribió WhatsApp ya dice el tipo, con tilde y sin plural.
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Vibro Compactadora', marca: 'VOLVO', modelo: 'Vibrócompactador Volvo' }),
+    `Vibrócompactador Volvo · ${AVISO_FALTA_PLACA}`,
+  );
+  assert.equal(
+    identificacionDelVehiculo({ placa: null, tipo: 'Montacargas', marca: null, modelo: 'Montacarga a Diesel' }),
+    `Montacarga a Diesel · ${AVISO_FALTA_PLACA}`,
+  );
+});
+
+prueba('032/RF-18, RF-19: WhatsApp reconoce la máquina por su placa y por su código de antes', () => {
+  // Así queda un equipo después del script de la spec 032: el código es la placa.
+  const flota: VehiculoConocido[] = [
+    { id: 'tay076', codigoInterno: 'TAY076', placa: 'TAY076', codigoAnterior: 'VOL-MAG-04', obraId: 'obra-a' },
+    { id: 'llq375', codigoInterno: 'LLQ375', placa: 'LLQ375', codigoAnterior: 'WA-LLQ375', obraId: 'obra-a' },
+    { id: 'nuevo', codigoInterno: 'PRB032', placa: 'PRB032', codigoAnterior: null, obraId: 'obra-a' },
+  ];
+  assert.equal(reconocerVehiculo('VOL-MAG-04', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('Volqueta vol mag 04', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('Volqueta TAY 076', flota, 'obra-a'), 'tay076');
+  assert.equal(reconocerVehiculo('WA-LLQ375', flota, 'obra-a'), 'llq375');
+  assert.equal(reconocerVehiculo('prb-032', flota, 'obra-a'), 'nuevo');
+  // El código viejo de otra obra no se toma: solo cuentan los equipos de la obra.
+  assert.equal(reconocerVehiculo('VOL-MAG-04', flota, 'obra-b'), null);
+});
+
+const PARTE_SIN_ACTIVIDADES_032 = {
+  maquinaria: [{ codigo: 'TAY076', claseMedidor: 'odometro' as const, medidorInicial: 100, medidorFinal: 150 }],
+  personal: [{ nombre: 'Pedro Cartagena', entrada: '07:30', salida: '17:00' }],
+  actividades: [],
+  clima: [{}],
+  laboratorio: [],
+  notas: 'Sin novedad.',
+};
+const FOTO_DEL_DIA_032 = { delDia: 1, itemsConFoto: [] };
+
+prueba('032/RF-24, RF-25, RF-32: con la marca y su motivo, la sección vacía deja cerrar', () => {
+  // Sin marcas: faltan las dos secciones.
+  assert.deepEqual(bloqueosDelCierre(PARTE_SIN_ACTIVIDADES_032, FOTO_DEL_DIA_032), [
+    'Falta llenar: Actividades y Control Calidad de Obra.',
+  ]);
+  // Con las dos marcas y su motivo: nada, ni siquiera la foto de una actividad (RF-25).
+  assert.deepEqual(
+    bloqueosDelCierre(
+      {
+        ...PARTE_SIN_ACTIVIDADES_032,
+        sinActividades: true,
+        motivoSinActividades: 'Lluvia toda la tarde, solo mantenimiento.',
+        sinEnsayos: true,
+        motivoSinEnsayos: 'No hubo material para ensayar.',
+      },
+      FOTO_DEL_DIA_032,
+    ),
+    [],
+  );
+  // Un ensayo del módulo de Laboratorio llena la sección: la marca de ensayos sobra.
+  assert.deepEqual(
+    bloqueosDelCierre(
+      { ...PARTE_SIN_ACTIVIDADES_032, sinActividades: true, motivoSinActividades: 'Lluvia.', ensayosDelModulo: 1 },
+      FOTO_DEL_DIA_032,
+    ),
+    [],
+  );
+});
+
+prueba('032/RF-23, RF-31: la marca sin motivo no deja cerrar, y lo dice', () => {
+  assert.deepEqual(
+    bloqueosDelCierre(
+      { ...PARTE_SIN_ACTIVIDADES_032, sinActividades: true, motivoSinActividades: '  ', sinEnsayos: true },
+      FOTO_DEL_DIA_032,
+    ),
+    [faltaElMotivoSinRegistro('actividades'), faltaElMotivoSinRegistro('ensayos')],
+  );
+  assert.equal(faltaElMotivoSinRegistro('actividades'), 'Actividades: falta el motivo de por qué no se realizaron.');
+  assert.equal(faltaElMotivoSinRegistro('ensayos'), 'Control de calidad: falta el motivo de por qué no se realizaron.');
+  // Lo que falta en otras secciones se sigue diciendo junto.
+  assert.deepEqual(
+    bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, notas: null, sinActividades: true }, FOTO_DEL_DIA_032),
+    ['Falta llenar: Control Calidad de Obra y Notas.', faltaElMotivoSinRegistro('actividades')],
+  );
+});
+
+prueba('032/RF-37, RF-38: en día sin trabajo las marcas no cuentan; sin marcas, todo igual', () => {
+  const domingo = {
+    maquinaria: [],
+    personal: [],
+    actividades: [],
+    clima: [{}],
+    laboratorio: [],
+    notas: 'Domingo.',
+    sinTrabajo: true,
+    motivoSinTrabajo: 'Domingo.',
+    // Marcada sin motivo: en un día sin trabajo no se mira.
+    sinActividades: true,
+  };
+  assert.deepEqual(bloqueosDelCierre(domingo, FOTO_DEL_DIA_032), []);
+  // Un parte de antes del cambio (sin las marcas) se evalúa como siempre.
+  assert.deepEqual(bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, actividades: [{ id: 'a' }] }, { delDia: 1, itemsConFoto: ['a'] }), [
+    'Falta llenar: Control Calidad de Obra.',
+  ]);
+});
+
+prueba('032: en el índice, la sección vacía con su marca y su motivo «no aplica»', () => {
+  const conMarcas = seccionesDelParte({ ...PARTE_VACIO, actividadesNoAplican: true, ensayosNoAplican: true });
+  assert.equal(conMarcas.find((s) => s.id === 'actividades')?.estado, 'no_aplica');
+  assert.equal(conMarcas.find((s) => s.id === 'laboratorio')?.estado, 'no_aplica');
+  // Sin la marca, la sección vacía sigue «sin registrar»; con filas, se cuentan.
+  assert.notEqual(seccionesDelParte(PARTE_VACIO).find((s) => s.id === 'actividades')?.estado, 'no_aplica');
+  const conFilas = seccionesDelParte({ ...PARTE_VACIO, actividades: 2, actividadesNoAplican: true });
+  assert.equal(conFilas.find((s) => s.id === 'actividades')?.cuantos, 2);
+});
+
+prueba('032/RF-27, RF-28, RF-34, RF-35: cómo queda la marca tras un guardado', () => {
+  const sin = { marcada: false, motivo: null };
+  const con = { marcada: true, motivo: 'Lluvia.' };
+  // Marcar con motivo, en una sección vacía.
+  assert.deepEqual(resolverSeccionSinRegistro(sin, { marcada: true, motivo: '  Lluvia.  ' }, 0), {
+    marcada: true,
+    motivo: 'Lluvia.',
+    error: null,
+  });
+  // Marcar sin motivo se deja guardar; lo que no deja es cerrar.
+  assert.deepEqual(resolverSeccionSinRegistro(sin, { marcada: true }, 0), { marcada: true, motivo: null, error: null });
+  // Solo el motivo, con la marca ya guardada.
+  assert.deepEqual(resolverSeccionSinRegistro({ marcada: true, motivo: null }, { motivo: 'Paro.' }, 0), {
+    marcada: true,
+    motivo: 'Paro.',
+    error: null,
+  });
+  // Desmarcar borra el motivo (RF-28, RF-35).
+  assert.deepEqual(resolverSeccionSinRegistro(con, { marcada: false }, 0), { marcada: false, motivo: null, error: null });
+  // Marcar una sección con filas es contradecirse.
+  assert.equal(resolverSeccionSinRegistro(sin, { marcada: true, motivo: 'x' }, 2).error, 'con_registros');
+  // Llega una actividad (WhatsApp) sin tocar la marca: se desmarca sola (RF-27, RF-34).
+  assert.deepEqual(resolverSeccionSinRegistro(con, {}, 1), { marcada: false, motivo: null, error: null });
+  // Sin cambios y sin filas, queda como estaba.
+  assert.deepEqual(resolverSeccionSinRegistro(con, {}, 0), { ...con, error: null });
+});
 
 verificarFirmaS3()
   .then(verificarFormulario)
