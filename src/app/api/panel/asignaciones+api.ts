@@ -2,13 +2,14 @@ import { aliasedTable, and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { asignaciones, obras, usuarios, vehiculos } from '@/db/servidor/esquema';
+import { asignaciones, fichasLaborales, obras, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { asignacionNueva } from '@/features/panel/contratos';
-import { alcanzaLaObra, filtroDeObra } from '@/features/servidor/alcance';
+import { alcanzaLaObra, filtroDeObraPedida } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
+import { seOfreceEnSelectores } from '@/shared/rules/ficha';
 
 /**
  * Qué operador lleva qué máquina. `GET` y `POST /api/panel/asignaciones`.
@@ -30,6 +31,8 @@ export async function GET(peticion: Request) {
   return responder(async () => {
     const sesion = await requerirPermiso(peticion, 'asignaciones', 'listar');
     if (sesion instanceof Response) return sesion;
+    // Spec 033, RF-19: dentro de una obra de Proyectos, solo las de esa obra.
+    const obraId = new URL(peticion.url).searchParams.get('obraId');
 
     const filas = await baseServidor()
       .select({
@@ -50,7 +53,7 @@ export async function GET(peticion: Request) {
       .innerJoin(vehiculos, eq(vehiculos.id, asignaciones.vehiculoId))
       .innerJoin(persona, eq(persona.id, asignaciones.usuarioId))
       .leftJoin(obras, eq(obras.id, asignaciones.obraId))
-      .where(and(isNull(asignaciones.eliminadoEn), filtroDeObra(sesion, asignaciones.obraId)))
+      .where(and(isNull(asignaciones.eliminadoEn), filtroDeObraPedida(sesion, asignaciones.obraId, obraId)))
       // Las vigentes primero por ser lo que se consulta; dentro de cada grupo,
       // la más reciente arriba. El `nulls first` es explícito porque Postgres
       // pone los nulos al final en orden ascendente, que aquí es justo al revés
@@ -93,11 +96,29 @@ export async function POST(peticion: Request) {
     // deja escrito que esa persona lleva esa máquina, que es justo lo que el acta
     // no debe decir.
     const [aQuien] = await db
-      .select({ cargo: usuarios.cargo })
+      .select({
+        cargo: usuarios.cargo,
+        activo: usuarios.activo,
+        // Spec 035, RF-21: retirada en Recursos Humanos.
+        retirado: sql<boolean>`exists (
+          select 1 from ${fichasLaborales}
+          where ${fichasLaborales.usuarioId} = ${usuarios.id} and ${fichasLaborales.estado} = 'retirado'
+        )`.mapWith(Boolean),
+      })
       .from(usuarios)
       .where(and(eq(usuarios.id, usuarioId), isNull(usuarios.eliminadoEn)));
 
     if (!aQuien) return errorDePeticion('Esa persona no existe o está dada de baja.', 404);
+
+    // Lo que la pantalla ya no ofrece (spec 035, RF-21), tampoco por un envío directo.
+    if (!seOfreceEnSelectores(aQuien)) {
+      return errorDePeticion(
+        aQuien.retirado
+          ? 'Esa persona está retirada: no se le asignan máquinas.'
+          : 'Esa persona está inactiva: no se le asignan máquinas.',
+        409,
+      );
+    }
 
     if (!operaVehiculos(aQuien.cargo)) {
       return errorDePeticion(

@@ -14,6 +14,9 @@ import { useCallback, useState } from 'react';
 
 import { identificacionDeFila } from '@/shared/rules/vehiculos';
 import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
+import { seOfreceEnSelectores } from '@/shared/rules/ficha';
+
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
 import { api } from './cliente-api';
 import {
@@ -51,9 +54,20 @@ function fechaCorta(iso: string | null): string {
 }
 
 export default function PantallaAsignaciones() {
-  const asignaciones = useListado<AsignacionFila>(useCallback(() => api.asignaciones.listar(), []));
-  const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
-  const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
+  // Spec 033, cambio del 2026-10-27 a RF-17: también dentro de cada obra, con lo de esa obra:
+  // sus asignaciones, sus máquinas y su gente.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const asignaciones = useListado<AsignacionFila>(
+    useCallback(() => api.asignaciones.listar(obraDeLaRuta), [obraDeLaRuta]),
+  );
+  const todosLosVehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
+  const vehiculos = {
+    ...todosLosVehiculos,
+    datos: obraDeLaRuta ? todosLosVehiculos.datos.filter((v) => v.obraId === obraDeLaRuta) : todosLosVehiculos.datos,
+  };
+  const personas = useListado<PersonaFila>(
+    useCallback(() => api.personas.listar(obraDeLaRuta ? { obraId: obraDeLaRuta } : undefined), [obraDeLaRuta]),
+  );
 
   const [vehiculoId, setVehiculoId] = useState<string | null>(null);
   const [usuarioId, setUsuarioId] = useState<string | null>(null);
@@ -68,7 +82,8 @@ export default function PantallaAsignaciones() {
    * dejaba escrito un dato falso. `operaVehiculos` es el mismo catálogo que ya
    * decide quién recibe celular; aquí se hace la misma pregunta.
    */
-  const operadores = personas.datos.filter((p) => operaVehiculos(p.cargo));
+  // Ni inactivos ni retirados (spec 035, RF-21): la lista de asignaciones los sigue mostrando.
+  const operadores = personas.datos.filter((p) => operaVehiculos(p.cargo) && seOfreceEnSelectores(p));
 
   async function crear() {
     if (!vehiculoId || !usuarioId) return;

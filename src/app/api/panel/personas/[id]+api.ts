@@ -14,7 +14,13 @@ import {
   responder,
 } from '@/features/servidor/respuestas';
 import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
-import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
+import { empresaDeLaPersona, reparoDelAccesoSinObra } from '@/shared/rules/empresas';
+import {
+  alcanza,
+  motivoParaNoDarRol,
+  motivoParaNoDarRolEnObra,
+  puedeCambiarRol,
+} from '@/shared/rules/permisos';
 
 /** Editar y dar de baja una persona. `PATCH` y `DELETE /api/panel/personas/:id`. */
 
@@ -27,6 +33,7 @@ const COLUMNAS = {
   cargo: usuarios.cargo,
   obraId: usuarios.obraId,
   activo: usuarios.activo,
+  empresa: usuarios.empresa,
 };
 
 /**
@@ -71,12 +78,28 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const motivo = cambios.rol ? motivoParaNoDarRol(sesion.rol, cambios.rol) : null;
     if (motivo) return errorDePeticion(motivo, 403);
 
+    // Spec 035, RF-11: la auxiliar de RR. HH. escribe en Personas pero no toca accesos. Solo
+    // corrige a quien podría haber registrado —personas sin acceso al panel— y no activa
+    // ni desactiva cuentas, que es dar o quitar un acceso. Para la gerencia no cambia nada.
+    if (cambios.activo !== undefined && !alcanza(sesion.rol, 'personas', 'activar')) {
+      return errorDePeticion('Solo la gerencia activa o desactiva cuentas.', 403);
+    }
+    const [deAntes] = await baseServidor()
+      .select({ rol: usuarios.rol })
+      .from(usuarios)
+      .where(and(eq(usuarios.id, id), isNull(usuarios.eliminadoEn)))
+      .limit(1);
+    if (!deAntes) return noEncontrado('esa persona');
+    if (!puedeCambiarRol(sesion.rol, deAntes.rol)) {
+      return errorDePeticion('Solo la gerencia corrige a quien tiene acceso al panel.', 403);
+    }
+
     // Y con qué módulos queda su obra (spec 017, RF-11). Se mira el rol y la obra
     // **como quedarían**: cambiar de obra a un almacenista también puede dejarlo en
     // una que no lleva almacén.
-    if (cambios.rol || cambios.obraId !== undefined) {
+    if (cambios.rol || cambios.obraId !== undefined || cambios.empresa !== undefined) {
       const [actual] = await baseServidor()
-        .select({ rol: usuarios.rol, obraId: usuarios.obraId })
+        .select({ rol: usuarios.rol, obraId: usuarios.obraId, empresa: usuarios.empresa })
         .from(usuarios)
         .where(eq(usuarios.id, id))
         .limit(1);
@@ -89,6 +112,17 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       if (sinModulo) {
         return Response.json({ error: sinModulo, campos: { rol: sinModulo } }, { status: 400 });
       }
+
+      // Spec 034, RF-13; spec 035, RF-8: el Encargado de OCC y la auxiliar de RR. HH., como
+      // quedarían, son de su empresa y sin obra.
+      const reparo = reparoDelAccesoSinObra({
+        rol: cambios.rol ?? actual.rol,
+        obraId: cambios.obraId === undefined ? actual.obraId : cambios.obraId,
+        empresa: cambios.empresa === undefined ? actual.empresa : cambios.empresa,
+      });
+      if (reparo) {
+        return Response.json({ error: reparo.mensaje, campos: { [reparo.campo]: reparo.mensaje } }, { status: 400 });
+      }
     }
 
     const [fila] = await baseServidor()
@@ -97,7 +131,8 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       .where(and(eq(usuarios.id, id), isNull(usuarios.eliminadoEn)))
       .returning(COLUMNAS);
 
-    return fila ? ok(fila) : noEncontrado('esa persona');
+    // La empresa como se ve: la suya o la de su rol (spec 033, RF-46).
+    return fila ? ok({ ...fila, empresa: empresaDeLaPersona(fila.empresa, fila.rol) }) : noEncontrado('esa persona');
   });
 }
 
@@ -132,6 +167,14 @@ export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
     const sesion = await requerirPermiso(peticion, 'personas', 'escribir');
     if (sesion instanceof Response) return sesion;
+    // Dar de baja quita el acceso y la saca de la lista: es de quien da los accesos, la
+    // gerencia (`activar`). La auxiliar de RR. HH. no borra: retira (spec 035, RF-11, RF-22).
+    if (!alcanza(sesion.rol, 'personas', 'activar')) {
+      return errorDePeticion(
+        'Solo la gerencia da de baja. Si la persona dejó de trabajar, retírela desde su ficha en Recursos Humanos.',
+        403,
+      );
+    }
 
     const fueraDeAlcance = await personaAlcanzable(sesion, id);
     if (fueraDeAlcance) return fueraDeAlcance;

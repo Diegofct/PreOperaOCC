@@ -40,6 +40,8 @@ export interface PersonaEnSesion {
   nombreCompleto: string;
   rol: Rol;
   obraId: string | null;
+  /** El nombre de su obra, para la cabecera del menú (spec 033, RF-10). */
+  obraNombre: string | null;
   /**
    * Los módulos que lleva su obra (spec 017). Viajan con la sesión y no se
    * consultan en cada ruta: la lectura de la sesión ya va a la base en cada
@@ -119,6 +121,7 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
       nombreCompleto: usuarios.nombreCompleto,
       rol: usuarios.rol,
       obraId: usuarios.obraId,
+      obraNombre: obras.nombre,
       almacenActivo: obras.almacenActivo,
       canteraActivo: obras.canteraActivo,
       laboratorioActivo: obras.laboratorioActivo,
@@ -155,6 +158,7 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
     nombreCompleto: fila.nombreCompleto,
     rol: fila.rol,
     obraId: fila.obraId,
+    obraNombre: fila.obraNombre ?? null,
     modulosDeObra: fila.obraId
       ? {
           almacen: fila.almacenActivo ?? true,

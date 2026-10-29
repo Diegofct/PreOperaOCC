@@ -159,6 +159,10 @@ function esTablaInexistente(fallo: unknown): boolean {
  */
 export function duplicadoDe(indice: string | undefined): { mensaje: string; campo?: string } {
   switch (indice) {
+    case 'ux_corte_dueno_fecha':
+      // Spec 033, RF-36. La ruta lo mira antes para nombrar la fecha; esto es el respaldo
+      // si dos registran el mismo día a la vez.
+      return { mensaje: 'Ya hay un corte vigente con esa fecha; anúlalo para registrar otro.', campo: 'fechaCorte' };
     case 'ux_obras_codigo':
       return { mensaje: 'Ya existe una obra con ese código.', campo: 'codigo' };
     case 'ux_usuarios_usuario':

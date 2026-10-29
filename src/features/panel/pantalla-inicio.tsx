@@ -34,14 +34,17 @@
  * Por eso la redirección vive aquí y no en el ingreso, que no pasaría por las
  * otras dos puertas.
  */
-import { Link, Redirect } from 'expo-router';
+import { Link, Redirect, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Spacing } from '@/constants/theme';
 import { RecuadroDelAsistente } from '@/features/asistente/recuadro-del-inicio';
 import { horasLegibles } from '@/shared/rules/horas';
-import { alcanza, moduloDeEntrada } from '@/shared/rules/permisos';
+import { PantallaEmpresas } from '@/features/empresas/pantalla-empresas';
+import { PantallaSinAcceso } from '@/features/empresas/pantallas-de-aviso';
+import { destinoAlEntrar, rutaDeObra } from '@/shared/rules/empresas';
+import { alcanza } from '@/shared/rules/permisos';
 import { nombreDeAmparo } from '@/shared/rules/polizas';
 
 import { api } from './cliente-api';
@@ -64,7 +67,6 @@ import {
   type ResumenFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
-import { ENLACES_DE_MODULO } from './modulos';
 import { usePersona } from './sesion';
 
 /** Una cifra del resumen, tal como se lee en la tabla equivalente. */
@@ -74,26 +76,31 @@ interface FilaResumen {
   valor: string;
 }
 
+/**
+ * `/panel` (spec 033, RF-1, RF-6 a RF-9): la gerencia ve las tarjetas de las empresas;
+ * los demás van directo a lo suyo —el residente a su obra, el laboratorista a Geolab, el
+ * almacenista y el encargado de planta a su módulo—, sin pasar por tarjetas que no les
+ * tocan (H7). El resumen del día que era esta portada pasa a ser la de cada obra (T16).
+ */
 export default function PantallaInicioPanel() {
-  const { rol } = usePersona();
-  const entrada = moduloDeEntrada(rol);
-
-  // El corte va en un componente aparte y antes de la portada: así quien se va a
-  // su módulo no llega a pedir el resumen, que el servidor le negaría.
-  if (entrada && entrada !== 'inicio') {
-    return <Redirect href={ENLACES_DE_MODULO[entrada].ruta} />;
-  }
-  return <Portada />;
+  const persona = usePersona();
+  if (persona.rol === 'admin') return <PantallaEmpresas />;
+  const destino = destinoAlEntrar({ rol: persona.rol, obras: persona.obraId ? [persona.obraId] : [] });
+  return destino ? <Redirect href={destino as Href} /> : <PantallaSinAcceso />;
 }
 
-function Portada() {
+/**
+ * El resumen del día: «Cómo va la obra» o «Su obra hoy». Desde la spec 033 es la portada
+ * de una obra en Proyectos, y con `obraId` cuenta solo lo de esa obra (RF-19).
+ */
+export function Portada({ obraId }: { obraId: string }) {
   const { rol } = usePersona();
   const esGerencia = alcanza(rol, 'obras', 'escribir');
 
   const [periodo, setPeriodo] = useState<PeriodoResumen>('hoy');
 
   const resumen = useListado<ResumenFila>(
-    useCallback(async () => [await api.resumen.de(periodo)], [periodo]),
+    useCallback(async () => [await api.resumen.de(periodo, obraId)], [periodo, obraId]),
   );
 
   const datos = resumen.datos[0];
@@ -101,10 +108,10 @@ function Portada() {
   return (
     <MarcoPantalla
       modulo="inicio"
-      titulo={esGerencia ? 'Cómo va la operación' : 'Su obra hoy'}
+      titulo={esGerencia ? 'Cómo va la obra' : 'Su obra hoy'}
       descripcion={
         esGerencia
-          ? 'Lo que están haciendo las obras: qué se inspeccionó, cuánto trabajaron las máquinas y la gente, y qué quedó sin cerrar.'
+          ? 'Lo que está haciendo esta obra: qué se inspeccionó, cuánto trabajaron las máquinas y la gente, y qué quedó sin cerrar.'
           : 'Lo que falta por hacer hoy en su obra. Lo de arriba es lo que no puede quedarse sin resolver antes de que termine la jornada.'
       }
       error={resumen.error}
@@ -116,7 +123,7 @@ function Portada() {
       {!datos ? null : esGerencia ? (
         <VistaGerencia datos={datos} periodo={periodo} onPeriodo={setPeriodo} />
       ) : (
-        <VistaResidente datos={datos} />
+        <VistaResidente datos={datos} obraId={obraId} />
       )}
     </MarcoPantalla>
   );
@@ -138,7 +145,7 @@ function AvisoDePolizas({ polizas }: { polizas: ResumenFila['polizas'] }) {
       </Aviso>
       <Acciones>
         {[...new Map(polizas.map((p) => [p.obraId, p.obra])).entries()].map(([obraId, obra]) => (
-          <Link key={obraId} href={`/panel/contrato?obra=${obraId}`} asChild>
+          <Link key={obraId} href={rutaDeObra(obraId, 'contrato') as Href} asChild>
             <Pressable accessibilityRole="link">
               <Etiqueta tono="atencion">{`Ver el contrato de ${obra}`}</Etiqueta>
             </Pressable>
@@ -268,7 +275,7 @@ function VistaGerencia({
 /* Residente                                                                 */
 /* ------------------------------------------------------------------------ */
 
-function VistaResidente({ datos }: { datos: ResumenFila }) {
+function VistaResidente({ datos, obraId }: { datos: ResumenFila; obraId: string }) {
   const todoEnOrden =
     datos.sinInspeccionar === 0 &&
     datos.noAptos === 0 &&
@@ -327,18 +334,18 @@ function VistaResidente({ datos }: { datos: ResumenFila }) {
 
       <Seccion titulo="Atajos">
         <Acciones>
-          <Enlace ruta="/panel/bitacoras" titulo="Llenar la bitácora de hoy" />
-          <Enlace ruta="/panel/preoperacionales" titulo="Ver los preoperacionales" />
-          <Enlace ruta="/panel/asignaciones" titulo="Revisar asignaciones" />
+          <Enlace ruta={rutaDeObra(obraId, 'bitacoras')} titulo="Llenar la bitácora de hoy" />
+          <Enlace ruta={rutaDeObra(obraId, 'preoperacionales')} titulo="Ver los preoperacionales" />
+          <Enlace ruta={rutaDeObra(obraId, 'asignaciones')} titulo="Revisar asignaciones" />
         </Acciones>
       </Seccion>
     </>
   );
 }
 
-function Enlace({ ruta, titulo }: { ruta: '/panel/bitacoras' | '/panel/preoperacionales' | '/panel/asignaciones'; titulo: string }) {
+function Enlace({ ruta, titulo }: { ruta: string; titulo: string }) {
   return (
-    <Link href={ruta} asChild>
+    <Link href={ruta as Href} asChild>
       <Pressable>
         <Boton titulo={titulo} tono="secundario" onPress={() => {}} />
       </Pressable>

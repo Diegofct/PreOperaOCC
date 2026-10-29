@@ -91,16 +91,20 @@ export interface ListadoFiltrado<T> {
  * @param ordenar  el orden elegido en la tabla, si se puede ordenar (spec 015).
  *   Tiene que venir de `useCallback`: cambia de identidad solo cuando cambia el
  *   orden, y eso es lo que decide si se vuelve a ordenar.
+ * @param claveDeBusqueda  el nombre de la búsqueda en la dirección. Cambia solo cuando
+ *   hay dos listados en la misma página (spec 035: el personal y, en la ficha, la carpeta
+ *   de documentos), para que una búsqueda no se le meta a la otra.
  */
 export function useListadoFiltrado<T>(
   filas: T[],
   textoDe: (fila: T) => (string | null | undefined)[],
   pasaFiltros: (fila: T) => boolean = () => true,
   ordenar?: (filas: T[]) => T[],
+  claveDeBusqueda = 'buscar',
 ): ListadoFiltrado<T> {
   // La búsqueda vive en la dirección: recargar no la pierde y el enlace se puede
   // pasar. El ayudante es el mismo que usa el periodo de los preoperacionales.
-  const [busqueda, setBusqueda] = useParametroDeDireccion('buscar', '');
+  const [busqueda, setBusqueda] = useParametroDeDireccion(claveDeBusqueda, '');
   const [paginaActual, setPaginaActual] = useState(1);
 
   const coincidentes = useMemo(() => {

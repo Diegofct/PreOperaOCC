@@ -34,6 +34,7 @@ import {
 import { fechaDeJornada, restarDias } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
@@ -95,7 +96,11 @@ export default function PantallaLaboratorio() {
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
   const obrasConLaboratorio = obras.datos.filter((o) => o.laboratorioActivo);
-  const [obraElegida, setObraElegida] = useState<string | null>(null);
+  const [obraDelSelector, setObraElegida] = useState<string | null>(null);
+  // Spec 033, RF-19: dentro de una obra de Proyectos, esa obra, sin selector. En Geolab
+  // sigue el selector con «Todas» (RF-26).
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraElegida = obraDeLaRuta ?? obraDelSelector;
   const [pestana, setPestana] = useState<Pestana>('granulometrias');
 
   const hoy = fechaDeJornada();
@@ -284,7 +289,7 @@ export default function PantallaLaboratorio() {
 
           <Seccion titulo="Granulometrías">
             <Formulario>
-              {esGerencia ? (
+              {esGerencia && !obraDeLaRuta ? (
                 <Selector
                   etiqueta="Obra"
                   valor={obraElegida}

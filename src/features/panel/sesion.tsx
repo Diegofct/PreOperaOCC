@@ -84,7 +84,10 @@ export function ProveedorSesionPanel({ children }: { children: ReactNode }) {
 
   const ingresar = useCallback(async (datos: CredencialesIngreso) => {
     try {
-      setPersona(await api.sesion.ingresar(datos));
+      await api.sesion.ingresar(datos);
+      // La sesión completa, como al recargar: la respuesta del ingreso no trae los
+      // módulos ni el nombre de su obra, y el menú los necesita (spec 033, RF-10).
+      setPersona(await api.sesion.quienSoy());
       return null;
     } catch (fallo) {
       return mensajeDe(fallo);

@@ -13,14 +13,17 @@ import { useCallback, useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useLugarDelPanel, useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, CampoDeFecha, Selector } from '@/features/panel/componentes';
 import type { ConsultaDeReporte, ObraFila, PestanaDeReporte } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
+import { pestanasDeReportes } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { esTipoDePeriodo, periodoDe, periodoVecino, type TipoDePeriodo } from '@/shared/rules/periodos';
+import { alcanza } from '@/shared/rules/permisos';
 
 import { hojasDelReporte, paginaParaImprimir, textoDelPeriodo, TITULO_DE_PESTANA } from './exportar';
 import { PestanaMantenimiento } from './pestana-mantenimiento';
@@ -38,6 +41,13 @@ const PESTANAS: readonly PestanaDeReporte[] = [
   'clima',
 ];
 
+/** Qué dice la pantalla en cada lugar: solo las pestañas que ahí se ven (spec 033). */
+const DESCRIPCION: Record<'occ' | 'geolab' | 'obra', string> = {
+  occ: 'Los equipos de cada obra, por día, semana o mes: horas y kilómetros de las máquinas y sus mantenimientos.',
+  geolab: 'Los ensayos de control de calidad de cada obra, por día, semana o mes: cuántos se hicieron y cuántos cumplen.',
+  obra: 'Lo que guardan las bitácoras, por día, semana o mes: máquinas, mantenimiento, personal, actividades, cantera, control de calidad y clima.',
+};
+
 const TIPOS: readonly { valor: TipoDePeriodo; titulo: string }[] = [
   { valor: 'dia', titulo: 'Día' },
   { valor: 'semana', titulo: 'Semana' },
@@ -49,14 +59,19 @@ const SIGUIENTE: Record<TipoDePeriodo, string> = { dia: 'Día siguiente', semana
 
 export default function PantallaReportes() {
   const { rol } = usePersona();
-  const esGerencia = rol === 'admin';
+  // Quien lista obras las elige: la gerencia y el Encargado de OCC (spec 034), como en las
+  // demás pantallas.
+  const esGerencia = alcanza(rol, 'obras', 'listar');
 
-  // Solo la gerencia elige obra: el residente ve la suya, la elija o no (RF-2).
+  // Solo quien ve todas las obras elige: el residente ve la suya, la elija o no (RF-2).
   const obras = useListado<ObraFila>(
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
   const activas = obras.datos.filter((o) => o.activa);
-  const [obraElegida, setObraElegida] = useParametroDeDireccion('obra', '');
+  const [obraDelParametro, setObraElegida] = useParametroDeDireccion('obra', '');
+  // Spec 033, RF-19: dentro de una obra de Proyectos, esa obra, sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraElegida = obraDeLaRuta ?? obraDelParametro;
   // Sin obra elegida, la primera activa: un reporte necesita una.
   const primeraActiva = activas[0]?.id;
   useEffect(() => {
@@ -68,8 +83,12 @@ export default function PantallaReportes() {
   const tipo: TipoDePeriodo = esTipoDePeriodo(tipoLeido) ? tipoLeido : 'semana';
   const [fechaLeida, setFecha] = useParametroDeDireccion('fecha', hoy);
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaLeida) ? fechaLeida : hoy;
-  const [pestanaLeida, setPestana] = useParametroDeDireccion('pestana', 'maquinas');
-  const pestana: PestanaDeReporte = (PESTANAS as readonly string[]).includes(pestanaLeida)
+  // Spec 033, RF-25, RF-27: en OCC las de los equipos, en Geolab la de los ensayos.
+  const lugar = useLugarDelPanel();
+  const deLaEmpresa = pestanasDeReportes(lugar?.tipo === 'empresa' ? lugar.empresa : null);
+  const pestanas = deLaEmpresa ? PESTANAS.filter((p) => (deLaEmpresa as readonly string[]).includes(p)) : PESTANAS;
+  const [pestanaLeida, setPestana] = useParametroDeDireccion('pestana', pestanas[0]);
+  const pestana: PestanaDeReporte = (pestanas as readonly string[]).includes(pestanaLeida)
     ? (pestanaLeida as PestanaDeReporte)
     : 'maquinas';
 
@@ -123,12 +142,12 @@ export default function PantallaReportes() {
       modulo="reportes"
       exigeObra
       titulo="Reportes"
-      descripcion="Lo que guardan las bitácoras, por día, semana o mes: máquinas, mantenimiento, personal, actividades, cantera, control de calidad y clima."
+      descripcion={DESCRIPCION[lugar?.tipo === 'empresa' && lugar.empresa !== 'elemental' ? lugar.empresa : 'obra']}
       error={obras.error}
       cargando={obras.cargando}
     >
       <View style={estilos.encabezado}>
-        {esGerencia ? (
+        {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
             valor={obraElegida || null}
@@ -168,7 +187,7 @@ export default function PantallaReportes() {
       {avisoDeSalida ? <Aviso tono="error">{avisoDeSalida}</Aviso> : null}
 
       <Acciones>
-        {PESTANAS.map((p) => (
+        {pestanas.map((p) => (
           <Boton
             key={p}
             titulo={TITULO_DE_PESTANA[p]}

@@ -18,11 +18,14 @@
  * motivo de revisión cuando lo hay (RF-17 a RF-19)— para decidir qué abrir. El
  * detalle, con la corrección y la aprobación, va aparte (tareas T20 a T22).
  */
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 
 import { alcanza } from '@/shared/rules/permisos';
 import { etiquetaDeCategoria, type EstadoMensajeWhatsapp } from '@/shared/rules/whatsapp';
+
+import { useLugarDelPanel, useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+import { rutaDeObra } from '@/shared/rules/empresas';
 
 import { api } from '../cliente-api';
 import {
@@ -89,8 +92,8 @@ function cuenta(n: number, singular: string, plural: string): string {
 /** Adónde lleva el botón de un mensaje del historial (RF-59). */
 interface Enlace {
   titulo: string;
-  ruta: '/panel/bitacoras' | '/panel/cantera' | '/panel/almacen';
-  params: Record<string, string>;
+  /** Ya en la obra del mensaje (spec 033): `/panel/proyectos/<obra>/<página>?…`. */
+  ruta: string;
 }
 
 /**
@@ -104,7 +107,9 @@ function dondeQuedo(p: PropuestaFila): { renglones: string[]; enlace: Enlace | n
     r.repetidos ? cuenta(r.repetidos, 'ya estaba guardado', 'ya estaban guardados') : null,
     r.apartados ? `${cuenta(r.apartados, 'renglón', 'renglones')} en «No se pudo guardar»` : null,
   ].filter((x): x is string => !!x);
-  const delDia = { obraId: p.obraId, ...(p.fechaHecho ? { fecha: p.fechaHecho } : {}) };
+  // A la página de la obra del mensaje, el día del hecho si lo hay.
+  const enLaObra = (pagina: string, conDia = true) =>
+    `${rutaDeObra(p.obraId, pagina)}${conDia && p.fechaHecho ? `?${new URLSearchParams({ fecha: p.fechaHecho })}` : ''}`;
 
   switch (p.estado) {
     case 'en_espera':
@@ -114,19 +119,19 @@ function dondeQuedo(p: PropuestaFila): { renglones: string[]; enlace: Enlace | n
           ...(viajes ? [`${cuenta(viajes, 'viaje', 'viajes')} ya en Control Cantera`] : []),
           ...extra,
         ],
-        enlace: viajes ? { titulo: 'Ver viajes', ruta: '/panel/cantera', params: delDia } : null,
+        enlace: viajes ? { titulo: 'Ver viajes', ruta: enLaObra('cantera') } : null,
       };
     case 'guardado':
       if (r.modulo === 'cantera') {
         return {
           renglones: [`Control Cantera: ${cuenta(viajes, 'viaje', 'viajes')}`, ...extra],
-          enlace: viajes ? { titulo: 'Ver viajes', ruta: '/panel/cantera', params: delDia } : null,
+          enlace: viajes ? { titulo: 'Ver viajes', ruta: enLaObra('cantera') } : null,
         };
       }
       if (r.modulo === 'almacen') {
         return {
           renglones: [`Almacén: ${cuenta(viajes, 'movimiento', 'movimientos')}`, ...extra],
-          enlace: viajes ? { titulo: 'Ver almacén', ruta: '/panel/almacen', params: { obraId: p.obraId } } : null,
+          enlace: viajes ? { titulo: 'Ver almacén', ruta: enLaObra('almacen', false) } : null,
         };
       }
       return {
@@ -135,7 +140,7 @@ function dondeQuedo(p: PropuestaFila): { renglones: string[]; enlace: Enlace | n
           ...(viajes ? [`${cuenta(viajes, 'viaje', 'viajes')} en Control Cantera`] : []),
           ...extra,
         ],
-        enlace: r.parteId ? { titulo: 'Ver bitácora', ruta: '/panel/bitacoras', params: delDia } : null,
+        enlace: r.parteId ? { titulo: 'Ver bitácora', ruta: enLaObra('bitacoras') } : null,
       };
     case 'aprobado':
       return { renglones: ['Aprobado a mano (antes del guardado automático)'], enlace: null };
@@ -168,10 +173,22 @@ export default function PantallaBandeja() {
   const { rol } = usePersona();
   // La gerencia ve todas las obras: asocia grupos y puede filtrar por obra (RF-9, RF-14).
   const esGerencia = alcanza(rol, 'obras', 'listar');
+  // Asociar grupos es solo de la gerencia (su ruta exige `requerirAdmin`). El Encargado de
+  // OCC (spec 034) también lista obras —filtra por obra—, pero no asocia grupos.
+  const asociaGrupos = rol === 'admin';
 
-  const [pestana, setPestana] = useState<Pestana>('historial');
+  const [pestanaElegida, setPestana] = useState<Pestana>('historial');
+  // Spec 033, RF-23: en OCC, lo de vehículos y maquinaria de todas las obras. Las demás
+  // pestañas son del día de cada obra (armar la bitácora, reportes esperados…): van en la obra.
+  const lugar = useLugarDelPanel();
+  const empresa = lugar?.tipo === 'empresa' ? lugar.empresa : undefined;
+  const pestanas = empresa === 'occ' ? PESTANAS.filter((p) => p.valor === 'historial') : PESTANAS;
+  const pestana: Pestana = empresa === 'occ' ? 'historial' : pestanaElegida;
   const [estado, setEstado] = useState<EstadoMensajeWhatsapp>('guardado');
-  const [obraId, setObraId] = useState<string | null>(null);
+  const [obraDelSelector, setObraId] = useState<string | null>(null);
+  // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraId = obraDeLaRuta ?? obraDelSelector;
   // El reporte abierto. Al volver, la bandeja se vuelve a pedir: pudo cambiar.
   const [abierta, setAbierta] = useState<string | null>(null);
 
@@ -183,8 +200,8 @@ export default function PantallaBandeja() {
   const { desde, hasta } = fechas.consultado;
   const propuestas = useListado<PropuestaFila>(
     useCallback(
-      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }),
-      [estado, obraId, desde, hasta],
+      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }, empresa),
+      [estado, obraId, desde, hasta, empresa],
     ),
   );
 
@@ -266,7 +283,7 @@ export default function PantallaBandeja() {
               <Boton
                 titulo={enlace.titulo}
                 tono="secundario"
-                onPress={() => router.push({ pathname: enlace.ruta, params: enlace.params })}
+                onPress={() => router.push(enlace.ruta as Href)}
               />
             ) : null}
           </>
@@ -312,13 +329,15 @@ export default function PantallaBandeja() {
           }}
         />
       ) : null}
-      {!abierta && esGerencia ? (
+      {/* Asociar los grupos a su obra es de todas las obras: dentro de una obra no va
+          (spec 033, RF-24); la gerencia lo tiene en Reportes de WhatsApp de OCC. */}
+      {!abierta && asociaGrupos && !obraDeLaRuta ? (
         <GruposDeWhatsapp opcionesDeObra={opcionesDeObra} alAsociar={propuestas.recargar} />
       ) : null}
 
       {abierta ? null : (
         <Acciones>
-          {PESTANAS.map((p) => (
+          {pestanas.map((p) => (
             <Boton
               key={p.valor}
               titulo={p.titulo}
@@ -343,7 +362,7 @@ export default function PantallaBandeja() {
             onChange={(v) => setEstado((v as EstadoMensajeWhatsapp | null) ?? 'guardado')}
             ancho={200}
           />
-          {esGerencia ? (
+          {esGerencia && !obraDeLaRuta ? (
             <Selector
               etiqueta="Obra"
               valor={obraId}

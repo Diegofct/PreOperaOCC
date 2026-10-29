@@ -8,6 +8,7 @@
 import { useCallback, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, Selector } from '@/features/panel/componentes';
 import type { ObraFila } from '@/features/panel/contratos';
@@ -31,7 +32,10 @@ export default function PantallaContrato() {
     useCallback(() => (esGerencia ? api.obras.listar() : Promise.resolve([])), [esGerencia]),
   );
   const activas = obras.datos.filter((o) => o.activa);
-  const [obraElegida, setObraElegida] = useParametroDeDireccion('obra', '');
+  const [obraDelParametro, setObraElegida] = useParametroDeDireccion('obra', '');
+  // Spec 033, RF-19: dentro de una obra de Proyectos, esa obra, sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraElegida = obraDeLaRuta ?? obraDelParametro;
   const primeraActiva = activas[0]?.id;
   useEffect(() => {
     if (esGerencia && !obraElegida && primeraActiva) setObraElegida(primeraActiva);
@@ -50,7 +54,7 @@ export default function PantallaContrato() {
       cargando={obras.cargando}
     >
       <View style={estilos.encabezado}>
-        {esGerencia ? (
+        {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
             valor={obraElegida || null}

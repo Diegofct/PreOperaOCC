@@ -108,7 +108,14 @@ function aFila(fila: {
  */
 export async function leerBandeja(
   sesion: PersonaEnSesion,
-  filtro: { estado: EstadoMensajeWhatsapp; obraId: string | null; desde: string; hasta: string },
+  filtro: {
+    estado: EstadoMensajeWhatsapp;
+    obraId: string | null;
+    desde: string;
+    hasta: string;
+    /** Spec 033, RF-23: las categorías de la empresa; `null`, todas. */
+    categorias?: readonly string[] | null;
+  },
 ): Promise<PropuestaFila[]> {
   // El mensaje con su grupo y su obra: la obra sale de `obraDelMensaje`.
   const filas = await baseServidor()
@@ -121,6 +128,7 @@ export async function leerBandeja(
         filtroDeObraEstricto(sesion, obraDelMensaje),
         veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
         eq(whatsappMensajes.estado, filtro.estado),
+        filtro.categorias ? inArray(whatsappMensajes.categoria, [...filtro.categorias]) : undefined,
         sql`${diaDelMensaje} between ${filtro.desde} and ${filtro.hasta}`,
         // Lo que complementa a un mensaje que existe va dentro de él (RF-20).
         sql`not exists (select 1 from whatsapp_mensajes p where p.id = ${whatsappMensajes.complementaA})`,

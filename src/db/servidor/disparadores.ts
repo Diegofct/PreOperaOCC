@@ -44,6 +44,10 @@ const TABLAS_CON_RELOJ = [
   // límite dice cuándo lo cambió la gerencia.
   'asistente_conversaciones',
   'asistente_limites',
+  // Spec 033: quién cambió los datos de la empresa y cuándo.
+  'empresas',
+  // Spec 035: cuándo se cambió la ficha laboral.
+  'fichas_laborales',
 ];
 
 const FUNCION = `

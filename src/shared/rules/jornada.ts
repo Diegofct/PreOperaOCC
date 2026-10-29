@@ -330,6 +330,16 @@ export function lecturaAnterior(
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
 /** `2026-10-18` → `18-oct`, como se escriben las fechas en la obra. */
+/**
+ * ¿Es una fecha `YYYY-MM-DD` que existe? `2026-02-30` no: `Date` la toma por el 2 de marzo,
+ * así que se compara de vuelta. La usan Documentos (spec 034) y la ficha laboral (035).
+ */
+export function esFechaReal(texto: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) return false;
+  const dia = new Date(`${texto}T00:00:00Z`);
+  return !Number.isNaN(dia.getTime()) && dia.toISOString().startsWith(texto);
+}
+
 export function diaCorto(fecha: string): string {
   const [, mes, dia] = fecha.split('-').map(Number);
   return `${dia}-${MESES_CORTOS[mes - 1]}`;

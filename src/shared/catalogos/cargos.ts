@@ -113,6 +113,16 @@ export const CARGOS = [
   // ese módulo. Distinto de «Control de Calidad», que es personal de obra sin acceso
   // al panel.
   { id: 'laboratorista', nombre: 'Laboratorista', rolSugerido: 'laboratorista', operaVehiculos: false },
+  // Spec 034, RF-12. Maneja los equipos y vehículos de OCC desde el panel; no recibe
+  // celular (RF-17): si además opera, es otra persona con su acceso de operador.
+  { id: 'encargado_occ', nombre: 'Encargado de OCC', rolSugerido: 'encargado_occ', operaVehiculos: false },
+  // Spec 035, RF-8. Las auxiliares administrativas de Elemental que llevan Recursos Humanos.
+  {
+    id: 'auxiliar_rrhh',
+    nombre: 'Auxiliar de Recursos Humanos',
+    rolSugerido: 'auxiliar_rrhh',
+    operaVehiculos: false,
+  },
 ] as const satisfies readonly DefinicionCargo[];
 
 export type Cargo = (typeof CARGOS)[number]['id'];

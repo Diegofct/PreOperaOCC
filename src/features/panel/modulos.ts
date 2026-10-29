@@ -10,6 +10,7 @@
  * la tabla y se olvida aquí, TypeScript lo dice — el `Record` obliga a que estén
  * todos.
  */
+import { lugarDeLaRuta, tituloDelLugar } from '@/shared/rules/empresas';
 import type { Modulo } from '@/shared/rules/permisos';
 
 export const ENLACES_DE_MODULO = {
@@ -65,6 +66,9 @@ const SISTEMA = 'Control de Obra OCC';
  * 2026-10-06). Sale de la ruta, igual que el módulo resaltado del menú.
  */
 export function tituloDeLaPestana(ruta: string): string {
+  // Dentro de una empresa, «<Módulo> · <Empresa>» (spec 033, RF-48).
+  const enEmpresa = tituloDelLugar(lugarDeLaRuta(ruta));
+  if (enEmpresa) return enEmpresa;
   if (/^\/panel\/laboratorio\/[^/]+\/informe\/?$/.test(ruta)) {
     return `Informe de granulometría · ${SISTEMA}`;
   }

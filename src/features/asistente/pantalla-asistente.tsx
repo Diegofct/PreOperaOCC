@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 
 import { FuentePanel, Panel, Radio, Sombra, Spacing, TextoPanel } from '@/constants/theme';
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api, mensajeDe, preguntarAlAsistente } from '@/features/panel/cliente-api';
 import { Aviso } from '@/features/panel/componentes';
 import type { ConversacionDelAsistente, CupoDelAsistente, MensajeDelAsistente } from '@/features/panel/contratos';
@@ -85,6 +86,8 @@ interface EnCurso {
 export default function PantallaAsistente() {
   const angosto = useEsAngosto();
   const persona = usePersona();
+  // Spec 033, RF-30: abierto dentro de una obra, responde por defecto sobre ella.
+  const obraDeLaRuta = useObraDeLaRuta();
   // RF-56 a RF-59: la gerencia ve además el uso y los límites, en su propia vista.
   const veUso = alcanza(persona.rol, 'asistente', 'escribir');
   const [vista, setVista] = useParametroDeDireccion('vista', 'conversaciones');
@@ -134,7 +137,7 @@ export default function PantallaAsistente() {
     let idFinal = id;
     try {
       await preguntarAlAsistente(
-        { pregunta, conversacionId: id || null, archivos: conArchivos },
+        { pregunta, conversacionId: id || null, archivos: conArchivos, obraId: obraDeLaRuta },
         (e) => {
           if (e.evento === 'conversacion') idFinal = e.id;
           else if (e.evento === 'texto') setEnCurso((c) => c && { ...c, texto: c.texto + e.texto, consultando: null });

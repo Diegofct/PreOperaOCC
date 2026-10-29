@@ -180,8 +180,8 @@ function VentanaDePoliza({
   );
 }
 
-/** Pedir el motivo de una anulación (RF-26, RF-29). */
-function VentanaDeAnular({
+/** Pedir el motivo de una anulación (RF-26, RF-29). También la usan los documentos (spec 034, RF-43). */
+export function VentanaDeAnular({
   titulo,
   aviso,
   alCerrar,

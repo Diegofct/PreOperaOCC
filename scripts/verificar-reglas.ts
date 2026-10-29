@@ -66,6 +66,7 @@ import {
   sinObraAsignada,
   modulosVisibles,
   puedeCambiarRol,
+  rolesQuePuedeDar,
   type Modulo,
   type Rol,
   TODOS_LOS_MODULOS,
@@ -162,6 +163,7 @@ import {
   tokenDeIntegracionValido,
 } from '../src/features/servidor/guardia-integracion';
 import {
+  CATEGORIAS_DE_WHATSAPP,
   abscisaDeTexto,
   reconocerEnsayo,
   equiposTomados,
@@ -258,7 +260,108 @@ import {
 } from '../src/shared/rules/contrato';
 import { enPesos } from '../src/shared/rules/pesos';
 import { AVISO_FALTA_PLACA, identificacionDelVehiculo, normalizarPlaca } from '../src/shared/rules/vehiculos';
+import {
+  alcanzaLaEmpresa,
+  alcanzaLaObraDeLaRuta,
+  categoriasDeWhatsappDe,
+  destinoAlEntrar,
+  DIRECCION_DE_LICITAPP,
+  EMPRESAS,
+  EMPRESAS_CON_CORTE,
+  empresaDeLaPersona,
+  empresaDelAccesoSinObra,
+  reparoDelAccesoSinObra,
+  empresaDelLugar,
+  lugarDeLaRuta,
+  menuDeEmpresa,
+  menuDelLugar,
+  pestanasDeReportes,
+  tituloDelLugar,
+  menuDeObra,
+  rutaNueva,
+  rutaRenombrada,
+  rutaRenombradaPara,
+} from '../src/shared/rules/empresas';
+import {
+  consolidado,
+  diferenciaConElAnterior,
+  estaDesactualizado,
+  fechaDelCorte,
+  pesosDeTexto,
+  resumenDeProyectos,
+  textoDeDiferencia,
+  ultimoCorte,
+  validarCorte,
+  type CorteParaRegla,
+} from '../src/shared/rules/cortes';
 import { polizasConAviso, vigenciaDePoliza, type PolizaParaAviso } from '../src/shared/rules/polizas';
+import {
+  alcanzaLaPersona,
+  avisosDeLaPersona,
+  camposCambiados,
+  faltasDeFichaCompleta,
+  faltasDeLaFicha,
+  faltasDelRetiro,
+  faltasDeLaRetirada,
+  faltasParaRetirar,
+  nombreDeEstadoLaboral,
+  nombreDeTipoDeContrato,
+  resumenDelPersonal,
+  seOfreceEnSelectores,
+  veElSalario,
+  type DatosDeLaFicha,
+  type FichaGuardable,
+  type PersonaParaAvisos,
+} from '../src/shared/rules/ficha';
+import {
+  aprobacionDeLaSolicitud,
+  camposCorregidos,
+  coincideLaSolicitud,
+  ESTADOS_DE_SOLICITUD,
+  estadoTrasComprasYRecibos,
+  estaVencida,
+  faltaDelMotivo,
+  faltasDeLaCompra,
+  faltasDelRecibo,
+  faltasDeLaSolicitud,
+  faltasPorCampo,
+  marcasDeLaSolicitud,
+  nombreDeEstadoDeSolicitud,
+  numeroDeSolicitud,
+  ordenDeLaBandeja,
+  ordenDelLugar,
+  PASOS_DE_SOLICITUD,
+  pasaLosFiltros,
+  porQueNoPuedeDar,
+  puedeDar,
+  resumenDeLaBandeja,
+  solicitudAbierta,
+  veElGasto,
+  veLosValores,
+  type DatosDeLaCompra,
+  type DatosDeLaSolicitud,
+  type EstadoDeSolicitud,
+  type FiltrosDeLaBandeja,
+  type RenglonParaCompra,
+  type RenglonParaRecibir,
+  type SolicitudEnLista,
+  type SolicitudParaPaso,
+} from '../src/shared/rules/compras';
+import {
+  clasesDe,
+  coincideBusqueda,
+  esClaseDe,
+  estadoDelVencimiento,
+  extensionDe,
+  faltasDelDocumento,
+  llevaPrecio,
+  nombreDeClase,
+  resumenDeVencimientos,
+  revisarDocumento,
+  tipoPorFirma,
+  TAMANO_MAXIMO_DE_DOCUMENTO,
+  type LugarDeDocumentos,
+} from '../src/shared/rules/documentos';
 import {
   claveDeItem,
   copiarParaNuevaVersion,
@@ -288,6 +391,7 @@ import {
   grupoDeFecha,
   MODULOS_CONSULTABLES,
   modulosDeAnulados,
+  indicacionDeObraPorDefecto,
   obraAlAlcance,
   preguntasQueQuedan,
   resumenDeRegistrados,
@@ -318,8 +422,6 @@ import {
 } from '../src/shared/rules/ensayos-de-obra';
 import {
   anchoDelContenido,
-  GRUPOS_DEL_MENU,
-  gruposDelMenu,
   regimenDelMenu,
 } from '../src/shared/rules/menu';
 import { moduloDeLaRuta, tituloDeLaPestana } from '../src/features/panel/modulos';
@@ -2684,10 +2786,11 @@ prueba('el rechazo del servidor dice quién sí puede hacerlo', () => {
     motivoDeRechazo('obras', 'escribir'),
     'No puede crear o modificar este registro: lo hace la gerencia.',
   );
-  // Al almacenista que abre Bitácoras se le dice quién la lleva.
+  // Al almacenista que abre Bitácoras se le dice quién la lleva. Desde la spec 034 el
+  // Encargado de OCC también la consulta (la de maquinaria de OCC).
   assert.equal(
     motivoDeRechazo('bitacoras', 'listar'),
-    'No puede consultar este listado: lo hacen la gerencia y el residente o el director.',
+    'No puede consultar este listado: lo hacen la gerencia, el residente o el director y el encargado de OCC.',
   );
 });
 
@@ -2699,59 +2802,6 @@ prueba('una cuenta sin obra se detecta para todo el que no es gerencia', () => {
   assert.equal(sinObraAsignada('almacenista', 'obra-1'), false);
   // La gerencia no está adscrita a ninguna obra, y eso no es un fallo de su cuenta.
   assert.equal(sinObraAsignada('admin', null), false);
-});
-
-/** Los grupos del menú de un rol, como pares título → módulos, fáciles de comparar. */
-function menuDe(rol: Rol, modulos = TODOS_LOS_MODULOS) {
-  return gruposDelMenu(modulosVisibles(rol, modulos)).map((g) => [g.titulo, g.modulos]);
-}
-
-prueba('el menú de la gerencia lleva los cinco grupos y los catorce módulos (022/RF-3; 030/RF-1; 031/RF-1; 028/RF-1)', () => {
-  assert.deepEqual(menuDe('admin'), [
-    [null, ['inicio', 'asistente']],
-    ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
-    ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
-    ['Cliente', ['contrato']],
-    ['Administración', ['obras', 'personas', 'vehiculos', 'asignaciones']],
-  ]);
-});
-
-prueba('el residente ve «Administración» solo con Asignaciones (022/RF-2, RF-4)', () => {
-  assert.deepEqual(menuDe('supervisor'), [
-    [null, ['inicio', 'asistente']],
-    ['El día a día', ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes']],
-    ['Módulos de obra', ['almacen', 'cantera', 'laboratorio']],
-    ['Cliente', ['contrato']],
-    ['Administración', ['asignaciones']],
-  ]);
-});
-
-prueba('los roles de un solo módulo ven su módulo y el asistente (022/RF-4; 028/RF-1)', () => {
-  const esperado: [Rol, Modulo][] = [
-    ['almacenista', 'almacen'],
-    ['encargado_planta', 'cantera'],
-    ['laboratorista', 'laboratorio'],
-  ];
-  for (const [rol, modulo] of esperado) {
-    assert.deepEqual(menuDe(rol), [[null, ['asistente']], ['Módulos de obra', [modulo]]], rol);
-  }
-});
-
-prueba('un módulo apagado en la obra no sale en el menú del residente (022/RF-2)', () => {
-  const grupo = menuDe('supervisor', { ...TODOS_LOS_MODULOS, cantera: false }).find(
-    ([titulo]) => titulo === 'Módulos de obra',
-  );
-  assert.deepEqual(grupo, ['Módulos de obra', ['almacen', 'laboratorio']]);
-  // Con los tres apagados, el grupo entero desaparece con su título.
-  const nada = { almacen: false, cantera: false, laboratorio: false };
-  assert.ok(!menuDe('supervisor', nada).some(([titulo]) => titulo === 'Módulos de obra'));
-});
-
-prueba('todo módulo está en exactamente un grupo del menú (022/RF-3)', () => {
-  // Un módulo nuevo que nadie ponga en un grupo desaparecería del menú sin avisar.
-  const enGrupos = GRUPOS_DEL_MENU.flatMap((g) => g.modulos);
-  assert.equal(new Set(enGrupos).size, enGrupos.length, 'hay un módulo repetido');
-  assert.deepEqual([...enGrupos].sort(), [...MODULOS].sort());
 });
 
 prueba('el menú arranca abierto y se pliega solo en ventana angosta (022/RF-8, RF-11, RF-12)', () => {
@@ -3103,6 +3153,7 @@ function sesionDe(rol: Rol, obraId: string | null): PersonaEnSesion {
     nombreCompleto: 'Persona de prueba',
     rol,
     obraId,
+    obraNombre: obraId ? 'Obra de prueba' : null,
     // Los dos módulos encendidos salvo que la prueba diga otra cosa (spec 017).
     modulosDeObra: TODOS_LOS_MODULOS,
     debeCambiarClave: false,
@@ -4486,7 +4537,8 @@ function archivosDelPanel(): string[] {
   const laboratorio = readdirSync(path.join(raiz, 'src/features/laboratorio'))
     .filter((f) => f.endsWith('.tsx'))
     .map((f) => `src/features/laboratorio/${f}`);
-  return [...recursivo('src/features/panel'), ...recursivo('src/app/panel'), ...laboratorio];
+  // Spec 033: el grupo empresarial (tarjetas, menús por empresa) es solo del panel.
+  return [...recursivo('src/features/panel'), ...recursivo('src/app/panel'), ...recursivo('src/features/empresas'), ...laboratorio];
 }
 
 /** Lo que le falta a un archivo del panel para estar del todo en el diseño nuevo. */
@@ -4574,14 +4626,15 @@ prueba('la paleta nueva del panel contrasta lo suficiente (022/RNF)', () => {
   assert.ok(contraste(Panel.acento, Panel.fondo) < 4.5);
 });
 
-prueba('están los veintiún cargos, con slug y rótulo únicos', () => {
+prueba('están los veintitrés cargos, con slug y rótulo únicos', () => {
   // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
   // más Gerente (002/RF-13, añadido el 2026-09-19), más Controlador(a) Vial y
   // Control de Calidad (pedidos por OCC el 2026-09-23), más Laboratorista
-  // (018/RF-3).
-  assert.equal(CARGOS.length, 21);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 21);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 21);
+  // (018/RF-3), más Encargado de OCC (034/RF-12), más Auxiliar de Recursos
+  // Humanos (035/RF-8).
+  assert.equal(CARGOS.length, 23);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 23);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 23);
 });
 
 prueba('los cargos nuevos de obra no reciben celular', () => {
@@ -9625,12 +9678,8 @@ prueba('030/RF-1: Reportes es de la gerencia y del residente, y nada más', () =
     }
     assert.ok(!modulosVisibles(rol).includes('reportes'), rol);
   }
-  // No se apaga por obra, y va en «El día a día».
+  // No se apaga por obra (los menús por empresa: ver las pruebas «033/…»).
   assert.equal(moduloApagado('reportes', { almacen: false, cantera: false, laboratorio: false }), false);
-  assert.deepEqual(
-    gruposDelMenu(modulosVisibles('supervisor')).find((g) => g.titulo === 'El día a día')?.modulos,
-    ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes'],
-  );
   assert.equal(moduloDeLaRuta('/panel/reportes'), 'reportes');
 });
 
@@ -9915,7 +9964,6 @@ prueba('031/RF-1 a RF-3: Contrato y Presupuesto es de la gerencia y del resident
     assert.ok(!modulosVisibles(rol).includes('contrato'), rol);
   }
   assert.equal(moduloApagado('contrato', { almacen: false, cantera: false, laboratorio: false }), false);
-  assert.deepEqual(gruposDelMenu(modulosVisibles('supervisor')).find((g) => g.titulo === 'Cliente')?.modulos, ['contrato']);
   assert.equal(moduloDeLaRuta('/panel/contrato'), 'contrato');
 });
 
@@ -10516,9 +10564,6 @@ prueba('028/RF-1, RF-2, RF-59: el asistente es de los cinco roles del panel, y l
   assert.equal(alcanza('operador', 'asistente', 'ver'), false);
   // No depende de los módulos que lleve la obra.
   assert.equal(moduloApagado('asistente', { almacen: false, cantera: false, laboratorio: false }), false);
-  // Junto al Inicio; el almacenista, que no tiene Inicio, lo ve arriba de su módulo.
-  assert.deepEqual(gruposDelMenu(modulosVisibles('supervisor'))[0].modulos, ['inicio', 'asistente']);
-  assert.deepEqual(gruposDelMenu(modulosVisibles('almacenista'))[0].modulos, ['asistente']);
   assert.equal(moduloDeLaRuta('/panel/asistente'), 'asistente');
   assert.match(motivoDeRechazo('asistente', 'escribir'), /cambiar los límites del asistente/);
 });
@@ -11071,6 +11116,1595 @@ prueba('032/RF-27, RF-28, RF-34, RF-35: cómo queda la marca tras un guardado', 
   assert.deepEqual(resolverSeccionSinRegistro(con, {}, 1), { marcada: false, motivo: null, error: null });
   // Sin cambios y sin filas, queda como estaba.
   assert.deepEqual(resolverSeccionSinRegistro(con, {}, 0), { ...con, error: null });
+});
+
+/* ── Grupo empresarial (spec 033) ── */
+
+console.log('\nGrupo empresarial (spec 033)\n');
+
+/** Las páginas de un menú, fáciles de comparar. */
+const paginas = (menu: { pagina: string }[]) => menu.map((m) => m.pagina);
+
+prueba('033/RF-1: las cuatro empresas, en el orden de las tarjetas; Proyectos sin corte propio', () => {
+  assert.deepEqual(
+    EMPRESAS.map((e) => e.nombre),
+    ['Elemental Ingeniería y Arquitectura', 'OCC', 'Geolab', 'Proyectos'],
+  );
+  for (const e of EMPRESAS) assert.ok(e.funcion.length > 0, e.id);
+  // Cambio del 2026-10-27: los cortes de Proyectos son los de sus obras.
+  assert.deepEqual([...EMPRESAS_CON_CORTE], ['elemental', 'occ', 'geolab']);
+});
+
+prueba('033/RF-13 a RF-15, RF-29: gerencia ve el menú entero de cada empresa, con el asistente', () => {
+  // Menús definitivos (cambio del 2026-10-27).
+  assert.deepEqual(paginas(menuDeEmpresa('elemental', 'admin')), [
+    'recursos-humanos', 'compras', 'tesoreria', 'documentos', 'licitaciones', 'asistente',
+  ]);
+  // Con Recursos Humanos de consulta en OCC y Geolab desde la spec 035 (RF-3).
+  assert.deepEqual(paginas(menuDeEmpresa('occ', 'admin')), [
+    'whatsapp', 'bitacora', 'documentos', 'recursos-humanos', 'reportes', 'vehiculos', 'preoperacionales',
+    'asignaciones', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+  ]);
+  assert.deepEqual(paginas(menuDeEmpresa('geolab', 'admin')), [
+    'bitacora', 'whatsapp', 'laboratorio', 'reportes', 'documentos', 'recursos-humanos', 'solicitudes-compra',
+    'solicitudes-pago', 'asistente',
+  ]);
+  assert.equal(menuDeEmpresa('occ', 'admin')[4].titulo, 'Reportes de vehículos y maquinaria');
+  assert.equal(menuDeEmpresa('geolab', 'admin')[3].titulo, 'Reportes de laboratorio');
+  // Ninguno lleva ya la información de la empresa, la financiera ni el consolidado.
+  for (const empresa of ['elemental', 'occ', 'geolab'] as const) {
+    const permisos = menuDeEmpresa(empresa, 'admin').map((m) => m.permiso);
+    assert.ok(!permisos.includes('empresa') && !permisos.includes('finanzas'), empresa);
+  }
+});
+
+prueba('033/RF-17, RF-18: el menú de una obra, sin los módulos que la obra tiene apagados', () => {
+  // Con Documentos después de Contrato y Presupuesto desde la spec 034 (RF-2).
+  assert.deepEqual(paginas(menuDeObra('admin')), [
+    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
+    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'solicitudes-compra',
+    'solicitudes-pago', 'asistente',
+  ]);
+  assert.equal(menuDeObra('admin')[2].titulo, 'Reportes e informes');
+  // Calidad es el laboratorio de la obra: se apaga con él.
+  const sinCanteraNiLaboratorio = { almacen: true, cantera: false, laboratorio: false };
+  assert.deepEqual(paginas(menuDeObra('admin', sinCanteraNiLaboratorio)), [
+    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'almacen', 'preoperacionales',
+    'asignaciones', 'contrato', 'documentos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+  ]);
+});
+
+prueba('033/RF-49: Licitaciones abre LicitApp en una pestaña nueva', () => {
+  const licitaciones = menuDeEmpresa('elemental', 'admin').find((m) => m.pagina === 'licitaciones');
+  assert.equal(licitaciones?.externa, DIRECCION_DE_LICITAPP);
+  assert.equal(DIRECCION_DE_LICITAPP, 'https://licitapp-elementaling.cloud/');
+  const enlaces = menuDelLugar({ tipo: 'empresa', empresa: 'elemental', pagina: null }, 'admin').entradas;
+  assert.deepEqual(enlaces.find((e) => e.clave === 'licitaciones'), {
+    clave: 'licitaciones',
+    titulo: 'Licitaciones',
+    ruta: 'https://licitapp-elementaling.cloud/',
+    externa: true,
+  });
+  // Las demás son del panel.
+  assert.deepEqual(enlaces.find((e) => e.clave === 'compras'), {
+    clave: 'compras',
+    titulo: 'Compras',
+    ruta: '/panel/elemental/compras',
+  });
+});
+
+prueba('033/RF-51: piden compras y pagos el residente, el almacenista, el laboratorista y gerencia; aprueba gerencia', () => {
+  // Más el Encargado de OCC, que pide en nombre de OCC (spec 034, RF-16).
+  assert.deepEqual(
+    ROLES.filter((r) => alcanza(r, 'solicitudes', 'escribir')),
+    ['admin', 'supervisor', 'almacenista', 'laboratorista', 'encargado_occ'],
+  );
+  // Documentos dejó de ser solo de la gerencia con la spec 034: su prueba es la de 034/RF-4.
+  // La auxiliar de RR. HH. ve todo lo de Elemental desde la spec 035 (RF-10).
+  for (const modulo of ['compras', 'tesoreria', 'licitaciones'] as const) {
+    assert.deepEqual(ROLES.filter((r) => alcanza(r, modulo, 'ver')), ['admin', 'auxiliar_rrhh'], modulo);
+  }
+  for (const modulo of ['compras', 'tesoreria'] as const) {
+    assert.deepEqual(ROLES.filter((r) => alcanza(r, modulo, 'aprobar')), ['admin'], modulo);
+  }
+  assert.equal(
+    motivoDeRechazo('compras', 'aprobar'),
+    'No puede aprobar ni rechazar solicitudes de compra: lo hace la gerencia.',
+  );
+  // Recursos Humanos: lo llevan gerencia y la auxiliar de RR. HH. (035); el residente consulta el de su obra.
+  // El Encargado de OCC y el laboratorista consultan el de su empresa (035/RF-4).
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'ver')), [
+    'admin',
+    'supervisor',
+    'laboratorista',
+    'encargado_occ',
+    'auxiliar_rrhh',
+  ]);
+  assert.equal(alcanza('supervisor', 'rrhh', 'escribir'), false);
+});
+
+prueba('033/RF-52: las páginas que cambiaron de nombre llevan a la nueva', () => {
+  const tesoreria = '/panel/elemental/tesoreria';
+  for (const pagina of ['empresa', 'finanzas', 'consolidado']) {
+    assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina }), tesoreria, pagina);
+  }
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'obra' }), tesoreria);
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'finanzas' }), tesoreria);
+  assert.equal(
+    rutaRenombrada({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }),
+    '/panel/elemental/recursos-humanos?pestana=personas',
+  );
+  assert.equal(
+    rutaRenombrada({ tipo: 'empresa', empresa: 'elemental', pagina: 'obras' }),
+    '/panel/elemental/recursos-humanos?pestana=obras',
+  );
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina: 'maquinaria' }), '/panel/occ/bitacora');
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'laboratorio' }), '/panel/proyectos/o1/calidad');
+  assert.equal(
+    rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'personas' }),
+    '/panel/proyectos/o1/recursos-humanos',
+  );
+  // Las que siguen igual, y la portada.
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' }), null);
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'geolab', pagina: 'laboratorio' }), null);
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: null }), null);
+  assert.equal(rutaRenombrada({ tipo: 'proyectos' }), null);
+
+  // Para quien entra (visto en la demo de la T22): la residente no va a Tesorería ni a
+  // Recursos Humanos de Elemental, que le darían «Sin acceso», sino a su Inicio.
+  const gerencia = { rol: 'admin' as const, obraId: null };
+  const residente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const laboratorista = { rol: 'laboratorista' as const, obraId: 'o9' };
+  const occEmpresa = { tipo: 'empresa' as const, empresa: 'occ' as const, pagina: 'empresa' };
+  assert.equal(rutaRenombradaPara(occEmpresa, gerencia), tesoreria);
+  assert.equal(rutaRenombradaPara(occEmpresa, residente), '/panel/proyectos/o1');
+  assert.equal(rutaRenombradaPara({ tipo: 'obra', obraId: 'o1', pagina: 'finanzas' }, residente), '/panel/proyectos/o1');
+  assert.equal(rutaRenombradaPara({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }, laboratorista), '/panel/geolab/laboratorio');
+  assert.equal(
+    rutaRenombradaPara({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }, gerencia),
+    '/panel/elemental/recursos-humanos?pestana=personas',
+  );
+  // La auxiliar de RR. HH. sí entra a Recursos Humanos; a Tesorería también la ve.
+  const auxiliar = { rol: 'auxiliar_rrhh' as const, obraId: null };
+  assert.equal(
+    rutaRenombradaPara({ tipo: 'empresa', empresa: 'elemental', pagina: 'personas' }, auxiliar),
+    '/panel/elemental/recursos-humanos?pestana=personas',
+  );
+  // Dentro de una obra, la nueva sigue en la obra: la decide la página de la obra.
+  assert.equal(rutaRenombradaPara({ tipo: 'obra', obraId: 'o1', pagina: 'laboratorio' }, residente), '/panel/proyectos/o1/calidad');
+  assert.equal(rutaRenombradaPara({ tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' }, residente), null);
+});
+
+prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos y finanzas solo gerencia', () => {
+  // El residente ve en su obra lo mismo que veía antes en el menú (sin Personas, que
+  // solo lista), y nada de la información de la obra ni de las finanzas. Con
+  // Preoperacionales y Asignaciones (cambio del 2026-10-27 a RF-17).
+  // Con los menús definitivos (cambio del 2026-10-27), el mismo menú de la obra: Recursos
+  // Humanos en consulta y las solicitudes de compra y de pago. Y Documentos de su obra
+  // (spec 034, RF-5).
+  assert.deepEqual(paginas(menuDeObra('supervisor')), [
+    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
+    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'solicitudes-compra',
+    'solicitudes-pago', 'asistente',
+  ]);
+  // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21).
+  const antes = modulosVisibles('supervisor').filter((m) => m !== 'inicio');
+  const ahora = new Set(menuDeObra('supervisor').map((m) => m.permiso));
+  assert.deepEqual(antes.filter((m) => !ahora.has(m)), []);
+  assert.deepEqual(paginas(menuDeObra('almacenista')), [
+    'almacen', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+  ]);
+  assert.deepEqual(paginas(menuDeObra('encargado_planta')), ['cantera', 'asistente']);
+  assert.deepEqual(paginas(menuDeObra('almacenista', { almacen: false, cantera: true, laboratorio: true })), [
+    'solicitudes-compra', 'solicitudes-pago', 'asistente',
+  ]);
+  // Con los documentos de Geolab desde la spec 034 (RF-7).
+  assert.deepEqual(paginas(menuDeEmpresa('geolab', 'laboratorista')), [
+    'laboratorio', 'documentos', 'recursos-humanos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+  ]);
+  for (const rol of ROLES.filter((r) => r !== 'admin')) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
+      assert.equal(alcanza(rol, 'finanzas', accion), false, `${rol} finanzas/${accion}`);
+      assert.equal(alcanza(rol, 'empresa', accion), false, `${rol} empresa/${accion}`);
+    }
+  }
+  assert.ok(alcanza('admin', 'finanzas', 'anular'));
+  assert.equal(alcanza('admin', 'finanzas', 'aprobar'), false);
+  assert.equal(
+    motivoDeRechazo('finanzas', 'escribir'),
+    'No puede registrar cortes financieros: lo hace la gerencia.',
+  );
+  assert.equal(motivoDeRechazo('empresa', 'escribir'), 'No puede cambiar los datos de la empresa: lo hace la gerencia.');
+});
+
+prueba('033/RF-12: cada rol entra a su empresa, y a Proyectos solo con su obra', () => {
+  for (const e of EMPRESAS) assert.ok(alcanzaLaEmpresa('admin', e.id), e.id);
+  assert.deepEqual(
+    EMPRESAS.filter((e) => alcanzaLaEmpresa('supervisor', e.id)).map((e) => e.id),
+    ['proyectos'],
+  );
+  assert.deepEqual(
+    EMPRESAS.filter((e) => alcanzaLaEmpresa('laboratorista', e.id)).map((e) => e.id),
+    ['geolab'],
+  );
+  assert.deepEqual(EMPRESAS.filter((e) => alcanzaLaEmpresa('operador', e.id)), []);
+
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'admin', obraId: null }, 'cualquiera'));
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: 'o1' }, 'o1'));
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: 'o1' }, 'o2'), false);
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: null }, 'o1'), false);
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'almacenista', obraId: 'o1' }, 'o1'));
+  // El laboratorista no entra a Proyectos aunque tenga obra: su lugar es Geolab.
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'laboratorista', obraId: 'o1' }, 'o1'), false);
+});
+
+prueba('033/RF-45, RF-46: la empresa de la persona, o la de su rol si no tiene', () => {
+  assert.equal(empresaDeLaPersona(null, 'operador'), 'occ');
+  assert.equal(empresaDeLaPersona(null, 'laboratorista'), 'geolab');
+  assert.equal(empresaDeLaPersona(null, 'supervisor'), 'proyectos');
+  assert.equal(empresaDeLaPersona(null, 'almacenista'), 'proyectos');
+  assert.equal(empresaDeLaPersona(null, 'encargado_planta'), 'proyectos');
+  assert.equal(empresaDeLaPersona(null, 'admin'), 'elemental');
+  // La elegida manda sobre el rol; una que no existe, no.
+  assert.equal(empresaDeLaPersona('geolab', 'operador'), 'geolab');
+  assert.equal(empresaDeLaPersona('otra', 'operador'), 'occ');
+});
+
+prueba('033/RF-6 a RF-9: cada rol entra a lo suyo', () => {
+  assert.equal(destinoAlEntrar({ rol: 'admin', obras: [] }), '/panel');
+  // El residente, directo a su obra: la portada es el resumen del día.
+  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: ['o1'] }), '/panel/proyectos/o1');
+  // Con varias obras o sin ninguna, la lista de Proyectos (RF-7 y caso límite).
+  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: ['o1', 'o2'] }), '/panel/proyectos');
+  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: [] }), '/panel/proyectos');
+  assert.equal(destinoAlEntrar({ rol: 'laboratorista', obras: ['o1'] }), '/panel/geolab/laboratorio');
+  // Almacenista y encargado de planta, a su módulo como hoy (008/RF-4).
+  assert.equal(destinoAlEntrar({ rol: 'almacenista', obras: ['o1'] }), '/panel/proyectos/o1/almacen');
+  assert.equal(destinoAlEntrar({ rol: 'encargado_planta', obras: ['o1'] }), '/panel/proyectos/o1/cantera');
+  assert.equal(destinoAlEntrar({ rol: 'operador', obras: ['o1'] }), null);
+});
+
+prueba('033/RF-47: las direcciones de antes llevan a su pantalla dentro de la empresa', () => {
+  const gerencia = { rol: 'admin' as const, obraId: null };
+  const residente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const laboratorista = { rol: 'laboratorista' as const, obraId: 'o1' };
+
+  // Las de una empresa, con sus parámetros.
+  assert.equal(rutaNueva('/panel/vehiculos', gerencia), '/panel/occ/vehiculos');
+  assert.equal(rutaNueva('/panel/asignaciones?pagina=2', gerencia), '/panel/occ/asignaciones?pagina=2');
+  assert.equal(rutaNueva('/panel/preoperacionales', gerencia), '/panel/occ/preoperacionales');
+  // El residente, a los de su obra (cambio del 2026-10-27 a RF-17).
+  assert.equal(rutaNueva('/panel/preoperacionales', residente), '/panel/proyectos/o1/preoperacionales');
+  assert.equal(rutaNueva('/panel/asignaciones', residente), '/panel/proyectos/o1/asignaciones');
+  // Obras y Personas, en Recursos Humanos de Elemental (cambio del 2026-10-27).
+  assert.equal(rutaNueva('/panel/obras/', gerencia), '/panel/elemental/recursos-humanos?pestana=obras');
+  assert.equal(rutaNueva('/panel/personas', gerencia), '/panel/elemental/recursos-humanos?pestana=personas');
+  // Quien no entra a Elemental (visto en la demo de la T22): Personas, a Recursos Humanos de
+  // lo suyo; Obras, que no tiene equivalente, a su Inicio.
+  assert.equal(rutaNueva('/panel/personas', residente), '/panel/proyectos/o1/recursos-humanos');
+  assert.equal(rutaNueva('/panel/personas', { rol: 'encargado_occ', obraId: null }), '/panel/occ/recursos-humanos');
+  assert.equal(rutaNueva('/panel/personas', { rol: 'laboratorista', obraId: 'o1' }), '/panel/geolab/recursos-humanos');
+  assert.equal(rutaNueva('/panel/personas', { rol: 'almacenista', obraId: 'o1' }), '/panel/proyectos/o1/almacen');
+  assert.equal(rutaNueva('/panel/obras', residente), '/panel/proyectos/o1');
+  assert.equal(
+    rutaNueva('/panel/personas', { rol: 'auxiliar_rrhh', obraId: null }),
+    '/panel/elemental/recursos-humanos?pestana=personas',
+  );
+
+  // Las de una obra: gerencia, a la obra de la dirección, que sale de los parámetros.
+  assert.equal(
+    rutaNueva('/panel/bitacoras?fecha=2026-10-08&obraId=o9', gerencia),
+    '/panel/proyectos/o9/bitacoras?fecha=2026-10-08',
+  );
+  assert.equal(
+    rutaNueva('/panel/reportes?obra=o9&pestana=calidad', gerencia),
+    '/panel/proyectos/o9/reportes?pestana=calidad',
+  );
+  // Sin obra, a la lista, que la lleva a esa pantalla al elegir una.
+  assert.equal(
+    rutaNueva('/panel/bitacoras?fecha=2026-10-08', gerencia),
+    '/panel/proyectos?ir=bitacoras&fecha=2026-10-08',
+  );
+  assert.equal(rutaNueva('/panel/laboratorio', gerencia), '/panel/geolab/laboratorio');
+  assert.equal(rutaNueva('/panel/asistente?conversacion=c1', gerencia), '/panel/elemental/asistente?conversacion=c1');
+
+  // El residente va siempre a la suya, diga lo que diga la dirección.
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o9', residente), '/panel/proyectos/o1/bitacoras');
+  assert.equal(rutaNueva('/panel/asistente', residente), '/panel/proyectos/o1/asistente');
+  assert.equal(rutaNueva('/panel/cantera', { rol: 'encargado_planta', obraId: null }), '/panel/proyectos');
+
+  // El laboratorista, a Geolab.
+  assert.equal(rutaNueva('/panel/laboratorio', laboratorista), '/panel/geolab/laboratorio');
+  assert.equal(rutaNueva('/panel/asistente', laboratorista), '/panel/geolab/asistente');
+
+  // Lo que no es de antes no se toca.
+  assert.equal(rutaNueva('/panel', gerencia), null);
+  assert.equal(rutaNueva('/panel/occ/vehiculos', gerencia), null);
+  assert.equal(rutaNueva('/panel/laboratorio/e1/informe', gerencia), null);
+  assert.equal(rutaNueva('/panel/laboratorio/e1', gerencia), null);
+  assert.equal(rutaNueva('/panel/desconocido', gerencia), null);
+});
+
+/** Un corte de prueba: vigente salvo que se diga, con valores pequeños. */
+const corteDe = (fechaCorte: string, saldo: number, extra: Partial<CorteParaRegla> = {}): CorteParaRegla => ({
+  fechaCorte,
+  saldo,
+  cuentasPorPagar: 100,
+  cuentasPorCobrar: 50,
+  anuladoEn: null,
+  ...extra,
+});
+
+prueba('033/RF-35, RF-36: el corte no puede ser futuro ni repetir fecha vigente', () => {
+  const valores = { saldo: 1000, cuentasPorPagar: 0, cuentasPorCobrar: 0 };
+  assert.equal(validarCorte({ ...valores, fechaCorte: '2026-10-27' }, '2026-10-27', []), null);
+  assert.equal(
+    validarCorte({ ...valores, fechaCorte: '2026-10-28' }, '2026-10-27', []),
+    'La fecha de corte no puede ser futura',
+  );
+  assert.equal(
+    validarCorte({ ...valores, fechaCorte: '2026-10-15' }, '2026-10-27', [{ fechaCorte: '2026-10-15' }]),
+    'Ya hay un corte del 15-oct-2026; anúlalo para registrar otro',
+  );
+  // Otra fecha sí; el saldo puede ser negativo; lo que se debe y lo que le deben, no.
+  assert.equal(validarCorte({ ...valores, fechaCorte: '2026-10-16' }, '2026-10-27', [{ fechaCorte: '2026-10-15' }]), null);
+  assert.equal(validarCorte({ ...valores, saldo: -5, fechaCorte: '2026-10-16' }, '2026-10-27', []), null);
+  assert.equal(
+    validarCorte({ ...valores, cuentasPorPagar: -1, fechaCorte: '2026-10-16' }, '2026-10-27', []),
+    'Las cuentas por pagar no pueden ser negativas',
+  );
+  assert.equal(
+    validarCorte({ ...valores, cuentasPorCobrar: -1, fechaCorte: '2026-10-16' }, '2026-10-27', []),
+    'Las cuentas por cobrar no pueden ser negativas',
+  );
+  assert.equal(fechaDelCorte('2026-01-05'), '5-ene-2026');
+});
+
+prueba('033/RF-37, RF-38: el último vigente y su diferencia con el anterior, sin los anulados', () => {
+  const cortes = [
+    corteDe('2026-09-30', 1000),
+    corteDe('2026-10-20', 1500, { cuentasPorPagar: 80 }),
+    // Anulado: no es el último aunque sea el más reciente, ni cuenta como anterior.
+    corteDe('2026-10-25', 9999, { anuladoEn: '2026-10-26T10:00:00Z' }),
+  ];
+  assert.equal(ultimoCorte(cortes)?.fechaCorte, '2026-10-20');
+  assert.deepEqual(diferenciaConElAnterior(cortes), { saldo: 500, cuentasPorPagar: -20, cuentasPorCobrar: 0 });
+  // Con uno solo no hay diferencia; sin ninguno, ni último.
+  assert.equal(diferenciaConElAnterior([corteDe('2026-10-20', 1)]), null);
+  assert.equal(ultimoCorte([]), null);
+  assert.equal(ultimoCorte([corteDe('2026-10-20', 1, { anuladoEn: 'x' })]), null);
+});
+
+prueba('033/RF-43: desactualizado con más de 30 días', () => {
+  assert.equal(estaDesactualizado('2026-09-27', '2026-10-27'), false); // 30 días
+  assert.ok(estaDesactualizado('2026-09-26', '2026-10-27')); // 31 días
+  assert.equal(estaDesactualizado('2026-10-27', '2026-10-27'), false);
+});
+
+prueba('033/RF-41, RF-42: el consolidado, una fila por empresa y por obra y el total sin Proyectos', () => {
+  const r = consolidado(
+    {
+      empresas: [
+        { id: 'elemental', nombre: 'Elemental', cortes: [corteDe('2026-10-20', 1000)] },
+        { id: 'occ', nombre: 'OCC', cortes: [corteDe('2026-09-01', 2000)] },
+        { id: 'geolab', nombre: 'Geolab', cortes: [] },
+      ],
+      obras: [
+        { id: 'o1', nombre: 'Consorcio Magdalena', dadaDeBaja: false, cortes: [corteDe('2026-10-25', 300)] },
+        { id: 'o2', nombre: 'Consorcio Alcaraván', dadaDeBaja: false, cortes: [] },
+        // De baja con corte: sigue en el consolidado (caso límite); sin corte, no.
+        { id: 'o3', nombre: 'Vieja con corte', dadaDeBaja: true, cortes: [corteDe('2026-10-01', 7)] },
+        { id: 'o4', nombre: 'Vieja sin corte', dadaDeBaja: true, cortes: [] },
+      ],
+    },
+    '2026-10-27',
+  );
+  assert.deepEqual(
+    r.filas.map((f) => [f.tipo, f.id, f.corte?.fechaCorte ?? null, f.desactualizado]),
+    [
+      ['empresa', 'elemental', '2026-10-20', false],
+      ['empresa', 'occ', '2026-09-01', true],
+      ['empresa', 'geolab', null, false],
+      ['obra', 'o1', '2026-10-25', false],
+      ['obra', 'o2', null, false],
+      ['obra', 'o3', '2026-10-01', false],
+    ],
+  );
+  assert.deepEqual(r.total, { saldo: 3307, cuentasPorPagar: 400, cuentasPorCobrar: 200 });
+  assert.equal(r.conCorte, 4);
+});
+
+prueba('033/RF-2, RF-3: la tarjeta de Proyectos suma el saldo de sus obras, a la fecha del más antiguo', () => {
+  assert.deepEqual(
+    resumenDeProyectos([
+      { cortes: [corteDe('2026-10-25', 300), corteDe('2026-10-01', 1)] },
+      { cortes: [corteDe('2026-10-10', -100)] },
+      { cortes: [] },
+    ]),
+    { saldo: 200, fechaCorte: '2026-10-10' },
+  );
+  assert.equal(resumenDeProyectos([{ cortes: [] }]), null);
+});
+
+prueba('033/RNF: los valores en pesos, con punto de miles', () => {
+  assert.equal(enPesos(1234567), '$ 1.234.567');
+  assert.equal(enPesos(-1234567), '-$ 1.234.567');
+  assert.equal(enPesos(0), '$ 0');
+});
+
+prueba('033/RF-23, RF-24: OCC ve los reportes de vehículos y maquinaria; una obra, todos', () => {
+  assert.deepEqual(categoriasDeWhatsappDe('occ'), ['vehiculo_maquinaria', 'suministro_cantera']);
+  // Todas son categorías que existen: un nombre mal escrito dejaría la bandeja vacía.
+  for (const c of categoriasDeWhatsappDe('occ')!) assert.ok(CATEGORIAS_DE_WHATSAPP.includes(c), c);
+  assert.equal(categoriasDeWhatsappDe('proyectos'), null);
+  assert.equal(categoriasDeWhatsappDe(null), null);
+});
+
+prueba('033/RF-30: desde una obra, el asistente responde sobre ella si no nombra otra', () => {
+  assert.equal(
+    indicacionDeObraPorDefecto({ id: 'o1', nombre: 'Consorcio Magdalena' }),
+    'Pregunta desde la obra «Consorcio Magdalena» (id o1). Si la pregunta no nombra otra obra, responda sobre esta y consulte con su id.',
+  );
+  // Fuera de una obra no se dice nada: el contexto queda como antes.
+  assert.equal(indicacionDeObraPorDefecto(null), '');
+});
+
+prueba('033/RF-10, RF-19: la dirección dice en qué empresa, obra y página se está', () => {
+  assert.deepEqual(lugarDeLaRuta('/panel/occ/vehiculos'), { tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' });
+  assert.deepEqual(lugarDeLaRuta('/panel/geolab'), { tipo: 'empresa', empresa: 'geolab', pagina: null });
+  assert.deepEqual(lugarDeLaRuta('/panel/elemental/consolidado/'), { tipo: 'empresa', empresa: 'elemental', pagina: 'consolidado' });
+  assert.deepEqual(lugarDeLaRuta('/panel/proyectos'), { tipo: 'proyectos' });
+  assert.deepEqual(lugarDeLaRuta('/panel/proyectos?ir=bitacoras'), { tipo: 'proyectos' });
+  assert.deepEqual(lugarDeLaRuta('/panel/proyectos/o%201/bitacoras?fecha=2026-10-08'), { tipo: 'obra', obraId: 'o 1', pagina: 'bitacoras' });
+  assert.deepEqual(lugarDeLaRuta('/panel/proyectos/o1'), { tipo: 'obra', obraId: 'o1', pagina: null });
+  // Fuera de una empresa: la portada, las direcciones de antes y el ensayo de laboratorio.
+  assert.equal(lugarDeLaRuta('/panel'), null);
+  assert.equal(lugarDeLaRuta('/panel/bitacoras'), null);
+  assert.equal(lugarDeLaRuta('/panel/laboratorio/e1'), null);
+  assert.equal(lugarDeLaRuta('/'), null);
+  assert.equal(empresaDelLugar(lugarDeLaRuta('/panel/proyectos/o1/almacen')), 'proyectos');
+  assert.equal(empresaDelLugar(lugarDeLaRuta('/panel/occ')), 'occ');
+  assert.equal(empresaDelLugar(null), null);
+});
+
+prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
+  const titulos = (m: { titulo: string }[]) => m.map((e) => e.titulo);
+  // En las tarjetas, la gerencia ve las cuatro empresas; los demás no llegan ahí.
+  assert.deepEqual(titulos(menuDelLugar(null, 'admin').entradas), [
+    'Elemental Ingeniería y Arquitectura', 'OCC', 'Geolab', 'Proyectos',
+  ]);
+  assert.deepEqual(menuDelLugar(null, 'supervisor'), { navegacion: [], entradas: [] });
+
+  // Dentro de una empresa: «← Empresas» y su menú, con sus rutas.
+  const occ = menuDelLugar({ tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' }, 'admin');
+  assert.deepEqual(occ.navegacion, [{ clave: 'empresas', titulo: '← Empresas', ruta: '/panel' }]);
+  assert.equal(occ.entradas.length, 11);
+  assert.deepEqual(occ.entradas[7], { clave: 'asignaciones', titulo: 'Asignaciones', ruta: '/panel/occ/asignaciones' });
+
+  // El laboratorista en Geolab: sin «← Empresas», que no tiene a dónde ir.
+  const geolab = menuDelLugar({ tipo: 'empresa', empresa: 'geolab', pagina: null }, 'laboratorista');
+  assert.deepEqual(geolab.navegacion, []);
+  assert.deepEqual(titulos(geolab.entradas), [
+    'Laboratorio', 'Documentos', 'Recursos Humanos', 'Solicitudes de compra', 'Solicitudes de pago', 'Asistente',
+  ]);
+
+  // En una obra: «Cambiar de obra» para la gerencia, y sin los módulos apagados.
+  const obra = menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: 'bitacoras' }, 'admin', {
+    almacen: false, cantera: true, laboratorio: false,
+  });
+  assert.deepEqual(titulos(obra.navegacion), ['← Empresas', 'Cambiar de obra']);
+  assert.equal(obra.navegacion[1].ruta, '/panel/proyectos');
+  assert.ok(!obra.entradas.some((e) => e.clave === 'almacen' || e.clave === 'calidad'));
+  assert.equal(obra.entradas.find((e) => e.clave === 'bitacoras')?.ruta, '/panel/proyectos/o1/bitacoras');
+  // El residente en su obra: su menú, sin ir y venir.
+  assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, 'supervisor').navegacion, []);
+  // La lista de obras: solo volver.
+  assert.deepEqual(menuDelLugar({ tipo: 'proyectos' }, 'admin').entradas, []);
+
+  // Con la persona, donde no entra el menú sale vacío (RF-12; visto en la demo de la T22).
+  const laResidente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const enOcc = { tipo: 'empresa' as const, empresa: 'occ' as const, pagina: null };
+  assert.deepEqual(menuDelLugar(enOcc, laResidente).entradas, []);
+  assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o9', pagina: null }, laResidente).entradas, []);
+  assert.ok(menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, laResidente).entradas.length > 0);
+  assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, { rol: 'laboratorista', obraId: 'o1' }).entradas, []);
+  assert.ok(menuDelLugar(enOcc, { rol: 'admin', obraId: null }).entradas.length > 0);
+  assert.ok(menuDelLugar({ tipo: 'empresa', empresa: 'geolab', pagina: null }, { rol: 'laboratorista', obraId: 'o1' }).entradas.length > 0);
+});
+
+prueba('033/RF-48: el título de la pestaña dice el módulo y la empresa', () => {
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/occ/vehiculos')), 'Vehículos · OCC');
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/geolab/reportes')), 'Reportes de laboratorio · Geolab');
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/elemental')), 'Elemental Ingeniería y Arquitectura');
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos/o1/bitacoras')), 'Bitácoras · Proyectos');
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos/o1')), 'Resumen del día · Proyectos');
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos')), 'Proyectos');
+  assert.equal(tituloDelLugar(null), null);
+  // Tal cual lo pide la spec, sin el nombre del sistema: la empresa ya dice dónde se está.
+  assert.equal(tituloDeLaPestana('/panel/occ/vehiculos'), 'Vehículos · OCC');
+  // Las de antes, que redirigen, y el ensayo siguen como siempre.
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Control de Obra OCC');
+});
+
+prueba('033/RF-34: lo que se escribe en un campo de pesos', () => {
+  assert.equal(pesosDeTexto('1.534.500.000'), 1_534_500_000);
+  assert.equal(pesosDeTexto('$ 1534500000'), 1_534_500_000);
+  assert.equal(pesosDeTexto(' -45.000.000 '), -45_000_000);
+  assert.equal(pesosDeTexto('0'), 0);
+  // Vacío, con decimales o con letras no es un valor.
+  assert.equal(pesosDeTexto(''), null);
+  assert.equal(pesosDeTexto('1500,50'), null);
+  assert.equal(pesosDeTexto('mil'), null);
+  assert.equal(pesosDeTexto('-'), null);
+});
+
+prueba('033/RF-38: la diferencia se lee con su signo', () => {
+  assert.equal(textoDeDiferencia(500_000), '+$ 500.000');
+  assert.equal(textoDeDiferencia(-20_000), '-$ 20.000');
+  assert.equal(textoDeDiferencia(0), 'Sin cambio');
+});
+
+prueba('033/RF-25, RF-27: Reportes muestra en cada empresa solo sus pestañas', () => {
+  assert.deepEqual(pestanasDeReportes('occ'), ['maquinas', 'mantenimiento']);
+  assert.deepEqual(pestanasDeReportes('geolab'), ['calidad']);
+  // Dentro de una obra (Proyectos), todas.
+  assert.equal(pestanasDeReportes('proyectos'), null);
+  assert.equal(pestanasDeReportes(null), null);
+});
+
+prueba('034/RF-18 a RF-23: las clases de documento de cada lugar', () => {
+  const ids = (lugar: LugarDeDocumentos) => clasesDe(lugar).map((c) => c.id);
+  const lugares: LugarDeDocumentos[] = ['elemental', 'occ', 'geolab', 'obra'];
+  for (const lugar of lugares) {
+    // Proveedores en los cuatro, y «Otro» siempre al final.
+    assert.ok(ids(lugar).includes('proveedores'), lugar);
+    assert.equal(ids(lugar).at(-1), 'otro', lugar);
+    // Sin repetidos: el slug es la llave.
+    assert.equal(new Set(ids(lugar)).size, ids(lugar).length, lugar);
+  }
+  // Las comunes en las tres empresas y no en la obra.
+  for (const lugar of ['elemental', 'occ', 'geolab'] as const) assert.ok(esClaseDe(lugar, 'camara_de_comercio'));
+  assert.ok(!esClaseDe('obra', 'camara_de_comercio'));
+  // Las propias, solo en su lugar.
+  assert.deepEqual(lugares.filter((l) => esClaseDe(l, 'rup')), ['elemental']);
+  assert.deepEqual(lugares.filter((l) => esClaseDe(l, 'fichas_tecnicas')), ['occ']);
+  assert.deepEqual(lugares.filter((l) => esClaseDe(l, 'calibracion')), ['geolab']);
+  assert.deepEqual(lugares.filter((l) => esClaseDe(l, 'planos')), ['obra']);
+  // El nombre se congela con el documento; una clase de otro lugar no tiene nombre ahí.
+  assert.equal(nombreDeClase('geolab', 'calibracion'), 'Certificados de calibración');
+  assert.equal(nombreDeClase('obra', 'proveedores'), 'Información de proveedores');
+  assert.equal(nombreDeClase('occ', 'planos'), null);
+  assert.equal(nombreDeClase('occ', 'no-existe'), null);
+});
+
+prueba('034/RF-25 a RF-28: el tipo real y el tamaño del archivo', () => {
+  const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(12).fill(0)].slice(0, 12));
+  const pdf = bytes(0x25, 0x50, 0x44, 0x46, 0x2d, 0x31);
+  const jpg = bytes(0xff, 0xd8, 0xff, 0xe0);
+  const png = bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+  const webp = bytes(0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x45, 0x42, 0x50);
+  const zip = bytes(0x50, 0x4b, 0x03, 0x04);
+  const ole = bytes(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1);
+  const exe = bytes(0x4d, 0x5a, 0x90, 0x00); // MZ: un ejecutable de Windows
+  assert.equal(tipoPorFirma(pdf), 'pdf');
+  assert.equal(tipoPorFirma(webp), 'webp');
+  assert.equal(tipoPorFirma(exe), null);
+  // Un RIFF que no es WEBP (un .wav) no pasa por imagen.
+  assert.equal(tipoPorFirma(bytes(0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45)), null);
+  assert.equal(extensionDe('Ficha.Técnica.PDF'), 'pdf');
+  assert.equal(extensionDe('sin-extension'), '');
+
+  // Los admitidos, con el tipo que se guarda.
+  const aceptados: [string, Uint8Array, string][] = [
+    ['a.pdf', pdf, 'application/pdf'],
+    ['a.JPG', jpg, 'image/jpeg'],
+    ['a.jpeg', jpg, 'image/jpeg'],
+    ['a.png', png, 'image/png'],
+    ['a.webp', webp, 'image/webp'],
+    ['a.docx', zip, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['a.xlsx', zip, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['a.doc', ole, 'application/msword'],
+    ['a.xls', ole, 'application/vnd.ms-excel'],
+  ];
+  for (const [nombre, cabecera, mime] of aceptados) {
+    assert.deepEqual(revisarDocumento(nombre, 1000, cabecera), { ok: true, mime }, nombre);
+  }
+
+  // Un ejecutable renombrado: la extensión dice PDF, los bytes no.
+  const renombrado = revisarDocumento('cotizacion.pdf', 1000, exe);
+  assert.ok(!renombrado.ok && renombrado.estado === 415 && renombrado.mensaje.includes('dice ser .pdf'));
+  // Un Word nuevo con nombre de Excel viejo tampoco: la firma es de otra familia.
+  assert.equal(revisarDocumento('a.xls', 1000, zip).ok, false);
+  // Tipos no admitidos, con el mensaje de los que sí.
+  for (const nombre of ['notas.txt', 'programa.exe', 'sin-extension', 'a.constructor']) {
+    const r = revisarDocumento(nombre, 1000, pdf);
+    assert.ok(!r.ok && r.estado === 415 && r.mensaje.startsWith('Solo se admiten'), nombre);
+  }
+  // Vacío y tamaño: 20 MB justos pasan, uno más no.
+  const vacio = revisarDocumento('a.pdf', 0, new Uint8Array());
+  assert.ok(!vacio.ok && vacio.estado === 422);
+  assert.equal(revisarDocumento('a.pdf', TAMANO_MAXIMO_DE_DOCUMENTO, pdf).ok, true);
+  const grande = revisarDocumento('a.pdf', TAMANO_MAXIMO_DE_DOCUMENTO + 1, pdf);
+  assert.ok(!grande.ok && grande.estado === 413);
+});
+
+prueba('034/RF-24, RF-29: lo que le falta a un documento antes de guardarlo', () => {
+  const bien = { clase: 'rut', nombre: 'RUT 2026', fecha: '2026-10-01', vence: null };
+  assert.deepEqual(faltasDelDocumento('occ', bien), []);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, clase: '' }), ['Elija la clase del documento.']);
+  // Una clase de otro lugar: los planos son de la obra.
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, clase: 'planos' }), ['Esa clase no es de este lugar.']);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, nombre: '   ' }), ['Escriba el nombre del documento.']);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, fecha: '' }), ['Escriba la fecha del documento.']);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, fecha: '2026-02-30' }), ['Escriba la fecha del documento.']);
+  // El vencimiento: el mismo día vale; antes, no.
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, vence: '2026-10-01' }), []);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, vence: '2026-09-30' }), [
+    'El vencimiento no puede ser antes de la fecha del documento.',
+  ]);
+  assert.deepEqual(faltasDelDocumento('occ', { ...bien, vence: '30/10/2026' }), ['La fecha de vencimiento no es válida.']);
+  // Todo vacío: las faltas en el orden del formulario.
+  assert.equal(faltasDelDocumento('obra', { clase: '', nombre: '', fecha: '', vence: null }).length, 3);
+});
+
+prueba('034/RF-38 a RF-42: el aviso de vencimiento y el resumen', () => {
+  const hoy = '2026-10-28';
+  const vigente = { anulado: false };
+  assert.equal(estadoDelVencimiento({ ...vigente, vence: null }, hoy), null);
+  // A 30 días avisa; a 31, no.
+  assert.deepEqual(estadoDelVencimiento({ ...vigente, vence: '2026-11-27' }, hoy), {
+    estado: 'por_vencer',
+    texto: 'Vence en 30 días',
+    detalle: 'Vence el 2026-11-27',
+  });
+  assert.equal(estadoDelVencimiento({ ...vigente, vence: '2026-11-28' }, hoy), null);
+  assert.equal(estadoDelVencimiento({ ...vigente, vence: hoy }, hoy)?.texto, 'Vence hoy');
+  assert.deepEqual(estadoDelVencimiento({ ...vigente, vence: '2026-10-25' }, hoy), {
+    estado: 'vencido',
+    texto: 'Vencido',
+    detalle: 'Venció hace 3 días',
+  });
+  // Anulado: sin aviso aunque esté vencido.
+  assert.equal(estadoDelVencimiento({ anulado: true, vence: '2026-10-25' }, hoy), null);
+
+  assert.deepEqual(
+    resumenDeVencimientos(
+      [
+        { anulado: false, vence: '2026-10-25' },
+        { anulado: false, vence: '2026-11-01' },
+        { anulado: false, vence: '2026-11-02' },
+        { anulado: false, vence: '2027-01-01' },
+        { anulado: false, vence: null },
+        { anulado: true, vence: '2026-10-01' },
+      ],
+      hoy,
+    ),
+    { vencidos: 1, porVencer: 2 },
+  );
+  assert.deepEqual(resumenDeVencimientos([], hoy), { vencidos: 0, porVencer: 0 });
+});
+
+prueba('034/RF-34: buscar sin mayúsculas ni tildes, en los cuatro campos', () => {
+  const doc = {
+    nombre: 'Cámara de comercio octubre',
+    proveedor: 'Ferretería El Tornillo',
+    descripcion: 'Renovación anual',
+    nombreArchivo: 'CCB-2026.pdf',
+  };
+  assert.ok(coincideBusqueda(doc, 'camara'));
+  assert.ok(coincideBusqueda(doc, '  FERRETERIA '));
+  assert.ok(coincideBusqueda(doc, 'renovacion'));
+  assert.ok(coincideBusqueda(doc, 'ccb-2026'));
+  assert.ok(coincideBusqueda(doc, ''));
+  assert.ok(!coincideBusqueda(doc, 'póliza'));
+});
+
+prueba('034/RF-12 a RF-17: el Encargado de OCC entra a OCC y solo a OCC', () => {
+  const encargado = { rol: 'encargado_occ' as const, obraId: null };
+  // RF-14: sin tarjetas, directo a OCC; ninguna otra empresa ni obra.
+  assert.equal(destinoAlEntrar({ rol: 'encargado_occ', obras: [] }), '/panel/occ');
+  assert.ok(alcanzaLaEmpresa('encargado_occ', 'occ'));
+  for (const empresa of ['elemental', 'geolab', 'proyectos'] as const) {
+    assert.equal(alcanzaLaEmpresa('encargado_occ', empresa), false, empresa);
+  }
+  assert.equal(alcanzaLaObraDeLaRuta(encargado, 'o1'), false);
+  // RF-15: el menú de OCC completo, sin «← Empresas».
+  const menu = menuDelLugar({ tipo: 'empresa', empresa: 'occ', pagina: null }, 'encargado_occ');
+  assert.deepEqual(menu.navegacion, []);
+  assert.deepEqual(
+    menu.entradas.map((m) => m.titulo),
+    menuDeEmpresa('occ', 'admin').map((m) => m.titulo),
+  );
+  // Once desde la spec 035: Recursos Humanos de consulta (RF-3).
+  assert.equal(menu.entradas.length, 11);
+  // RF-16: lo de la gerencia en OCC, menos anular documentos y aprobar compras o pagos.
+  assert.ok(alcanza('encargado_occ', 'vehiculos', 'escribir'));
+  assert.ok(alcanza('encargado_occ', 'asignaciones', 'escribir'));
+  assert.ok(alcanza('encargado_occ', 'preoperacionales', 'anular'));
+  assert.ok(alcanza('encargado_occ', 'reportes', 'escribir'));
+  assert.ok(alcanza('encargado_occ', 'documentos', 'escribir'));
+  assert.ok(alcanza('encargado_occ', 'solicitudes', 'escribir'));
+  assert.equal(alcanza('encargado_occ', 'documentos', 'anular'), false);
+  assert.equal(alcanza('encargado_occ', 'compras', 'aprobar'), false);
+  assert.equal(alcanza('encargado_occ', 'tesoreria', 'aprobar'), false);
+  // La bitácora y WhatsApp de OCC se consultan: se corrigen y se aprueban en la obra.
+  assert.ok(alcanza('encargado_occ', 'bitacoras', 'listar'));
+  for (const accion of ['escribir', 'anular'] as const) {
+    assert.equal(alcanza('encargado_occ', 'bitacoras', accion), false, accion);
+  }
+  for (const accion of ['escribir', 'aprobar'] as const) {
+    assert.equal(alcanza('encargado_occ', 'whatsapp', accion), false, accion);
+  }
+  // Fuera de OCC, nada; obras y personas solo para llenar sus selectores.
+  // Recursos Humanos sí: consulta el personal de OCC desde la spec 035 (RF-4).
+  for (const modulo of ['inicio', 'almacen', 'cantera', 'laboratorio', 'contrato', 'empresa', 'finanzas'] as const) {
+    assert.equal(alcanza('encargado_occ', modulo, 'ver'), false, modulo);
+  }
+  assert.ok(alcanza('encargado_occ', 'obras', 'listar') && !alcanza('encargado_occ', 'obras', 'ver'));
+  assert.ok(alcanza('encargado_occ', 'personas', 'listar') && !alcanza('encargado_occ', 'personas', 'escribir'));
+  // RF-12, RF-13: el cargo, su empresa, y que solo la gerencia da ese acceso.
+  assert.equal(cargoPorId('encargado_occ')?.rolSugerido, 'encargado_occ');
+  assert.equal(cargoPorId('encargado_occ')?.operaVehiculos, false);
+  assert.equal(empresaDeLaPersona(null, 'encargado_occ'), 'occ');
+  assert.ok(puedeCambiarRol('admin', 'encargado_occ'));
+  assert.equal(puedeCambiarRol('supervisor', 'encargado_occ'), false);
+  // El asistente: todas las obras, con los módulos de OCC que alcanza.
+  const alcance = alcanceDelAsistente({ ...encargado, modulosDeObra: TODOS_LOS_MODULOS });
+  assert.equal(alcance.obras, 'todas');
+  assert.deepEqual(alcance.modulos, ['bitacoras', 'preoperacionales', 'whatsapp', 'reportes', 'vehiculos']);
+  // Las direcciones de antes lo llevan a OCC, nunca a una obra.
+  assert.equal(rutaNueva('/panel/preoperacionales', encargado), '/panel/occ/preoperacionales');
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', encargado), '/panel/occ');
+});
+
+prueba('034/RF-2, RF-4 a RF-10: quién ve Documentos y dónde', () => {
+  // RF-2: en la obra, después de Contrato y Presupuesto.
+  const deObra = menuDeObra('admin').map((m) => m.pagina);
+  assert.equal(deObra.indexOf('documentos'), deObra.indexOf('contrato') + 1);
+  // No tiene interruptor por obra: con todo apagado sigue.
+  assert.ok(
+    menuDeObra('supervisor', { almacen: false, cantera: false, laboratorio: false }).some((m) => m.pagina === 'documentos'),
+  );
+  // RF-4 a RF-8: ven y suben gerencia, residente, laboratorista y Encargado de OCC; desde la
+  // spec 035, también la auxiliar de RR. HH. en los de Elemental (035/RF-10). Nadie más.
+  assert.deepEqual(
+    ROLES.filter((r) => alcanza(r, 'documentos', 'ver')),
+    ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_rrhh'],
+  );
+  assert.deepEqual(
+    ROLES.filter((r) => alcanza(r, 'documentos', 'escribir')),
+    ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_rrhh'],
+  );
+  // RF-10: anula solo la gerencia.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'documentos', 'anular')), ['admin']);
+  const tiene = (menu: { pagina: string }[]) => menu.some((m) => m.pagina === 'documentos');
+  // RF-5: el residente, en su obra.
+  assert.ok(tiene(menuDeObra('supervisor')));
+  // RF-6, RF-7: cada uno en su empresa, y a las demás no entra.
+  assert.ok(tiene(menuDeEmpresa('geolab', 'laboratorista')));
+  assert.ok(tiene(menuDeEmpresa('occ', 'encargado_occ')));
+  assert.equal(alcanzaLaEmpresa('laboratorista', 'occ'), false);
+  assert.equal(alcanzaLaEmpresa('supervisor', 'occ'), false);
+  // RF-4: la gerencia, en las tres empresas y en la obra.
+  for (const empresa of ['elemental', 'occ', 'geolab'] as const) assert.ok(tiene(menuDeEmpresa(empresa, 'admin')), empresa);
+  // RF-8: operador, almacenista y encargado de planta, en ningún lado.
+  for (const rol of ['operador', 'almacenista', 'encargado_planta'] as const) {
+    assert.ok(!tiene(menuDeObra(rol)), rol);
+  }
+});
+
+prueba('034/RF-16, RF-50, RF-51: el Encargado de OCC ve todas las obras, solo en sus módulos', () => {
+  const encargado = sesionDe('encargado_occ', null);
+  // Todas las obras: sin filtro, y alcanza cualquiera.
+  assert.equal(filtroDeObra(encargado, vehiculos.obraId), undefined);
+  assert.ok(alcanzaLaObra(encargado, 'obra-a') && alcanzaLaObra(encargado, 'obra-b'));
+  // Sin obra no es «cuenta a medio configurar»: no se le avisa que le falta obra.
+  assert.equal(sinObraAsignada('encargado_occ', null), false);
+  // Las fotos: las de preoperacionales y bitácoras sí; el contrato y los documentos sueltos no.
+  const deObra = { existe: true, obraId: 'obra-b' };
+  assert.ok(alcanzaLaImagen(encargado, deObra, 'preoperacionales'));
+  assert.ok(alcanzaLaImagen(encargado, deObra, 'bitacoras'));
+  assert.equal(alcanzaLaImagen(encargado, deObra, 'contrato'), false);
+  assert.equal(alcanzaLaImagen(encargado, deObra, null), false);
+  assert.equal(alcanzaLaImagen(encargado, deObra), false);
+  // Lo huérfano sigue siendo solo de la gerencia.
+  assert.equal(alcanzaLaImagen(encargado, { existe: false, obraId: null }, 'bitacoras'), false);
+  assert.ok(alcanzaLaImagen(sesionDe('admin', null), { existe: true, obraId: 'obra-b' }, 'contrato'));
+  // Nada cambia para el residente: su obra, con o sin módulo.
+  const residente = sesionDe('supervisor', 'obra-a');
+  assert.ok(alcanzaLaImagen(residente, { existe: true, obraId: 'obra-a' }, 'contrato'));
+  assert.equal(alcanzaLaImagen(residente, deObra, 'bitacoras'), false);
+  // La cerradura de los módulos sigue en la tabla: fuera de OCC recibe 403.
+  for (const modulo of ['obras', 'personas', 'contrato', 'almacen', 'laboratorio'] as const) {
+    assert.equal(alcanza('encargado_occ', modulo, 'escribir'), false, modulo);
+  }
+  for (const modulo of ['compras', 'tesoreria'] as const) {
+    assert.equal(alcanza('encargado_occ', modulo, 'ver'), false, modulo);
+  }
+});
+
+prueba('034/RF-13, RF-14: el Encargado de OCC es de OCC y no lleva obra', () => {
+  assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: null, empresa: 'occ' }), null);
+  // Sin empresa todavía: el servidor le pone OCC.
+  assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: null, empresa: null }), null);
+  assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: 'o1', empresa: 'occ' })?.campo, 'obraId');
+  assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: null, empresa: 'geolab' })?.campo, 'empresa');
+  // Los demás roles, sin reparo: un residente con obra y de Proyectos sigue igual.
+  assert.equal(reparoDelAccesoSinObra({ rol: 'supervisor', obraId: 'o1', empresa: 'proyectos' }), null);
+  assert.equal(reparoDelAccesoSinObra({ rol: 'operador', obraId: 'o1', empresa: 'occ' }), null);
+});
+
+prueba('035/RF-8: la auxiliar de RR. HH. es de Elemental y no lleva obra', () => {
+  assert.equal(empresaDelAccesoSinObra('auxiliar_rrhh'), 'elemental');
+  assert.equal(empresaDelAccesoSinObra('encargado_occ'), 'occ');
+  assert.equal(empresaDelAccesoSinObra('supervisor'), null);
+  assert.equal(reparoDelAccesoSinObra({ rol: 'auxiliar_rrhh', obraId: null, empresa: 'elemental' }), null);
+  assert.equal(reparoDelAccesoSinObra({ rol: 'auxiliar_rrhh', obraId: null, empresa: null }), null);
+  const conObra = reparoDelAccesoSinObra({ rol: 'auxiliar_rrhh', obraId: 'o1', empresa: 'elemental' });
+  assert.equal(conObra?.campo, 'obraId');
+  assert.match(conObra?.mensaje ?? '', /no lleva obra/);
+  assert.deepEqual(reparoDelAccesoSinObra({ rol: 'auxiliar_rrhh', obraId: null, empresa: 'occ' }), {
+    campo: 'empresa',
+    mensaje: 'La auxiliar de Recursos Humanos es de Elemental.',
+  });
+});
+
+prueba('035/RF-11: el selector de Acceso ofrece solo lo que cada rol puede dar', () => {
+  assert.deepEqual(rolesQuePuedeDar('auxiliar_rrhh'), ['operador']);
+  assert.deepEqual(rolesQuePuedeDar('admin'), [...ROLES]);
+  assert.deepEqual(rolesQuePuedeDar('supervisor'), ['supervisor', 'operador']);
+  for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista', 'encargado_occ'] as const) {
+    assert.deepEqual(rolesQuePuedeDar(rol), [], rol);
+  }
+});
+
+prueba('035/RF-8 a RF-11: la auxiliar de RR. HH. entra a Elemental y solo a Elemental', () => {
+  const auxiliar = { rol: 'auxiliar_rrhh' as const, obraId: null };
+  // RF-9: directo a su Recursos Humanos, sin tarjetas.
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_rrhh', obras: [] }), '/panel/elemental/recursos-humanos');
+  assert.ok(alcanzaLaEmpresa('auxiliar_rrhh', 'elemental'));
+  for (const empresa of ['occ', 'geolab', 'proyectos'] as const) {
+    assert.equal(alcanzaLaEmpresa('auxiliar_rrhh', empresa), false, empresa);
+  }
+  assert.equal(alcanzaLaObraDeLaRuta(auxiliar, 'o1'), false);
+  // RF-10: el menú de Elemental sin el Asistente, y sin «← Empresas».
+  const menu = menuDelLugar({ tipo: 'empresa', empresa: 'elemental', pagina: null }, 'auxiliar_rrhh');
+  assert.deepEqual(menu.navegacion, []);
+  assert.deepEqual(
+    menu.entradas.map((m) => m.clave),
+    ['recursos-humanos', 'compras', 'tesoreria', 'documentos', 'licitaciones'],
+  );
+  // Recursos Humanos entero; las pestañas Personas (escribe) y Obras (consulta).
+  for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) assert.ok(alcanza('auxiliar_rrhh', 'rrhh', accion), accion);
+  assert.ok(alcanza('auxiliar_rrhh', 'personas', 'escribir') && !alcanza('auxiliar_rrhh', 'personas', 'activar'));
+  assert.ok(alcanza('auxiliar_rrhh', 'obras', 'ver') && !alcanza('auxiliar_rrhh', 'obras', 'escribir'));
+  // Documentos de Elemental: sube, no anula (034/RF-10).
+  assert.ok(alcanza('auxiliar_rrhh', 'documentos', 'escribir') && !alcanza('auxiliar_rrhh', 'documentos', 'anular'));
+  // Compras y Tesorería las ve; aprobar es de la gerencia.
+  assert.ok(alcanza('auxiliar_rrhh', 'compras', 'ver') && !alcanza('auxiliar_rrhh', 'compras', 'aprobar'));
+  assert.ok(alcanza('auxiliar_rrhh', 'tesoreria', 'ver') && !alcanza('auxiliar_rrhh', 'tesoreria', 'aprobar'));
+  // Nada de las obras ni el Asistente.
+  for (const modulo of ['bitacoras', 'preoperacionales', 'contrato', 'almacen', 'laboratorio', 'whatsapp', 'asistente', 'vehiculos'] as const) {
+    assert.equal(alcanza('auxiliar_rrhh', modulo, 'ver'), false, modulo);
+  }
+  // RF-11: solo da el acceso de operador (una persona sin panel); los demás, la gerencia.
+  assert.ok(puedeCambiarRol('auxiliar_rrhh', 'operador'));
+  for (const rol of ['admin', 'supervisor', 'auxiliar_rrhh', 'encargado_occ', 'laboratorista'] as const) {
+    assert.equal(puedeCambiarRol('auxiliar_rrhh', rol), false, rol);
+  }
+  assert.ok(puedeCambiarRol('admin', 'auxiliar_rrhh'));
+  // RF-8: el cargo y su empresa.
+  assert.equal(cargoPorId('auxiliar_rrhh')?.rolSugerido, 'auxiliar_rrhh');
+  assert.equal(empresaDeLaPersona(null, 'auxiliar_rrhh'), 'elemental');
+  // Lleva el personal de todas las obras: no es una cuenta «sin obra».
+  assert.equal(sinObraAsignada('auxiliar_rrhh', null), false);
+  // Y las fotos de las obras no las alcanza: no tiene sus módulos.
+  assert.equal(alcanzaLaImagen(sesionDe('auxiliar_rrhh', null), { existe: true, obraId: 'o1' }, 'bitacoras'), false);
+  // Lo de antes la lleva a su Recursos Humanos, nunca a una obra.
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', auxiliar), '/panel/elemental/recursos-humanos');
+});
+
+prueba('035/RF-2 a RF-7: quién ve Recursos Humanos y dónde', () => {
+  const tiene = (menu: { pagina: string }[]) => menu.some((m) => m.pagina === 'recursos-humanos');
+  // RF-3: en OCC y en Geolab, después de Documentos.
+  for (const empresa of ['occ', 'geolab'] as const) {
+    const paginas = menuDeEmpresa(empresa, 'admin').map((m) => m.pagina);
+    assert.equal(paginas.indexOf('recursos-humanos'), paginas.indexOf('documentos') + 1, empresa);
+  }
+  // RF-2, RF-4, RF-5: Elemental (gerencia y auxiliar), OCC (Encargado), Geolab (laboratorista), obra (residente).
+  assert.ok(tiene(menuDeEmpresa('elemental', 'auxiliar_rrhh')));
+  assert.ok(tiene(menuDeEmpresa('occ', 'encargado_occ')));
+  assert.ok(tiene(menuDeEmpresa('geolab', 'laboratorista')));
+  assert.ok(tiene(menuDeObra('supervisor')));
+  // Cada uno solo entra a lo suyo (lo decide el lugar, no la fila).
+  assert.equal(alcanzaLaEmpresa('encargado_occ', 'geolab'), false);
+  assert.equal(alcanzaLaEmpresa('laboratorista', 'occ'), false);
+  // RF-6: escriben y anulan solo gerencia y la auxiliar.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'escribir')), ['admin', 'auxiliar_rrhh']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'anular')), ['admin', 'auxiliar_rrhh']);
+  // RF-4, RF-5: los que consultan.
+  for (const rol of ['supervisor', 'encargado_occ', 'laboratorista'] as const) {
+    assert.ok(alcanza(rol, 'rrhh', 'ver') && alcanza(rol, 'rrhh', 'listar') && !alcanza(rol, 'rrhh', 'escribir'), rol);
+  }
+  // RF-7: operador, almacenista y encargado de planta, en ningún lado.
+  for (const rol of ['operador', 'almacenista', 'encargado_planta'] as const) {
+    assert.equal(alcanza(rol, 'rrhh', 'ver'), false, rol);
+    assert.ok(!tiene(menuDeObra(rol)), rol);
+  }
+});
+
+prueba('035/RF-12, RF-16, RF-17: lo que impide guardar una ficha', () => {
+  const vacia: DatosDeLaFicha = {
+    tipoDocumento: null, fechaNacimiento: null, telefono: null, correo: null, direccion: null, ciudad: null,
+    emergenciaNombre: null, emergenciaParentesco: null, emergenciaTelefono: null, fechaIngreso: null,
+    tipoContrato: null, finContrato: null, salario: null, eps: null, arl: null, pension: null, caja: null, notas: null,
+  };
+  // Vacía se guarda: lo que falta es un aviso (RF-26), no un rechazo.
+  assert.deepEqual(faltasDeLaFicha(vacia), []);
+  const buena = { ...vacia, tipoDocumento: 'cc', fechaIngreso: '2026-01-15', tipoContrato: 'termino_fijo', finContrato: '2026-12-31', salario: 2_500_000, correo: 'ana@ejemplo.co' };
+  assert.deepEqual(faltasDeLaFicha(buena), []);
+  // RF-16: el fin antes del ingreso; el mismo día vale.
+  assert.deepEqual(faltasDeLaFicha({ ...buena, finContrato: '2026-01-14' }), ['El contrato no puede terminar antes de la fecha de ingreso.']);
+  assert.deepEqual(faltasDeLaFicha({ ...buena, finContrato: '2026-01-15' }), []);
+  // Un indefinido no tiene fecha de terminación.
+  assert.deepEqual(faltasDeLaFicha({ ...buena, tipoContrato: 'termino_indefinido' }), [
+    'Un contrato de término indefinido no tiene fecha de terminación.',
+  ]);
+  // RF-17: salario 0, negativo o con decimales.
+  for (const salario of [0, -1, 1500000.5]) {
+    assert.deepEqual(faltasDeLaFicha({ ...buena, salario }), ['El salario va en pesos, sin decimales y mayor que cero.'], String(salario));
+  }
+  // Fechas que no existen, correo y tipos que no existen.
+  assert.deepEqual(faltasDeLaFicha({ ...vacia, fechaNacimiento: '1990-02-30' }), ['La fecha de nacimiento no es válida.']);
+  assert.deepEqual(faltasDeLaFicha({ ...vacia, correo: 'ana@' }), ['El correo no es válido.']);
+  assert.deepEqual(faltasDeLaFicha({ ...vacia, tipoDocumento: 'nit' }), ['Ese tipo de documento no existe.']);
+  assert.deepEqual(faltasDeLaFicha({ ...vacia, tipoContrato: 'verbal' }), ['Ese tipo de contrato no existe.']);
+  assert.equal(nombreDeTipoDeContrato('obra_labor'), 'Obra o labor');
+  assert.equal(nombreDeEstadoLaboral('incapacidad'), 'Incapacitado');
+});
+
+prueba('035/RF-26: la ficha incompleta, por cada uno de sus cuatro campos', () => {
+  const completa = { fechaIngreso: '2026-01-15', tipoContrato: 'termino_fijo', eps: 'Sura', arl: 'Positiva' };
+  assert.deepEqual(faltasDeFichaCompleta(completa), []);
+  assert.deepEqual(faltasDeFichaCompleta({ ...completa, fechaIngreso: null }), ['fecha de ingreso']);
+  assert.deepEqual(faltasDeFichaCompleta({ ...completa, tipoContrato: null }), ['tipo de contrato']);
+  assert.deepEqual(faltasDeFichaCompleta({ ...completa, eps: '  ' }), ['EPS']);
+  assert.deepEqual(faltasDeFichaCompleta({ ...completa, arl: null }), ['ARL']);
+  // Sin ficha (las personas de antes y las de WhatsApp), le falta todo.
+  assert.deepEqual(faltasDeFichaCompleta(null), ['fecha de ingreso', 'tipo de contrato', 'EPS', 'ARL']);
+});
+
+prueba('035/RF-13: el salario lo ven la gerencia y la auxiliar de RR. HH., y nadie más', () => {
+  assert.deepEqual(ROLES.filter(veElSalario), ['admin', 'auxiliar_rrhh']);
+});
+
+prueba('035/RF-23: las clases de documento de una persona', () => {
+  const ids = clasesDe('persona').map((c) => c.id);
+  // Las de RF-23, con «Otro» al final y sin repetidos.
+  for (const id of ['hoja_de_vida', 'identidad', 'contrato_laboral', 'afiliacion_eps', 'afiliacion_arl', 'afiliacion_pension',
+    'afiliacion_caja', 'estudios', 'cursos', 'examen_medico', 'examen_retiro', 'consentimiento_examen_retiro',
+    'licencia_conduccion', 'dotacion', 'liquidacion', 'paz_y_salvo']) {
+    assert.ok(ids.includes(id), id);
+  }
+  assert.equal(ids.at(-1), 'otro');
+  assert.equal(new Set(ids).size, ids.length);
+  // Ni las comunes de empresa ni las de la obra; y las de la persona solo en la persona.
+  assert.ok(!esClaseDe('persona', 'camara_de_comercio') && !esClaseDe('persona', 'planos'));
+  for (const lugar of ['elemental', 'occ', 'geolab', 'obra'] as const) {
+    assert.equal(esClaseDe(lugar, 'paz_y_salvo'), false, lugar);
+  }
+  assert.equal(nombreDeClase('persona', 'consentimiento_examen_retiro'), 'Consentimiento de no realizar el examen médico de retiro');
+});
+
+prueba('035/RF-19: lo que falta para retirar a una persona', () => {
+  const examen = 'Examen médico de retiro, o el consentimiento firmado de no realizarlo';
+  // Sin nada, las tres faltas.
+  assert.deepEqual(faltasParaRetirar('termino_fijo', []), ['Paz y salvo', 'Liquidación', examen]);
+  // Con todo, nada.
+  assert.deepEqual(faltasParaRetirar('termino_fijo', ['paz_y_salvo', 'liquidacion', 'examen_retiro']), []);
+  // El consentimiento reemplaza al examen.
+  assert.deepEqual(faltasParaRetirar('obra_labor', ['paz_y_salvo', 'liquidacion', 'consentimiento_examen_retiro']), []);
+  // Prestación de servicios no pide liquidación.
+  assert.deepEqual(faltasParaRetirar('prestacion_servicios', ['paz_y_salvo', 'examen_retiro']), []);
+  assert.deepEqual(faltasParaRetirar('prestacion_servicios', []), ['Paz y salvo', examen]);
+  // Sin tipo de contrato en la ficha, se pide: no se sabe que no la tenga.
+  assert.deepEqual(faltasParaRetirar(null, ['paz_y_salvo', 'examen_retiro']), ['Liquidación']);
+  // Un examen ocupacional de ingreso no es el de retiro.
+  assert.deepEqual(faltasParaRetirar('aprendizaje', ['paz_y_salvo', 'liquidacion', 'examen_medico']), [examen]);
+});
+
+prueba('035, caso límite: un documento de retiro anulado después del retiro', () => {
+  const completos = ['paz_y_salvo', 'liquidacion', 'consentimiento_examen_retiro'];
+  // Retirada con todo: nada que decir.
+  assert.deepEqual(faltasDeLaRetirada('retirado', 'termino_fijo', completos), []);
+  // Se anuló la liquidación después: sigue retirada y la ficha lo dice.
+  assert.deepEqual(faltasDeLaRetirada('retirado', 'termino_fijo', ['paz_y_salvo', 'consentimiento_examen_retiro']), ['Liquidación']);
+  // Prestación de servicios no la pide, ni antes ni después.
+  assert.deepEqual(faltasDeLaRetirada('retirado', 'prestacion_servicios', ['paz_y_salvo', 'examen_retiro']), []);
+  // Quien no está retirada no tiene este aviso: lo suyo es «Retirar», que dice lo que falta.
+  assert.deepEqual(faltasDeLaRetirada('activo', 'termino_fijo', []), []);
+  assert.deepEqual(faltasDeLaRetirada('vacaciones', null, []), []);
+});
+
+prueba('035/RF-20: la fecha y el motivo del retiro', () => {
+  assert.deepEqual(faltasDelRetiro({ fecha: '2026-10-28', motivo: 'Terminó la obra' }, '2026-01-10'), []);
+  assert.deepEqual(faltasDelRetiro({ fecha: '2026-10-28', motivo: 'Renuncia' }, null), []);
+  // El mismo día del ingreso vale; antes, no.
+  assert.deepEqual(faltasDelRetiro({ fecha: '2026-01-10', motivo: 'Periodo de prueba' }, '2026-01-10'), []);
+  assert.deepEqual(faltasDelRetiro({ fecha: '2026-01-09', motivo: 'x' }, '2026-01-10'), ['El retiro no puede ser antes de la fecha de ingreso.']);
+  assert.deepEqual(faltasDelRetiro({ fecha: '2026-02-30', motivo: '  ' }, null), ['Escriba la fecha del retiro.', 'Escriba el motivo del retiro.']);
+  assert.deepEqual(faltasDelRetiro({ fecha: '', motivo: 'x' }, null), ['Escriba la fecha del retiro.']);
+});
+
+prueba('035/RF-21: los selectores no ofrecen a inactivos ni retirados', () => {
+  assert.equal(seOfreceEnSelectores({ activo: true }), true);
+  assert.equal(seOfreceEnSelectores({ activo: true, retirado: false }), true);
+  assert.equal(seOfreceEnSelectores({ activo: false, retirado: false }), false);
+  assert.equal(seOfreceEnSelectores({ activo: false, retirado: true }), false);
+  // Reactivada en Personas sin dejar de estar retirada: sigue sin ofrecerse.
+  assert.equal(seOfreceEnSelectores({ activo: true, retirado: true }), false);
+});
+
+prueba('035/RF-26 a RF-31: los avisos de cada persona y el resumen del personal', () => {
+  const hoy = '2026-10-28';
+  const fichaCompleta = { estado: 'activo', fechaIngreso: '2026-01-15', tipoContrato: 'termino_indefinido', eps: 'Sura', arl: 'Positiva', finContrato: null };
+  const sin = (p: Partial<PersonaParaAvisos>): PersonaParaAvisos => ({ activo: true, ficha: fichaCompleta, documentos: [], ...p });
+  const tipos = (p: PersonaParaAvisos) => avisosDeLaPersona(p, hoy).map((a) => a.tipo);
+
+  // Al día, sin avisos.
+  assert.deepEqual(avisosDeLaPersona(sin({}), hoy), []);
+  // Documentos: dos vencidos y dos por vencer; el más cercano manda.
+  const conDocs = sin({
+    documentos: [
+      { nombre: 'Curso de alturas', vence: '2026-10-20', anulado: false },
+      { nombre: 'Licencia', vence: '2026-10-01', anulado: false },
+      { nombre: 'Examen periódico', vence: '2026-11-20', anulado: false },
+      { nombre: 'Afiliación ARL', vence: '2026-11-05', anulado: false },
+      { nombre: 'Anulado vencido', vence: '2026-01-01', anulado: true },
+      { nombre: 'Hoja de vida', vence: null, anulado: false },
+    ],
+  });
+  const avisos = avisosDeLaPersona(conDocs, hoy);
+  assert.deepEqual(avisos.map((a) => a.texto), ['2 documentos vencidos', 'Vence en 8 días']);
+  assert.equal(avisos[0].detalle, 'Curso de alturas, Licencia');
+  assert.equal(avisos[0].tono, 'malo');
+  // Contrato: a 30 días avisa, a 31 no; el día de la fecha todavía vale; después, terminado.
+  const conFin = (finContrato: string) => sin({ ficha: { ...fichaCompleta, tipoContrato: 'termino_fijo', finContrato } });
+  assert.deepEqual(avisosDeLaPersona(conFin('2026-11-27'), hoy).map((a) => a.texto), ['Contrato termina en 30 días']);
+  assert.deepEqual(tipos(conFin('2026-11-28')), []);
+  assert.deepEqual(avisosDeLaPersona(conFin(hoy), hoy).map((a) => a.texto), ['Contrato termina hoy']);
+  assert.deepEqual(tipos(conFin('2026-10-27')), ['contrato_terminado']);
+  // Ficha incompleta, y sin ficha.
+  assert.deepEqual(avisosDeLaPersona(sin({ ficha: { ...fichaCompleta, eps: null } }), hoy)[0].detalle, 'Falta: EPS.');
+  assert.deepEqual(tipos(sin({ ficha: null })), ['ficha_incompleta']);
+  // Retirada o desactivada: nada, aunque tenga de todo.
+  const deTodo = { ...conDocs, ficha: { ...fichaCompleta, eps: null, finContrato: '2026-10-01' } };
+  assert.deepEqual(tipos({ ...deTodo, ficha: { ...deTodo.ficha, estado: 'retirado' } }), []);
+  assert.deepEqual(tipos({ ...deTodo, activo: false }), []);
+  // El orden: de lo más grave a lo menos.
+  assert.deepEqual(tipos({ ...deTodo, ficha: { ...deTodo.ficha, finContrato: '2026-10-27' } }), [
+    'documentos_vencidos', 'contrato_terminado', 'ficha_incompleta', 'documentos_por_vencer',
+  ]);
+
+  // El resumen cuenta personas, no avisos.
+  assert.deepEqual(
+    resumenDelPersonal(
+      [sin({}), conDocs, conFin('2026-11-01'), conFin('2026-10-01'), sin({ ficha: null }), { ...deTodo, activo: false }],
+      hoy,
+    ),
+    { conDocumentosVencidos: 1, conDocumentosPorVencer: 1, contratosPorTerminar: 1, contratosTerminados: 1, fichasIncompletas: 1 },
+  );
+  assert.deepEqual(resumenDelPersonal([], hoy), {
+    conDocumentosVencidos: 0, conDocumentosPorVencer: 0, contratosPorTerminar: 0, contratosTerminados: 0, fichasIncompletas: 0,
+  });
+});
+
+prueba('035/RF-32, RF-33: a qué fichas llega cada quien', () => {
+  const obraA = 'obra-a';
+  const de = (rol: Rol, empresa: string | null, obraId: string | null) => ({ rol, empresa, obraId });
+  const operadorOcc = de('operador', null, obraA);
+  const operadorDeOtra = de('operador', 'occ', 'obra-b');
+  const laboratoristaB = de('laboratorista', null, 'obra-b');
+  const deProyectos = de('operador', 'proyectos', obraA);
+  const elemental = de('admin', null, null);
+
+  for (const rol of ['admin', 'auxiliar_rrhh'] as const) {
+    for (const p of [operadorOcc, operadorDeOtra, laboratoristaB, deProyectos, elemental]) {
+      assert.equal(alcanzaLaPersona({ rol, obraId: null }, p), true, rol);
+    }
+  }
+  const encargado = { rol: 'encargado_occ' as const, obraId: null };
+  assert.equal(alcanzaLaPersona(encargado, operadorOcc), true);
+  assert.equal(alcanzaLaPersona(encargado, operadorDeOtra), true);
+  assert.equal(alcanzaLaPersona(encargado, laboratoristaB), false);
+  assert.equal(alcanzaLaPersona(encargado, deProyectos), false);
+  assert.equal(alcanzaLaPersona(encargado, elemental), false);
+
+  const laboratorista = { rol: 'laboratorista' as const, obraId: obraA };
+  assert.equal(alcanzaLaPersona(laboratorista, laboratoristaB), true);
+  // Su obra no le abre las fichas de OCC: lo suyo es Geolab.
+  assert.equal(alcanzaLaPersona(laboratorista, operadorOcc), false);
+
+  const residente = { rol: 'supervisor' as const, obraId: obraA };
+  assert.equal(alcanzaLaPersona(residente, operadorOcc), true);
+  assert.equal(alcanzaLaPersona(residente, deProyectos), true);
+  assert.equal(alcanzaLaPersona(residente, operadorDeOtra), false);
+  assert.equal(alcanzaLaPersona(residente, elemental), false);
+  assert.equal(alcanzaLaPersona({ rol: 'supervisor', obraId: null }, operadorOcc), false);
+
+  for (const rol of ['operador', 'almacenista', 'encargado_planta'] as const) {
+    assert.equal(alcanzaLaPersona({ rol, obraId: obraA }, operadorOcc), false, rol);
+  }
+});
+
+prueba('035/RF-15: el historial dice qué campos cambiaron', () => {
+  const vacia: FichaGuardable = {
+    tipoDocumento: null, fechaNacimiento: null, telefono: null, correo: null, direccion: null, ciudad: null,
+    emergenciaNombre: null, emergenciaParentesco: null, emergenciaTelefono: null, fechaIngreso: null,
+    tipoContrato: null, finContrato: null, salario: null, eps: null, arl: null, pension: null, caja: null,
+    notas: null, estado: 'activo',
+  };
+  // Sin ficha antes: lo que se llenó.
+  assert.deepEqual(camposCambiados(null, vacia), []);
+  const primera = { ...vacia, fechaIngreso: '2026-01-10', salario: 2_500_000, eps: 'Sura' };
+  assert.deepEqual(camposCambiados(null, primera), ['fechaIngreso', 'salario', 'eps']);
+  // Después: solo lo distinto, en el orden del formulario.
+  assert.deepEqual(camposCambiados(primera, { ...primera, estado: 'vacaciones', telefono: '300' }), ['telefono', 'estado']);
+  assert.deepEqual(camposCambiados(primera, { ...primera }), []);
+  assert.deepEqual(camposCambiados(primera, { ...primera, salario: null }), ['salario']);
+});
+
+prueba('036/RF-8: el número SC y los estados', () => {
+  assert.equal(numeroDeSolicitud(1), 'SC-0001');
+  assert.equal(numeroDeSolicitud(12345), 'SC-12345');
+  assert.equal(nombreDeEstadoDeSolicitud('recibida_en_parte'), 'Recibida en parte');
+  assert.equal(ESTADOS_DE_SOLICITUD.length, 8);
+  // RF-24: abiertas arriba; recibida, rechazada y cancelada, cerradas.
+  assert.deepEqual(
+    ESTADOS_DE_SOLICITUD.filter((e) => !solicitudAbierta(e.id)).map((e) => e.id),
+    ['recibida', 'rechazada', 'cancelada'],
+  );
+});
+
+prueba('036/RF-7 a RF-10: lo que impide enviar una solicitud', () => {
+  const hoy = '2026-10-29';
+  const buena: DatosDeLaSolicitud = {
+    renglones: [
+      { descripcion: 'Cemento gris', cantidad: 20, unidad: 'bulto', materialId: 'm1' },
+      { descripcion: 'Guantes de nitrilo', cantidad: 2.5, unidad: 'caja', materialId: null },
+    ],
+    paraCuando: hoy,
+    urgente: true,
+    paraQue: 'Fundir la placa',
+    proveedorSugerido: '',
+    valorEstimado: null,
+  };
+  assert.deepEqual(faltasDeLaSolicitud(buena, hoy), []);
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, valorEstimado: 1_200_000, paraCuando: '2026-11-15' }, hoy), []);
+
+  // RF-9: sin renglones, sin descripción, cantidad 0, negativa o con tres decimales, sin unidad.
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, renglones: [] }, hoy), [
+    'Agregue al menos un renglón con lo que se necesita.',
+  ]);
+  const renglon = buena.renglones[0];
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, renglones: [renglon, { ...renglon, descripcion: '  ' }] }, hoy), [
+    'El renglón 2 no dice qué se necesita.',
+  ]);
+  for (const cantidad of [0, -3, 1.234, Number.NaN]) {
+    assert.deepEqual(faltasDeLaSolicitud({ ...buena, renglones: [{ ...renglon, cantidad }] }, hoy), [
+      'La cantidad del renglón 1 debe ser mayor que cero, con dos decimales a lo más.',
+    ]);
+  }
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, renglones: [{ ...renglon, unidad: '' }] }, hoy), [
+    'El renglón 1 no tiene unidad.',
+  ]);
+
+  // RF-10: ayer no; sin fecha o con una que no existe, tampoco.
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, paraCuando: '2026-10-28' }, hoy), [
+    'La fecha «para cuándo» no puede ser anterior a hoy.',
+  ]);
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, paraCuando: '' }, hoy), ['Diga para cuándo se necesita.']);
+  assert.deepEqual(faltasDeLaSolicitud({ ...buena, paraCuando: '2026-02-30' }, hoy), ['Diga para cuándo se necesita.']);
+
+  // El valor estimado es opcional, pero si va, en pesos y mayor que cero.
+  for (const valorEstimado of [0, -1, 1500.5]) {
+    assert.deepEqual(faltasDeLaSolicitud({ ...buena, valorEstimado }, hoy), [
+      'El valor estimado va en pesos, sin decimales y mayor que cero.',
+    ]);
+  }
+});
+
+prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué estado', () => {
+  const residente = { id: 'r1', rol: 'supervisor' as const };
+  const gerencia = { id: 'g1', rol: 'admin' as const };
+  const almacenista = { id: 'a1', rol: 'almacenista' as const };
+  const enviada: SolicitudParaPaso = { estado: 'enviada', pedidaPor: 'r1', tieneCompraVigente: false };
+  const aprobada: SolicitudParaPaso = { ...enviada, estado: 'aprobada' };
+  const comprada: SolicitudParaPaso = { ...enviada, estado: 'comprada', tieneCompraVigente: true };
+
+  // RF-11: corregir y cancelar, solo quien la pidió y solo antes de aprobarla.
+  assert.equal(porQueNoPuedeDar('corregir', residente, enviada), null);
+  assert.equal(porQueNoPuedeDar('cancelar', residente, { ...enviada, estado: 'devuelta' }), null);
+  assert.deepEqual(porQueNoPuedeDar('corregir', { id: 'r2', rol: 'supervisor' }, enviada), {
+    estado: 403,
+    mensaje: 'Solo quien pidió la solicitud puede corregirla.',
+  });
+  assert.equal(puedeDar('cancelar', gerencia, enviada), false);
+  assert.ok(puedeDar('cancelar', gerencia, { ...enviada, pedidaPor: 'g1' }));
+  assert.deepEqual(porQueNoPuedeDar('corregir', residente, aprobada), {
+    estado: 409,
+    mensaje: 'Esta solicitud está aprobada: no se puede corregir.',
+  });
+
+  // RF-5, RF-13 a RF-15: aprobar, rechazar y devolver, solo la gerencia.
+  for (const paso of ['aprobar', 'rechazar', 'devolver'] as const) {
+    assert.ok(puedeDar(paso, gerencia, enviada), paso);
+    for (const rol of ROLES.filter((r) => r !== 'admin')) {
+      assert.equal(puedeDar(paso, { id: 'r1', rol }, enviada), false, `${paso} ${rol}`);
+    }
+  }
+  assert.deepEqual(porQueNoPuedeDar('aprobar', { id: 'e1', rol: 'encargado_occ' }, enviada), {
+    estado: 403,
+    mensaje: 'No puede aprobar ni rechazar solicitudes de compra: lo hace la gerencia.',
+  });
+  // Una devuelta está en manos de quien la pidió: se rechaza, pero no se aprueba ni se vuelve a devolver.
+  assert.ok(puedeDar('rechazar', gerencia, { ...enviada, estado: 'devuelta' }));
+  assert.equal(puedeDar('aprobar', gerencia, { ...enviada, estado: 'devuelta' }), false);
+  assert.equal(puedeDar('devolver', gerencia, { ...enviada, estado: 'devuelta' }), false);
+
+  // RF-16, RF-19: registrar y anular compras, la gerencia; la auxiliar de RR. HH. no.
+  assert.ok(puedeDar('registrar_compra', gerencia, aprobada));
+  assert.ok(puedeDar('registrar_compra', gerencia, { ...comprada, estado: 'recibida_en_parte' }));
+  assert.equal(puedeDar('registrar_compra', gerencia, enviada), false);
+  assert.deepEqual(porQueNoPuedeDar('registrar_compra', { id: 'x1', rol: 'auxiliar_rrhh' }, aprobada), {
+    estado: 403,
+    mensaje: 'No puede registrar compras: lo hace la gerencia.',
+  });
+  assert.deepEqual(porQueNoPuedeDar('anular_compra', gerencia, aprobada), {
+    estado: 409,
+    mensaje: 'Esta solicitud no tiene compras registradas.',
+  });
+  assert.ok(puedeDar('anular_compra', gerencia, comprada));
+  assert.equal(puedeDar('anular_compra', almacenista, comprada), false);
+
+  // RF-20: recibir, quien ve Solicitudes de compra, y solo con compra.
+  assert.deepEqual(porQueNoPuedeDar('recibir', almacenista, aprobada), {
+    estado: 409,
+    mensaje: 'Esta solicitud no tiene compras registradas.',
+  });
+  assert.ok(puedeDar('recibir', almacenista, { ...aprobada, tieneCompraVigente: true }));
+  for (const rol of ['supervisor', 'laboratorista', 'encargado_occ', 'admin'] as const) {
+    assert.ok(puedeDar('recibir', { id: 'z', rol }, comprada), rol);
+  }
+  for (const rol of ['operador', 'encargado_planta', 'auxiliar_rrhh'] as const) {
+    assert.equal(puedeDar('recibir', { id: 'z', rol }, comprada), false, rol);
+  }
+
+  // Cerradas: ningún paso, ni para la gerencia que la pidió.
+  for (const estado of ['recibida', 'rechazada', 'cancelada'] as const) {
+    for (const paso of PASOS_DE_SOLICITUD) {
+      assert.equal(puedeDar(paso, gerencia, { estado, pedidaPor: 'g1', tieneCompraVigente: true }), false, `${estado} ${paso}`);
+    }
+  }
+  assert.deepEqual(porQueNoPuedeDar('aprobar', gerencia, { ...enviada, estado: 'rechazada' }), {
+    estado: 409,
+    mensaje: 'Esta solicitud está rechazada: no se puede aprobar.',
+  });
+
+  // La tabla de permisos: registrar y anular compras es de la gerencia.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'escribir')), ['admin']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'anular')), ['admin']);
+  assert.equal(motivoDeRechazo('compras', 'anular'), 'No puede anular compras: lo hace la gerencia.');
+});
+
+prueba('036/RF-16, RF-18, RF-19: lo que impide registrar una compra', () => {
+  const renglones: RenglonParaCompra[] = [
+    { id: 'a', orden: 1, cantidadAprobada: 20, enCompraVigente: false },
+    { id: 'b', orden: 2, cantidadAprobada: 0, enCompraVigente: false },
+    { id: 'c', orden: 3, cantidadAprobada: 5, enCompraVigente: true },
+    { id: 'd', orden: 4, cantidadAprobada: null, enCompraVigente: false },
+  ];
+  const buena: DatosDeLaCompra = {
+    proveedor: 'Ferretería El Tornillo',
+    valor: 640_000,
+    fecha: '2026-10-29',
+    factura: '',
+    renglonIds: ['a'],
+  };
+  assert.deepEqual(faltasDeLaCompra(buena, renglones), []);
+  // El mismo renglón dos veces en la lista es uno solo.
+  assert.deepEqual(faltasDeLaCompra({ ...buena, renglonIds: ['a', 'a'] }, renglones), []);
+
+  // RF-18: el valor, en pesos y mayor que cero.
+  for (const valor of [0, -5, 640_000.5]) {
+    assert.deepEqual(faltasDeLaCompra({ ...buena, valor }, renglones), [
+      'El valor de la compra va en pesos, sin decimales y mayor que cero.',
+    ]);
+  }
+  assert.deepEqual(faltasDeLaCompra({ ...buena, proveedor: ' ', fecha: '' }, renglones), [
+    'Diga a qué proveedor se le compró.',
+    'Diga la fecha de la compra.',
+  ]);
+
+  // RF-19: renglones aprobados, libres y de esta solicitud.
+  assert.deepEqual(faltasDeLaCompra({ ...buena, renglonIds: [] }, renglones), ['Elija qué renglones cubre esta compra.']);
+  assert.deepEqual(faltasDeLaCompra({ ...buena, renglonIds: ['b', 'd'] }, renglones), [
+    'El renglón 2 no quedó aprobado.',
+    'El renglón 4 no quedó aprobado.',
+  ]);
+  assert.deepEqual(faltasDeLaCompra({ ...buena, renglonIds: ['c'] }, renglones), ['El renglón 3 ya está en otra compra.']);
+  assert.deepEqual(faltasDeLaCompra({ ...buena, renglonIds: ['z'] }, renglones), [
+    'Uno de los renglones elegidos no es de esta solicitud.',
+  ]);
+});
+
+prueba('036/RF-19, RF-21: el estado después de comprar, anular y recibir', () => {
+  const libre = { cantidadAprobada: 20, enCompraVigente: false, recibido: 0 };
+  const comprado = { ...libre, enCompraVigente: true };
+  const quitado = { cantidadAprobada: 0, enCompraVigente: false, recibido: 0 };
+
+  // Una compra con parte de los renglones: sigue aprobada; con todos, comprada.
+  assert.equal(estadoTrasComprasYRecibos([comprado, libre]), 'aprobada');
+  assert.equal(estadoTrasComprasYRecibos([comprado, comprado]), 'comprada');
+  // El renglón que la gerencia quitó al aprobar no se espera.
+  assert.equal(estadoTrasComprasYRecibos([comprado, quitado]), 'comprada');
+  // Anular la única compra la devuelve a aprobada.
+  assert.equal(estadoTrasComprasYRecibos([libre, libre]), 'aprobada');
+
+  // Recibido en parte, completo y de más.
+  assert.equal(estadoTrasComprasYRecibos([{ ...comprado, recibido: 8 }, comprado]), 'recibida_en_parte');
+  assert.equal(estadoTrasComprasYRecibos([{ ...comprado, recibido: 20 }, comprado]), 'recibida_en_parte');
+  assert.equal(estadoTrasComprasYRecibos([{ ...comprado, recibido: 20 }, { ...comprado, recibido: 20 }]), 'recibida');
+  assert.equal(estadoTrasComprasYRecibos([{ ...comprado, recibido: 25 }, { ...comprado, recibido: 20 }, quitado]), 'recibida');
+  // Lo del primer proveedor llega antes de comprarle al segundo.
+  assert.equal(estadoTrasComprasYRecibos([{ ...comprado, recibido: 20 }, libre]), 'recibida_en_parte');
+});
+
+prueba('036/RF-31: el almacenista no ve los valores de compra', () => {
+  assert.equal(veLosValores('almacenista'), false);
+  for (const rol of ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_rrhh'] as const) {
+    assert.ok(veLosValores(rol), rol);
+  }
+});
+
+prueba('036/RF-12, RF-24, RF-25: vencidas, marcas, orden de la bandeja y del lugar, y el resumen', () => {
+  const hoy = '2026-10-29';
+  // RF-25: se vence al día siguiente, no el mismo día; recibida o cerrada ya no.
+  assert.equal(estaVencida({ estado: 'aprobada', paraCuando: hoy }, hoy), false);
+  assert.equal(estaVencida({ estado: 'aprobada', paraCuando: '2026-10-28' }, hoy), true);
+  assert.equal(estaVencida({ estado: 'recibida_en_parte', paraCuando: '2026-10-28' }, hoy), true);
+  for (const estado of ['recibida', 'rechazada', 'cancelada'] as const) {
+    assert.equal(estaVencida({ estado, paraCuando: '2026-10-01' }, hoy), false, estado);
+  }
+  assert.deepEqual(marcasDeLaSolicitud({ estado: 'devuelta', paraCuando: '2026-10-28' }, hoy), ['Devuelta: corrígela', 'Vencida']);
+  assert.deepEqual(marcasDeLaSolicitud({ estado: 'enviada', paraCuando: hoy }, hoy), []);
+
+  const s = (numero: number, estado: EstadoDeSolicitud, urgente: boolean, paraCuando: string): SolicitudEnLista => ({
+    numero,
+    estado,
+    urgente,
+    paraCuando,
+  });
+  const lista = [
+    s(1, 'recibida', true, '2026-10-01'),
+    s(2, 'aprobada', false, '2026-11-02'),
+    s(3, 'enviada', false, '2026-11-01'),
+    s(4, 'cancelada', false, '2026-10-20'),
+    s(5, 'enviada', true, '2026-11-10'),
+    s(6, 'comprada', true, '2026-11-05'),
+    s(7, 'enviada', false, '2026-10-30'),
+    s(8, 'devuelta', false, '2026-10-25'),
+    s(9, 'enviada', true, '2026-11-10'),
+  ];
+  // RF-12: por aprobar (urgentes y luego por fecha), demás abiertas, cerradas de la más nueva.
+  assert.deepEqual(ordenDeLaBandeja(lista).map((x) => x.numero), [5, 9, 7, 3, 6, 8, 2, 4, 1]);
+  // RF-24: abiertas y luego cerradas, sin poner primero las que esperan aprobación.
+  assert.deepEqual(ordenDelLugar(lista).map((x) => x.numero), [6, 5, 9, 8, 7, 3, 2, 4, 1]);
+  // No cambia la lista que recibe.
+  assert.equal(lista[0].numero, 1);
+
+  // RF-12: cuántas esperan aprobación, cuántas urgentes abiertas y cuántas vencidas.
+  assert.deepEqual(resumenDeLaBandeja(lista, hoy), { porAprobar: 4, urgentes: 3, vencidas: 1 });
+  assert.deepEqual(resumenDeLaBandeja([], hoy), { porAprobar: 0, urgentes: 0, vencidas: 0 });
+});
+
+prueba('036/RF-17, RF-31: las clases de los adjuntos de una solicitud y las que llevan precio', () => {
+  const ids = clasesDe('solicitud').map((c) => c.id);
+  assert.deepEqual(ids, ['cotizacion', 'orden_de_compra', 'factura', 'remision', 'foto', 'ficha_tecnica', 'otro']);
+  // Solo en la solicitud: ni las empresas, ni la obra, ni la persona las ofrecen.
+  const otros: LugarDeDocumentos[] = ['elemental', 'occ', 'geolab', 'obra', 'persona'];
+  for (const id of ids.filter((x) => x !== 'otro')) {
+    assert.deepEqual(otros.filter((l) => esClaseDe(l, id)), [], id);
+  }
+  // Ni las comunes de empresa ni las de la persona son de una solicitud.
+  assert.ok(!esClaseDe('solicitud', 'camara_de_comercio') && !esClaseDe('solicitud', 'liquidacion'));
+  assert.equal(nombreDeClase('solicitud', 'orden_de_compra'), 'Orden de compra');
+
+  // RF-31: cotización, orden de compra y factura llevan precio; las demás, no.
+  assert.deepEqual(ids.filter(llevaPrecio), ['cotizacion', 'orden_de_compra', 'factura']);
+  assert.equal(llevaPrecio('planos'), false);
+});
+
+prueba('036/RF-11, RF-14, RF-15: el motivo de cancelar, rechazar, devolver y anular', () => {
+  assert.equal(faltaDelMotivo('cancelar', ' '), 'Diga por qué se cancela.');
+  assert.equal(faltaDelMotivo('rechazar', ''), 'Diga por qué se rechaza.');
+  assert.equal(faltaDelMotivo('devolver', ''), 'Diga qué debe corregirse.');
+  assert.equal(faltaDelMotivo('anular_compra', ''), 'Diga por qué se anula la compra.');
+  assert.equal(faltaDelMotivo('rechazar', 'No hay presupuesto'), null);
+  // Aprobar no pide motivo.
+  assert.equal(faltaDelMotivo('aprobar', ''), null);
+});
+
+prueba('036/RF-13: aprobar con cantidades bajadas o renglones quitados', () => {
+  const renglones = [
+    { id: 'a', orden: 1, descripcion: 'Cemento', cantidad: 20 },
+    { id: 'b', orden: 2, descripcion: 'Guantes', cantidad: 2.5 },
+  ];
+  // Sin decir nada: todo entero, sin cambios.
+  assert.deepEqual(aprobacionDeLaSolicitud(renglones, []), { faltas: [], aprobadas: { a: 20, b: 2.5 }, cambios: [] });
+  // Bajar una y quitar la otra.
+  assert.deepEqual(
+    aprobacionDeLaSolicitud(renglones, [
+      { renglonId: 'a', cantidad: 15 },
+      { renglonId: 'b', cantidad: 0 },
+    ]),
+    {
+      faltas: [],
+      aprobadas: { a: 15, b: 0 },
+      cambios: [
+        { renglon: 1, descripcion: 'Cemento', antes: 20, despues: 15 },
+        { renglon: 2, descripcion: 'Guantes', antes: 2.5, despues: 0 },
+      ],
+    },
+  );
+  // No se sube, no va negativa ni con tres decimales.
+  for (const cantidad of [21, -1, 1.234]) {
+    assert.deepEqual(aprobacionDeLaSolicitud(renglones, [{ renglonId: 'a', cantidad }]).faltas, [
+      'La cantidad aprobada del renglón 1 va de 0 a 20.',
+    ]);
+  }
+  assert.deepEqual(aprobacionDeLaSolicitud(renglones, [{ renglonId: 'z', cantidad: 1 }]).faltas, [
+    'Uno de los renglones no es de esta solicitud.',
+  ]);
+  // Todo en cero: se rechaza, no se aprueba.
+  assert.deepEqual(
+    aprobacionDeLaSolicitud(renglones, [
+      { renglonId: 'a', cantidad: 0 },
+      { renglonId: 'b', cantidad: 0 },
+    ]).faltas,
+    ['Para no aprobar nada, recházala.'],
+  );
+});
+
+prueba('036/RF-11, RF-23: qué cambió al corregir una solicitud', () => {
+  const antes: DatosDeLaSolicitud = {
+    renglones: [{ descripcion: 'Cemento', cantidad: 20, unidad: 'bulto', materialId: null }],
+    paraCuando: '2026-11-01',
+    urgente: false,
+    paraQue: 'Placa',
+    proveedorSugerido: '',
+    valorEstimado: null,
+  };
+  assert.deepEqual(camposCorregidos(antes, { ...antes, paraQue: ' Placa ' }), []);
+  assert.deepEqual(
+    camposCorregidos(antes, {
+      ...antes,
+      renglones: [{ descripcion: 'Cemento', cantidad: 25, unidad: 'bulto', materialId: null }],
+      urgente: true,
+      valorEstimado: 300_000,
+    }),
+    ['lo que se pide', 'urgencia', 'valor estimado'],
+  );
+});
+
+prueba('036/RF-20: lo que impide registrar lo que llegó', () => {
+  const renglones: RenglonParaRecibir[] = [
+    { id: 'a', orden: 1, cantidadAprobada: 20, enCompraVigente: true },
+    { id: 'b', orden: 2, cantidadAprobada: 4, enCompraVigente: false },
+    { id: 'c', orden: 3, cantidadAprobada: 0, enCompraVigente: false },
+  ];
+  const fecha = '2026-10-29';
+  assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'a', cantidad: 8 }] }, renglones), []);
+  // Llegó de más: se deja (caso límite).
+  assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'a', cantidad: 25 }] }, renglones), []);
+  assert.deepEqual(faltasDelRecibo({ fecha: '', recibos: [] }, renglones), ['Diga qué día llegó.', 'Diga qué llegó.']);
+  assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'b', cantidad: 1 }] }, renglones), [
+    'El renglón 2 todavía no tiene compra.',
+  ]);
+  assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'c', cantidad: 1 }] }, renglones), [
+    'El renglón 3 no quedó aprobado.',
+  ]);
+  for (const cantidad of [0, -2, 1.005]) {
+    assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'a', cantidad }] }, renglones), [
+      'La cantidad recibida del renglón 1 debe ser mayor que cero, con dos decimales a lo más.',
+    ]);
+  }
+  assert.deepEqual(
+    faltasDelRecibo(
+      {
+        fecha,
+        recibos: [
+          { renglonId: 'a', cantidad: 1 },
+          { renglonId: 'a', cantidad: 2 },
+        ],
+      },
+      renglones,
+    ),
+    ['El renglón 1 está dos veces.'],
+  );
+  assert.deepEqual(faltasDelRecibo({ fecha, recibos: [{ renglonId: 'z', cantidad: 1 }] }, renglones), [
+    'Uno de los renglones no es de esta solicitud.',
+  ]);
+});
+
+prueba('036/RF-3, RF-26, RF-27: buscar y filtrar la bandeja, y quién ve el gasto', () => {
+  const s = {
+    numero: 5,
+    estado: 'aprobada' as const,
+    urgente: true,
+    lugar: { id: 'obra-1' },
+    pedidaEl: '2026-10-20',
+    renglones: [{ descripcion: 'Cemento gris Argos' }],
+    proveedorSugerido: 'Ferretería El Tornillo',
+    proveedores: ['Dotaciones Andinas'],
+    pedidaPor: { nombre: 'María Pérez' },
+  };
+  // RF-26: número, renglones, proveedores y quien pidió, sin tildes ni mayúsculas.
+  for (const texto of ['SC-0005', 'sc5', '5', '0005', 'cemento', 'ARGOS', 'ferreteria', 'andinas', 'maria perez', '']) {
+    assert.ok(coincideLaSolicitud(s, texto), texto);
+  }
+  for (const texto of ['SC-0006', '6', 'arena', 'Gómez']) assert.equal(coincideLaSolicitud(s, texto), false, texto);
+
+  // RF-3: lugar, estado, urgencia y fechas del pedido, las dos puntas incluidas.
+  const sin: FiltrosDeLaBandeja = { lugar: null, estado: null, soloUrgentes: false, desde: null, hasta: null, texto: '' };
+  assert.ok(pasaLosFiltros(s, sin));
+  assert.ok(pasaLosFiltros(s, { ...sin, lugar: 'obra-1', estado: 'aprobada', soloUrgentes: true }));
+  assert.equal(pasaLosFiltros(s, { ...sin, lugar: 'occ' }), false);
+  assert.equal(pasaLosFiltros(s, { ...sin, estado: 'enviada' }), false);
+  assert.equal(pasaLosFiltros({ ...s, urgente: false }, { ...sin, soloUrgentes: true }), false);
+  assert.ok(pasaLosFiltros(s, { ...sin, desde: '2026-10-20', hasta: '2026-10-20' }));
+  assert.equal(pasaLosFiltros(s, { ...sin, desde: '2026-10-21' }), false);
+  assert.equal(pasaLosFiltros(s, { ...sin, hasta: '2026-10-19' }), false);
+  assert.equal(pasaLosFiltros(s, { ...sin, texto: 'arena' }), false);
+
+  // RF-27: el gasto, solo la gerencia.
+  assert.deepEqual(ROLES.filter(veElGasto), ['admin']);
+});
+
+prueba('036/RF-9, RF-10: cada falta de la solicitud, junto a su campo', () => {
+  const hoy = '2026-10-29';
+  const datos: DatosDeLaSolicitud = {
+    renglones: [
+      { descripcion: 'Cemento', cantidad: 20, unidad: 'bulto', materialId: null },
+      { descripcion: ' ', cantidad: 0, unidad: '', materialId: null },
+    ],
+    paraCuando: '2026-10-28',
+    urgente: false,
+    paraQue: '',
+    proveedorSugerido: '',
+    valorEstimado: 0,
+  };
+  assert.deepEqual(faltasPorCampo(datos, hoy), {
+    renglones: null,
+    porRenglon: [
+      { descripcion: null, cantidad: null, unidad: null },
+      {
+        descripcion: 'El renglón 2 no dice qué se necesita.',
+        cantidad: 'La cantidad del renglón 2 debe ser mayor que cero, con dos decimales a lo más.',
+        unidad: 'El renglón 2 no tiene unidad.',
+      },
+    ],
+    paraCuando: 'La fecha «para cuándo» no puede ser anterior a hoy.',
+    valorEstimado: 'El valor estimado va en pesos, sin decimales y mayor que cero.',
+  });
+  // La lista del servidor es la misma, en el orden del formulario.
+  assert.deepEqual(faltasDeLaSolicitud(datos, hoy), [
+    'El renglón 2 no dice qué se necesita.',
+    'La cantidad del renglón 2 debe ser mayor que cero, con dos decimales a lo más.',
+    'El renglón 2 no tiene unidad.',
+    'La fecha «para cuándo» no puede ser anterior a hoy.',
+    'El valor estimado va en pesos, sin decimales y mayor que cero.',
+  ]);
 });
 
 verificarFirmaS3()

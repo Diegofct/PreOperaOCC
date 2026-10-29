@@ -23,6 +23,8 @@ export async function GET(peticion: Request) {
       nombreCompleto: sesion.nombreCompleto,
       rol: sesion.rol,
       obraId: sesion.obraId,
+      // La cabecera del menú dice el nombre de la obra (spec 033, RF-10).
+      obraNombre: sesion.obraNombre,
       // El panel arma su menú con esto (spec 017, RF-7).
       modulosDeObra: sesion.modulosDeObra,
       debeCambiarClave: sesion.debeCambiarClave,

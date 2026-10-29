@@ -69,9 +69,11 @@ import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas'
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
 import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
+import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
 import type { AdjuntoGuardado, FuenteDeRespuesta, ModuloConsultable } from '../../shared/rules/asistente';
 import type { LecturaDeIa } from '../../shared/rules/formulario-presupuesto-ia';
 import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
+import type { EmpresaId } from '../../shared/rules/empresas';
 import type {
   MasasDelEnsayo,
   ResultadoGranulometria,
@@ -129,6 +131,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'contrato',
   // Spec 028, RF-71: los archivos adjuntos a una pregunta al asistente.
   'asistente',
+  // Spec 034: los documentos de Elemental, OCC, Geolab y cada obra (`documentos_del_grupo`).
+  'repositorio',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -280,6 +284,12 @@ export const usuarios = pgTable(
      * forma de saber qué máquinas le tocan.
      */
     obraId: text('obra_id').references(() => obras.id),
+    /**
+     * La empresa del grupo a la que pertenece (spec 033, RF-45). Nula es «la de su rol»
+     * (RF-46, `empresaDeLaPersona`): las personas de antes y las que crea WhatsApp
+     * (spec 026) nacen sin ella, y la regla decide igual en todos lados.
+     */
+    empresa: text('empresa').$type<EmpresaId>(),
     activo: boolean('activo').notNull().default(true),
     /**
      * Quién la registró y desde qué mensaje, cuando se registró desde la bandeja de
@@ -298,6 +308,10 @@ export const usuarios = pgTable(
     // El índice que `src/features/auth/servicio.ts` da por hecho desde la Fase 1
     // y que no existe en ninguna de las dos bases. Sin él, dos personas pueden
     // acabar compartiendo nombre de usuario y el ingreso se vuelve ambiguo.
+    check(
+      'ck_usuarios_empresa',
+      sql`${t.empresa} is null or ${t.empresa} in ('elemental', 'occ', 'geolab', 'proyectos')`,
+    ),
     uniqueIndex('ux_usuarios_usuario')
       .on(t.usuario)
       .where(sql`eliminado_en is null`),
@@ -1915,6 +1929,445 @@ export const asistenteLimites = pgTable(
       'ck_asistente_limite_clave',
       sql`(${t.clave} = 'todos' and ${t.usuarioId} is null) or (${t.clave} = ${t.usuarioId})`,
     ),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Grupo empresarial (spec 033)                                              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Las cuatro empresas del grupo (spec 033, RF-31). Son fijas —crearlas o quitarlas está
+ * fuera de alcance— y las siembra la migración; aquí solo se guardan sus datos, que
+ * gerencia escribe en «Información de la empresa». El nombre y la función de cada una
+ * viven en `shared/rules/empresas`, no aquí: no se editan.
+ */
+export const empresas = pgTable(
+  'empresas',
+  {
+    id: text('id').primaryKey().$type<EmpresaId>(),
+    razonSocial: text('razon_social').notNull().default(''),
+    nit: text('nit').notNull().default(''),
+    direccion: text('direccion').notNull().default(''),
+    ciudad: text('ciudad').notNull().default(''),
+    telefono: text('telefono').notNull().default(''),
+    correo: text('correo').notNull().default(''),
+    representanteLegal: text('representante_legal').notNull().default(''),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [check('ck_empresas_id', sql`${t.id} in ('elemental', 'occ', 'geolab', 'proyectos')`)],
+);
+
+/**
+ * Un corte financiero de una empresa o de una obra (spec 033, RF-34 a RF-40): lo que
+ * gerencia digita a una fecha. No se edita (RF-40): se anula con motivo y se registra
+ * otro, como toda evidencia del sistema.
+ *
+ * El dueño es la empresa **o** la obra, nunca las dos ni ninguna. Proyectos no tiene
+ * corte propio (cambio del 2026-10-27): sus cortes son los de sus obras.
+ */
+export const cortesFinancieros = pgTable(
+  'cortes_financieros',
+  {
+    id: text('id').primaryKey(),
+    empresaId: text('empresa_id').references(() => empresas.id).$type<EmpresaId>(),
+    obraId: text('obra_id').references(() => obras.id),
+    fechaCorte: date('fecha_corte', { mode: 'string' }).notNull(),
+    /** Pesos, sin decimales, como el valor del contrato (spec 031). Puede ser negativo. */
+    saldo: bigint('saldo', { mode: 'number' }).notNull(),
+    cuentasPorPagar: bigint('cuentas_por_pagar', { mode: 'number' }).notNull(),
+    cuentasPorCobrar: bigint('cuentas_por_cobrar', { mode: 'number' }).notNull(),
+    notas: text('notas').notNull().default(''),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    registradoEn: timestamp('registrado_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    check(
+      'ck_corte_dueno',
+      sql`(${t.empresaId} is null) <> (${t.obraId} is null) and (${t.empresaId} is null or ${t.empresaId} <> 'proyectos')`,
+    ),
+    check('ck_corte_cuentas', sql`${t.cuentasPorPagar} >= 0 and ${t.cuentasPorCobrar} >= 0`),
+    check(
+      'ck_corte_anulado',
+      sql`(${t.anuladoEn} is null) = (${t.motivoAnulacion} is null)`,
+    ),
+    // Un vigente por dueño y fecha (RF-36): anulado, deja registrar otro ese día.
+    uniqueIndex('ux_corte_dueno_fecha')
+      .on(sql`coalesce(${t.empresaId}, ${t.obraId})`, t.fechaCorte)
+      .where(sql`anulado_en is null`),
+    index('ix_corte_empresa').on(t.empresaId, t.fechaCorte),
+    index('ix_corte_obra').on(t.obraId, t.fechaCorte),
+  ],
+);
+
+/**
+ * Los documentos de Elemental, OCC, Geolab y cada obra (spec 034): cámara de comercio,
+ * pólizas, fichas técnicas, planos, papeles de proveedores…
+ *
+ * Una sola tabla para empresas y obras, como `cortes_financieros`: el documento es de una
+ * empresa **o** de una obra (RF-3), nunca de las dos, y Proyectos no tiene los suyos. Desde
+ * la spec 035 también de una **persona**: su carpeta de Recursos Humanos (RF-23); de uno
+ * solo de los tres.
+ *
+ * El archivo vive en `media` (dueño `repositorio`), como los documentos del contrato; el
+ * nombre original va aquí porque `media` no lo guarda y la descarga lo necesita (RF-36).
+ * La clase se guarda con su nombre (RF-23). Nada se edita ni se borra: se anula con
+ * motivo (RF-43, RF-47).
+ */
+export const documentosDelGrupo = pgTable(
+  'documentos_del_grupo',
+  {
+    id: text('id').primaryKey(),
+    empresaId: text('empresa_id').references(() => empresas.id).$type<EmpresaId>(),
+    obraId: text('obra_id').references(() => obras.id),
+    /** Spec 035: la persona dueña, en su carpeta de Recursos Humanos. */
+    personaId: text('persona_id').references(() => usuarios.id),
+    /** Spec 036: la solicitud de compra dueña, con sus soportes (RF-17). */
+    solicitudId: text('solicitud_id').references((): AnyPgColumn => solicitudesCompra.id),
+    /** El slug de `rules/documentos.ts`, y su nombre el día que se subió. */
+    clase: text('clase').notNull(),
+    claseNombre: text('clase_nombre').notNull(),
+    nombre: text('nombre').notNull(),
+    /** El proveedor o tercero del documento, para buscarlo (RF-24). Vacío si no tiene. */
+    proveedor: text('proveedor').notNull().default(''),
+    descripcion: text('descripcion').notNull().default(''),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    vence: date('vence', { mode: 'string' }),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    nombreArchivo: text('nombre_archivo').notNull(),
+    subidoPor: text('subido_por')
+      .notNull()
+      .references(() => usuarios.id),
+    subidoEn: timestamp('subido_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    check(
+      'ck_documento_grupo_dueno',
+      sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int + (${t.personaId} is not null)::int
+         + (${t.solicitudId} is not null)::int) = 1
+       and (${t.empresaId} is null or ${t.empresaId} <> 'proyectos')`,
+    ),
+    check('ck_documento_grupo_vence', sql`${t.vence} is null or ${t.vence} >= ${t.fecha}`),
+    check(
+      'ck_documento_grupo_anulado',
+      sql`(${t.anuladoEn} is null) = (${t.motivoAnulacion} is null)
+       and (${t.motivoAnulacion} is null or length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+    check('ck_documento_grupo_nombre', sql`length(trim(${t.nombre})) > 0`),
+    index('ix_documento_grupo_empresa').on(t.empresaId, t.fecha),
+    index('ix_documento_grupo_obra').on(t.obraId, t.fecha),
+    index('ix_documento_grupo_persona').on(t.personaId, t.fecha),
+    index('ix_documento_grupo_solicitud').on(t.solicitudId, t.fecha),
+  ],
+);
+
+/**
+ * La ficha laboral de una persona (spec 035, RF-12 a RF-20): una fila por persona, aparte
+ * de `usuarios` a propósito. `usuarios` lo leen el ingreso, la sesión, Personas, el pull del
+ * celular y el asistente; el **salario** no puede colarse en ninguno de ellos (RF-13), y
+ * estando aquí solo sale de `rrhh/servidor`, que lo entrega a quien `veElSalario`.
+ *
+ * Sin fila es «ficha vacía»: las personas de antes de esta spec y las que crea WhatsApp. Los
+ * catálogos (tipos de documento y de contrato, estados) viven en `rules/ficha.ts` y se
+ * validan allí, como los cargos: un enum aquí pediría una migración por cada uno nuevo.
+ */
+export const fichasLaborales = pgTable(
+  'fichas_laborales',
+  {
+    usuarioId: text('usuario_id')
+      .primaryKey()
+      .references(() => usuarios.id),
+    tipoDocumento: text('tipo_documento'),
+    fechaNacimiento: date('fecha_nacimiento', { mode: 'string' }),
+    telefono: text('telefono'),
+    correo: text('correo'),
+    direccion: text('direccion'),
+    ciudad: text('ciudad'),
+    emergenciaNombre: text('emergencia_nombre'),
+    emergenciaParentesco: text('emergencia_parentesco'),
+    emergenciaTelefono: text('emergencia_telefono'),
+    fechaIngreso: date('fecha_ingreso', { mode: 'string' }),
+    tipoContrato: text('tipo_contrato'),
+    finContrato: date('fin_contrato', { mode: 'string' }),
+    /** Pesos al mes, sin decimales (RF-12). Lo ven solo gerencia y la auxiliar (RF-13). */
+    salario: bigint('salario', { mode: 'number' }),
+    eps: text('eps'),
+    arl: text('arl'),
+    pension: text('pension'),
+    caja: text('caja'),
+    notas: text('notas'),
+    /** `activo`, `vacaciones`, `incapacidad`, `licencia` o `retirado` (RF-18). */
+    estado: text('estado').notNull().default('activo'),
+    retiroFecha: date('retiro_fecha', { mode: 'string' }),
+    retiroMotivo: text('retiro_motivo'),
+    /** Para que dos personas no se pisen al guardar la misma ficha (409 con una vieja). */
+    version: integer('version').notNull().default(1),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    check(
+      'ck_ficha_estado',
+      sql`${t.estado} in ('activo', 'vacaciones', 'incapacidad', 'licencia', 'retirado')`,
+    ),
+    check('ck_ficha_fin', sql`${t.finContrato} is null or ${t.fechaIngreso} is null or ${t.finContrato} >= ${t.fechaIngreso}`),
+    check('ck_ficha_salario', sql`${t.salario} is null or ${t.salario} > 0`),
+    // Retirada ⇔ con fecha y motivo (RF-20).
+    check(
+      'ck_ficha_retiro',
+      sql`(${t.estado} = 'retirado') = (${t.retiroFecha} is not null and ${t.retiroMotivo} is not null and length(trim(${t.retiroMotivo})) > 0)`,
+    ),
+  ],
+);
+
+/**
+ * Quién cambió una ficha, cuándo y **qué campos** (RF-15), sin los valores: así el historial
+ * no tiene salarios que esconder.
+ */
+export const fichaEventos = pgTable(
+  'ficha_eventos',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    /** `guardado` o `retirado`. */
+    accion: text('accion').notNull(),
+    /** Los nombres de los campos que cambiaron (`salario`, `eps`…), sin sus valores. */
+    campos: jsonb('campos').$type<string[]>().notNull().default([]),
+    por: text('por')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    check('ck_ficha_evento_accion', sql`${t.accion} in ('guardado', 'retirado')`),
+    index('ix_ficha_eventos').on(t.usuarioId, t.en),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Compras (spec 036)                                                        */
+/* ------------------------------------------------------------------------ */
+
+/** Los estados de `rules/compras.ts` (RF-8, RF-13 a RF-16, RF-21). */
+export const estadoSolicitudCompra = pgEnum('estado_solicitud_compra', IDS_DE_ESTADOS_DE_SOLICITUD);
+
+/**
+ * Una solicitud de compra (RF-7, RF-8). Es **de un lugar** —una obra, OCC o Geolab—, no de
+ * quien la pide: el residente nuevo hereda las de su obra, y quién la ve lo deciden
+ * `alcanzaLaEmpresa` y `alcanzaLaObraDeLaRuta`, como en Documentos. Elemental no pide (D1).
+ *
+ * `numero` es la identidad de Postgres: consecutivo del grupo sin carreras entre dos que
+ * envían a la vez. Un envío que falla puede dejar un hueco, y no se rellena.
+ *
+ * Nada se borra (RF-30): no hay `eliminado_en`. Los motivos de devolver, rechazar o
+ * cancelar viven en `solicitud_compra_eventos`, con quién y cuándo.
+ */
+export const solicitudesCompra = pgTable(
+  'solicitudes_compra',
+  {
+    id: text('id').primaryKey(),
+    numero: integer('numero').generatedAlwaysAsIdentity().notNull(),
+    empresaId: text('empresa_id').references(() => empresas.id).$type<EmpresaId>(),
+    obraId: text('obra_id').references(() => obras.id),
+    estado: estadoSolicitudCompra('estado').notNull().default('enviada'),
+    /** `YYYY-MM-DD`: para cuándo se necesita (RF-7, RF-10). */
+    paraCuando: date('para_cuando', { mode: 'string' }).notNull(),
+    urgente: boolean('urgente').notNull().default(false),
+    paraQue: text('para_que').notNull().default(''),
+    proveedorSugerido: text('proveedor_sugerido').notNull().default(''),
+    /** Pesos, sin decimales. Al almacenista no se le manda (RF-31). */
+    valorEstimado: bigint('valor_estimado', { mode: 'number' }),
+    pedidaPor: text('pedida_por')
+      .notNull()
+      .references(() => usuarios.id),
+    pedidaEn: timestamp('pedida_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    /** Para que dos pasos a la vez no se pisen (409 con una vieja), como la ficha (035). */
+    version: integer('version').notNull().default(1),
+    actualizadaEn: timestamp('actualizada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex('ux_solicitud_compra_numero').on(t.numero),
+    check(
+      'ck_solicitud_compra_lugar',
+      sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int) = 1
+       and (${t.empresaId} is null or ${t.empresaId} in ('occ', 'geolab'))`,
+    ),
+    check('ck_solicitud_compra_valor', sql`${t.valorEstimado} is null or ${t.valorEstimado} > 0`),
+    index('ix_solicitud_compra_obra').on(t.obraId, t.estado),
+    index('ix_solicitud_compra_empresa').on(t.empresaId, t.estado),
+    index('ix_solicitud_compra_bandeja').on(t.estado, t.urgente, t.paraCuando),
+  ],
+);
+
+/**
+ * Lo que se pide, un renglón por cosa (RF-7). Si salió del catálogo del Almacén guarda el
+ * material, y además copia la descripción y la unidad: un material dado de baja se sigue
+ * leyendo (caso límite).
+ */
+export const solicitudCompraRenglones = pgTable(
+  'solicitud_compra_renglones',
+  {
+    id: text('id').primaryKey(),
+    solicitudId: text('solicitud_id')
+      .notNull()
+      .references(() => solicitudesCompra.id),
+    /** 1, 2, 3…: el número que ve la gente. */
+    orden: integer('orden').notNull(),
+    descripcion: text('descripcion').notNull(),
+    materialId: text('material_id').references(() => almacenMateriales.id),
+    cantidad: numeric('cantidad', { precision: 14, scale: 2 }).notNull(),
+    /** Nula hasta aprobar; 0 si la gerencia lo quitó al aprobar (RF-13). */
+    cantidadAprobada: numeric('cantidad_aprobada', { precision: 14, scale: 2 }),
+    unidad: text('unidad').notNull(),
+  },
+  (t) => [
+    uniqueIndex('ux_solicitud_compra_renglon_orden').on(t.solicitudId, t.orden),
+    check('ck_solicitud_compra_renglon_cantidad', sql`${t.cantidad} > 0`),
+    check(
+      'ck_solicitud_compra_renglon_aprobada',
+      sql`${t.cantidadAprobada} is null or (${t.cantidadAprobada} >= 0 and ${t.cantidadAprobada} <= ${t.cantidad})`,
+    ),
+    check('ck_solicitud_compra_renglon_descripcion', sql`length(trim(${t.descripcion})) > 0`),
+  ],
+);
+
+/**
+ * La historia de una solicitud (RF-23): cada paso de `rules/compras.ts`, más `enviada` al
+ * crearla, con su motivo y, al aprobar con cantidades bajadas, qué cambió (RF-13).
+ */
+export const solicitudCompraEventos = pgTable(
+  'solicitud_compra_eventos',
+  {
+    id: text('id').primaryKey(),
+    solicitudId: text('solicitud_id')
+      .notNull()
+      .references(() => solicitudesCompra.id),
+    paso: text('paso').notNull(),
+    motivo: text('motivo'),
+    /** Al aprobar: `[{ renglon, antes, despues }]`; al corregir, los campos cambiados. */
+    cambios: jsonb('cambios').$type<unknown[]>().notNull().default([]),
+    por: text('por')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [index('ix_solicitud_compra_eventos').on(t.solicitudId, t.en)],
+);
+
+/**
+ * Una compra de una solicitud aprobada (RF-16, RF-19): a qué proveedor, por cuánto y
+ * cuándo. Una solicitud puede quedar en varias (dos proveedores). No se edita: se anula con
+ * motivo (RF-30) y sus renglones quedan libres.
+ */
+export const compras = pgTable(
+  'compras',
+  {
+    id: text('id').primaryKey(),
+    solicitudId: text('solicitud_id')
+      .notNull()
+      .references(() => solicitudesCompra.id),
+    proveedor: text('proveedor').notNull(),
+    /** Pesos, sin decimales (RF-18). Al almacenista no se le manda (RF-31). */
+    valor: bigint('valor', { mode: 'number' }).notNull(),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    /** El número de factura o de remisión, si lo hay. */
+    factura: text('factura').notNull().default(''),
+    registradaPor: text('registrada_por')
+      .notNull()
+      .references(() => usuarios.id),
+    registradaEn: timestamp('registrada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    anuladaEn: timestamp('anulada_en', { withTimezone: true, mode: 'date' }),
+    anuladaPor: text('anulada_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    check('ck_compra_valor', sql`${t.valor} > 0`),
+    check('ck_compra_proveedor', sql`length(trim(${t.proveedor})) > 0`),
+    check(
+      'ck_compra_anulada',
+      sql`(${t.anuladaEn} is null) = (${t.motivoAnulacion} is null)
+       and (${t.motivoAnulacion} is null or length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+    index('ix_compras_solicitud').on(t.solicitudId),
+    index('ix_compras_fecha').on(t.fecha),
+  ],
+);
+
+/**
+ * Qué renglones cubre cada compra (RF-19). Que un renglón no esté en dos compras vigentes lo
+ * revisa el servidor al registrar (`faltasDeLaCompra`): con las anuladas en la tabla, un
+ * índice único no lo puede decir.
+ */
+export const compraRenglones = pgTable(
+  'compra_renglones',
+  {
+    compraId: text('compra_id')
+      .notNull()
+      .references(() => compras.id),
+    renglonId: text('renglon_id')
+      .notNull()
+      .references(() => solicitudCompraRenglones.id),
+  },
+  (t) => [primaryKey({ columns: [t.compraId, t.renglonId] }), index('ix_compra_renglones_renglon').on(t.renglonId)],
+);
+
+/**
+ * Lo que llegó de un renglón (RF-20): todo o una parte, con fecha y, si se quiere, la
+ * remisión o una foto. Lo recibido del renglón es la suma; puede pasar de lo aprobado
+ * (caso límite). No toca el Almacén (RF-22).
+ */
+export const recepcionesCompra = pgTable(
+  'recepciones_compra',
+  {
+    id: text('id').primaryKey(),
+    solicitudId: text('solicitud_id')
+      .notNull()
+      .references(() => solicitudesCompra.id),
+    renglonId: text('renglon_id')
+      .notNull()
+      .references(() => solicitudCompraRenglones.id),
+    cantidad: numeric('cantidad', { precision: 14, scale: 2 }).notNull(),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    nota: text('nota').notNull().default(''),
+    documentoId: text('documento_id').references((): AnyPgColumn => documentosDelGrupo.id),
+    por: text('por')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    check('ck_recepcion_compra_cantidad', sql`${t.cantidad} > 0`),
+    index('ix_recepciones_compra_solicitud').on(t.solicitudId),
   ],
 );
 

@@ -34,12 +34,13 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 
 import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
-import type {
-  AlcanceDelAsistente,
-  FuenteDeRespuesta,
-  LoQueConsulto,
-  ModuloConsultable,
-  TokensUsados,
+import {
+  indicacionDeObraPorDefecto,
+  type AlcanceDelAsistente,
+  type FuenteDeRespuesta,
+  type LoQueConsulto,
+  type ModuloConsultable,
+  type TokensUsados,
 } from '@/shared/rules/asistente';
 
 import type { AdjuntoLeido } from './adjuntos';
@@ -91,6 +92,8 @@ export interface PreguntaAlAsistente {
   historial: readonly MensajeDelHistorial[];
   pregunta: string;
   adjuntos: readonly AdjuntoLeido[];
+  /** La obra desde la que se pregunta, ya comprobada contra el alcance (spec 033, RF-30). */
+  obraPorDefecto?: { id: string; nombre: string } | null;
 }
 
 export type EventoDeRespuesta =
@@ -107,7 +110,8 @@ export type RespuestaDelAsistente =
 /** Quién pregunta y la fecha: cambian, así que van después de lo que queda en caché. */
 function contexto(p: PreguntaAlAsistente): string {
   const obras = p.alcance.obras === 'todas' ? 'todas las obras' : p.alcance.obras.length === 0 ? 'ninguna obra (no tiene obra asignada)' : 'una sola obra';
-  return `Quien pregunta: ${p.quien}. Alcanza ${obras}. Hoy es ${p.hoy} en Colombia.`;
+  const desdeLaObra = indicacionDeObraPorDefecto(p.obraPorDefecto ?? null);
+  return `Quien pregunta: ${p.quien}. Alcanza ${obras}. Hoy es ${p.hoy} en Colombia.${desdeLaObra ? ` ${desdeLaObra}` : ''}`;
 }
 
 function contenidoDeLaPregunta(p: PreguntaAlAsistente): BetaContentBlockParam[] {

@@ -42,6 +42,8 @@ import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/mater
 import { formatearCantidad, rechazoDeBaja, type TipoMovimiento } from '@/shared/rules/almacen';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+
 import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
@@ -129,9 +131,14 @@ export default function PantallaAlmacen() {
   const [unidad, setUnidad] = useState<UnidadAlmacen | null>(null);
   const otroMaterial = elegido === CLAVE_OTRO_MATERIAL;
   const nombreRegistrado = otroMaterial ? nombre.trim() : (elegido ?? '');
-  const [obraId, setObraId] = useState<string | null>(null);
+  const [obraIdElegida, setObraId] = useState<string | null>(null);
 
-  const [obraFiltro, setObraFiltro] = useState<string | null>(null);
+  const [obraFiltroElegido, setObraFiltro] = useState<string | null>(null);
+  // Spec 033, RF-19: dentro de una obra de Proyectos, esa obra, sin selectores.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraId = obraDeLaRuta ?? obraIdElegida;
+  const obraFiltro = obraDeLaRuta ?? obraFiltroElegido;
+  const eligeObra = esGerencia && !obraDeLaRuta;
   const filtrado = useListadoFiltrado(
     materiales.datos,
     (m) => [m.nombre, nombreDeUnidad(m.unidad), m.obraNombre],
@@ -325,7 +332,7 @@ export default function PantallaAlmacen() {
               error={materiales.errorDe('unidad')}
               ancho={220}
             />
-            {esGerencia ? (
+            {eligeObra ? (
               <Selector
                 etiqueta="Obra"
                 obligatorio
@@ -404,7 +411,7 @@ export default function PantallaAlmacen() {
           total={filtrado.total}
           mostradas={filtrado.coincidencias}
         >
-          {esGerencia ? (
+          {eligeObra ? (
             <Selector
               etiqueta="Obra"
               valor={obraFiltro}
