@@ -3,7 +3,7 @@ import { aliasedTable, and, desc, eq, gte, isNull, lt, or } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
-import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
+import { filtroDeObraPedida, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { ok, responder } from '@/features/servidor/respuestas';
@@ -53,6 +53,8 @@ export async function GET(peticion: Request) {
 
     const parametros = new URL(peticion.url).searchParams;
     const vehiculoId = parametros.get('vehiculoId');
+    // Spec 033, RF-19: dentro de una obra de Proyectos, solo lo de esa obra.
+    const obraId = parametros.get('obraId');
 
     // Un día concreto manda sobre el periodo: se pide a propósito, navegando.
     const diaPedido = parametros.get('fecha')
@@ -122,7 +124,7 @@ export async function GET(peticion: Request) {
             ),
           ),
           vehiculoId ? eq(preoperacionales.vehiculoId, vehiculoId) : undefined,
-          filtroDeObra(sesion, preoperacionales.obraId),
+          filtroDeObraPedida(sesion, preoperacionales.obraId, obraId),
         ),
       )
       .orderBy(desc(preoperacionales.iniciadoEn));
@@ -142,7 +144,7 @@ export async function GET(peticion: Request) {
       })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
-      .where(and(isNull(vehiculos.eliminadoEn), filtroDeObra(sesion, vehiculos.obraId)));
+      .where(and(isNull(vehiculos.eliminadoEn), filtroDeObraPedida(sesion, vehiculos.obraId, obraId)));
 
     /**
      * Qué máquinas ya tienen preoperacional **hoy**.
@@ -160,7 +162,7 @@ export async function GET(peticion: Request) {
           gte(preoperacionales.iniciadoEn, desdeHoy),
           lt(preoperacionales.iniciadoEn, hastaHoy),
           isNull(preoperacionales.anuladoEn),
-          filtroDeObra(sesion, preoperacionales.obraId),
+          filtroDeObraPedida(sesion, preoperacionales.obraId, obraId),
         ),
       );
 

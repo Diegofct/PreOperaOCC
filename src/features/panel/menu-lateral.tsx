@@ -1,14 +1,11 @@
 /**
- * El menú lateral del panel: los módulos a la izquierda. Spec 022, RF-1 a RF-14.
+ * El menú lateral del panel. Spec 022, RF-1 a RF-14; desde la spec 033, uno por empresa
+ * y por obra (RF-10, RF-11, RF-13 a RF-18, RF-20).
  *
- * Reemplaza los enlaces de la barra de arriba, que con once módulos ya no cabían
- * en un renglón. En columna caben todos y los que vengan, y se leen de arriba
- * abajo, que es como se busca en una lista.
- *
- * Quién ve qué sale de `modulosVisibles` (cargo y módulos de su obra), igual que
- * antes (RF-2), y `gruposDelMenu` los reparte bajo sus títulos y quita los grupos
- * vacíos (RF-3, RF-4). El activo se marca con `moduloDeLaRuta`, por prefijo, para
- * que las subpáginas —el informe de un ensayo— también lo marquen (RF-6).
+ * Qué lleva sale de `menuDelLugar` (rules/empresas), según dónde se está —que lo dice
+ * la dirección— y lo que el rol alcanza: el menú reparte, no da permisos (RF-21). Arriba,
+ * «← Empresas» y «Cambiar de obra» para la gerencia; debajo, el nombre de la empresa (y
+ * de la obra) y sus páginas. El activo es la página de la dirección (RF-6).
  *
  * Plegado deja solo los íconos (RF-9). El nombre aparece al pasar el puntero o al
  * llegar con el tabulador (RF-10), en una etiqueta que se dibuja **fuera** de la
@@ -19,9 +16,9 @@
  * así el contenido no salta de ancho cada vez que alguien busca un módulo. Elegir
  * uno o tocar el telón lo cierra (RF-14).
  */
-import { Link, usePathname } from 'expo-router';
+import { Link, type Href } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   AnchoMenuAbierto,
@@ -36,13 +33,19 @@ import {
   TextoPanel,
 } from '@/constants/theme';
 
-import { gruposDelMenu, type GrupoDelMenu } from '@/shared/rules/menu';
-import { modulosVisibles, type Modulo } from '@/shared/rules/permisos';
+import { useLugarDelPanel, useObraDelLugar } from '@/features/empresas/contexto-empresa';
+import {
+  empresaDelLugar,
+  esEmpresa,
+  menuDelLugar,
+  nombreDeEmpresa,
+  type EnlaceDelMenu as Enlace,
+} from '@/shared/rules/empresas';
+import { MODULOS, type Modulo } from '@/shared/rules/permisos';
 
 import { useMenu } from './estado-menu';
-import { Icono } from './iconos';
-import { ENLACES_DE_MODULO, moduloDeLaRuta } from './modulos';
-import { useSesionPanel } from './sesion';
+import { Icono, type NombreDeIcono } from './iconos';
+import { usePersona, useSesionPanel } from './sesion';
 
 /** La etiqueta del menú plegado: qué módulo y a qué altura de la lista. */
 interface Etiqueta {
@@ -51,13 +54,71 @@ interface Etiqueta {
   centro: number;
 }
 
+/** Un bloque del menú: la navegación, o las páginas bajo el nombre de la empresa. */
+interface Bloque {
+  clave: string;
+  titulo: string | null;
+  subtitulo: string | null;
+  enlaces: Enlace[];
+}
+
+/** El dibujo de cada enlace: el del módulo si es uno, y los propios de la spec 033. */
+const ICONOS: Record<string, NombreDeIcono> = {
+  // El texto ya lleva la flecha («← Empresas», RF-11): el ícono es la casa de las tarjetas.
+  empresas: 'inicio',
+  'cambiar-obra': 'obras',
+  // Los de los menús definitivos (cambio del 2026-10-27).
+  'recursos-humanos': 'personas',
+  compras: 'compras',
+  tesoreria: 'finanzas',
+  documentos: 'documentos',
+  licitaciones: 'licitaciones',
+  bitacora: 'bitacoras',
+  calidad: 'laboratorio',
+  'solicitudes-compra': 'compras',
+  'solicitudes-pago': 'finanzas',
+  elemental: 'empresa',
+  occ: 'empresa',
+  geolab: 'empresa',
+  proyectos: 'obras',
+};
+
+function iconoDe(clave: string): NombreDeIcono {
+  return (
+    ICONOS[clave] ?? ((MODULOS as readonly string[]).includes(clave) ? (clave as Modulo) : 'inicio')
+  );
+}
+
 export function MenuLateral() {
   const { persona } = useSesionPanel();
+  // Sin sesión no hay menú: el marco muestra el ingreso.
+  return persona ? <MenuConSesion /> : null;
+}
+
+function MenuConSesion() {
+  const persona = usePersona();
   const { regimen, abierto, encima, anchoReservado, alternar, cerrarEncima } = useMenu();
-  const activo = moduloDeLaRuta(usePathname());
-  const grupos = gruposDelMenu(
-    modulosVisibles(persona?.rol ?? 'operador', persona?.modulosDeObra),
-  );
+  const lugar = useLugarDelPanel();
+  const obra = useObraDelLugar();
+  const menu = menuDelLugar(lugar, persona, obra?.modulos);
+  const empresa = empresaDelLugar(lugar);
+  const activo = lugar && lugar.tipo !== 'proyectos' ? lugar.pagina : null;
+
+  const bloques: Bloque[] = [
+    {
+      clave: 'navegacion',
+      titulo: null,
+      subtitulo: null,
+      enlaces: menu.navegacion,
+    },
+    {
+      clave: 'paginas',
+      // El nombre de la empresa, y el de la obra en Proyectos (RF-10).
+      titulo: empresa && esEmpresa(empresa) ? nombreDeEmpresa(empresa) : lugar ? null : 'Empresas',
+      subtitulo: lugar?.tipo === 'obra' ? (obra?.nombre ?? '…') : null,
+      enlaces: menu.entradas,
+    },
+  ].filter((b) => b.enlaces.length > 0 || b.titulo !== null);
 
   const [desplazado, setDesplazado] = useState(0);
   const [etiqueta, setEtiqueta] = useState<Etiqueta | null>(null);
@@ -94,18 +155,16 @@ export function MenuLateral() {
           onScroll={(e) => setDesplazado(e.nativeEvent.contentOffset.y)}
           scrollEventThrottle={32}
         >
-          {grupos.map((grupo, indice) => (
+          {bloques.map((bloque, indice) => (
             <Grupo
-              key={grupo.titulo ?? 'suelto'}
-              grupo={grupo}
+              key={bloque.clave}
+              bloque={bloque}
               primero={indice === 0}
               activo={activo}
               abierto={abierto}
               alElegir={encima ? cerrarEncima : undefined}
-              alSenalar={(modulo, centro) =>
-                setEtiqueta(
-                  modulo === null ? null : { titulo: ENLACES_DE_MODULO[modulo].titulo, centro },
-                )
+              alSenalar={(titulo, centro) =>
+                setEtiqueta(titulo === null ? null : { titulo, centro })
               }
             />
           ))}
@@ -121,7 +180,10 @@ export function MenuLateral() {
           pointerEvents="none"
           style={[
             estilos.etiqueta,
-            { left: anchoReservado + Spacing.one, top: etiqueta.centro - desplazado },
+            {
+              left: anchoReservado + Spacing.one,
+              top: etiqueta.centro - desplazado,
+            },
           ]}
         >
           <Text style={estilos.etiquetaTexto}>{etiqueta.titulo}</Text>
@@ -132,45 +194,54 @@ export function MenuLateral() {
 }
 
 /**
- * Un grupo del menú, con su título. Mide dónde empieza dentro de la lista para
+ * Un bloque del menú, con su título. Mide dónde empieza dentro de la lista para
  * que cada enlace sepa su altura total: `onLayout` da la posición relativa al
  * padre, y el padre de un enlace es el grupo, no la lista.
  */
 function Grupo({
-  grupo,
+  bloque,
   primero,
   activo,
   abierto,
   alElegir,
   alSenalar,
 }: {
-  grupo: GrupoDelMenu;
+  bloque: Bloque;
   primero: boolean;
-  activo: Modulo | null;
+  activo: string | null;
   abierto: boolean;
   alElegir?: () => void;
-  alSenalar: (modulo: Modulo | null, centro: number) => void;
+  alSenalar: (titulo: string | null, centro: number) => void;
 }) {
   const [arriba, setArriba] = useState(0);
 
   return (
     <View style={estilos.grupo} onLayout={(e) => setArriba(e.nativeEvent.layout.y)}>
-      {grupo.titulo === null ? null : abierto ? (
-        <Text style={estilos.tituloGrupo} numberOfLines={1}>
-          {grupo.titulo}
-        </Text>
+      {bloque.titulo === null ? null : abierto ? (
+        <View style={estilos.cabecera}>
+          <Text style={estilos.tituloGrupo} numberOfLines={2}>
+            {bloque.titulo}
+          </Text>
+          {bloque.subtitulo ? (
+            <Text style={estilos.subtituloGrupo} numberOfLines={2}>
+              {bloque.subtitulo}
+            </Text>
+          ) : null}
+        </View>
       ) : primero ? null : (
         // Plegado no hay sitio para el título: una raya separa los grupos.
         <View style={estilos.separadorGrupo} />
       )}
-      {grupo.modulos.map((modulo) => (
+      {bloque.enlaces.map((enlace) => (
         <EnlaceDelMenu
-          key={modulo}
-          modulo={modulo}
-          activo={modulo === activo}
+          key={enlace.clave}
+          enlace={enlace}
+          activo={enlace.clave === activo}
           abierto={abierto}
           alElegir={alElegir}
-          alSenalar={(centro) => alSenalar(centro === null ? null : modulo, arriba + (centro ?? 0))}
+          alSenalar={(centro) =>
+            alSenalar(centro === null ? null : enlace.titulo, arriba + (centro ?? 0))
+          }
         />
       ))}
     </View>
@@ -178,20 +249,20 @@ function Grupo({
 }
 
 /**
- * Un módulo del menú.
+ * Una página del menú.
  *
  * La caja con su realce vive en un `View` interno y no en el `Pressable`: `Link`
  * con `asChild` le impone su propio `style` al hijo, y un estilo-función ahí se
  * pierde. Es lo mismo que ya pasaba con la barra de antes.
  */
 function EnlaceDelMenu({
-  modulo,
+  enlace,
   activo,
   abierto,
   alElegir,
   alSenalar,
 }: {
-  modulo: Modulo;
+  enlace: Enlace;
   activo: boolean;
   abierto: boolean;
   /** Al elegirlo, además de navegar: cierra el menú abierto encima (RF-14). */
@@ -199,62 +270,77 @@ function EnlaceDelMenu({
   /** Avisa el centro del enlace dentro de su grupo al señalarlo, o `null` al dejarlo. */
   alSenalar: (centro: number | null) => void;
 }) {
-  const enlace = ENLACES_DE_MODULO[modulo];
   const [encima, setEncima] = useState(false);
   const [enfocado, setEnfocado] = useState(false);
   const [centro, setCentro] = useState(0);
 
-  return (
-    <View
-      onLayout={(e) =>
-        setCentro(e.nativeEvent.layout.y + e.nativeEvent.layout.height / 2)
-      }
+  const boton = (
+    <Pressable
+      onFocus={() => {
+        setEnfocado(true);
+        alSenalar(centro);
+      }}
+      onBlur={() => {
+        setEnfocado(false);
+        alSenalar(null);
+      }}
+      // Plegado, el nombre no se ve: el lector de pantalla lo necesita igual.
+      accessibilityLabel={enlace.titulo}
+      accessibilityState={{ selected: activo }}
+      {...(enlace.externa
+        ? {
+            accessibilityRole: 'link' as const,
+            onPress: () => {
+              alElegir?.();
+              // En web abre una pestaña nueva; `Link` con `asChild` pierde el `target`.
+              void Linking.openURL(enlace.ruta);
+            },
+          }
+        : {})}
     >
-      {activo ? <View style={estilos.marcaActivo} /> : null}
-      {/* El `onPress` va en el `Link`, no en el hijo: `Link` lo llama y después navega. */}
-      <Link href={enlace.ruta} onPress={alElegir} asChild>
-        <Pressable
-          onFocus={() => {
-            setEnfocado(true);
-            alSenalar(centro);
-          }}
-          onBlur={() => {
-            setEnfocado(false);
-            alSenalar(null);
-          }}
-          // Plegado, el nombre no se ve: el lector de pantalla lo necesita igual.
-          accessibilityLabel={enlace.titulo}
-          accessibilityState={{ selected: activo }}
-        >
-          <View
-            onPointerEnter={() => {
-              setEncima(true);
-              alSenalar(centro);
-            }}
-            onPointerLeave={() => {
-              setEncima(false);
-              alSenalar(null);
-            }}
-            style={[
-              estilos.enlace,
-              !abierto && estilos.enlacePlegado,
-              encima && !activo && estilos.enlaceEncima,
-              activo && estilos.enlaceActivo,
-              enfocado && estilos.enlaceEnfocado,
-            ]}
+      <View
+        onPointerEnter={() => {
+          setEncima(true);
+          alSenalar(centro);
+        }}
+        onPointerLeave={() => {
+          setEncima(false);
+          alSenalar(null);
+        }}
+        style={[
+          estilos.enlace,
+          !abierto && estilos.enlacePlegado,
+          encima && !activo && estilos.enlaceEncima,
+          activo && estilos.enlaceActivo,
+          enfocado && estilos.enlaceEnfocado,
+        ]}
+      >
+        <Icono nombre={iconoDe(enlace.clave)} color={activo ? Panel.sobreAcento : Panel.texto} />
+        {abierto ? (
+          <Text
+            style={[estilos.enlaceTexto, activo && estilos.enlaceTextoActivo]}
+            // Dos renglones: «Reportes de vehículos y maquinaria» no cabe en uno (spec 033).
+            numberOfLines={2}
           >
-            <Icono nombre={modulo} color={activo ? Panel.sobreAcento : Panel.texto} />
-            {abierto ? (
-              <Text
-                style={[estilos.enlaceTexto, activo && estilos.enlaceTextoActivo]}
-                numberOfLines={1}
-              >
-                {enlace.titulo}
-              </Text>
-            ) : null}
-          </View>
-        </Pressable>
-      </Link>
+            {enlace.titulo}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+
+  return (
+    <View onLayout={(e) => setCentro(e.nativeEvent.layout.y + e.nativeEvent.layout.height / 2)}>
+      {activo ? <View style={estilos.marcaActivo} /> : null}
+      {/* El `onPress` va en el `Link`, no en el hijo: `Link` lo llama y después navega.
+          Otra aplicación (LicitApp, RF-49) se abre en una pestaña nueva, sin `Link`. */}
+      {enlace.externa ? (
+        boton
+      ) : (
+        <Link href={enlace.ruta as Href} onPress={alElegir} asChild>
+          {boton}
+        </Link>
+      )}
     </View>
   );
 }
@@ -329,6 +415,15 @@ const estilos = StyleSheet.create({
   },
   listaPlegada: { gap: Spacing.two },
   grupo: { gap: Spacing.half },
+  /** El nombre de la empresa y, debajo, el de la obra (spec 033, RF-10). */
+  cabecera: { gap: Spacing.half, paddingBottom: Spacing.one },
+  subtituloGrupo: {
+    paddingHorizontal: Spacing.two + Spacing.half * 3,
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.apoyo,
+    fontWeight: '600',
+    color: Panel.texto,
+  },
   /** «EL DÍA A DÍA»: Space Grotesk en mayúsculas, como en egg.live (RF-23). */
   tituloGrupo: {
     paddingHorizontal: Spacing.two + Spacing.half * 3,
@@ -434,5 +529,13 @@ export function TelonDelMenu() {
 }
 
 const estilosTelon = StyleSheet.create({
-  telon: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 15, backgroundColor: Panel.telon },
+  telon: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 15,
+    backgroundColor: Panel.telon,
+  },
 });

@@ -5,7 +5,7 @@
  * Van juntas porque son tablas de lectura sin más: ninguna escribe nada ni tiene
  * ventanas propias, salvo el detalle por día de un ítem.
  */
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -28,6 +28,7 @@ import {
 import type { ConsultaDeReporte, PestanaDeReporte, ReporteFila } from '@/features/panel/contratos';
 import { useListado } from '@/features/panel/marco';
 import { POR_PAGINA, usePaginacion } from '@/features/panel/usar-listado-filtrado';
+import { rutaDeObra } from '@/shared/rules/empresas';
 import { diaCorto } from '@/shared/rules/jornada';
 
 import { AvisoDeAbiertas, BarraDeProporcion, cifra } from './comunes';
@@ -253,7 +254,7 @@ export function PestanaCalidad({ consulta }: { consulta: ConsultaDeReporte }) {
           <Boton
             titulo="Ver bitácora"
             tono="secundario"
-            onPress={() => router.push({ pathname: '/panel/bitacoras', params: { fecha: e.fecha, obraId: e.obraId } })}
+            onPress={() => router.push(`${rutaDeObra(e.obraId, 'bitacoras')}?${new URLSearchParams({ fecha: e.fecha })}` as Href)}
           />
         </Acciones>
       ),

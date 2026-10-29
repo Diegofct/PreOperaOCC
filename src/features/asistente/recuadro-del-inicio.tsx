@@ -10,9 +10,11 @@ import { useCallback, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api } from '@/features/panel/cliente-api';
 import { Acciones, Boton, Campo, Seccion } from '@/features/panel/componentes';
 import { useListado } from '@/features/panel/marco';
+import { rutaDeObra } from '@/shared/rules/empresas';
 
 const ULTIMAS = 3;
 
@@ -24,6 +26,9 @@ const cuando = (iso: string) =>
   new Date(iso).toLocaleString('es-CO', { timeZone: 'America/Bogota', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
 export function RecuadroDelAsistente() {
+  // Spec 033, RF-30: en la portada de una obra, al asistente de esa obra.
+  const obraId = useObraDeLaRuta();
+  const asistente = obraId ? rutaDeObra(obraId, 'asistente') : '/panel/asistente';
   const [pregunta, setPregunta] = useState('');
   const lista = useListado(useCallback(async () => [await api.asistente.conversaciones()], []));
   const datos = lista.datos[0];
@@ -32,7 +37,7 @@ export function RecuadroDelAsistente() {
 
   const preguntar = () => {
     if (!pregunta.trim()) return;
-    ir(`/panel/asistente?${new URLSearchParams({ pregunta: pregunta.trim() })}`);
+    ir(`${asistente}?${new URLSearchParams({ pregunta: pregunta.trim() })}`);
   };
 
   return (
@@ -46,7 +51,7 @@ export function RecuadroDelAsistente() {
         <Campo etiqueta="Su pregunta" valor={pregunta} onChange={setPregunta} multilinea compacto />
         <Acciones>
           <Boton titulo="Preguntar" onPress={preguntar} deshabilitado={!pregunta.trim() || sinCupo} />
-          <Boton titulo="Ver mis conversaciones" tono="secundario" onPress={() => ir('/panel/asistente')} />
+          <Boton titulo="Ver mis conversaciones" tono="secundario" onPress={() => ir(asistente)} />
         </Acciones>
         {ultimas.length > 0 ? (
           <View style={estilos.lista}>
@@ -55,7 +60,7 @@ export function RecuadroDelAsistente() {
               <Pressable
                 key={c.id}
                 accessibilityRole="link"
-                onPress={() => ir(`/panel/asistente?${new URLSearchParams({ conversacion: c.id })}`)}
+                onPress={() => ir(`${asistente}?${new URLSearchParams({ conversacion: c.id })}`)}
                 style={({ hovered }) => [estilos.fila, hovered && estilos.filaEncima]}
               >
                 <Text style={estilos.titulo} numberOfLines={1}>

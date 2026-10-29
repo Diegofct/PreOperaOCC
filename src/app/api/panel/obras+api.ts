@@ -1,8 +1,8 @@
-import { and, asc, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { obras } from '@/db/servidor/esquema';
+import { contratos, obras } from '@/db/servidor/esquema';
 import { obraNueva } from '@/features/panel/contratos';
 import { filtroDeObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
@@ -37,8 +37,11 @@ export async function GET(peticion: Request) {
         almacenActivo: obras.almacenActivo,
         canteraActivo: obras.canteraActivo,
         laboratorioActivo: obras.laboratorioActivo,
+        // Spec 033, RF-16: el consorcio, que se escribe en el contrato (spec 031).
+        consorcio: sql<string | null>`case when ${contratos.esConsorcio} and ${contratos.nombreConsorcio} <> '' then ${contratos.nombreConsorcio} end`,
       })
       .from(obras)
+      .leftJoin(contratos, eq(contratos.obraId, obras.id))
       // El residente ve la suya; la gerencia, todas. La condición la decide
       // `alcance.ts` y no esta consulta: ver el porqué en ese archivo.
       .where(and(isNull(obras.eliminadoEn), filtroDeObra(sesion, obras.id)))

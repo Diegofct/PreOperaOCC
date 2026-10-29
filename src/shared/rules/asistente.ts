@@ -17,7 +17,14 @@ import { modulosVisibles, type Modulo, type ModulosDeObra, type Rol } from './pe
 import { normalizar } from './texto';
 
 /** RF-1: quiénes lo usan. El operador no (RF-2: el asistente no está en el celular). */
-export const ROLES_DEL_ASISTENTE: readonly Rol[] = ['admin', 'supervisor', 'almacenista', 'encargado_planta', 'laboratorista'];
+export const ROLES_DEL_ASISTENTE: readonly Rol[] = [
+  'admin',
+  'supervisor',
+  'almacenista',
+  'encargado_planta',
+  'laboratorista',
+  'encargado_occ',
+];
 
 /**
  * Los módulos con registros que el asistente puede consultar. `inicio` y `asignaciones`
@@ -62,6 +69,11 @@ export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
   if (!ROLES_DEL_ASISTENTE.includes(quien.rol)) return NADA;
   if (quien.rol === 'admin') {
     return { usa: true, obras: 'todas', modulos: consultables(modulosVisibles('admin')) };
+  }
+  // Spec 034, RF-15: el Encargado de OCC no tiene obra y ve todas, como en sus pantallas;
+  // los módulos, los de OCC que alcanza.
+  if (quien.rol === 'encargado_occ') {
+    return { usa: true, obras: 'todas', modulos: consultables(modulosVisibles('encargado_occ')) };
   }
   // RF-10: sin obra no hay nada a su alcance; puede entrar, pero el asistente se lo dice.
   if (!quien.obraId) return { usa: true, obras: [], modulos: [] };
@@ -388,4 +400,18 @@ export function ejemplosDePregunta(modulos: readonly ModuloConsultable[]): strin
   return EJEMPLOS.filter((e) => modulos.includes(e.modulo))
     .slice(0, EJEMPLOS_MAXIMOS)
     .map((e) => e.pregunta);
+}
+
+/**
+ * Lo que se le dice a la IA cuando se pregunta desde una obra (spec 033, RF-30): que
+ * responda sobre esa obra salvo que la pregunta nombre otra. Es una indicación y no un
+ * filtro: quien alcanza varias obras puede seguir preguntando por cualquiera, y quien
+ * alcanza una ya solo tiene esa (el alcance no cambia).
+ */
+export function indicacionDeObraPorDefecto(obra: { id: string; nombre: string } | null): string {
+  if (!obra) return '';
+  return (
+    `Pregunta desde la obra «${obra.nombre}» (id ${obra.id}). Si la pregunta no nombra otra obra, ` +
+    'responda sobre esta y consulte con su id.'
+  );
 }

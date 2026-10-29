@@ -17,6 +17,8 @@ import {
   type TipoDeReporte,
 } from '@/shared/rules/whatsapp-automatico';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+
 import { api } from '../cliente-api';
 import {
   Acciones,
@@ -43,7 +45,10 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
   const esGerencia = alcanza(rol, 'obras', 'listar');
 
   // La gerencia elige la obra; al residente el servidor le da la suya.
-  const [obraId, setObraId] = useState<string | null>(null);
+  const [obraDelSelector, setObraId] = useState<string | null>(null);
+  // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraId = obraDeLaRuta ?? obraDelSelector;
   // Lo que se está editando; `null` mientras nadie toca nada: entonces manda lo guardado.
   const [borrador, setBorrador] = useState<ReporteEsperadoFila[] | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -92,7 +97,7 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
         Cuando lleguen todos los reportes de la lista, la bitácora del día se arma sola. Si alguno no llega, se arma
         al mediodía del día siguiente y queda incompleta. Sin lista, se arma con el primer reporte del día.
       </Ayuda>
-      {esGerencia ? (
+      {esGerencia && !obraDeLaRuta ? (
         <Acciones>
           <Selector
             etiqueta="Obra"

@@ -21,6 +21,8 @@ import { useLocalSearchParams } from 'expo-router';
 import { formatearAbscisa } from '@/shared/rules/cantera';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+
 import { api } from './cliente-api';
 import { CatalogosCantera } from './catalogos-cantera';
 import {
@@ -51,7 +53,10 @@ export default function PantallaCantera() {
   const obrasConCantera = obras.datos.filter((o) => o.canteraActivo);
   // Spec 024, RF-59: el historial de WhatsApp abre los viajes de un día y una obra.
   const enlace = useLocalSearchParams<{ fecha?: string; obraId?: string }>();
-  const [obraElegida, setObraElegida] = useState<string | null>(enlace.obraId ?? null);
+  const [obraDelSelector, setObraElegida] = useState<string | null>(enlace.obraId ?? null);
+  // Spec 033, RF-19: dentro de una obra de Proyectos, esa obra, sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraElegida = obraDeLaRuta ?? obraDelSelector;
 
   /**
    * Sube cada vez que cambian los sitios o los materiales, para que el formulario de
@@ -76,7 +81,7 @@ export default function PantallaCantera() {
       error={obras.error}
       cargando={obras.cargando}
     >
-      {esGerencia ? (
+      {esGerencia && !obraDeLaRuta ? (
         <Seccion titulo="Obra">
           <Formulario>
             <Selector

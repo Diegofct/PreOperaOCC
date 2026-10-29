@@ -35,7 +35,13 @@ export type NombreDeIcono =
   | 'pdf'
   | 'reintentar'
   | 'buscar'
-  | 'nueva';
+  | 'nueva'
+  // Los del grupo empresarial (spec 033) y de sus menús definitivos (cambio del 2026-10-27).
+  | 'empresa'
+  | 'finanzas'
+  | 'compras'
+  | 'documentos'
+  | 'licitaciones';
 
 const DIBUJOS = {
   inicio: (
@@ -197,6 +203,41 @@ const DIBUJOS = {
     <>
       <Path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" />
       <Path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z" />
+    </>
+  ),
+  // Spec 033: un edificio, la empresa.
+  empresa: (
+    <>
+      <Rect x={4} y={3} width={11} height={18} rx={1} />
+      <Path d="M15 9h5v12h-5M8 7h3M8 11h3M8 15h3M10 21v-3" />
+    </>
+  ),
+  // Un signo de pesos en un círculo: la información financiera.
+  finanzas: (
+    <>
+      <Circle cx={12} cy={12} r={9} />
+      <Path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2.2 0 2.8 6 1.4 6 4.1 0 1.3-1.3 2.2-3 2.2-1.5 0-2.6-.6-3.1-1.6M12 6.5v11" />
+    </>
+  ),
+  // Un carrito: lo que se pide comprar.
+  compras: (
+    <>
+      <Path d="M3 4h2.5l2.2 11h10.6L20.5 7H7" />
+      <Circle cx={9.5} cy={19} r={1.5} />
+      <Circle cx={16.5} cy={19} r={1.5} />
+    </>
+  ),
+  // Una carpeta: el repositorio de documentos.
+  documentos: (
+    <>
+      <Path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" />
+    </>
+  ),
+  // Una caja con la flecha que sale: otra aplicación, en una pestaña nueva.
+  licitaciones: (
+    <>
+      <Path d="M13 4h7v7M20 4l-9 9" />
+      <Path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
     </>
   ),
 } satisfies Record<NombreDeIcono, ReactNode>;

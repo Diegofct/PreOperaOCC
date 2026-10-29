@@ -9,7 +9,7 @@ import {
   vehiculos,
 } from '@/db/servidor/esquema';
 import { avisosDePolizas } from '@/features/contratos/servidor/polizas-y-documentos';
-import { filtroDeObra } from '@/features/servidor/alcance';
+import { filtroDeObraPedida } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
@@ -47,7 +47,12 @@ export async function GET(peticion: Request) {
     const sesion = await requerirPermiso(peticion, 'inicio', 'ver');
     if (sesion instanceof Response) return sesion;
 
-    const pedido = new URL(peticion.url).searchParams.get('periodo');
+    const parametros = new URL(peticion.url).searchParams;
+    const pedido = parametros.get('periodo');
+    // Spec 033, RF-19: la portada de una obra pide solo lo de esa obra. Quien no es
+    // gerencia ya está limitado a la suya; pedir otra le deja el resumen vacío.
+    const obraId = parametros.get('obraId');
+    const deLaObra = (columna: Parameters<typeof filtroDeObraPedida>[1]) => filtroDeObraPedida(sesion, columna, obraId);
     const periodo: Periodo = pedido === 'semana' || pedido === 'mes' ? pedido : 'hoy';
 
     const hoy = fechaDeJornada();
@@ -73,7 +78,7 @@ export async function GET(peticion: Request) {
         and(
           gte(partesDeObra.fecha, desdeFecha),
           isNull(partesDeObra.anuladoEn),
-          filtroDeObra(sesion, partesDeObra.obraId),
+          deLaObra(partesDeObra.obraId),
         ),
       );
 
@@ -125,7 +130,7 @@ export async function GET(peticion: Request) {
         and(
           gte(preoperacionales.iniciadoEn, inicioDelDia),
           lt(preoperacionales.iniciadoEn, finDelDia),
-          filtroDeObra(sesion, preoperacionales.obraId),
+          deLaObra(preoperacionales.obraId),
         ),
       );
 
@@ -137,7 +142,7 @@ export async function GET(peticion: Request) {
       .select({ id: vehiculos.id, tipoVehiculoId: vehiculos.tipoVehiculoId })
       .from(vehiculos)
       .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
-      .where(and(isNull(vehiculos.eliminadoEn), filtroDeObra(sesion, vehiculos.obraId)));
+      .where(and(isNull(vehiculos.eliminadoEn), deLaObra(vehiculos.obraId)));
 
     // Solo cuentan los equipos a los que se les puede levantar preoperacional
     // (spec 019, RF-21 a RF-23): uno de un tipo sin formato no está pendiente.
@@ -151,7 +156,7 @@ export async function GET(peticion: Request) {
     const obrasVisibles = await db
       .select({ id: obras.id })
       .from(obras)
-      .where(and(isNull(obras.eliminadoEn), filtroDeObra(sesion, obras.id)));
+      .where(and(isNull(obras.eliminadoEn), deLaObra(obras.id)));
 
     return ok({
       periodo,
@@ -174,7 +179,7 @@ export async function GET(peticion: Request) {
       minutosExtra,
       personasContadas,
       // Spec 031, RF-25: las pólizas por vencer o vencidas de sus obras, si ve el contrato.
-      polizas: await avisosDePolizas(sesion),
+      polizas: (await avisosDePolizas(sesion)).filter((p) => !obraId || p.obraId === obraId),
     });
   });
 }

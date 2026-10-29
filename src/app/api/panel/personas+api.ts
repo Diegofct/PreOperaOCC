@@ -2,12 +2,18 @@ import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { dispositivos, obras, usuarios } from '@/db/servidor/esquema';
+import { dispositivos, fichasLaborales, obras, usuarios } from '@/db/servidor/esquema';
 import { personaNueva } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
+import {
+  empresaDelAccesoSinObra,
+  empresaDeLaPersona,
+  esEmpresa,
+  reparoDelAccesoSinObra,
+} from '@/shared/rules/empresas';
 import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
 import { USUARIO_IA_WHATSAPP } from '@/shared/rules/whatsapp-automatico';
 
@@ -30,6 +36,14 @@ export async function GET(peticion: Request) {
     const sesion = await requerirPermiso(peticion, 'personas', 'listar');
     if (sesion instanceof Response) return sesion;
 
+    // Spec 033, RF-28: las de una empresa (`?empresa=`) o las de una obra (`?obraId=`). La
+    // empresa se resuelve con la regla y no en SQL: la de quien no tiene la toma de su
+    // rol (RF-46), y esa regla vive en un solo sitio.
+    const parametros = new URL(peticion.url).searchParams;
+    const empresa = parametros.get('empresa');
+    if (empresa !== null && !esEmpresa(empresa)) return errorDePeticion('Esa empresa no existe.');
+    const obraId = parametros.get('obraId');
+
     const filas = await baseServidor()
       .select({
         id: usuarios.id,
@@ -41,6 +55,7 @@ export async function GET(peticion: Request) {
         obraId: usuarios.obraId,
         obraNombre: obras.nombre,
         activo: usuarios.activo,
+        empresa: usuarios.empresa,
         /**
          * Si tiene algún celular activado (spec 015, RF-18). La ventana de baja lo
          * avisa antes de confirmar: darla de baja desactiva ese celular, y lo que
@@ -57,6 +72,12 @@ export async function GET(peticion: Request) {
           select 1 from whatsapp_creados c
           where c.tipo = 'persona' and c.registro_id = ${usuarios.id}
         )`.mapWith(Boolean),
+        // Spec 035, RF-21: retirada en Recursos Humanos. Solo el estado: el resto de la
+        // ficha no sale de `rrhh/servidor`.
+        retirado: sql<boolean>`exists (
+          select 1 from ${fichasLaborales}
+          where ${fichasLaborales.usuarioId} = ${usuarios.id} and ${fichasLaborales.estado} = 'retirado'
+        )`.mapWith(Boolean),
       })
       .from(usuarios)
       // `left` y no `inner`: el personal de gerencia no está adscrito a ninguna
@@ -68,11 +89,13 @@ export async function GET(peticion: Request) {
           filtroDeObra(sesion, usuarios.obraId),
           // El usuario de sistema «IA WhatsApp» no es una persona de la obra (spec 024).
           ne(usuarios.id, USUARIO_IA_WHATSAPP.id),
+          obraId ? eq(usuarios.obraId, obraId) : undefined,
         ),
       )
       .orderBy(asc(usuarios.nombreCompleto));
 
-    return ok(filas);
+    const conEmpresa = filas.map((f) => ({ ...f, empresa: empresaDeLaPersona(f.empresa, f.rol) }));
+    return ok(empresa ? conEmpresa.filter((f) => f.empresa === empresa) : conEmpresa);
   });
 }
 
@@ -99,6 +122,15 @@ export async function POST(peticion: Request) {
         return errorDePeticion('Solo puede registrar personas en su propia obra.', 403);
       }
       datos.obraId ??= sesion.obraId;
+    }
+
+    // El Encargado de OCC es de OCC y la auxiliar de RR. HH. de Elemental, los dos sin obra
+    // (spec 034, RF-13; spec 035, RF-8): sin empresa, la suya; con obra o con otra empresa,
+    // se les dice por qué no.
+    datos.empresa ??= empresaDelAccesoSinObra(datos.rol);
+    const reparo = reparoDelAccesoSinObra({ rol: datos.rol, obraId: datos.obraId ?? null, empresa: datos.empresa ?? null });
+    if (reparo) {
+      return Response.json({ error: reparo.mensaje, campos: { [reparo.campo]: reparo.mensaje } }, { status: 400 });
     }
 
     // Y la obra tiene que llevar el módulo de ese acceso (spec 017, RF-11): un
@@ -129,6 +161,9 @@ export async function POST(peticion: Request) {
         )[0]?.nombre ?? null)
       : null;
 
-    return ok({ ...datos, id: creada.id, obraNombre: nombreObra }, 201);
+    return ok(
+      { ...datos, id: creada.id, obraNombre: nombreObra, empresa: empresaDeLaPersona(datos.empresa, datos.rol) },
+      201,
+    );
   });
 }

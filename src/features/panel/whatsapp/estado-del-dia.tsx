@@ -6,12 +6,15 @@
  * cerrada, y, mientras espera, el botón «Guardar con lo que hay» para armarla sin
  * esperar la hora límite. La ven el residente de la obra y la gerencia.
  */
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 
+import { rutaDeObra } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
 import { ETIQUETAS_DE_REPORTE } from '@/shared/rules/whatsapp-automatico';
+
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
 import { api } from '../cliente-api';
 import {
@@ -62,7 +65,10 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
   const puedeAtender = alcanza(rol, 'whatsapp', 'aprobar');
 
   const hoy = fechaDeJornada();
-  const [obraId, setObraId] = useState<string | null>(null);
+  const [obraDelSelector, setObraId] = useState<string | null>(null);
+  // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraId = obraDeLaRuta ?? obraDelSelector;
   const [desde, setDesde] = useState(restarDias(hoy, 6));
   const [hasta, setHasta] = useState(hoy);
   const [porArmar, setPorArmar] = useState<FilaDelDia | null>(null);
@@ -147,7 +153,7 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
               titulo="Ver bitácora"
               tono="secundario"
               onPress={() =>
-                router.push({ pathname: '/panel/bitacoras', params: { fecha: d.fecha, obraId: d.obraId } })
+                router.push(`${rutaDeObra(d.obraId, 'bitacoras')}?${new URLSearchParams({ fecha: d.fecha })}` as Href)
               }
             />
           ) : null}
@@ -162,7 +168,7 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
   return (
     <Seccion titulo="Estado del día">
       <Acciones>
-        {esGerencia ? (
+        {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
             valor={obraId}

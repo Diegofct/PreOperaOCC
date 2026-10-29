@@ -48,6 +48,11 @@ import {
   type Cargo,
 } from '@/shared/catalogos/cargos';
 
+import { useLugarDelPanel, useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+import { EMPRESAS, empresaDelAccesoSinObra, esEmpresa, type EmpresaId } from '@/shared/rules/empresas';
+import { alcanza, puedeCambiarRol, rolesQuePuedeDar } from '@/shared/rules/permisos';
+
+
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -85,6 +90,9 @@ import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
 import { useOrdenRecordado } from './usar-orden-recordado';
 import { DatoSecreto, VentanaDeSecreto } from './ventana-de-secreto';
+
+/** Las cuatro empresas del grupo, para elegir la de una persona (spec 033, RF-45). */
+const OPCIONES_DE_EMPRESA = EMPRESAS.map((e) => ({ valor: e.id, etiqueta: e.nombre }));
 
 /**
  * Qué acceso tiene de verdad una persona, no el nombre interno del rol.
@@ -127,8 +135,25 @@ const ORDEN_INICIAL: Orden = { clave: 'nombre', sentido: 'asc' };
 export default function PantallaPersonas() {
   const { persona: yo, pedirCambioDeClave } = useSesionPanel();
   const esGerencia = yo?.rol === 'admin';
+  // Spec 035, RF-11: el selector ofrece solo lo que se puede dar (a la auxiliar de RR. HH.,
+  // «Operador»); corregir, a quien se podría haber registrado; dar de baja, la gerencia.
+  const rolesQueDa = yo ? rolesQuePuedeDar(yo.rol) : [];
+  const puedeDarDeBaja = yo ? alcanza(yo.rol, 'personas', 'activar') : false;
 
-  const personas = useListado<PersonaFila>(useCallback(() => api.personas.listar(), []));
+  // Spec 033, RF-28: en una empresa, sus personas; dentro de una obra de Proyectos, las de
+  // esa obra.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const lugar = useLugarDelPanel();
+  const empresaDelLugar = lugar?.tipo === 'empresa' ? lugar.empresa : null;
+  const personas = useListado<PersonaFila>(
+    useCallback(
+      () =>
+        api.personas.listar(
+          obraDeLaRuta ? { obraId: obraDeLaRuta } : empresaDelLugar ? { empresa: empresaDelLugar } : undefined,
+        ),
+      [obraDeLaRuta, empresaDelLugar],
+    ),
+  );
   const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
 
   /*
@@ -152,7 +177,13 @@ export default function PantallaPersonas() {
   const [documento, setDocumento] = useState('');
   const [rol, setRol] = useState<Rol>('operador');
   const [cargo, setCargo] = useState<Cargo | null>(null);
-  const [obraId, setObraId] = useState<string | null>(null);
+  // Spec 033, RF-45: la empresa de la persona, propuesta con la del lugar —dentro de una
+  // obra, Proyectos—. Se puede cambiar; vacía no deja registrar.
+  const empresaPropuesta: EmpresaId | null = empresaDelLugar ?? (obraDeLaRuta ? 'proyectos' : null);
+  const [empresa, setEmpresa] = useState<EmpresaId | null>(empresaPropuesta);
+  const [obraDelSelector, setObraId] = useState<string | null>(null);
+  // Registrada dentro de una obra, la persona queda en esa obra (RF-19).
+  const obraId = obraDeLaRuta ?? obraDelSelector;
 
   /**
    * Elegir el cargo propone el acceso que le corresponde, y ahí se acaba la
@@ -164,7 +195,20 @@ export default function PantallaPersonas() {
   function elegirCargo(valor: string | null) {
     const nuevo = (valor as Cargo) ?? null;
     setCargo(nuevo);
-    if (nuevo) setRol(rolSugerido(nuevo));
+    if (nuevo) elegirAcceso(rolSugerido(nuevo));
+  }
+
+  /**
+   * El Encargado de OCC y la auxiliar de RR. HH. son de su empresa y sin obra (spec 034,
+   * RF-13; spec 035, RF-8): se les ponen solos.
+   */
+  function elegirAcceso(nuevo: Rol) {
+    setRol(nuevo);
+    const suEmpresa = empresaDelAccesoSinObra(nuevo);
+    if (suEmpresa) {
+      setEmpresa(suEmpresa);
+      setObraId(null);
+    }
   }
 
   const [obraFiltro, setObraFiltro] = useState<string | null>(null);
@@ -208,7 +252,7 @@ export default function PantallaPersonas() {
 
   async function crear() {
     const creada = await personas.ejecutar(() =>
-      api.personas.crear({ usuario, nombreCompleto, documento, rol, cargo, obraId, activo: true }),
+      api.personas.crear({ usuario, nombreCompleto, documento, rol, cargo, obraId, empresa, activo: true }),
     );
     if (creada) {
       setHecho(`${nombreCompleto} quedó registrada.`);
@@ -221,6 +265,7 @@ export default function PantallaPersonas() {
       // almacenista, como almacenista— sin que nadie lo hubiera elegido.
       setRol('operador');
       setObraId(null);
+      setEmpresa(empresaPropuesta);
     }
   }
 
@@ -313,15 +358,19 @@ export default function PantallaPersonas() {
             {operaVehiculos(p.cargo) ? (
               <Boton titulo="Códigos" tono="secundario" onPress={() => setCodigosDe(p)} />
             ) : null}
-            <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(p)} />
-            <Boton
-              titulo="Dar de baja"
-              tono="peligro"
-              onPress={() => {
-                setHecho(null);
-                setPorDarDeBaja(p);
-              }}
-            />
+            {yo && puedeCambiarRol(yo.rol, p.rol) ? (
+              <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(p)} />
+            ) : null}
+            {puedeDarDeBaja ? (
+              <Boton
+                titulo="Dar de baja"
+                tono="peligro"
+                onPress={() => {
+                  setHecho(null);
+                  setPorDarDeBaja(p);
+                }}
+              />
+            ) : null}
           </Acciones>
         );
       },
@@ -413,24 +462,36 @@ export default function PantallaPersonas() {
           <Selector
             etiqueta="Acceso"
             valor={rol}
-            opciones={ROLES.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
-            onChange={(v) => setRol((v as Rol) ?? 'operador')}
+            opciones={rolesQueDa.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
+            onChange={(v) => elegirAcceso((v as Rol) ?? 'operador')}
             ancho={220}
           />
+          {obraDeLaRuta || empresaDelAccesoSinObra(rol) ? null : (
+            <Selector
+              etiqueta="Obra"
+              valor={obraId}
+              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
+              onChange={setObraId}
+              permiteVacio
+              vacio="Sin obra (gerencia)"
+              ancho={240}
+            />
+          )}
           <Selector
-            etiqueta="Obra"
-            valor={obraId}
-            opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
-            onChange={setObraId}
-            permiteVacio
-            vacio="Sin obra (gerencia)"
-            ancho={240}
+            etiqueta="Empresa"
+            obligatorio
+            valor={empresa}
+            opciones={OPCIONES_DE_EMPRESA}
+            onChange={(v) => setEmpresa(esEmpresa(v) ? v : null)}
+            vacio="Elija la empresa"
+            error={personas.errorDe('empresa')}
+            ancho={260}
           />
           <AccionesFormulario>
             <Boton
               titulo="Registrar persona"
               onPress={crear}
-              deshabilitado={!usuario || !nombreCompleto}
+              deshabilitado={!usuario || !nombreCompleto || !empresa}
             />
           </AccionesFormulario>
         </Formulario>
@@ -468,6 +529,7 @@ export default function PantallaPersonas() {
         <VentanaCorregirPersona
           persona={editando}
           obras={obras.datos}
+          rolesQueDa={rolesQueDa}
           onCerrar={() => setEditando(null)}
           onGuardado={(nombre) => {
             setEditando(null);
@@ -484,15 +546,17 @@ export default function PantallaPersonas() {
           total={filtrado.total}
           mostradas={filtrado.coincidencias}
         >
-          <Selector
-            etiqueta="Obra"
-            valor={obraFiltro}
-            opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
-            onChange={setObraFiltro}
-            permiteVacio
-            vacio="Todas las obras"
-            ancho={200}
-          />
+          {obraDeLaRuta ? null : (
+            <Selector
+              etiqueta="Obra"
+              valor={obraFiltro}
+              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
+              onChange={setObraFiltro}
+              permiteVacio
+              vacio="Todas las obras"
+              ancho={200}
+            />
+          )}
           <Selector
             etiqueta="Acceso"
             valor={accesoFiltro}
@@ -549,11 +613,14 @@ export default function PantallaPersonas() {
 function VentanaCorregirPersona({
   persona,
   obras,
+  rolesQueDa,
   onCerrar,
   onGuardado,
 }: {
   persona: PersonaFila;
   obras: ObraFila[];
+  /** Lo que puede dar quien corrige (spec 035, RF-11). */
+  rolesQueDa: readonly Rol[];
   onCerrar: () => void;
   onGuardado: (nombre: string) => void;
 }) {
@@ -562,6 +629,18 @@ function VentanaCorregirPersona({
   const [cargo, setCargo] = useState<Cargo | null>(persona.cargo);
   const [rol, setRol] = useState<Rol>(persona.rol);
   const [obraId, setObraId] = useState<string | null>(persona.obraId);
+  // La que se ve: la suya o la de su rol (RF-46). Elegir otra la guarda (RF-45).
+  const [empresa, setEmpresa] = useState<EmpresaId>(persona.empresa);
+
+  /** Los accesos sin obra van con su empresa (spec 034, RF-13; spec 035, RF-8). */
+  function elegirAcceso(nuevo: Rol) {
+    setRol(nuevo);
+    const suEmpresa = empresaDelAccesoSinObra(nuevo);
+    if (suEmpresa) {
+      setEmpresa(suEmpresa);
+      setObraId(null);
+    }
+  }
   /*
    * **Esta es la ventana que motivó el cambio del 2026-09-22.** Mover a un
    * almacenista a una obra que no lleva Almacén se rechaza con razón (spec 017,
@@ -584,6 +663,7 @@ function VentanaCorregirPersona({
     if (cargo !== persona.cargo) cambios.cargo = cargo;
     if (rol !== persona.rol) cambios.rol = rol;
     if (obraId !== persona.obraId) cambios.obraId = obraId;
+    if (empresa !== persona.empresa) cambios.empresa = empresa;
 
     if (Object.keys(cambios).length === 0) {
       onCerrar();
@@ -614,7 +694,7 @@ function VentanaCorregirPersona({
           onChange={(v) => {
             const nuevo = (v as Cargo) ?? null;
             setCargo(nuevo);
-            if (nuevo) setRol(rolSugerido(nuevo));
+            if (nuevo) elegirAcceso(rolSugerido(nuevo));
           }}
           permiteVacio
           vacio="Sin definir"
@@ -623,20 +703,33 @@ function VentanaCorregirPersona({
         <Selector
           etiqueta="Acceso"
           valor={rol}
-          opciones={ROLES.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
-          onChange={(v) => setRol((v as Rol) ?? 'operador')}
+          opciones={rolesQueDa.map((r) => ({ valor: r, etiqueta: ETIQUETA_ROL[r] }))}
+          onChange={(v) => elegirAcceso((v as Rol) ?? 'operador')}
           error={accion.campoConError('rol')}
           ancho={220}
         />
+        {empresaDelAccesoSinObra(rol) ? null : (
+          <Selector
+            etiqueta="Obra"
+            valor={obraId}
+            opciones={obras.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
+            onChange={setObraId}
+            permiteVacio
+            vacio="Sin obra (gerencia)"
+            error={accion.campoConError('obraId')}
+            ancho={240}
+          />
+        )}
         <Selector
-          etiqueta="Obra"
-          valor={obraId}
-          opciones={obras.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
-          onChange={setObraId}
-          permiteVacio
-          vacio="Sin obra (gerencia)"
-          error={accion.campoConError('obraId')}
-          ancho={240}
+          etiqueta="Empresa"
+          obligatorio
+          valor={empresa}
+          opciones={OPCIONES_DE_EMPRESA}
+          onChange={(v) => {
+            if (esEmpresa(v)) setEmpresa(v);
+          }}
+          error={accion.campoConError('empresa')}
+          ancho={260}
         />
         <AccionesFormulario>
           <Acciones>

@@ -8,9 +8,10 @@
  * obra— decide qué llega; el ensayo y si cumple se filtran aquí sobre lo que llegó
  * (RF-27), como en granulometrías.
  */
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 
+import { rutaDeObra } from '@/shared/rules/empresas';
 import { nombreDeEnsayo } from '@/shared/catalogos/bitacora';
 import { filtrarEnsayosDeObra, type FiltroDeCumple } from '@/shared/rules/ensayos-de-obra';
 import { fechaDeJornada, restarDias } from '@/shared/rules/jornada';
@@ -144,7 +145,7 @@ export function EnsayosDeObra({
           <Boton
             titulo="Ver bitácora"
             tono="secundario"
-            onPress={() => router.push({ pathname: '/panel/bitacoras', params: { fecha: e.fecha, obraId: e.obraId } })}
+            onPress={() => router.push(`${rutaDeObra(e.obraId, 'bitacoras')}?${new URLSearchParams({ fecha: e.fecha })}` as Href)}
           />
         </Acciones>
       ),

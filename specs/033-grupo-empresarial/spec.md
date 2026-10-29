@@ -1,6 +1,9 @@
 # Spec 033 — Grupo empresarial: tarjetas y menú por empresa
 
-> Estado: **Aprobada** el 2026-10-26 · Fecha: 2026-10-26
+> Estado: **Cumplida en dev** el 2026-10-29 (ver `validacion.md`); producción con la T23, que espera a las specs 036 a 038 (RF-53) · plan aprobado el 2026-10-27 · aprobada el 2026-10-26 · Fecha: 2026-10-26
+> Cambio del 2026-10-27 (al aprobar el plan): Proyectos no tiene corte propio; RF-2, RF-3, RF-34 y RF-41 ajustados.
+> Cambio del 2026-10-27 (en la T21): el menú de la obra también lleva Preoperacionales y Asignaciones; RF-17 ajustado.
+> Cambio del 2026-10-27 (menús definitivos, explicado por el usuario antes de la T22): Elemental presta los servicios administrativos del grupo; nuevos menús en RF-13 a RF-17; salen del menú Información de la empresa, Información financiera y Consolidado (los cortes pasan a Tesorería, spec 037); RF-49 a RF-53 nuevos. Módulos nuevos en sus specs: Documentos (034), Recursos Humanos (035), Compras (036), Tesorería (037), WhatsApp y Bitácora de OCC y Geolab (038). Todo sube a producción junto.
 > Cambia:
 > - la spec 022 (un solo menú lateral con sus grupos);
 > - la spec 008 (a dónde entra cada rol al iniciar sesión);
@@ -40,8 +43,8 @@ Gerencia quiere entrar al sistema y ver una tarjeta por empresa; al pulsar una, 
 ### Tarjetas de empresas (H1, H7)
 
 - RF-1: CUANDO gerencia entra al panel, EL SISTEMA muestra cuatro tarjetas: Elemental Ingeniería y Arquitectura, OCC, Geolab y Proyectos.
-- RF-2: EL SISTEMA muestra en cada tarjeta el nombre de la empresa, su función en una línea y la fecha y el saldo de su último corte financiero.
-- RF-3: SI una empresa no tiene ningún corte financiero, ENTONCES EL SISTEMA muestra en su tarjeta «Sin información financiera».
+- RF-2: EL SISTEMA muestra en cada tarjeta el nombre de la empresa, su función en una línea y la fecha y el saldo de su último corte financiero; en la de Proyectos, la suma de los saldos del último corte de cada obra y la fecha del más antiguo (cambio del 2026-10-27).
+- RF-3: SI una empresa no tiene ningún corte financiero (en Proyectos: ninguna obra lo tiene), ENTONCES EL SISTEMA muestra en su tarjeta «Sin información financiera».
 - RF-4: EL SISTEMA muestra en la tarjeta de Proyectos cuántas obras activas hay.
 - RF-5: CUANDO se pulsa una tarjeta, EL SISTEMA abre la empresa con su menú propio.
 - RF-6: CUANDO un residente entra al panel, EL SISTEMA abre directamente su obra dentro de Proyectos.
@@ -54,29 +57,31 @@ Gerencia quiere entrar al sistema y ver una tarjeta por empresa; al pulsar una, 
 
 ### Menú de cada empresa (H4, H5)
 
-- RF-13: EL SISTEMA muestra en el menú de Elemental: Información de la empresa, Información financiera, Consolidado del grupo, Obras, Personas y Asistente.
-- RF-14: EL SISTEMA muestra en el menú de OCC: Información de la empresa, Información financiera, Bitácora de maquinaria, Reportes de WhatsApp, Preoperacionales, Reportes de vehículos y maquinaria, Personas, Vehículos, Asignaciones y Asistente.
-- RF-15: EL SISTEMA muestra en el menú de Geolab: Información de la empresa, Información financiera, Laboratorio, Reportes de laboratorio, Personas y Asistente.
+- RF-13 (cambio del 2026-10-27, menús definitivos): EL SISTEMA muestra en el menú de Elemental: Recursos Humanos (con Personas y Obras dentro), Compras, Tesorería, Documentos, Licitaciones y Asistente.
+- RF-14 (cambio del 2026-10-27, menús definitivos): EL SISTEMA muestra en el menú de OCC: Reportes de WhatsApp, Bitácora, Documentos, Reportes de vehículos y maquinaria, Vehículos, Preoperacionales, Asignaciones, Solicitudes de compra, Solicitudes de pago y Asistente.
+- RF-15 (cambio del 2026-10-27, menús definitivos): EL SISTEMA muestra en el menú de Geolab: Bitácora, Reportes de WhatsApp, Laboratorio, Reportes de laboratorio, Documentos, Solicitudes de compra, Solicitudes de pago y Asistente.
 - RF-16: CUANDO se entra a Proyectos, EL SISTEMA muestra la lista de obras con su consorcio, municipio y estado para elegir una.
-- RF-17: CUANDO se elige una obra, EL SISTEMA muestra en su menú: Información de la obra, Información financiera, Reportes de WhatsApp, Reportes, Bitácoras, Control Cantera, Almacén, Laboratorio, Personas, Contrato y Presupuesto, y Asistente.
-- RF-18: MIENTRAS una obra tiene apagado Almacén, Control Cantera o Laboratorio (spec 017), EL SISTEMA no muestra ese módulo en su menú.
+- RF-17 (cambio del 2026-10-27, menús definitivos): CUANDO se elige una obra, EL SISTEMA muestra en su menú, igual para todas las obras: Bitácoras, Reportes de WhatsApp, Reportes/Informes, Recursos Humanos, Calidad (el Laboratorio de la obra), Almacén, Preoperacionales, Asignaciones, Control Cantera, Contrato y Presupuesto, Solicitudes de compra, Solicitudes de pago y Asistente.
+- RF-18: MIENTRAS una obra tiene apagado Almacén, Control Cantera o Laboratorio (Calidad) (spec 017), EL SISTEMA no muestra ese módulo en su menú.
 - RF-19: MIENTRAS se está dentro de una obra, EL SISTEMA muestra cada módulo con los datos de esa obra solamente, sin pedir elegir la obra en la pantalla.
 - RF-20: MIENTRAS se está dentro de una obra, EL SISTEMA muestra «Cambiar de obra» en el menú.
 - RF-21: EL SISTEMA sigue decidiendo qué módulos ve cada rol con los permisos de hoy; el menú de cada empresa solo los reparte.
 
 ### Contenido de los módulos por empresa (H4)
 
-- RF-22: EL SISTEMA muestra en la Bitácora de maquinaria de OCC la sección Maquinaria de las bitácoras de todas las obras, con un filtro por obra y por fecha.
+- RF-22: EL SISTEMA muestra en la Bitácora de OCC, mientras no llegue su grupo de WhatsApp propio (spec 038), la sección Maquinaria de las bitácoras de todas las obras, con un filtro por obra y por fecha.
 - RF-23: EL SISTEMA muestra en Reportes de WhatsApp de OCC solo lo de vehículos y maquinaria de todas las obras.
 - RF-24: EL SISTEMA muestra en Reportes de WhatsApp de una obra solo lo de esa obra.
 - RF-25: EL SISTEMA muestra en Reportes de vehículos y maquinaria de OCC los reportes de equipos (horas, kilómetros, preoperacionales, mantenimientos) de todas las obras.
 - RF-26: EL SISTEMA muestra en Laboratorio de Geolab los ensayos de todas las obras, con un filtro por obra.
 - RF-27: EL SISTEMA muestra en Reportes de laboratorio de Geolab los consolidados de ensayos por obra y por rango de fechas.
-- RF-28: EL SISTEMA muestra en Personas de cada empresa solo las personas de esa empresa; en Proyectos, solo las de la obra.
+- RF-28 (cambio del 2026-10-27): EL SISTEMA muestra en Recursos Humanos de Elemental las personas de todo el grupo, con filtro por empresa; en Recursos Humanos de una obra, solo las de esa obra.
 - RF-29: EL SISTEMA muestra el asistente en el menú de todas las empresas y de todas las obras.
 - RF-30: MIENTRAS el asistente se abre dentro de una obra, EL SISTEMA responde por defecto sobre esa obra.
 
 ### Información de la empresa (H2)
+
+> Cambio del 2026-10-27: Información de la empresa e Información de la obra salen del menú. La tabla `empresas` se queda (nombre de las tarjetas); RF-31 a RF-33 quedan sin pantalla hasta que se pidan de nuevo.
 
 - RF-31: EL SISTEMA guarda por empresa: razón social, NIT, dirección, ciudad, teléfono, correo y representante legal.
 - RF-32: EL SISTEMA deja editar la información de la empresa solo a gerencia.
@@ -84,14 +89,16 @@ Gerencia quiere entrar al sistema y ver una tarjeta por empresa; al pulsar una, 
 
 ### Información financiera (H3, H6)
 
-- RF-34: EL SISTEMA deja a gerencia registrar un corte financiero de una empresa o de una obra con: fecha de corte, saldo a la fecha, cuentas por pagar, cuentas por cobrar y notas.
+> Cambio del 2026-10-27: Información financiera sale del menú de las empresas y de las obras y el Consolidado del grupo se quita. Los cortes (RF-34 a RF-40, RF-44) se registran desde Tesorería de Elemental (spec 037) y siguen alimentando las tarjetas (RF-2, RF-3). RF-41 a RF-43 quedan sin pantalla.
+
+- RF-34: EL SISTEMA deja a gerencia registrar un corte financiero de Elemental, OCC, Geolab o de una obra (Proyectos no tiene corte propio: sus cortes son los de sus obras; cambio del 2026-10-27) con: fecha de corte, saldo a la fecha, cuentas por pagar, cuentas por cobrar y notas.
 - RF-35: SI la fecha de corte es posterior a hoy, ENTONCES EL SISTEMA rechaza el corte con «La fecha de corte no puede ser futura».
 - RF-36: SI ya existe un corte vigente de la misma empresa u obra con la misma fecha, ENTONCES EL SISTEMA rechaza el corte con «Ya hay un corte del <fecha>; anúlalo para registrar otro».
 - RF-37: EL SISTEMA muestra en Información financiera el último corte arriba y debajo el historial de cortes, del más reciente al más antiguo.
 - RF-38: EL SISTEMA muestra junto a cada valor del último corte su diferencia con el corte anterior.
 - RF-39: CUANDO gerencia anula un corte, EL SISTEMA pide el motivo y lo deja en el historial marcado como anulado.
 - RF-40: EL SISTEMA no deja editar un corte registrado; se corrige anulándolo y registrando otro.
-- RF-41: EL SISTEMA muestra en el Consolidado del grupo una fila por empresa y por obra con su último corte y una fila de total.
+- RF-41: EL SISTEMA muestra en el Consolidado del grupo una fila por Elemental, OCC, Geolab y por cada obra (agrupadas bajo Proyectos), con su último corte, y una fila de total (cambio del 2026-10-27: sin fila propia de Proyectos, para no contar dos veces).
 - RF-42: EL SISTEMA muestra en el Consolidado del grupo la fecha del corte de cada fila, para que se vea cuál está desactualizado.
 - RF-43: SI el último corte de una empresa u obra tiene más de 30 días, ENTONCES EL SISTEMA lo marca en el Consolidado como «Desactualizado».
 - RF-44: EL SISTEMA muestra la información financiera solo a gerencia.
@@ -106,10 +113,18 @@ Gerencia quiere entrar al sistema y ver una tarjeta por empresa; al pulsar una, 
 - RF-47: CUANDO se abre una dirección del panel de antes del cambio, EL SISTEMA lleva a la misma pantalla dentro de su empresa.
 - RF-48: EL SISTEMA conserva el título de la pestaña del navegador con la empresa: «<Módulo> · <Empresa>».
 
+### Menús definitivos (cambio del 2026-10-27)
+
+- RF-49: CUANDO se pulsa Licitaciones en el menú de Elemental, EL SISTEMA abre LicitApp (`https://licitapp-elementaling.cloud/`) en una pestaña nueva.
+- RF-50: EL SISTEMA muestra el asistente en el menú de Elemental, OCC, Geolab y de cada obra (reafirma RF-29).
+- RF-51: EL SISTEMA muestra Solicitudes de compra y Solicitudes de pago al residente y al almacenista en su obra, al laboratorista en Geolab y a gerencia en OCC, Geolab y cada obra; Compras y Tesorería de Elemental, donde se aprueban, solo a gerencia.
+- RF-52: CUANDO se abre una dirección de Información de la empresa, Información financiera o Consolidado, EL SISTEMA lleva a Tesorería de Elemental (gerencia) o al inicio del rol.
+- RF-53: MIENTRAS un módulo del menú pertenece a una spec aún no terminada (034 a 038), EL SISTEMA no sube a producción: la 033 se despliega junto con ellas.
+
 ## Superficies afectadas
 
 - [ ] **Móvil** — no cambia.
-- [x] **Panel web** — Inicio (tarjetas), menú lateral por empresa, Proyectos (lista y elección de obra), Información de la empresa / obra, Información financiera, Consolidado del grupo, Personas (empresa), Bitácora de maquinaria de OCC, Reportes de laboratorio, Asistente (obra por defecto).
+- [x] **Panel web** — Inicio (tarjetas), menú lateral por empresa, Proyectos (lista y elección de obra), Información de la empresa / obra, Información financiera (en Proyectos, la de cada obra), Consolidado del grupo, Personas (empresa), Bitácora de maquinaria de OCC, Reportes de laboratorio, Asistente (obra por defecto).
 - [x] **API** — datos de empresa, cortes financieros (registrar, listar, anular), consolidado; filtros por empresa en Personas, WhatsApp y Laboratorio.
 - [ ] **Sincronización** — no cambia.
 - [x] **Datos** — empresas y sus datos; cortes financieros; empresa de cada persona.
@@ -147,4 +162,4 @@ Gerencia quiere entrar al sistema y ver una tarjeta por empresa; al pulsar una, 
 ## Dudas abiertas
 
 - [NECESITA ACLARACIÓN: datos reales de cada empresa (razón social, NIT…) — los digita gerencia al terminar, no bloquea.]
-- [NECESITA ACLARACIÓN: si además de saldo, cuentas por pagar y por cobrar hace falta algún otro valor en el corte (p. ej. obligaciones financieras, nómina por pagar).]
+- Resuelto el 2026-10-27: el corte lleva solo saldo, cuentas por pagar y cuentas por cobrar (más fecha y notas); si luego hace falta otro valor, se agrega en un cambio aparte.

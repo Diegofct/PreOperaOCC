@@ -2,7 +2,9 @@
  * Qué le toca ver a cada quien, decidido en un solo sitio.
  *
  * `admin` —gerencia— ve todas las obras. `supervisor` —residente o director de
- * obra— ve la suya y nada más.
+ * obra— ve la suya y nada más. El Encargado de OCC (spec 034) también ve todas, pero
+ * solo dentro de los módulos que le da la tabla de permisos: cada ruta exige su
+ * permiso antes de llegar aquí (`requerirPermiso`).
  *
  * Está aquí y no repartido por los endpoints a propósito. Un filtro de alcance
  * copiado en nueve rutas es un filtro que en la décima se olvida, y ese olvido
@@ -14,16 +16,17 @@
  * Regla de uso: **ninguna consulta del panel arma su propia condición de obra.**
  * Si una necesita algo que estas funciones no dan, se amplían aquí.
  */
-import { eq, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn } from 'drizzle-orm/pg-core';
 
 import { obras } from '@/db/servidor/esquema';
+import { alcanza, rolVeTodasLasObras, type ModuloConPermiso } from '@/shared/rules/permisos';
 
 import type { PersonaEnSesion } from './guardia';
 
-/** Puede ver y tocar todas las obras. */
+/** Puede ver y tocar todas las obras (en los módulos que alcance su rol). */
 export function veTodasLasObras(persona: PersonaEnSesion): boolean {
-  return persona.rol === 'admin';
+  return rolVeTodasLasObras(persona.rol);
 }
 
 /**
@@ -111,12 +114,28 @@ export function alcanzaLaObra(persona: PersonaEnSesion, obraId: string | null): 
  *
  * La gerencia sí la ve: lleva todas las obras, y alguien tiene que poder revisar lo
  * que quedó huérfano.
+ *
+ * `modulo` es el del registro dueño (spec 034). La ruta de archivos solo pide sesión,
+ * así que el Encargado de OCC —que ve todas las obras sin ser gerencia— necesita además
+ * el permiso de ese módulo: sin esto abriría, foto por foto, el contrato de cualquier
+ * obra. Sin módulo, no la alcanza.
  */
 export function alcanzaLaImagen(
   persona: PersonaEnSesion,
   dueno: { existe: boolean; obraId: string | null },
+  modulo: ModuloConPermiso | null = null,
 ): boolean {
-  if (veTodasLasObras(persona)) return true;
+  if (persona.rol === 'admin') return true;
   if (!dueno.existe) return false;
+  if (veTodasLasObras(persona)) return modulo !== null && alcanza(persona.rol, modulo, 'ver');
   return alcanzaLaObra(persona, dueno.obraId);
+}
+
+/**
+ * `filtroDeObra` más la obra que se pidió (`?obraId=`), para las pantallas que se abren
+ * dentro de una obra de Proyectos (spec 033, RF-19). Quien no es gerencia ya está
+ * limitado a la suya: pedir otra le deja el listado vacío, no le abre la ajena.
+ */
+export function filtroDeObraPedida(persona: PersonaEnSesion, columna: PgColumn, obraId: string | null): SQL | undefined {
+  return obraId ? and(filtroDeObra(persona, columna), eq(columna, obraId)) : filtroDeObra(persona, columna);
 }

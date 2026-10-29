@@ -18,6 +18,11 @@ import { z } from 'zod';
 
 import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
+import type { EstadoDeSolicitud, PasoDeSolicitud } from '@/shared/rules/compras';
+import type { ValoresDelCorte } from '@/shared/rules/cortes';
+import type { AvisoDeVencimiento } from '@/shared/rules/documentos';
+import type { AvisoDePersona, DatosDeLaFicha, ResumenDelPersonal } from '@/shared/rules/ficha';
+import type { EmpresaId } from '@/shared/rules/empresas';
 import type { EnsayoDeObra } from '@/shared/rules/ensayos-de-obra';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '@/shared/rules/mantenimiento';
 import {
@@ -225,6 +230,8 @@ export interface ObraFila {
   almacenActivo: boolean;
   canteraActivo: boolean;
   laboratorioActivo: boolean;
+  /** El consorcio, si su contrato lo dice (spec 033, RF-16). Solo en el listado. */
+  consorcio?: string | null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -240,6 +247,11 @@ export interface ObraFila {
  * cada rol es quien debe decir cuáles hay.
  */
 export { ETIQUETA_ROL, ROLES, type Rol };
+
+/** Una de las cuatro empresas del grupo (spec 033, RF-45). */
+const empresaDeLaPersonaZod = z.enum(['elemental', 'occ', 'geolab', 'proyectos'], {
+  error: 'Esa empresa no existe.',
+});
 
 export const personaNueva = z.object({
   /**
@@ -265,6 +277,11 @@ export const personaNueva = z.object({
     .transform((v) => v ?? null),
   obraId: idOpcional,
   activo: z.boolean().default(true),
+  /**
+   * La empresa del grupo (spec 033, RF-45). Sin ella vale la de su rol (RF-46): la
+   * pantalla la pide siempre, pero las altas de otros caminos (WhatsApp) no la traen.
+   */
+  empresa: empresaDeLaPersonaZod.nullish().transform((v) => v ?? null),
 });
 
 /**
@@ -289,6 +306,7 @@ export const personaEditada = z.object({
     .optional(),
   obraId: idParcial,
   activo: z.boolean().optional(),
+  empresa: empresaDeLaPersonaZod.nullable().optional(),
 });
 
 export type PersonaNueva = z.input<typeof personaNueva>;
@@ -307,6 +325,10 @@ export interface PersonaFila {
   activo: boolean;
   /** Tiene al menos un celular activado. Darla de baja lo desactiva (spec 015). */
   celularActivo: boolean;
+  /** La suya o, si no tiene, la de su rol (spec 033, RF-46). */
+  empresa: EmpresaId;
+  /** Spec 035, RF-21: su ficha está retirada. Lo trae el listado; los selectores no la ofrecen. */
+  retirado?: boolean;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -459,6 +481,8 @@ export interface PersonaEnSesionFila {
   nombreCompleto: string;
   rol: Rol;
   obraId: string | null;
+  /** El nombre de su obra, para la cabecera del menú (spec 033, RF-10). */
+  obraNombre: string | null;
   /** Los módulos que lleva su obra (spec 017); los dos, si no tiene obra. */
   modulosDeObra: ModulosDeObra;
   debeCambiarClave: boolean;
@@ -2871,4 +2895,516 @@ export const limiteDelAsistente = z.object({
 export interface UsoDelAsistente {
   filas: { usuarioId: string; persona: string; obraId: string | null; obra: string | null; preguntas: number; costo: number }[];
   limites: { todos: number | null; porPersona: { usuarioId: string; persona: string; limite: number }[] };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Grupo empresarial (spec 033)                                              */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Los datos de una empresa (RF-31). Todos son texto y pueden quedar vacíos: los digita
+ * gerencia cuando los tenga (duda abierta de la spec, no bloquea). Ausente no toca el
+ * campo; vacío lo borra. Sin validar el formato del NIT ni del correo, como los del
+ * contratante en el contrato (spec 031): se escriben como vienen en los papeles.
+ */
+const datoDeEmpresa = (max: number) => z.string().trim().max(max).optional();
+
+export const empresaEditada = z.object({
+  razonSocial: datoDeEmpresa(200),
+  nit: datoDeEmpresa(40),
+  direccion: datoDeEmpresa(200),
+  ciudad: datoDeEmpresa(80),
+  telefono: datoDeEmpresa(60),
+  correo: datoDeEmpresa(200),
+  representanteLegal: datoDeEmpresa(200),
+});
+
+export type EmpresaEditada = z.input<typeof empresaEditada>;
+
+export interface DatosDeEmpresa {
+  razonSocial: string;
+  nit: string;
+  direccion: string;
+  ciudad: string;
+  telefono: string;
+  correo: string;
+  representanteLegal: string;
+}
+
+/** El último corte de lo que muestra una tarjeta (RF-2), o `null`: «Sin información financiera». */
+export interface ResumenFinanciero {
+  fechaCorte: string;
+  saldo: number;
+}
+
+/** `GET /api/panel/empresas`: una por tarjeta, en el orden de las tarjetas (RF-1 a RF-4). */
+export interface EmpresaFila {
+  id: EmpresaId;
+  nombre: string;
+  funcion: string;
+  datos: DatosDeEmpresa;
+  /**
+   * El último corte vigente. En Proyectos, la suma del saldo del último corte de cada
+   * obra activa, a la fecha del más antiguo (RF-2, cambio del 2026-10-27).
+   */
+  financiero: ResumenFinanciero | null;
+  /** Solo en Proyectos (RF-4). */
+  obrasActivas: number | null;
+  actualizadoEn: string;
+}
+
+/** Un valor del corte: pesos enteros; que no sean negativos lo dice la regla (RF-34). */
+const pesosDelCorte = (campo: string) =>
+  z.number({ error: `Falta ${campo}.` }).int(`${campo[0].toUpperCase()}${campo.slice(1)} va en pesos, sin decimales.`);
+
+/**
+ * Registrar un corte (RF-34): de Elemental, OCC o Geolab (`empresaId`) **o** de una obra
+ * (`obraId`), nunca de los dos. Que la fecha no sea futura ni repetida lo decide
+ * `validarCorte` en el servidor, con la fecha de la jornada.
+ */
+export const corteNuevo = z
+  .object({
+    empresaId: z.enum(['elemental', 'occ', 'geolab'], { error: 'Esa empresa no lleva corte propio.' }).optional(),
+    obraId: z.string().trim().min(1).max(64).optional(),
+    fechaCorte: fechaDeJornadaZod,
+    saldo: pesosDelCorte('el saldo'),
+    cuentasPorPagar: pesosDelCorte('las cuentas por pagar'),
+    cuentasPorCobrar: pesosDelCorte('las cuentas por cobrar'),
+    notas: z.string().trim().max(2000).default(''),
+  })
+  .refine((c) => Boolean(c.empresaId) !== Boolean(c.obraId), {
+    message: 'El corte es de una empresa o de una obra.',
+    path: ['empresaId'],
+  });
+
+export type CorteNuevo = z.input<typeof corteNuevo>;
+
+/** Anular un corte (RF-39): con motivo, siempre. */
+export const corteAnulado = z.object({ motivo: textoObligatorio(500, 'el motivo') });
+
+/** Un corte, para el historial (RF-37, RF-39). */
+export interface CorteFila extends ValoresDelCorte {
+  id: string;
+  empresaId: EmpresaId | null;
+  obraId: string | null;
+  fechaCorte: string;
+  notas: string;
+  registradoPor: string;
+  registradoEn: string;
+  anuladoEn: string | null;
+  anuladoPor: string | null;
+  motivoAnulacion: string | null;
+}
+
+/** `GET /api/panel/cortes`: del más reciente al más antiguo, y la diferencia del último (RF-37, RF-38). */
+export interface CortesDe {
+  cortes: CorteFila[];
+  diferencia: ValoresDelCorte | null;
+}
+
+/** `GET /api/panel/cortes/consolidado` (RF-41 a RF-43). */
+export interface ConsolidadoDelGrupo {
+  hoy: string;
+  filas: {
+    tipo: 'empresa' | 'obra';
+    id: string;
+    nombre: string;
+    corte: (ValoresDelCorte & { fechaCorte: string }) | null;
+    desactualizado: boolean;
+  }[];
+  total: ValoresDelCorte;
+  conCorte: number;
+}
+
+/**
+ * Una máquina de una bitácora, en la Bitácora de maquinaria de OCC (spec 033, RF-22):
+ * la sección Maquinaria de las bitácoras de todas las obras, una fila por máquina y día.
+ * `GET /api/panel/partes/maquinaria`.
+ */
+export interface MaquinaDeLasObrasFila {
+  /** La bitácora (para abrirla) y la fila dentro de ella. */
+  parteId: string;
+  id: string;
+  fecha: string;
+  obraId: string;
+  obraNombre: string;
+  /** La bitácora abierta todavía se puede corregir; cerrada, es evidencia. */
+  cerrada: boolean;
+  vehiculoId: string;
+  /** Como quedó en la bitácora: la placa, o el código si se cerró antes de la spec 032 (RF-17). */
+  equipo: string;
+  claseMedidor: 'horometro' | 'odometro';
+  medidorInicial: number | null;
+  medidorFinal: number | null;
+  avance: number | null;
+  operador: string | null;
+  observaciones: string;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Documentos de Elemental, OCC, Geolab y cada obra (spec 034)               */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Los datos de un documento nuevo, como llegan en el formulario junto al archivo
+ * (RF-24). Las reglas del lugar —que la clase sea suya, que el vencimiento no sea antes
+ * de la fecha— las aplica `faltasDelDocumento`; aquí solo la forma y los largos.
+ */
+export const documentoDelGrupoNuevo = z.object({
+  clase: z.string().trim().max(64).default(''),
+  nombre: z.string().trim().max(200, 'El nombre no puede pasar de 200 caracteres.').default(''),
+  proveedor: z.string().trim().max(200, 'El proveedor no puede pasar de 200 caracteres.').default(''),
+  descripcion: z.string().trim().max(1000, 'La descripción no puede pasar de 1000 caracteres.').default(''),
+  fecha: z.string().trim().max(10).default(''),
+  // Vacío es «no vence».
+  vence: z
+    .string()
+    .trim()
+    .max(10)
+    .nullish()
+    .transform((v) => v || null),
+});
+
+export type DocumentoDelGrupoNuevo = z.input<typeof documentoDelGrupoNuevo>;
+
+/** Anular un documento exige motivo (RF-43). */
+export const anulacionDeDocumento = z.object({
+  motivo: z.string().trim().min(1, 'Escriba por qué lo anula.').max(500),
+});
+
+export interface DocumentoDelLugar {
+  id: string;
+  clase: string;
+  /** Como se llamaba la clase el día que se subió (RF-23). */
+  claseNombre: string;
+  nombre: string;
+  proveedor: string;
+  descripcion: string;
+  fecha: string;
+  vence: string | null;
+  /** «Vence en N días» o «Vencido» de hoy; `null` si no avisa (RF-38 a RF-42). */
+  aviso: AvisoDeVencimiento | null;
+  mediaId: string;
+  mime: string;
+  bytes: number | null;
+  nombreArchivo: string;
+  subidoPor: string;
+  subidoEn: string;
+  anulado: { en: string; por: string; motivo: string } | null;
+}
+
+export interface DocumentosDelLugar {
+  documentos: DocumentoDelLugar[];
+  /** Los vigentes vencidos y por vencer (RF-41). */
+  resumen: { vencidos: number; porVencer: number };
+}
+
+/**
+ * Una persona en el listado de Recursos Humanos (spec 035, RF-1 a RF-5, RF-27 a RF-31).
+ * `salario` solo existe para quien lo ve (`veElSalario`, RF-13): a los demás el servidor
+ * no lo manda, ni en `null`.
+ */
+export interface PersonaDelPersonal {
+  id: string;
+  usuario: string;
+  nombreCompleto: string;
+  documento: string | null;
+  rol: Rol;
+  cargo: Cargo | null;
+  obraId: string | null;
+  obraNombre: string | null;
+  empresa: EmpresaId;
+  /** La cuenta: `false` es desactivada o retirada. */
+  activo: boolean;
+  /** El estado laboral de la ficha; sin ficha, `activo`. */
+  estado: string;
+  tieneFicha: boolean;
+  tipoContrato: string | null;
+  fechaIngreso: string | null;
+  finContrato: string | null;
+  avisos: AvisoDePersona[];
+  salario?: number | null;
+}
+
+export interface PersonalDelLugar {
+  personas: PersonaDelPersonal[];
+  /** Cuántas personas tienen cada aviso (RF-27). */
+  resumen: ResumenDelPersonal;
+}
+
+/**
+ * Guardar la ficha (spec 035, RF-12 a RF-17). Se manda entera, con la `version` que se
+ * leyó (0 si no tenía). Aquí solo la forma: fechas, salario, tipos y estado los revisa
+ * `faltasDeLaFicha` en el servidor, que responde 422 con lo que está mal. Por eso las
+ * fechas llegan como texto: una fecha mal escrita es un dato que corregir, no una
+ * petición rota.
+ */
+export const fichaEditada = z.object({
+  version: z.number().int().min(0),
+  tipoDocumento: textoOpcional(20),
+  fechaNacimiento: textoOpcional(20),
+  telefono: textoOpcional(40),
+  correo: textoOpcional(160),
+  direccion: textoOpcional(200),
+  ciudad: textoOpcional(80),
+  emergenciaNombre: textoOpcional(160),
+  emergenciaParentesco: textoOpcional(60),
+  emergenciaTelefono: textoOpcional(40),
+  fechaIngreso: textoOpcional(20),
+  tipoContrato: textoOpcional(40),
+  finContrato: textoOpcional(20),
+  /** Solo cuenta si quien guarda ve el salario (RF-13); de los demás se ignora. */
+  salario: z
+    .number({ error: 'El salario va en pesos, sin decimales y mayor que cero.' })
+    .nullish()
+    .transform((v) => v ?? null),
+  eps: textoOpcional(120),
+  arl: textoOpcional(120),
+  pension: textoOpcional(120),
+  caja: textoOpcional(120),
+  notas: textoOpcional(2000),
+  estado: z.string().trim().default('activo'),
+});
+
+export type FichaEditada = z.input<typeof fichaEditada>;
+/** La ficha ya leída: cada campo presente, vacío en `null`. */
+export type FichaPedida = z.output<typeof fichaEditada>;
+
+/**
+ * La ficha de una persona (RF-12, RF-13). `salario` solo existe para quien lo ve. Sin
+ * ficha todavía, los datos van vacíos, el estado es `activo` y la versión 0.
+ */
+export interface FichaDeLaPersona {
+  persona: {
+    id: string;
+    usuario: string;
+    nombreCompleto: string;
+    documento: string | null;
+    rol: Rol;
+    cargo: Cargo | null;
+    obraId: string | null;
+    obraNombre: string | null;
+    empresa: EmpresaId;
+    activo: boolean;
+  };
+  ficha: Omit<DatosDeLaFicha, 'salario'> & {
+    salario?: number | null;
+    estado: string;
+    retiroFecha: string | null;
+    retiroMotivo: string | null;
+    version: number;
+    actualizadoPor: string | null;
+    actualizadoEn: string | null;
+  };
+}
+
+/** Una entrada del historial de la ficha (RF-15): quién, cuándo y qué campos, sin valores. */
+export interface EventoDeLaFicha {
+  id: string;
+  accion: 'guardado' | 'retirado';
+  campos: string[];
+  por: string;
+  en: string;
+}
+
+/**
+ * Retirar a una persona (spec 035, RF-19, RF-20): con la `version` de la ficha que se leyó
+ * (0 si no tenía), la fecha y el motivo. Las revisa `faltasDelRetiro` en el servidor (422).
+ */
+export const retiroDeLaPersona = z.object({
+  version: z.number().int().min(0),
+  fecha: z.string().trim().max(20),
+  motivo: z.string().trim().max(500),
+});
+
+/* ── Compras (spec 036) ─────────────────────────────────────────────────── */
+
+/**
+ * Una solicitud de compra al pedirla o corregirla (RF-7). Aquí solo la forma: lo que la
+ * impide (renglones, cantidades, fecha, valor) lo dice `faltasDeLaSolicitud` con un 422 y
+ * su mensaje, para que la pantalla lo muestre junto a su campo.
+ */
+export const solicitudPedida = z.object({
+  renglones: z
+    .array(
+      z.object({
+        descripcion: z.string().trim().max(300),
+        cantidad: z.number({ error: 'La cantidad va en números.' }),
+        unidad: z.string().trim().max(40),
+        materialId: z
+          .string()
+          .trim()
+          .max(64)
+          .nullish()
+          .transform((v) => (v ? v : null)),
+      }),
+    )
+    .max(100),
+  paraCuando: z.string().trim().max(20),
+  urgente: z.boolean().default(false),
+  paraQue: z.string().trim().max(1000).default(''),
+  proveedorSugerido: z.string().trim().max(200).default(''),
+  valorEstimado: z
+    .number({ error: 'El valor estimado va en pesos, sin decimales y mayor que cero.' })
+    .nullish()
+    .transform((v) => v ?? null),
+});
+
+export type SolicitudPedida = z.input<typeof solicitudPedida>;
+
+/**
+ * Una solicitud en la lista de su lugar (RF-24 a RF-26). `valorEstimado` no existe para
+ * quien no `veLosValores` (RF-31): ni en `null`.
+ */
+export interface SolicitudEnElLugar {
+  id: string;
+  numero: number;
+  /** `SC-0001`. */
+  codigo: string;
+  /** De qué obra o empresa es: en la bandeja de Compras se mezclan todas (RF-3). */
+  lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string };
+  estado: EstadoDeSolicitud;
+  urgente: boolean;
+  paraCuando: string;
+  paraQue: string;
+  proveedorSugerido: string;
+  valorEstimado?: number | null;
+  pedidaPor: { id: string; nombre: string };
+  pedidaEn: string;
+  /** El día en que se pidió, en Colombia (`YYYY-MM-DD`), para filtrar por fechas (RF-3). */
+  pedidaEl: string;
+  /** Lo que se pidió, para leerlo en la lista y buscar (RF-26). */
+  renglones: { descripcion: string; cantidad: number; unidad: string }[];
+  /** Los proveedores de sus compras vigentes, para buscar (RF-26). */
+  proveedores: string[];
+  /** «Devuelta: corrígela», «Vencida» (RF-25). */
+  marcas: string[];
+  version: number;
+}
+
+export interface SolicitudesDelLugar {
+  /** En el orden de RF-24: abiertas y después cerradas. */
+  solicitudes: SolicitudEnElLugar[];
+  /** ¿Puede pedir aquí? No, en una obra inactiva (caso límite). */
+  sePuedePedir: boolean;
+}
+
+/** Corregir una solicitud enviada o devuelta (RF-11): la misma forma, con su versión. */
+export const solicitudCorregida = solicitudPedida.extend({ version: z.number().int().min(1) });
+
+export type SolicitudCorregida = z.input<typeof solicitudCorregida>;
+
+/**
+ * Un paso sobre la solicitud (RF-11, RF-13 a RF-15). `cantidades`, solo al aprobar: las que
+ * se bajan o se quitan con 0; las demás se aprueban enteras.
+ */
+export const pasoPedido = z.object({
+  paso: z.enum(['cancelar', 'aprobar', 'rechazar', 'devolver']),
+  version: z.number().int().min(1),
+  motivo: z.string().trim().max(1000).default(''),
+  cantidades: z
+    .array(z.object({ renglonId: z.string().max(64), cantidad: z.number() }))
+    .max(100)
+    .default([]),
+});
+
+export type PasoPedido = z.input<typeof pasoPedido>;
+
+/**
+ * Una solicitud con todo lo que le pasó (RF-23). Los valores (`valorEstimado` y el `valor`
+ * de cada compra) no existen para quien no `veLosValores` (RF-31). `pasos`: los que puede
+ * dar quien la mira, para pintar solo esos botones.
+ */
+export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones' | 'proveedores' | 'marcas' | 'pedidaEl'> {
+  marcas: string[];
+  renglones: {
+    id: string;
+    orden: number;
+    descripcion: string;
+    materialId: string | null;
+    cantidad: number;
+    /** `null` hasta aprobar; 0 si la gerencia lo quitó. */
+    cantidadAprobada: number | null;
+    unidad: string;
+    /** La suma de lo recibido (RF-20). */
+    recibido: number;
+  }[];
+  compras: {
+    id: string;
+    proveedor: string;
+    valor?: number;
+    fecha: string;
+    factura: string;
+    renglonIds: string[];
+    registradaPor: string;
+    registradaEn: string;
+    anulada: { en: string; por: string; motivo: string } | null;
+  }[];
+  recepciones: {
+    id: string;
+    renglonId: string;
+    cantidad: number;
+    fecha: string;
+    nota: string;
+    documentoId: string | null;
+    por: string;
+    en: string;
+  }[];
+  historia: { paso: string; motivo: string | null; cambios: unknown[]; por: string; en: string }[];
+  pasos: PasoDeSolicitud[];
+}
+
+/**
+ * Registrar una compra de una solicitud aprobada (RF-16, RF-19). `version` es la de la
+ * solicitud. Lo que la impide lo dice `faltasDeLaCompra` con un 422.
+ */
+export const compraPedida = z.object({
+  version: z.number().int().min(1),
+  proveedor: z.string().trim().max(200),
+  valor: z.number({ error: 'El valor de la compra va en pesos, sin decimales y mayor que cero.' }),
+  fecha: z.string().trim().max(20),
+  factura: z.string().trim().max(100).default(''),
+  renglonIds: z.array(z.string().max(64)).max(100),
+});
+
+export type CompraPedida = z.input<typeof compraPedida>;
+
+/** Anular una compra (RF-30), con la versión de su solicitud y el motivo. */
+export const compraAnulada = z.object({
+  version: z.number().int().min(1),
+  motivo: z.string().trim().max(1000).default(''),
+});
+
+/**
+ * Lo que llegó de una solicitud (RF-20): por renglón, todo o una parte, con fecha, nota y,
+ * si se quiere, el soporte (remisión o foto) ya subido a la solicitud.
+ */
+export const reciboPedido = z.object({
+  version: z.number().int().min(1),
+  fecha: z.string().trim().max(20),
+  nota: z.string().trim().max(1000).default(''),
+  documentoId: z
+    .string()
+    .max(64)
+    .nullish()
+    .transform((v) => v || null),
+  recibos: z.array(z.object({ renglonId: z.string().max(64), cantidad: z.number() })).max(100),
+});
+
+export type ReciboDeLaSolicitud = z.input<typeof reciboPedido>;
+
+/** Compras de Elemental (RF-3, RF-12): lo filtrado, en el orden de la bandeja, y el resumen de todo el grupo. */
+export interface BandejaDeCompras {
+  solicitudes: SolicitudEnElLugar[];
+  resumen: { porAprobar: number; urgentes: number; vencidas: number };
+  /** Cuántas hay en el grupo, sin filtros. */
+  total: number;
+}
+
+/** Lo comprado por lugar entre dos fechas de compra, sin las anuladas (RF-27). */
+export interface GastoDeCompras {
+  desde: string;
+  hasta: string;
+  lugares: { lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string }; total: number; compras: number }[];
+  total: number;
 }

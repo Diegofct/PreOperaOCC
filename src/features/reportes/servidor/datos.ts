@@ -23,6 +23,7 @@ import {
   usuarios,
   vehiculos,
 } from '@/db/servidor/esquema';
+import { veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { errorDePeticion } from '@/features/servidor/respuestas';
@@ -49,9 +50,11 @@ export interface PedidoDeReporte {
  */
 export function pedidoDeReporte(sesion: PersonaEnSesion, url: URL): PedidoDeReporte | Response {
   const parametros = url.searchParams;
-  const obraId = sesion.rol === 'admin' ? parametros.get('obraId') : sesion.obraId;
+  // La gerencia y el Encargado de OCC (spec 034) eligen la obra; los demás, la suya.
+  const todas = veTodasLasObras(sesion);
+  const obraId = todas ? parametros.get('obraId') : sesion.obraId;
   if (!obraId) {
-    return errorDePeticion(sesion.rol === 'admin' ? 'Elija la obra.' : 'Su usuario no tiene obra asignada.');
+    return errorDePeticion(todas ? 'Elija la obra.' : 'Su usuario no tiene obra asignada.');
   }
   const tipo = parametros.get('tipo') ?? 'semana';
   if (!esTipoDePeriodo(tipo)) return errorDePeticion('El periodo es día, semana o mes.');

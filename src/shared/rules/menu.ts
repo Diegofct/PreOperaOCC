@@ -1,10 +1,9 @@
 /**
- * El menú lateral del panel: qué grupos se ven y cuándo se queda fijo. Spec 022.
+ * El menú lateral del panel: cuándo se queda fijo y cuánto mide el contenido. Spec 022.
  *
- * Puro y sin I/O, como toda regla, para poder comprobarlo desde Node. **Quién ve
- * qué módulo no se decide aquí**: sigue saliendo de `modulosVisibles` en
- * `permisos.ts` (RF-2). Esto solo los reparte en grupos y quita los que quedan
- * vacíos, para que un almacenista no vea títulos sin nada debajo (RF-4).
+ * Puro y sin I/O, como toda regla, para poder comprobarlo desde Node. Qué lleva el menú
+ * ya no se decide aquí: desde la spec 033 cada empresa y cada obra tienen el suyo
+ * (`menuDelLugar`, en `empresas.ts`), y los grupos de antes se quitaron.
  *
  * El régimen depende del ancho de la ventana y de lo que la persona eligió. La
  * elección no manda en ventana angosta: ahí el menú abierto le quitaría a las
@@ -17,39 +16,6 @@ import {
   MaxContentWidthPanel,
   Spacing,
 } from '../../constants/medidas';
-import type { Modulo } from './permisos';
-
-export interface GrupoDelMenu {
-  /** `null` para Inicio, que va suelto arriba y sin título. */
-  titulo: string | null;
-  modulos: readonly Modulo[];
-}
-
-/**
- * Los grupos, en el orden del menú (RF-3).
- *
- * El trabajo de cada día va arriba: es a lo que se entra todas las tardes. La
- * administración va al final porque se toca al empezar una obra y poco después.
- * Una prueba exige que cada módulo de `MODULOS` esté en exactamente un grupo.
- */
-export const GRUPOS_DEL_MENU: readonly GrupoDelMenu[] = [
-  // Spec 028: el asistente junto al Inicio, porque es otra forma de llegar a todo.
-  { titulo: null, modulos: ['inicio', 'asistente'] },
-  { titulo: 'El día a día', modulos: ['bitacoras', 'whatsapp', 'preoperacionales', 'reportes'] },
-  { titulo: 'Módulos de obra', modulos: ['almacen', 'cantera', 'laboratorio'] },
-  // Spec 031, RF-1: lo pactado con el cliente, como en NexusObras. Va antes de la
-  // administración: se consulta más que ella una vez arrancada la obra.
-  { titulo: 'Cliente', modulos: ['contrato'] },
-  { titulo: 'Administración', modulos: ['obras', 'personas', 'vehiculos', 'asignaciones'] },
-];
-
-/** Los grupos con solo los módulos visibles; los que quedan vacíos no salen (RF-4). */
-export function gruposDelMenu(visibles: readonly Modulo[]): GrupoDelMenu[] {
-  return GRUPOS_DEL_MENU.map((grupo) => ({
-    titulo: grupo.titulo,
-    modulos: grupo.modulos.filter((modulo) => visibles.includes(modulo)),
-  })).filter((grupo) => grupo.modulos.length > 0);
-}
 
 /** Lo que la persona eligió la última vez; `null` si nunca eligió (RF-8). */
 export type PreferenciaDelMenu = 'abierto' | 'plegado' | null;

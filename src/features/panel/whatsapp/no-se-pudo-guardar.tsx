@@ -33,6 +33,8 @@ import {
   ubicacionDeTexto,
 } from '@/shared/rules/whatsapp';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
 import {
   Acciones,
@@ -163,7 +165,10 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
   const esGerencia = alcanza(rol, 'obras', 'listar');
   const puedeAtender = alcanza(rol, 'whatsapp', 'aprobar');
 
-  const [obraId, setObraId] = useState<string | null>(null);
+  const [obraDelSelector, setObraId] = useState<string | null>(null);
+  // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
+  const obraDeLaRuta = useObraDeLaRuta();
+  const obraId = obraDeLaRuta ?? obraDelSelector;
   const [completando, setCompletando] = useState<ExcepcionFila | null>(null);
   const [descartando, setDescartando] = useState<ExcepcionFila | null>(null);
   const [reintentando, setReintentando] = useState<ExcepcionFila | null>(null);
@@ -262,7 +267,7 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
         renglón (la fecha, una bitácora cerrada) se reintenta.
       </Ayuda>
       <Acciones>
-        {esGerencia ? (
+        {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
             valor={obraId}

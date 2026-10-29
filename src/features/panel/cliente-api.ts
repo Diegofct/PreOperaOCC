@@ -15,6 +15,8 @@
  * única fuente es la API; la base del teléfono no existe para él.
  */
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
+import type { EstadoDeSolicitud } from '@/shared/rules/compras';
+import type { EmpresaId } from '@/shared/rules/empresas';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -50,6 +52,20 @@ import type {
   ContratoDeObra,
   ContratoEditado,
   DocumentoNuevo,
+  DocumentosDelLugar,
+  EventoDeLaFicha,
+  FichaDeLaPersona,
+  FichaEditada,
+  BandejaDeCompras,
+  CompraPedida,
+  GastoDeCompras,
+  PasoPedido,
+  PersonalDelLugar,
+  ReciboDeLaSolicitud,
+  SolicitudCorregida,
+  SolicitudDetallada,
+  SolicitudesDelLugar,
+  SolicitudPedida,
   PolizaNueva,
   PresupuestoDetalle,
   PresupuestoEditado,
@@ -92,6 +108,13 @@ import type {
   ViajeRegistrado,
   PeriodoResumen,
   ResumenFila,
+  ConsolidadoDelGrupo,
+  CorteNuevo,
+  CortesDe,
+  DatosDeEmpresa,
+  EmpresaEditada,
+  EmpresaFila,
+  MaquinaDeLasObrasFila,
   ParteEditado,
   ParteFila,
   PersonaEnSesionFila,
@@ -158,7 +181,12 @@ async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   try {
     respuesta = await fetch(ruta, {
       ...opciones,
-      headers: { 'Content-Type': 'application/json', ...opciones?.headers },
+      // Un formulario con archivo (spec 034) lleva el `Content-Type` que pone el navegador,
+      // con su separador; cualquier otro cuerpo es JSON.
+      headers:
+        opciones?.body instanceof FormData
+          ? opciones.headers
+          : { 'Content-Type': 'application/json', ...opciones?.headers },
     });
   } catch {
     // El servidor de desarrollo caído es el caso más frecuente y el más
@@ -215,6 +243,33 @@ const panel = <T>(ruta: string) => pedir<T>(`/api/panel${ruta}`);
 const panelEnviar = <T>(ruta: string, metodo: string, datos?: unknown) =>
   enviar<T>(`/api/panel${ruta}`, metodo, datos);
 
+/** De quién son unos documentos (spec 034): una empresa con menú o una obra. */
+/** Spec 035: también los de una persona (`personaId`), que son de Recursos Humanos. */
+/** Spec 036: también los soportes de una solicitud de compra (`solicitudId`). */
+export type LugarDeLosDocumentos =
+  | { empresa: 'elemental' | 'occ' | 'geolab' }
+  | { obraId: string }
+  | { personaId: string }
+  | { solicitudId: string };
+
+const delLugar = (lugar: LugarDeLosDocumentos) =>
+  'empresa' in lugar
+    ? `?empresa=${lugar.empresa}`
+    : 'obraId' in lugar
+      ? `?obraId=${encodeURIComponent(lugar.obraId)}`
+      : 'personaId' in lugar
+        ? `?personaId=${encodeURIComponent(lugar.personaId)}`
+        : `?solicitudId=${encodeURIComponent(lugar.solicitudId)}`;
+
+/** Spec 035: el personal de una empresa con menú o de una obra. */
+export type LugarDelPersonal = { empresa: 'elemental' | 'occ' | 'geolab' } | { obraId: string };
+
+/** Spec 036: de dónde son unas solicitudes de compra. Elemental no pide (D1). */
+export type LugarDeLasSolicitudes = { empresa: 'occ' | 'geolab' } | { obraId: string };
+
+const deLasSolicitudes = (lugar: LugarDeLasSolicitudes) =>
+  'empresa' in lugar ? `?empresa=${lugar.empresa}` : `?obraId=${encodeURIComponent(lugar.obraId)}`;
+
 /** `?obraId=…` si hay obra, o nada. */
 const conObra = (obraId?: string | null) =>
   obraId ? `?obraId=${encodeURIComponent(obraId)}` : '';
@@ -236,6 +291,25 @@ export const api = {
       enviar<{ ok: true }>('/api/auth/cambiar-clave', 'POST', datos),
   },
 
+  /** Las cuatro empresas del grupo, con lo de sus tarjetas, y sus datos (spec 033). */
+  empresas: {
+    listar: () => panel<EmpresaFila[]>('/empresas'),
+    editar: (id: EmpresaId, cambios: EmpresaEditada) =>
+      panelEnviar<DatosDeEmpresa>(`/empresas/${id}`, 'PATCH', cambios),
+  },
+
+  /** Los cortes financieros de una empresa o de una obra, y el consolidado (spec 033). */
+  cortes: {
+    de: (dueno: { empresa: EmpresaId } | { obraId: string }) =>
+      panel<CortesDe>(
+        `/cortes?${'empresa' in dueno ? `empresa=${dueno.empresa}` : `obraId=${encodeURIComponent(dueno.obraId)}`}`,
+      ),
+    registrar: (corte: CorteNuevo) => panelEnviar<{ id: string }>('/cortes', 'POST', corte),
+    anular: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/cortes/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+    consolidado: () => panel<ConsolidadoDelGrupo>('/cortes/consolidado'),
+  },
+
   obras: {
     listar: () => panel<ObraFila[]>('/obras'),
     crear: (datos: ObraNueva) => panelEnviar<ObraFila>('/obras', 'POST', datos),
@@ -245,7 +319,11 @@ export const api = {
   },
 
   personas: {
-    listar: () => panel<PersonaFila[]>('/personas'),
+    /** Spec 033, RF-28: las de una empresa o las de una obra; sin filtro, todas las que alcanza. */
+    listar: (filtro?: { empresa?: EmpresaId; obraId?: string }) =>
+      panel<PersonaFila[]>(
+        `/personas${filtro?.empresa ? `?empresa=${filtro.empresa}` : filtro?.obraId ? `?obraId=${encodeURIComponent(filtro.obraId)}` : ''}`,
+      ),
     crear: (datos: PersonaNueva) => panelEnviar<PersonaFila>('/personas', 'POST', datos),
     /**
      * Corregir una persona ya registrada.
@@ -275,7 +353,9 @@ export const api = {
 
   /** Las cifras del inicio. Viajan contadas, no en filas. */
   resumen: {
-    de: (periodo: PeriodoResumen) => panel<ResumenFila>(`/resumen?periodo=${periodo}`),
+    /** Con `obraId`, solo lo de esa obra: la portada de la obra (spec 033). */
+    de: (periodo: PeriodoResumen, obraId?: string | null) =>
+      panel<ResumenFila>(`/resumen?periodo=${periodo}${obraId ? `&obraId=${encodeURIComponent(obraId)}` : ''}`),
   },
 
   tiposVehiculo: {
@@ -291,6 +371,14 @@ export const api = {
    */
   partes: {
     delDia: (fecha: string) => panel<DiaDeObra>(`/partes?fecha=${fecha}`),
+    /** La Bitácora de maquinaria de OCC: la Maquinaria de todas las obras (spec 033, RF-22). */
+    maquinaria: (filtro: { obraId?: string | null } & Partial<RangoDeFechas>) => {
+      const parametros = new URLSearchParams();
+      if (filtro.obraId) parametros.set('obraId', filtro.obraId);
+      if (filtro.desde) parametros.set('desde', filtro.desde);
+      if (filtro.hasta) parametros.set('hasta', filtro.hasta);
+      return panel<MaquinaDeLasObrasFila[]>(`/partes/maquinaria?${parametros.toString()}`);
+    },
     abrir: (fecha: string, obraId?: string) =>
       panelEnviar<ParteFila>('/partes', 'POST', { fecha, obraId }),
     guardar: (id: string, cambios: ParteEditado) =>
@@ -358,15 +446,17 @@ export const api = {
      * inicio o su llegada caen dentro. Es lo que hace visible un acta que subió
      * con retraso sin tener que sospechar que existe.
      */
-    delPeriodo: (periodo: Periodo, vehiculoId?: string | null) =>
+    delPeriodo: (periodo: Periodo, vehiculoId?: string | null, obraId?: string | null) =>
       panel<JornadaDePreoperacionales>(
         `/preoperacionales?periodo=${encodeURIComponent(periodo)}` +
-          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : ''),
+          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : '') +
+          (obraId ? `&obraId=${encodeURIComponent(obraId)}` : ''),
       ),
-    delDia: (fecha: string, vehiculoId?: string | null) =>
+    delDia: (fecha: string, vehiculoId?: string | null, obraId?: string | null) =>
       panel<JornadaDePreoperacionales>(
         `/preoperacionales?fecha=${encodeURIComponent(fecha)}` +
-          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : ''),
+          (vehiculoId ? `&vehiculoId=${encodeURIComponent(vehiculoId)}` : '') +
+          (obraId ? `&obraId=${encodeURIComponent(obraId)}` : ''),
       ),
     detalle: (id: string) => panel<PreoperacionalDetalle>(`/preoperacionales/${id}`),
     /**
@@ -469,6 +559,84 @@ export const api = {
       ),
   },
 
+  /** Spec 035: Recursos Humanos. */
+  rrhh: {
+    personal: (lugar: LugarDelPersonal) =>
+      panel<PersonalDelLugar>(
+        `/rrhh/personal${'empresa' in lugar ? `?empresa=${lugar.empresa}` : `?obraId=${encodeURIComponent(lugar.obraId)}`}`,
+      ),
+    ficha: (id: string) => panel<FichaDeLaPersona>(`/rrhh/fichas/${encodeURIComponent(id)}`),
+    /** Entera, con la versión que se leyó: una vieja responde con el aviso de que cambió. */
+    guardarFicha: (id: string, ficha: FichaEditada) =>
+      panelEnviar<{ version: number }>(`/rrhh/fichas/${encodeURIComponent(id)}`, 'PUT', ficha),
+    historial: (id: string) => panel<EventoDeLaFicha[]>(`/rrhh/fichas/${encodeURIComponent(id)}/historial`),
+    /** Con sus documentos de retiro cargados; sin ellos, el servidor dice cuáles faltan. */
+    retirar: (id: string, retiro: { version: number; fecha: string; motivo: string }) =>
+      panelEnviar<{ version: number }>(`/rrhh/fichas/${encodeURIComponent(id)}/retirar`, 'POST', retiro),
+  },
+
+  /** Spec 036: las solicitudes de compra de una obra, OCC o Geolab. */
+  compras: {
+    solicitudes: (lugar: LugarDeLasSolicitudes) => panel<SolicitudesDelLugar>(`/solicitudes-compra${deLasSolicitudes(lugar)}`),
+    /** Pide una compra en ese lugar; responde su número (RF-8). */
+    crear: (lugar: LugarDeLasSolicitudes, datos: SolicitudPedida) =>
+      panelEnviar<{ id: string; numero: number; codigo: string }>(`/solicitudes-compra${deLasSolicitudes(lugar)}`, 'POST', datos),
+    /** Entera, con la versión que se leyó: una vieja responde con el aviso de que cambió. */
+    corregir: (id: string, datos: SolicitudCorregida) =>
+      panelEnviar<{ version: number }>(`/solicitudes-compra/${encodeURIComponent(id)}`, 'PUT', datos),
+    /** Con su historia, compras, recibos y los pasos que puede dar quien la mira (RF-23). */
+    detalle: (id: string) => panel<SolicitudDetallada>(`/solicitudes-compra/${encodeURIComponent(id)}`),
+    /** Cancelar, aprobar, rechazar o devolver, con la versión que se leyó. */
+    paso: (id: string, pedido: PasoPedido) =>
+      panelEnviar<{ estado: EstadoDeSolicitud; version: number }>(
+        `/solicitudes-compra/${encodeURIComponent(id)}/paso`,
+        'POST',
+        pedido,
+      ),
+    /** Compras de Elemental: todas las del grupo, en su orden, con el resumen (RF-3, RF-12). */
+    bandeja: () => panel<BandejaDeCompras>('/compras'),
+    /** Lo comprado por lugar entre dos fechas de compra (RF-27). Solo la gerencia. */
+    gasto: (desde: string, hasta: string) =>
+      panel<GastoDeCompras>(`/compras/gasto?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`),
+    /** La compra de una solicitud aprobada, con la versión que se leyó (RF-16). */
+    registrarCompra: (id: string, compra: CompraPedida) =>
+      panelEnviar<{ compraId: string; estado: EstadoDeSolicitud; version: number }>(
+        `/solicitudes-compra/${encodeURIComponent(id)}/compras`,
+        'POST',
+        compra,
+      ),
+    /** Con la versión de su solicitud y el motivo (RF-30). */
+    anularCompra: (compraId: string, pedido: { version: number; motivo: string }) =>
+      panelEnviar<{ estado: EstadoDeSolicitud; version: number }>(
+        `/compras/${encodeURIComponent(compraId)}/anular`,
+        'POST',
+        pedido,
+      ),
+    /** Lo que llegó (RF-20). */
+    recibir: (id: string, recibo: ReciboDeLaSolicitud) =>
+      panelEnviar<{ estado: EstadoDeSolicitud; version: number }>(
+        `/solicitudes-compra/${encodeURIComponent(id)}/recibir`,
+        'POST',
+        recibo,
+      ),
+  },
+
+  /** Spec 034: los documentos de Elemental, OCC, Geolab y cada obra. */
+  documentos: {
+    listar: (lugar: LugarDeLosDocumentos) => panel<DocumentosDelLugar>(`/documentos${delLugar(lugar)}`),
+    /** El archivo y sus datos en un solo formulario (RF-24): o se guardan los dos o ninguno. */
+    subir: (lugar: LugarDeLosDocumentos, datos: Record<string, string>, archivo: Blob, nombreArchivo: string) => {
+      const formulario = new FormData();
+      for (const [campo, valor] of Object.entries(datos)) formulario.append(campo, valor);
+      formulario.append('archivo', archivo, nombreArchivo);
+      return pedir<{ id: string }>(`/api/panel/documentos${delLugar(lugar)}`, { method: 'POST', body: formulario });
+    },
+    anular: (id: string, motivo: string) =>
+      panelEnviar<{ id: string }>(`/documentos/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+    /** Abre el PDF o la imagen en el navegador (RF-35), o lo guarda con su nombre (RF-36). */
+    urlDelArchivo: (mediaId: string, descargar = false) =>
+      `/api/panel/media/${mediaId}${descargar ? '?descargar=1' : ''}`,
+  },
   /** Spec 031: el contrato de la obra con su cliente. */
   contrato: {
     de: (obraId: string | null) => panel<ContratoDeObra>(`/contrato${conObra(obraId)}`),
@@ -598,9 +766,16 @@ reportes: {
     },
     propuestas: {
       /** Con el rango de días del reporte (spec 025, RF-45); sin él, la última semana. */
-      listar: (estado: EstadoMensajeWhatsapp, obraId?: string | null, rango?: RangoDeFechas) => {
+      listar: (
+        estado: EstadoMensajeWhatsapp,
+        obraId?: string | null,
+        rango?: RangoDeFechas,
+        /** Spec 033, RF-23: OCC ve solo lo de vehículos y maquinaria. */
+        empresa?: EmpresaId,
+      ) => {
         const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
+        if (empresa) parametros.set('empresa', empresa);
         return panel<{ propuestas: PropuestaFila[] }>(
           `/whatsapp/propuestas?${parametros.toString()}`,
         ).then((r) => r.propuestas);
@@ -728,7 +903,9 @@ reportes: {
   },
 
   asignaciones: {
-    listar: () => panel<AsignacionFila[]>('/asignaciones'),
+    /** Con `obraId`, solo las de esa obra (spec 033). */
+    listar: (obraId?: string | null) =>
+      panel<AsignacionFila[]>(`/asignaciones${obraId ? `?obraId=${encodeURIComponent(obraId)}` : ''}`),
     crear: (datos: AsignacionNueva) => panelEnviar<AsignacionFila>('/asignaciones', 'POST', datos),
     cerrar: (id: string) =>
       panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'cerrar' }),
@@ -743,13 +920,20 @@ reportes: {
  * otro: `ErrorApi` con el mensaje del servidor. Los de durante, como evento `error`.
  */
 export async function preguntarAlAsistente(
-  datos: { pregunta: string; conversacionId: string | null; archivos: readonly File[] },
+  datos: {
+    pregunta: string;
+    conversacionId: string | null;
+    archivos: readonly File[];
+    /** Spec 033, RF-30: la obra desde la que se pregunta. */
+    obraId?: string | null;
+  },
   alEvento: (evento: EventoDelAsistente) => void,
   senal?: AbortSignal,
 ): Promise<void> {
   const formulario = new FormData();
   formulario.append('pregunta', datos.pregunta);
   if (datos.conversacionId) formulario.append('conversacionId', datos.conversacionId);
+  if (datos.obraId) formulario.append('obraId', datos.obraId);
   for (const archivo of datos.archivos) formulario.append('archivo', archivo, archivo.name);
 
   let respuesta: Response;

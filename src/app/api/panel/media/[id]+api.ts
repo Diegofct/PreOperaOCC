@@ -2,12 +2,13 @@ import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import { disposicionDelArchivo, documentoAlAlcance } from '@/features/documentos/servidor/documentos';
 import { leer } from '@/features/media/servidor/almacen';
 import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
 import { noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
-import { alcanza } from '@/shared/rules/permisos';
+import { alcanza, type ModuloConPermiso } from '@/shared/rules/permisos';
 
 /**
  * Sirve una imagen al panel. `GET /api/panel/media/:id`.
@@ -22,6 +23,10 @@ import { alcanza } from '@/shared/rules/permisos';
  * al resto del panel: la sesión y el filtro por obra. Un residente no puede ver
  * la evidencia de una obra que no es la suya, igual que no puede ver sus
  * preoperacionales.
+ *
+ * Los documentos de Elemental, OCC, Geolab y las obras (spec 034) salen con su nombre
+ * original: para abrirlos en otra pestaña (RF-35) o, con `?descargar=1`, para guardarlos
+ * (RF-36).
  */
 export async function GET(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
@@ -49,6 +54,9 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     // teléfono lo tiene en la cola esperando una WiFi. No es un error.
     if (!fila?.claveR2) return noEncontrado('esa imagen');
 
+    /** Solo los documentos (spec 034) llevan nombre: lo demás son fotos sin él. */
+    let nombreArchivo: string | null = null;
+
     // "No existe" y no "no puede", igual que en el resto del panel: confirmar
     // que el id es real ya le diría a un residente qué se registra en las obras
     // que no le tocan.
@@ -57,7 +65,14 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     } else if (fila.duenoTipo === 'asistente') {
       // Spec 028, RF-40 y RF-71: un adjunto al asistente lo ve solo quien hizo la pregunta.
       if (!(await esSuConversacion(sesion, fila.duenoId))) return noEncontrado('esa imagen');
-    } else if (!alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId))) {
+    } else if (fila.duenoTipo === 'repositorio') {
+      // Spec 034, RF-35, RF-51: el de su empresa u obra, con las reglas de su lugar.
+      const documento = await documentoAlAlcance(sesion, fila.duenoId);
+      if (!documento) return noEncontrado('ese documento');
+      nombreArchivo = documento.nombreArchivo;
+    } else if (
+      !alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId), MODULO_DEL_DUENO[fila.duenoTipo])
+    ) {
       return noEncontrado('esa imagen');
     }
 
@@ -72,6 +87,14 @@ export async function GET(peticion: Request, { id }: { id: string }) {
         // `private` importa tanto como el tiempo — sin él, un proxy compartido
         // podría guardar el acta de un operador y servírsela a otro.
         'Cache-Control': 'private, max-age=86400',
+        ...(nombreArchivo
+          ? {
+              'Content-Disposition': disposicionDelArchivo(
+                nombreArchivo,
+                new URL(peticion.url).searchParams.get('descargar') === '1',
+              ),
+            }
+          : {}),
       },
     });
   });
@@ -130,6 +153,17 @@ async function duenoDeLaImagen(
   // Los documentos todavía no tienen dueño con obra: solo los ve la gerencia.
   return { existe: false, obraId: null };
 }
+
+/**
+ * El módulo del registro del que cuelga cada archivo (spec 034): lo que el Encargado de OCC
+ * necesita poder ver para abrirlo. Los documentos sueltos no tienen módulo: solo gerencia.
+ */
+const MODULO_DEL_DUENO: Record<'preoperacional' | 'bitacora' | 'documento' | 'contrato', ModuloConPermiso | null> = {
+  preoperacional: 'preoperacionales',
+  bitacora: 'bitacoras',
+  contrato: 'contrato',
+  documento: null,
+};
 
 /**
  * ¿Puede ver los archivos de este mensaje de WhatsApp? (spec 021, RF-53.)

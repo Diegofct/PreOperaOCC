@@ -2,6 +2,7 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { leerBandeja } from '@/features/whatsapp/servidor/bandeja';
 import { ESTADOS_MENSAJE_WHATSAPP, type EstadoMensajeWhatsapp } from '@/shared/rules/whatsapp';
+import { categoriasDeWhatsappDe, esEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { MENSAJES_DE_RANGO, rangoDeFechas } from '@/shared/rules/rango';
 
@@ -27,10 +28,15 @@ export async function GET(peticion: Request) {
     const rango = rangoDeFechas(parametros.get('desde'), parametros.get('hasta'), fechaDeJornada());
     if ('error' in rango) return errorDePeticion(MENSAJES_DE_RANGO[rango.error], 400);
 
+    // Spec 033, RF-23: `?empresa=occ` deja solo lo de vehículos y maquinaria.
+    const empresa = parametros.get('empresa');
+    if (empresa !== null && !esEmpresa(empresa)) return errorDePeticion('Esa empresa no existe.', 400);
+
     const propuestas = await leerBandeja(sesion, {
       estado: estado as EstadoMensajeWhatsapp,
       obraId: parametros.get('obraId'),
       ...rango,
+      categorias: categoriasDeWhatsappDe(empresa),
     });
     return ok({ propuestas });
   });

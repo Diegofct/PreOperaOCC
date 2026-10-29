@@ -26,7 +26,7 @@ import {
   moduloApagado,
   motivoDeRechazo,
   type Accion,
-  type Modulo,
+  type ModuloConPermiso,
 } from '@/shared/rules/permisos';
 
 import { errorDePeticion } from './respuestas';
@@ -94,7 +94,7 @@ export async function requerirAdmin(peticion: Request): Promise<PersonaEnSesion 
  */
 export async function requerirPermiso(
   peticion: Request,
-  modulo: Modulo,
+  modulo: ModuloConPermiso,
   accion: Accion,
 ): Promise<PersonaEnSesion | Response> {
   const sesion = await requerirSesion(peticion);

@@ -22,6 +22,8 @@ import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/consta
 import { identificacionDeFila } from '@/shared/rules/vehiculos';
 import { fechaDeJornada, type Periodo, sumarDias } from '@/shared/rules/jornada';
 
+import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+
 import { api } from './cliente-api';
 import {
   Aviso,
@@ -134,18 +136,25 @@ export default function PantallaPreoperacionales() {
   const [dia, setDia] = useState<string | null>(null);
   const [vehiculoId, setVehiculoId] = useState<string | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
+  // Spec 033, cambio del 2026-10-27 a RF-17: también dentro de cada obra, con lo de esa obra.
+  const obraDeLaRuta = useObraDeLaRuta();
 
   const jornada = useListado<JornadaDePreoperacionales>(
     useCallback(
       async () => [
         dia
-          ? await api.preoperacionales.delDia(dia, vehiculoId)
-          : await api.preoperacionales.delPeriodo(periodo as Periodo, vehiculoId),
+          ? await api.preoperacionales.delDia(dia, vehiculoId, obraDeLaRuta)
+          : await api.preoperacionales.delPeriodo(periodo as Periodo, vehiculoId, obraDeLaRuta),
       ],
-      [dia, periodo, vehiculoId],
+      [dia, periodo, vehiculoId, obraDeLaRuta],
     ),
   );
-  const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
+  const todosLosVehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
+  // Para el filtro de equipo: dentro de una obra, solo los suyos.
+  const vehiculos = {
+    ...todosLosVehiculos,
+    datos: obraDeLaRuta ? todosLosVehiculos.datos.filter((v) => v.obraId === obraDeLaRuta) : todosLosVehiculos.datos,
+  };
 
   const ventana = jornada.datos[0];
 

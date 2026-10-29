@@ -32,6 +32,8 @@ export interface PreguntaRecibida {
   pregunta: string;
   conversacionId: string | null;
   archivos: ArchivoRecibido[];
+  /** Spec 033, RF-30: la obra desde la que se pregunta. La ruta ya comprobó que la alcanza. */
+  obraPorDefecto?: { id: string; nombre: string } | null;
 }
 
 function evento(e: EventoDelAsistente): Uint8Array {
@@ -98,6 +100,7 @@ export async function preguntar(sesion: PersonaEnSesion, recibida: PreguntaRecib
           historial,
           pregunta,
           adjuntos: leidos.adjuntos,
+          obraPorDefecto: recibida.obraPorDefecto ?? null,
         },
         (e) => {
           if (e.tipo === 'texto') mandar({ evento: 'texto', texto: e.texto });

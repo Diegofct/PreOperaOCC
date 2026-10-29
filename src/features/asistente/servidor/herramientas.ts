@@ -54,6 +54,7 @@ import { partesDelPeriodo, vehiculosDeLaObra } from '@/features/reportes/servido
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { reporteDe, type PestanaDeReporte, type ReporteDe } from '@/features/reportes/servidor/reportes';
 import { diaDelMensaje, obraDelMensaje } from '@/features/whatsapp/servidor/obra';
+import { rutaDeEmpresa, rutaDeObra } from '@/shared/rules/empresas';
 import { ensayosDeLosPartes, type FilaDeCalidadLeida } from '@/shared/rules/ensayos-de-obra';
 import {
   faltaDelPeriodo,
@@ -300,7 +301,7 @@ const reporte = herramienta({
           modulo: 'reportes',
           etiqueta: `Reportes › ${TITULO_DE_PESTANA[pestana]}, ${obra.codigo}, del ${desde} al ${hasta}`,
           fecha: null,
-          ruta: `/panel/reportes?${new URLSearchParams({ obra: obra.id, pestana, periodo: tipo, fecha: desde })}`,
+          ruta: `${rutaDeObra(obra.id, 'reportes')}?${new URLSearchParams({ pestana, periodo: tipo, fecha: desde })}`,
         },
       ],
       consulto: consulta(obra.id, 'reportes', ...(pestana === 'cantera' ? (['cantera'] as const) : [])),
@@ -326,7 +327,7 @@ const bitacoraDelDia = herramienta({
       modulo: 'bitacoras',
       etiqueta: `Bitácora del ${fecha}, ${obra.codigo}`,
       fecha,
-      ruta: `/panel/bitacoras?${new URLSearchParams({ obraId: obra.id, fecha })}`,
+      ruta: `${rutaDeObra(obra.id, 'bitacoras')}?${new URLSearchParams({ fecha })}`,
     };
     if (!parte) {
       return {
@@ -390,7 +391,7 @@ const viajesDeCantera = herramienta({
           modulo: 'cantera',
           etiqueta: `Control Cantera, ${obra.codigo}, del ${desde} al ${hasta}`,
           fecha: desde,
-          ruta: `/panel/cantera?${new URLSearchParams({ obraId: obra.id, fecha: desde })}`,
+          ruta: `${rutaDeObra(obra.id, 'cantera')}?${new URLSearchParams({ fecha: desde })}`,
         },
       ],
       consulto: consulta(obra.id, 'cantera'),
@@ -439,7 +440,7 @@ const ensayos = herramienta({
           modulo: 'laboratorio',
           etiqueta: `Laboratorio, ${obra.codigo}, del ${desde} al ${hasta}`,
           fecha: desde,
-          ruta: `/panel/laboratorio?${new URLSearchParams({ obraId: obra.id })}`,
+          ruta: rutaDeObra(obra.id, 'calidad'),
         },
       ],
       consulto: consulta(obra.id, 'laboratorio'),
@@ -483,7 +484,7 @@ const almacen = herramienta({
           modulo: 'almacen',
           etiqueta: `Almacén, ${obra.codigo}`,
           fecha: null,
-          ruta: `/panel/almacen?${new URLSearchParams({ obraId: obra.id })}`,
+          ruta: rutaDeObra(obra.id, 'almacen'),
         },
       ],
       consulto: consulta(obra.id, 'almacen'),
@@ -539,7 +540,7 @@ const preoperacionalesDelPeriodo = herramienta({
           modulo: 'preoperacionales',
           etiqueta: `Preoperacionales, ${obra.codigo}, del ${desde} al ${hasta}`,
           fecha: desde,
-          ruta: '/panel/preoperacionales',
+          ruta: rutaDeObra(obra.id, 'preoperacionales'),
         },
       ],
       consulto: consulta(obra.id, 'preoperacionales'),
@@ -594,7 +595,7 @@ const vehiculosYMedidores = herramienta({
           modulo: 'vehiculos',
           etiqueta: `Vehículos, ${obra.codigo}`,
           fecha: null,
-          ruta: '/panel/vehiculos',
+          ruta: rutaDeEmpresa('occ', 'vehiculos'),
         },
       ],
       consulto: consulta(obra.id, 'vehiculos'),
@@ -627,7 +628,7 @@ const personasDeLaObra = herramienta({
           modulo: 'personas',
           etiqueta: `Personas, ${obra.codigo}`,
           fecha: null,
-          ruta: '/panel/personas',
+          ruta: rutaDeObra(obra.id, 'recursos-humanos'),
         },
       ],
       consulto: consulta(obra.id, 'personas'),
@@ -689,7 +690,7 @@ const contratoYPresupuesto = herramienta({
           modulo: 'contrato',
           etiqueta: `Contrato y Presupuesto, ${obra.codigo}`,
           fecha: null,
-          ruta: `/panel/contrato?${new URLSearchParams({ obra: obra.id })}`,
+          ruta: rutaDeObra(obra.id, 'contrato'),
         },
       ],
       consulto: consulta(obra.id, 'contrato'),
@@ -908,16 +909,18 @@ const NOMBRE_DEL_MODULO: Record<ModuloConsultable, string> = {
 };
 
 const RUTA_DEL_MODULO: Record<ModuloConsultable, (obraId: string, fecha: string) => string> = {
-  bitacoras: (obraId, fecha) => `/panel/bitacoras?${new URLSearchParams({ obraId, fecha })}`,
-  preoperacionales: () => '/panel/preoperacionales',
-  almacen: (obraId) => `/panel/almacen?${new URLSearchParams({ obraId })}`,
-  cantera: (obraId, fecha) => `/panel/cantera?${new URLSearchParams({ obraId, fecha })}`,
-  laboratorio: (obraId) => `/panel/laboratorio?${new URLSearchParams({ obraId })}`,
-  whatsapp: (_obraId, fecha) => `/panel/whatsapp?${new URLSearchParams({ desde: fecha })}`,
-  reportes: (obra, fecha) => `/panel/reportes?${new URLSearchParams({ obra, fecha })}`,
-  contrato: (obra) => `/panel/contrato?${new URLSearchParams({ obra })}`,
-  vehiculos: () => '/panel/vehiculos',
-  personas: () => '/panel/personas',
+  // Spec 033: cada módulo en su lugar nuevo, dentro de la obra (los de antes redirigen igual).
+  // En la obra, el laboratorio es Calidad y las personas, Recursos Humanos (cambio del 2026-10-27).
+  bitacoras: (obraId, fecha) => `${rutaDeObra(obraId, 'bitacoras')}?${new URLSearchParams({ fecha })}`,
+  preoperacionales: (obraId) => rutaDeObra(obraId, 'preoperacionales'),
+  almacen: (obraId) => rutaDeObra(obraId, 'almacen'),
+  cantera: (obraId, fecha) => `${rutaDeObra(obraId, 'cantera')}?${new URLSearchParams({ fecha })}`,
+  laboratorio: (obraId) => rutaDeObra(obraId, 'calidad'),
+  whatsapp: (obraId, fecha) => `${rutaDeObra(obraId, 'whatsapp')}?${new URLSearchParams({ desde: fecha })}`,
+  reportes: (obraId, fecha) => `${rutaDeObra(obraId, 'reportes')}?${new URLSearchParams({ fecha })}`,
+  contrato: (obraId) => rutaDeObra(obraId, 'contrato'),
+  vehiculos: () => rutaDeEmpresa('occ', 'vehiculos'),
+  personas: (obraId) => rutaDeObra(obraId, 'recursos-humanos'),
 };
 
 /** Lo que se le pasa a la IA de cada mensaje: suficiente para leerlo, no el reporte entero. */
@@ -993,7 +996,7 @@ const mensajesDeWhatsapp = herramienta({
         modulo: 'whatsapp' as const,
         etiqueta: `Reportes de WhatsApp, ${obra.codigo}, del ${desde} al ${hasta}`,
         fecha: desde,
-        ruta: `/panel/whatsapp?${new URLSearchParams({ desde, hasta })}`,
+        ruta: `${rutaDeObra(obra.id, 'whatsapp')}?${new URLSearchParams({ desde, hasta })}`,
       },
     ];
     if (comparar) {

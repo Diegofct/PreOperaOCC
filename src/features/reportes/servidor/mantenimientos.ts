@@ -19,6 +19,7 @@ import {
   usuarios,
   vehiculos,
 } from '@/db/servidor/esquema';
+import { veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
@@ -196,7 +197,7 @@ async function vehiculoDelAlcance(sesion: PersonaEnSesion, vehiculoId: string) {
     .where(and(eq(vehiculos.id, vehiculoId), isNull(vehiculos.eliminadoEn)))
     .limit(1);
   if (!v) return null;
-  if (sesion.rol !== 'admin' && v.obraId !== sesion.obraId) return null;
+  if (!veTodasLasObras(sesion) && v.obraId !== sesion.obraId) return null;
   const claseMedidor = medidorDeClase(v.clase);
   return { ...v, claseMedidor, lectura: (claseMedidor === 'odometro' ? v.odometroKm : v.horometroH) ?? null };
 }

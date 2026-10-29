@@ -94,6 +94,7 @@ import {
 } from "@/shared/rules/actividades-de-obra";
 import { identificacionDeFila } from "@/shared/rules/vehiculos";
 import { alcanza } from "@/shared/rules/permisos";
+import { seOfreceEnSelectores } from "@/shared/rules/ficha";
 import {
   bloqueosDelCierre,
   faltasDeActividad,
@@ -108,6 +109,8 @@ import {
   type CampoDeEnsayo,
   type UbicacionPorValidar,
 } from "@/shared/rules/parte";
+
+import { useObraDeLaRuta } from "@/features/empresas/contexto-empresa";
 
 import { api, mensajeDe } from "./cliente-api";
 import {
@@ -379,6 +382,9 @@ export default function PantallaPartes() {
     enlace.fecha && /^\d{4}-\d{2}-\d{2}$/.test(enlace.fecha) ? enlace.fecha : fechaDeJornada(),
   );
   const [obraId, setObraId] = useState<string | null>(enlace.obraId ?? null);
+  // Spec 033, RF-19: dentro de una obra de Proyectos manda la obra de la dirección, y no
+  // hay selector.
+  const obraDeLaRuta = useObraDeLaRuta();
 
   const dia = useListado<DiaDeObra>(
     useCallback(async () => [await api.partes.delDia(fecha)], [fecha]),
@@ -416,7 +422,7 @@ export default function PantallaPartes() {
    *
    * El residente no elige nada: el servidor ya le manda solo la suya.
    */
-  const obraMirada = obraId ?? partes[0]?.obraId ?? null;
+  const obraMirada = obraDeLaRuta ?? obraId ?? partes[0]?.obraId ?? null;
   const deLaObra = obraMirada ? partes.filter((p) => p.obraId === obraMirada) : partes;
   // Dentro de una misma obra sigue mandando la viva sobre la anulada: es el
   // modelo de RF-7 —se anula y se abre otra— y no cambia.
@@ -622,7 +628,7 @@ export default function PantallaPartes() {
         {/* El selector va fuera del `parte ? …` a propósito: antes desaparecía
             en cuanto ese día existía una bitácora, y entonces no había forma de
             ver la de otra obra ni de abrir la que faltaba (RF-92, RF-95). */}
-        {esGerencia ? (
+        {esGerencia && !obraDeLaRuta ? (
           <Formulario>
             <Selector
               etiqueta="Obra"
@@ -1203,11 +1209,15 @@ function SeccionMaquinaria({
                   <Selector
                     etiqueta="Operador"
                     valor={fila.operadorId}
-                    opciones={personas.map((p) => ({
-                      valor: p.id,
-                      etiqueta: p.nombreCompleto,
-                      detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
-                    }))}
+                    // Ni inactivos ni retirados (spec 035, RF-21), salvo quien ya estaba
+                    // puesto: un parte de antes sigue diciendo quién la operó.
+                    opciones={personas
+                      .filter((p) => seOfreceEnSelectores(p) || p.id === fila.operadorId)
+                      .map((p) => ({
+                        valor: p.id,
+                        etiqueta: p.nombreCompleto,
+                        detalle: p.cargo ? nombreDeCargo(p.cargo) : undefined,
+                      }))}
                     onChange={(v) =>
                       setFilas(filas.map((f, i) => (i === indice ? { ...f, operadorId: v } : f)))
                     }
@@ -1321,7 +1331,9 @@ function SeccionPersonal({
   const [guardando, setGuardando] = useState(false);
 
   const usados = new Set(filas.map((f) => f.usuarioId));
-  const libres = personas.filter((p) => !usados.has(p.id));
+  // Para agregar, ni inactivos ni retirados (spec 035, RF-21); los que ya están en el parte
+  // se siguen viendo con su nombre, porque `quien` busca en la lista entera.
+  const libres = personas.filter((p) => !usados.has(p.id) && seOfreceEnSelectores(p));
 
   function cambiar<C extends keyof FilaPersona>(indice: number, campo: C, valor: FilaPersona[C]) {
     setFilas(
