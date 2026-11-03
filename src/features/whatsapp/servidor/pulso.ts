@@ -28,8 +28,9 @@ import { diaVencido } from '@/shared/rules/whatsapp-automatico';
 import { apartar } from './apartados';
 import { anotarFalloDelProceso, procesarMensaje } from './automatico';
 import { actualizarDia, armarBitacora } from './dias';
-import { diaDeLaFoto, sincronizarFotosDelDia } from './fotos-del-dia';
-import { obraDelMensaje } from './obra';
+import { vencerDiasDeEmpresa } from './dias-empresa';
+import { diaDeLaFoto, sincronizarFotosDeEmpresa, sincronizarFotosDelDia } from './fotos-del-dia';
+import { empresaDelMensaje, obraDelMensaje } from './obra';
 
 /** Cuántos mensajes pendientes procesa cada pulso: unos 30 caben en un minuto. */
 const PENDIENTES_POR_PULSO = 30;
@@ -55,6 +56,11 @@ export interface ResultadoDelPulso {
 export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<ResultadoDelPulso> {
   const db = baseServidor();
   const deLaObra = soloObra ? sql`${obraDelMensaje} = ${soloObra}` : sql`${obraDelMensaje} is not null`;
+  // Spec 038: los pendientes y las fotos del grupo de una empresa también (un mensaje de OCC
+  // que falló se reintenta como uno de obra). Los días en espera son solo de las obras.
+  const conDueno = soloObra
+    ? deLaObra
+    : sql`(${obraDelMensaje} is not null or ${empresaDelMensaje} is not null)`;
 
   // 1. Los días con mensajes en espera que ya llegaron a su hora límite (RF-46).
   const dias = await db
@@ -75,6 +81,9 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
     diasArmados++;
   }
 
+  // 1b. Spec 038 (RF-17): los días de empresa que pasaron la hora límite, a incompleta.
+  if (!soloObra) await vencerDiasDeEmpresa(ahoraMs);
+
   // 2. Los pendientes, los más antiguos primero (RF-68).
   const pendientes = await db
     .select({ id: whatsappMensajes.id })
@@ -85,7 +94,7 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
         eq(whatsappMensajes.estado, 'pendiente'),
         isNull(whatsappMensajes.procesadoEn),
         lt(whatsappMensajes.intentos, INTENTOS_MAXIMOS),
-        deLaObra,
+        conDueno,
       ),
     )
     .orderBy(asc(whatsappMensajes.enviadoEn))
@@ -123,7 +132,11 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
   }
   // 4. Las fotos de los días que recibieron alguna hace poco (spec 027).
   const diasConFotos = await db
-    .selectDistinct({ obraId: sql<string>`${obraDelMensaje}`, fecha: diaDeLaFoto })
+    .selectDistinct({
+      obraId: sql<string | null>`${obraDelMensaje}`,
+      empresaId: sql<string | null>`${empresaDelMensaje}`,
+      fecha: diaDeLaFoto,
+    })
     .from(media)
     .innerJoin(whatsappMensajes, eq(whatsappMensajes.id, media.duenoId))
     .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
@@ -132,12 +145,14 @@ export async function pulso(ahoraMs = Date.now(), soloObra?: string): Promise<Re
         eq(media.duenoTipo, 'whatsapp'),
         sql`${media.recibidoEn} > ${new Date(ahoraMs - HORAS_DE_FOTOS * 3_600_000).toISOString()}::timestamptz`,
         sql`${diaDeLaFoto} is not null`,
-        deLaObra,
+        conDueno,
       ),
     );
   let fotosAgregadas = 0;
-  for (const { obraId, fecha } of diasConFotos) {
-    if (fecha) fotosAgregadas += (await sincronizarFotosDelDia(obraId, fecha)).agregadas;
+  for (const { obraId, empresaId, fecha } of diasConFotos) {
+    if (!fecha) continue;
+    if (obraId) fotosAgregadas += (await sincronizarFotosDelDia(obraId, fecha)).agregadas;
+    else if (empresaId) fotosAgregadas += (await sincronizarFotosDeEmpresa(empresaId, fecha)).agregadas;
   }
 
   return { diasArmados, procesados, conError, abandonados, fotosAgregadas };

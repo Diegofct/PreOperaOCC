@@ -34,6 +34,7 @@ import {
 } from '@/shared/rules/whatsapp';
 
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+import type { EmpresaId } from '@/shared/rules/empresas';
 
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
 import {
@@ -57,6 +58,11 @@ import {
 } from '../componentes';
 import type { DetalleDePropuesta, ExcepcionFila } from '../contratos';
 import { useListado } from '../marco';
+import {
+  NOMBRE_DE_SECCION_DE_EMPRESA,
+  SE_COMPLETAN_EN_EMPRESA,
+  VentanaCompletarDeEmpresa,
+} from './completar-de-empresa';
 import { CamposDeFechas, useFiltroDeFechas } from './filtro-de-fechas';
 import { usePersona } from '../sesion';
 import {
@@ -131,6 +137,8 @@ const NOMBRE_DE_SECCION: Record<string, string> = {
   mensaje: 'Mensaje',
   // Spec 027, RF-21: la foto que llegó con la bitácora de su día ya cerrada.
   fotos: 'Foto',
+  // Spec 038: las del grupo de una empresa.
+  ...NOMBRE_DE_SECCION_DE_EMPRESA,
 };
 
 /**
@@ -160,10 +168,12 @@ function momento(iso: string): string {
   });
 }
 
-export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
+export function NoSePudoGuardar({ opcionesDeObra, empresa }: { opcionesDeObra: Opcion[]; empresa?: EmpresaId }) {
   const { rol } = usePersona();
   const esGerencia = alcanza(rol, 'obras', 'listar');
-  const puedeAtender = alcanza(rol, 'whatsapp', 'aprobar');
+  // Spec 038 (RF-11, RF-26): en OCC, solo lo de su grupo, y lo atiende quien lleva su bitácora.
+  const deEmpresa = empresa === 'occ' || empresa === 'geolab' ? empresa : undefined;
+  const puedeAtender = deEmpresa ? alcanza(rol, 'bitacora_empresa', 'escribir') : alcanza(rol, 'whatsapp', 'aprobar');
 
   const [obraDelSelector, setObraId] = useState<string | null>(null);
   // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
@@ -182,11 +192,11 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
   const lista = useListado<ExcepcionFila>(
     useCallback(
       () =>
-        api.whatsapp.excepciones.listar('pendiente', obraId, { desde, hasta }).then((r) => {
+        api.whatsapp.excepciones.listar('pendiente', deEmpresa ? null : obraId, { desde, hasta }, deEmpresa).then((r) => {
           setAnteriores(r.anterioresPendientes);
           return r.excepciones;
         }),
-      [obraId, desde, hasta],
+      [obraId, desde, hasta, deEmpresa],
     ),
   );
 
@@ -246,7 +256,8 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
       pintar: (e) =>
         puedeAtender ? (
           <Acciones>
-            {SOLO_SE_DESCARTAN.includes(e.seccion) ? null : e.renglon !== null && SE_COMPLETAN.includes(e.seccion) ? (
+            {SOLO_SE_DESCARTAN.includes(e.seccion) ? null : e.renglon !== null &&
+              (e.obraId ? SE_COMPLETAN : SE_COMPLETAN_EN_EMPRESA).includes(e.seccion) ? (
               <Boton titulo="Completar" onPress={() => setCompletando(e)} />
             ) : (
               <Boton titulo="Reintentar" onPress={() => setReintentando(e)} />
@@ -267,7 +278,7 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
         renglón (la fecha, una bitácora cerrada) se reintenta.
       </Ayuda>
       <Acciones>
-        {esGerencia && !obraDeLaRuta ? (
+        {esGerencia && !obraDeLaRuta && !deEmpresa ? (
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -303,7 +314,17 @@ export function NoSePudoGuardar({ opcionesDeObra }: { opcionesDeObra: Opcion[] }
         />
       </>
 
-      {completando ? (
+      {completando && !completando.obraId ? (
+        <VentanaCompletarDeEmpresa
+          excepcion={completando}
+          alCerrar={() => setCompletando(null)}
+          alGuardar={() => {
+            setHecho('El renglón quedó guardado en la bitácora de su día.');
+            setCompletando(null);
+            lista.recargar();
+          }}
+        />
+      ) : completando ? (
         <VentanaCompletar
           excepcion={completando}
           alCerrar={() => setCompletando(null)}

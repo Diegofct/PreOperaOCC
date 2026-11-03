@@ -11,9 +11,11 @@
 import { useCallback, useState } from 'react';
 
 import { alcanza } from '@/shared/rules/permisos';
+import type { EmpresaId } from '@/shared/rules/empresas';
 import {
   ETIQUETAS_DE_REPORTE,
-  TIPOS_DE_REPORTE,
+  TIPOS_DE_REPORTE_DE_EMPRESA,
+  TIPOS_DE_REPORTE_DE_OBRA,
   type TipoDeReporte,
 } from '@/shared/rules/whatsapp-automatico';
 
@@ -38,11 +40,20 @@ import { usePersona } from '../sesion';
 /** El valor de «cualquier persona» en el selector de autor. */
 const CUALQUIERA = '__cualquiera__';
 
-const OPCIONES_DE_REPORTE: Opcion[] = TIPOS_DE_REPORTE.map((t) => ({ valor: t, etiqueta: ETIQUETAS_DE_REPORTE[t] }));
+const OPCIONES_DE_REPORTE: Opcion[] = TIPOS_DE_REPORTE_DE_OBRA.map((t) => ({ valor: t, etiqueta: ETIQUETAS_DE_REPORTE[t] }));
+/** Spec 038 (RF-16, D8): la lista de equipos y el informe de mantenimiento. */
+const OPCIONES_DE_REPORTE_DE_EMPRESA: Opcion[] = TIPOS_DE_REPORTE_DE_EMPRESA.map((t) => ({
+  valor: t,
+  etiqueta: ETIQUETAS_DE_REPORTE[t],
+}));
 
-export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
+export function ReportesEsperados({ opcionesDeObra, empresa }: { opcionesDeObra: Opcion[]; empresa?: EmpresaId }) {
   const { rol } = usePersona();
   const esGerencia = alcanza(rol, 'obras', 'listar');
+  // Spec 038 (RF-16): en OCC, los de su bitácora; los cambian gerencia y el Encargado de OCC.
+  const deEmpresa = empresa === 'occ' || empresa === 'geolab' ? empresa : null;
+  const cambiaLaLista = deEmpresa ? alcanza(rol, 'bitacora_empresa', 'escribir') : esGerencia;
+  const opcionesDeReporte = deEmpresa ? OPCIONES_DE_REPORTE_DE_EMPRESA : OPCIONES_DE_REPORTE;
 
   // La gerencia elige la obra; al residente el servidor le da la suya.
   const [obraDelSelector, setObraId] = useState<string | null>(null);
@@ -55,9 +66,17 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
   const [hecho, setHecho] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const pedir = esGerencia ? obraId !== null : true;
+  const pedir = deEmpresa ? true : esGerencia ? obraId !== null : true;
   const datos = useListado<ReportesEsperadosDeLaObra>(
-    useCallback(() => (pedir ? api.whatsapp.esperados.leer(obraId).then((r) => [r]) : Promise.resolve([])), [obraId, pedir]),
+    useCallback(
+      () =>
+        deEmpresa
+          ? api.whatsapp.esperados.leerDeEmpresa(deEmpresa).then((r) => [{ obraId: '', esperados: r.esperados, autores: r.autores }])
+          : pedir
+            ? api.whatsapp.esperados.leer(obraId).then((r) => [r])
+            : Promise.resolve([]),
+      [obraId, pedir, deEmpresa],
+    ),
   );
   const guardada = datos.datos[0] ?? null;
   const lista = borrador ?? guardada?.esperados ?? [];
@@ -80,10 +99,11 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
     setGuardando(true);
     setError(null);
     try {
-      await api.whatsapp.esperados.guardar(guardada.obraId, lista);
+      if (deEmpresa) await api.whatsapp.esperados.guardarDeEmpresa(deEmpresa, lista);
+      else await api.whatsapp.esperados.guardar(guardada.obraId, lista);
       setBorrador(null);
       datos.recargar();
-      setHecho('Quedó guardada la lista de reportes esperados de la obra.');
+      setHecho(deEmpresa ? 'Quedó guardada la lista de reportes esperados.' : 'Quedó guardada la lista de reportes esperados de la obra.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar la lista.');
     } finally {
@@ -93,11 +113,19 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
 
   return (
     <Seccion titulo="Reportes esperados">
-      <Ayuda>
-        Cuando lleguen todos los reportes de la lista, la bitácora del día se arma sola. Si alguno no llega, se arma
-        al mediodía del día siguiente y queda incompleta. Sin lista, se arma con el primer reporte del día.
-      </Ayuda>
-      {esGerencia && !obraDeLaRuta ? (
+      {deEmpresa ? (
+        <Ayuda>
+          Lo que llega al grupo se guarda en la bitácora al momento. Con esta lista, el día queda «Armada» cuando llegan
+          todos sus reportes, o «Incompleta» al mediodía del día siguiente si falta alguno. Sin lista, basta el primer
+          reporte del día.
+        </Ayuda>
+      ) : (
+        <Ayuda>
+          Cuando lleguen todos los reportes de la lista, la bitácora del día se arma sola. Si alguno no llega, se arma
+          al mediodía del día siguiente y queda incompleta. Sin lista, se arma con el primer reporte del día.
+        </Ayuda>
+      )}
+      {esGerencia && !obraDeLaRuta && !deEmpresa ? (
         <Acciones>
           <Selector
             etiqueta="Obra"
@@ -119,14 +147,20 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
 
       {!guardada ? null : (
         <>
-          {lista.length === 0 ? <Ayuda>Esta obra no tiene lista: la bitácora se arma con el primer reporte del día.</Ayuda> : null}
+          {lista.length === 0 ? (
+            <Ayuda>
+              {deEmpresa
+                ? 'Sin lista: el día se da por completo con el primer reporte.'
+                : 'Esta obra no tiene lista: la bitácora se arma con el primer reporte del día.'}
+            </Ayuda>
+          ) : null}
           {lista.map((fila, i) =>
-            esGerencia ? (
+            cambiaLaLista ? (
               <FilaDeFormulario key={i} ultima={i === lista.length - 1}>
                 <Selector
                   etiqueta="Reporte"
                   valor={fila.tipoReporte}
-                  opciones={OPCIONES_DE_REPORTE}
+                  opciones={opcionesDeReporte}
                   onChange={(v) => cambiar(i, { tipoReporte: (v as TipoDeReporte | null) ?? fila.tipoReporte })}
                   ancho={240}
                 />
@@ -155,20 +189,23 @@ export function ReportesEsperados({ opcionesDeObra }: { opcionesDeObra: Opcion[]
               </Celda>
             ),
           )}
-          {esGerencia ? (
+          {cambiaLaLista ? (
             <Acciones>
               <Boton
                 titulo="Añadir reporte"
                 tono="secundario"
                 onPress={() => {
                   setHecho(null);
-                  setLista((actual) => [...actual, { tipoReporte: 'reporte_diario', autorId: null, autorNombre: null }]);
+                  setLista((actual) => [
+                    ...actual,
+                    { tipoReporte: deEmpresa ? 'lista_equipos' : 'reporte_diario', autorId: null, autorNombre: null },
+                  ]);
                 }}
               />
               <Boton titulo={guardando ? 'Guardando…' : 'Guardar'} onPress={guardar} deshabilitado={guardando} />
             </Acciones>
           ) : (
-            <Ayuda>La lista la cambia la gerencia.</Ayuda>
+            <Ayuda>{deEmpresa ? 'La lista la cambian la gerencia y el Encargado de OCC.' : 'La lista la cambia la gerencia.'}</Ayuda>
           )}
         </>
       )}

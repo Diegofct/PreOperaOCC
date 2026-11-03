@@ -39,6 +39,14 @@
  * Elemental. Suben los que pueden pedir; anula solo la gerencia, como en Documentos. Al
  * almacenista no le llegan las clases con precio (`llevaPrecio`, RF-31): ni en la lista, ni
  * al abrirlas, y tampoco las sube, porque después no las vería.
+ *
+ * ── De una solicitud de pago (spec 037) ──
+ *
+ * Quinto dueño: `?solicitudPagoId=`. La cuenta de cobro, la factura, el RUT, la
+ * certificación bancaria y los comprobantes (RF-6, RF-13). Los alcanza quien alcanza la
+ * solicitud (`solicitudDePagoAlAlcance`); el almacenista, solo los de las que pidió él
+ * (RF-5a): en las ajenas cualquier soporte dice cuánto se paga, así que para él no existen.
+ * Suben los que pueden pedir; anula solo la gerencia.
  */
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
@@ -46,6 +54,7 @@ import { uuidv7 } from 'uuidv7';
 import { baseServidor } from '@/db/servidor/cliente';
 import { documentosDelGrupo, media, obras, usuarios } from '@/db/servidor/esquema';
 import { solicitudAlAlcance } from '@/features/compras/servidor/solicitudes';
+import { solicitudDePagoAlAlcance } from '@/features/tesoreria/servidor/solicitudes-pago';
 import { personaAlAlcance } from '@/features/rrhh/servidor/fichas';
 import { claveDeObjeto, guardar } from '@/features/media/servidor/almacen';
 import type { DocumentoDelLugar, DocumentosDelLugar } from '@/features/panel/contratos';
@@ -67,6 +76,7 @@ import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, esEmpresa } from '@/shared/rul
 import { alcanzaLaPersona } from '@/shared/rules/ficha';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { veLosValores } from '@/shared/rules/compras';
+import { veElValorDelPago } from '@/shared/rules/pagos';
 import { alcanza, motivoDeRechazo, type ModuloConPermiso, type Rol } from '@/shared/rules/permisos';
 
 /** El lugar de un pedido, ya comprobado: de quién son los documentos y qué clases lleva. */
@@ -75,17 +85,19 @@ export type DuenoDeDocumentos =
   | { tipo: 'obra'; obraId: string; lugar: 'obra' }
   | { tipo: 'persona'; personaId: string; lugar: 'persona' }
   /** `sinPrecio`: quien pide no ve los valores, así que no le llegan las clases con precio. */
-  | { tipo: 'solicitud'; solicitudId: string; lugar: 'solicitud'; sinPrecio: boolean };
+  | { tipo: 'solicitud'; solicitudId: string; lugar: 'solicitud'; sinPrecio: boolean }
+  | { tipo: 'solicitud_pago'; solicitudPagoId: string; lugar: 'pago' };
 
 /**
- * El lugar tal como llega en la dirección: `?empresa=`, `?obraId=`, `?personaId=` o
- * `?solicitudId=`.
+ * El lugar tal como llega en la dirección: `?empresa=`, `?obraId=`, `?personaId=`,
+ * `?solicitudId=` o `?solicitudPagoId=`.
  */
 export interface LugarPedido {
   empresa: string | null;
   obraId: string | null;
   personaId: string | null;
   solicitudId: string | null;
+  solicitudPagoId?: string | null;
 }
 
 export function lugarDeLaPeticion(peticion: Request): LugarPedido {
@@ -95,6 +107,7 @@ export function lugarDeLaPeticion(peticion: Request): LugarPedido {
     obraId: parametros.get('obraId'),
     personaId: parametros.get('personaId'),
     solicitudId: parametros.get('solicitudId'),
+    solicitudPagoId: parametros.get('solicitudPagoId'),
   };
 }
 
@@ -104,8 +117,13 @@ export function lugarDeLaPeticion(peticion: Request): LugarPedido {
  * Elemental para quien la tiene (gerencia y, de consulta, la auxiliar) y de Solicitudes
  * de compra para los demás (spec 036); los de una empresa o una obra, de Documentos.
  */
-export function moduloDelDueno(lugar: { personaId: string | null; solicitudId?: string | null }, rol: Rol): ModuloConPermiso {
+export function moduloDelDueno(
+  lugar: { personaId: string | null; solicitudId?: string | null; solicitudPagoId?: string | null },
+  rol: Rol,
+): ModuloConPermiso {
   if (lugar.solicitudId) return alcanza(rol, 'compras', 'ver') ? 'compras' : 'solicitudes';
+  // Spec 037: los de una solicitud de pago, de Tesorería para quien la tiene y de Solicitudes para los demás.
+  if (lugar.solicitudPagoId) return alcanza(rol, 'tesoreria', 'ver') ? 'tesoreria' : 'solicitudes';
   return lugar.personaId ? 'rrhh' : 'documentos';
 }
 
@@ -119,9 +137,16 @@ export async function duenoDelPedido(
   sesion: PersonaEnSesion,
   pedido: LugarPedido,
 ): Promise<DuenoDeDocumentos | Response> {
-  const { empresa, obraId, personaId, solicitudId } = pedido;
-  if ([empresa, obraId, personaId, solicitudId].filter(Boolean).length !== 1) {
+  const { empresa, obraId, personaId, solicitudId, solicitudPagoId } = pedido;
+  if ([empresa, obraId, personaId, solicitudId, solicitudPagoId].filter(Boolean).length !== 1) {
     return errorDePeticion('Diga de qué empresa, obra, persona o solicitud son los documentos.');
+  }
+
+  if (solicitudPagoId) {
+    // 037/RF-5a, RF-28: no alcanzarla, o ser el almacenista en una ajena, es «no existe».
+    const fila = await solicitudDePagoAlAlcance(sesion, solicitudPagoId);
+    if (!fila || !veElValorDelPago(sesion.rol, fila.pedidaPor, sesion.id)) return noEncontrado('esa solicitud');
+    return { tipo: 'solicitud_pago', solicitudPagoId, lugar: 'pago' };
   }
 
   if (solicitudId) {
@@ -153,6 +178,7 @@ function condicionDelDueno(dueno: DuenoDeDocumentos) {
   if (dueno.tipo === 'empresa') return eq(documentosDelGrupo.empresaId, dueno.empresaId);
   if (dueno.tipo === 'obra') return eq(documentosDelGrupo.obraId, dueno.obraId);
   if (dueno.tipo === 'solicitud') return eq(documentosDelGrupo.solicitudId, dueno.solicitudId);
+  if (dueno.tipo === 'solicitud_pago') return eq(documentosDelGrupo.solicitudPagoId, dueno.solicitudPagoId);
   return eq(documentosDelGrupo.personaId, dueno.personaId);
 }
 
@@ -291,6 +317,7 @@ export async function subirDocumento(
       obraId: dueno.tipo === 'obra' ? dueno.obraId : null,
       personaId: dueno.tipo === 'persona' ? dueno.personaId : null,
       solicitudId: dueno.tipo === 'solicitud' ? dueno.solicitudId : null,
+      solicitudPagoId: dueno.tipo === 'solicitud_pago' ? dueno.solicitudPagoId : null,
       clase: datos.clase,
       claseNombre: nombreDeClase(dueno.lugar, datos.clase) ?? datos.clase,
       nombre: datos.nombre.trim(),
@@ -332,6 +359,7 @@ export async function documentoAlAlcance(
       obraId: documentosDelGrupo.obraId,
       personaId: documentosDelGrupo.personaId,
       solicitudId: documentosDelGrupo.solicitudId,
+      solicitudPagoId: documentosDelGrupo.solicitudPagoId,
       clase: documentosDelGrupo.clase,
       nombreArchivo: documentosDelGrupo.nombreArchivo,
       anuladoEn: documentosDelGrupo.anuladoEn,
@@ -347,7 +375,11 @@ export async function documentoAlAlcance(
   if (!fila) return null;
   const modulo = moduloDelDueno(fila, sesion.rol);
   let entra: boolean;
-  if (fila.solicitudId) {
+  if (fila.solicitudPagoId) {
+    // 037/RF-5a, RF-28: quien alcanza la solicitud de pago; el almacenista, solo en las suyas.
+    const solicitud = await solicitudDePagoAlAlcance(sesion, fila.solicitudPagoId);
+    entra = solicitud !== null && veElValorDelPago(sesion.rol, solicitud.pedidaPor, sesion.id);
+  } else if (fila.solicitudId) {
     // 036/RF-29, RF-31: quien alcanza la solicitud; las clases con precio, solo quien ve los valores.
     entra =
       (await solicitudAlAlcance(sesion, fila.solicitudId)) !== null && (veLosValores(sesion.rol) || !llevaPrecio(fila.clase));

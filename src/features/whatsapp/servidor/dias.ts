@@ -68,8 +68,8 @@ import { guardarEnBitacora, marcarMensaje } from './aprobacion';
 import { apartar } from './apartados';
 import { catalogosDeLaObra } from './catalogos';
 import { crearMaquina, crearPersona, crearVolqueta } from './creacion';
-import { diaDeLaFoto, sincronizarFotosDelDia } from './fotos-del-dia';
-import { obraDelMensaje } from './obra';
+import { diaDeLaFoto, sincronizarFotosDeEmpresa, sincronizarFotosDelDia } from './fotos-del-dia';
+import { empresaDelMensaje, obraDelMensaje } from './obra';
 
 /** Cómo se armó la bitácora: con todo, por la hora límite, o con «Guardar con lo que hay». */
 export type MotivoDelArmado = 'completo' | 'vencido' | 'a_mano';
@@ -477,6 +477,8 @@ export async function archivoRecibido(mensajeId: string): Promise<void> {
       fechaHecho: whatsappMensajes.fechaHecho,
       parteId: whatsappMensajes.parteId,
       obraId: obraDelMensaje,
+      // Spec 038 (RF-8): la foto del grupo de una empresa va a la bitácora de esa empresa.
+      empresaId: empresaDelMensaje,
       diaDeLaFoto,
     })
     .from(whatsappMensajes)
@@ -497,5 +499,12 @@ export async function archivoRecibido(mensajeId: string): Promise<void> {
   for (const dia of dias) {
     const [obraId, fecha] = dia.split('|');
     await sincronizarFotosDelDia(obraId, fecha);
+  }
+  const diasDeEmpresa = new Set(
+    filas.filter((m) => m.empresaId && m.diaDeLaFoto).map((m) => `${m.empresaId}|${m.diaDeLaFoto}`),
+  );
+  for (const dia of diasDeEmpresa) {
+    const [empresaId, fecha] = dia.split('|');
+    await sincronizarFotosDeEmpresa(empresaId, fecha);
   }
 }

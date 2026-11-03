@@ -31,6 +31,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import {
   almacenMateriales,
   almacenMovimientos,
+  bitacorasEmpresa,
   canteraViajes,
   ensayosGranulometria,
   llantas,
@@ -344,6 +345,89 @@ const bitacoraDelDia = herramienta({
       datos: { obra: obra.codigo, bitacora: sinHorario },
       fuentes: [fuente],
       consulto: consulta(obra.id, 'bitacoras'),
+    };
+  },
+});
+
+/**
+ * Spec 038 (RF-31): la bitácora de mantenimiento de OCC de un día, con los permisos de su
+ * pantalla. Las anuladas no salen. Los equipos van con su placa, como en la pantalla.
+ */
+const bitacoraDeOcc = herramienta({
+  nombre: 'bitacora_de_occ',
+  descripcion:
+    'La bitácora de mantenimiento de OCC de un día (no es de una obra): qué equipos quedaron operativos o inoperativos y por qué, con sus varadas y arreglos en el día; los trabajos de mantenimiento (daños, reparaciones, preventivos, llantas, repuestos, suministros); las actividades del personal de mantenimiento; los pendientes; y si está cerrada. Las anuladas no salen.',
+  modulo: null,
+  seOfrece: (alcance) => alcance.bitacoraDeOcc === true,
+  entrada: z.strictObject({ fecha: FECHA }),
+  async ejecutar({ fecha }, alcance) {
+    if (!alcance.bitacoraDeOcc) return { error: NO_ESTA_A_SU_ALCANCE };
+    const [dia] = await baseServidor()
+      .select({
+        estadoEquipos: bitacorasEmpresa.estadoEquipos,
+        trabajos: bitacorasEmpresa.trabajos,
+        actividades: bitacorasEmpresa.actividades,
+        pendientes: bitacorasEmpresa.pendientes,
+        cerradoEn: bitacorasEmpresa.cerradoEn,
+        fechaDudosa: bitacorasEmpresa.fechaDudosa,
+      })
+      .from(bitacorasEmpresa)
+      .where(and(eq(bitacorasEmpresa.empresaId, 'occ'), eq(bitacorasEmpresa.fecha, fecha), isNull(bitacorasEmpresa.anuladoEn)))
+      .limit(1);
+    const consulto = { obras: [], modulos: ['bitacoras' as const] };
+    if (!dia) return { datos: { bitacora: null, nota: `No hay bitácora de OCC vigente el ${fecha}.` }, fuentes: [], consulto };
+
+    const ligados = [
+      ...new Set(
+        [...dia.estadoEquipos, ...dia.trabajos, ...dia.actividades.map((a) => a.equipo), ...dia.pendientes.map((p) => p.equipo)]
+          .map((e) => e?.vehiculoId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const nombres = new Map(
+      ligados.length > 0
+        ? conNombreDelVehiculo(
+            await baseServidor()
+              .select({ id: vehiculos.id, nombrable: columnasParaNombrar })
+              .from(vehiculos)
+              .where(inArray(vehiculos.id, ligados)),
+            'nombre',
+          ).map((v) => [v.id, v.nombre])
+        : [],
+    );
+    const equipo = (e: { vehiculoId: string | null; escrito: string; posiblePlaca: { placa: string } | null } | null) =>
+      !e
+        ? null
+        : e.vehiculoId
+          ? (nombres.get(e.vehiculoId) ?? e.escrito)
+          : e.posiblePlaca
+            ? `${e.escrito} (posiblemente ${e.posiblePlaca.placa})`
+            : e.escrito;
+
+    return {
+      datos: {
+        fecha,
+        cerrada: dia.cerradoEn !== null,
+        fechaDudosa: dia.fechaDudosa,
+        estadoDeLosEquipos: dia.estadoEquipos.map((r) => ({
+          equipo: equipo(r),
+          segunLaLista: r.estado,
+          motivo: r.motivo,
+          cambiosDelDia: r.cambios.map((c) => ({ hora: c.hora, estado: c.estado, texto: c.texto })),
+        })),
+        trabajos: dia.trabajos.map((t) => ({ equipo: equipo(t), tipo: t.tipo, descripcion: t.descripcion, hora: t.hora, reportadoPor: t.reportadoPor })),
+        actividades: dia.actividades.map((a) => ({ persona: a.persona, descripcion: a.descripcion, equipo: equipo(a.equipo) })),
+        pendientes: dia.pendientes.map((p) => ({ texto: p.texto, equipo: equipo(p.equipo) })),
+      },
+      fuentes: [
+        {
+          modulo: 'bitacoras',
+          etiqueta: `Bitácora de OCC del ${fecha}`,
+          fecha,
+          ruta: `${rutaDeEmpresa('occ', 'bitacora')}?${new URLSearchParams({ fecha })}`,
+        },
+      ],
+      consulto,
     };
   },
 });
@@ -1065,6 +1149,7 @@ const TODAS: Herramienta<never>[] = [
   obrasAMiAlcance,
   reporte,
   bitacoraDelDia,
+  bitacoraDeOcc,
   viajesDeCantera,
   ensayos,
   almacen,

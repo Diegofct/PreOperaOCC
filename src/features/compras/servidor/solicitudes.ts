@@ -22,6 +22,7 @@ import {
   compraRenglones,
   compras,
   obras,
+  pagos,
   recepcionesCompra,
   solicitudCompraEventos,
   solicitudCompraRenglones,
@@ -65,29 +66,33 @@ export type LugarDeLaSolicitud =
   | { tipo: 'empresa'; empresaId: 'occ' | 'geolab' }
   | { tipo: 'obra'; obraId: string; activa: boolean };
 
-const SIN_PERMISO = 'No tiene acceso a las solicitudes de compra de ese lugar.';
-
 /**
  * El lugar que se pidió, si quien pide entra a él (RF-2, RF-28). Una empresa o una obra,
  * nunca las dos ni ninguna. Elemental no pide (D1) y Proyectos pide desde cada obra.
+ * Las solicitudes de pago (spec 037) usan el mismo lugar con las mismas reglas: `de` dice
+ * de cuáles se habla en los mensajes.
  */
 export async function lugarDeLaSolicitud(
   sesion: PersonaEnSesion,
   pedido: { empresa: string | null; obraId: string | null },
+  de: 'de compra' | 'de pago' = 'de compra',
 ): Promise<LugarDeLaSolicitud | Response> {
   const { empresa, obraId } = pedido;
+  const sinPermiso = `No tiene acceso a las solicitudes ${de} de ese lugar.`;
   if (Boolean(empresa) === Boolean(obraId)) return errorDePeticion('Diga de qué empresa u obra son las solicitudes.');
 
   if (empresa) {
     if (empresa !== 'occ' && empresa !== 'geolab') {
-      return esEmpresa(empresa) ? errorDePeticion('Esa empresa no tiene solicitudes de compra propias.') : noEncontrado('esa empresa');
+      return esEmpresa(empresa)
+        ? errorDePeticion(`Esa empresa no tiene solicitudes ${de} propias.`)
+        : noEncontrado('esa empresa');
     }
-    if (!alcanzaLaEmpresa(sesion.rol, empresa)) return errorDePeticion(SIN_PERMISO, 403);
+    if (!alcanzaLaEmpresa(sesion.rol, empresa)) return errorDePeticion(sinPermiso, 403);
     return { tipo: 'empresa', empresaId: empresa };
   }
 
   const id = obraId as string;
-  if (!alcanzaLaObraDeLaRuta(sesion, id)) return errorDePeticion(SIN_PERMISO, 403);
+  if (!alcanzaLaObraDeLaRuta(sesion, id)) return errorDePeticion(sinPermiso, 403);
   const [obra] = await baseServidor()
     .select({ id: obras.id, activa: obras.activa, eliminadoEn: obras.eliminadoEn })
     .from(obras)
@@ -392,6 +397,15 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
 
   const conValores = veLosValores(sesion.rol);
   const compraVigente = filasDeCompras.some((c) => !c.anuladaEn);
+  // Spec 037, RF-19: lo pagado de cada compra, para quien ve los valores.
+  const pagadoPorCompra = new Map<string, number>();
+  if (conValores && filasDeCompras.length) {
+    const filasDePagos = await db
+      .select({ compraId: pagos.compraId, valor: pagos.valor })
+      .from(pagos)
+      .where(and(inArray(pagos.compraId, filasDeCompras.map((c) => c.id)), isNull(pagos.anuladoEn)));
+    for (const p of filasDePagos) pagadoPorCompra.set(p.compraId as string, (pagadoPorCompra.get(p.compraId as string) ?? 0) + p.valor);
+  }
   const detalle: SolicitudDetallada = {
     id: fila.id,
     numero: fila.numero,
@@ -432,7 +446,10 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
           : null,
       };
       // RF-31: para el almacenista el campo no existe.
-      if (conValores) compra.valor = c.valor;
+      if (conValores) {
+        compra.valor = c.valor;
+        compra.pagado = pagadoPorCompra.get(c.id) ?? 0;
+      }
       return compra;
     }),
     recepciones: recepciones.map((r) => ({

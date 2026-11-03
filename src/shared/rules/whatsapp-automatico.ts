@@ -27,13 +27,23 @@ import {
  * Los reportes que la bitácora de un día puede esperar (RF-38). `viajes` cuenta
  * con cualquier vale o renglón de viajes de ese día.
  */
-export const TIPOS_DE_REPORTE = [
+export const TIPOS_DE_REPORTE_DE_OBRA = [
   'reporte_diario',
   'personal',
   'control_calidad',
   'inicio_actividades',
   'viajes',
 ] as const;
+
+/**
+ * Los que espera la bitácora de OCC (spec 038, RF-16, D8): la lista «Equipos operativos –
+ * para el día X» y el informe diario del personal de mantenimiento. Aparte de los de
+ * obra, para que una obra no los ofrezca ni una empresa espere un reporte diario.
+ */
+export const TIPOS_DE_REPORTE_DE_EMPRESA = ['lista_equipos', 'informe_mantenimiento'] as const;
+
+/** Todos: los valores del enum de la base. Cada lugar ofrece solo los suyos. */
+export const TIPOS_DE_REPORTE = [...TIPOS_DE_REPORTE_DE_OBRA, ...TIPOS_DE_REPORTE_DE_EMPRESA] as const;
 
 export type TipoDeReporte = (typeof TIPOS_DE_REPORTE)[number];
 
@@ -44,6 +54,8 @@ export const ETIQUETAS_DE_REPORTE: Record<TipoDeReporte, string> = {
   control_calidad: 'Control de calidad',
   inicio_actividades: 'Inicio de actividades',
   viajes: 'Viajes de cantera',
+  lista_equipos: 'Lista de equipos operativos',
+  informe_mantenimiento: 'Informe de mantenimiento',
 };
 
 /**
@@ -122,6 +134,16 @@ export function tipoDeReporte(
     default:
       return null;
   }
+}
+
+/**
+ * A cuál de los reportes esperados de una empresa cuenta un mensaje de su grupo (spec
+ * 038, RF-16), o `null` si a ninguno: una foto de un trabajo no completa la bitácora.
+ */
+export function tipoDeReporteDeEmpresa(categoria: string | null | undefined): TipoDeReporte | null {
+  if (categoria === 'lista_equipos') return 'lista_equipos';
+  if (categoria === 'informe_mantenimiento') return 'informe_mantenimiento';
+  return null;
 }
 
 /* ── Lo que le falta a un viaje ────────────────────────────────────────── */

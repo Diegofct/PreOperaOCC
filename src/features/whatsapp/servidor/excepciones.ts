@@ -20,11 +20,20 @@
  * Lo que no es un renglón —la fecha, la bitácora cerrada, un mensaje abandonado, una
  * sección entera— no se completa: «guardar» es reintentar. El mensaje vuelve a
  * pendiente y el pulso lo procesa otra vez; si vuelve a fallar, reaparece aquí.
+ *
+ * ── Del grupo de una empresa (spec 038, RF-11, RF-26) ──
+ *
+ * Lo apartado de un mensaje del grupo de OCC se lista aparte (`?empresa=occ`) y se completa
+ * con `completarRenglonDeEmpresa`, que lo lleva a la bitácora de la empresa. Lo atienden
+ * quienes llevan esa bitácora: gerencia y el Encargado de OCC (`bitacora_empresa`), no el
+ * permiso de aprobar de la bandeja de una obra.
  */
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, whatsappExcepciones, whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
+import { alcanzaLaEmpresa, nombreDeEmpresa, type EmpresaId } from '@/shared/rules/empresas';
+import { alcanza } from '@/shared/rules/permisos';
 import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
 import { eleccionesAjenas, opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
 import { reporteCorregido, type ExcepcionFila } from '@/features/panel/contratos';
@@ -32,14 +41,20 @@ import { filtroDeObraEstricto, veTodasLasObras } from '@/features/servidor/alcan
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
-import { faltasDelReporte, type ReporteDelDia } from '@/shared/rules/whatsapp';
+import {
+  EMPRESAS_CON_GRUPO,
+  faltasDelReporte,
+  type EmpresaConGrupo,
+  type ReporteDelDia,
+} from '@/shared/rules/whatsapp';
 import { completarIniciales, type EstadoDeExcepcion } from '@/shared/rules/whatsapp-automatico';
 
 import { escribirReporteDeAlmacen, faltasDelAlmacen } from './almacen';
 import { guardarEnBitacora, guardarViajes } from './aprobacion';
 import { catalogosDeLaObra } from './catalogos';
 import { guardarMantenimientos } from './mantenimientos';
-import { diaDelMensaje, obraDelMensaje } from './obra';
+import { completarRenglonDeEmpresa, SECCIONES_DE_EMPRESA, type SeccionDeEmpresa } from './empresa';
+import { diaDelMensaje, empresaDelMensaje, obraDelMensaje } from './obra';
 
 /** Las secciones de la bitácora que un renglón completado puede llevar. */
 const SECCIONES_DE_BITACORA = ['clima', 'actividades', 'maquinaria', 'personal', 'ensayos'] as const;
@@ -47,8 +62,9 @@ const SECCIONES_DE_BITACORA = ['clima', 'actividades', 'maquinaria', 'personal',
 const COLUMNAS = {
   id: whatsappExcepciones.id,
   mensajeId: whatsappExcepciones.mensajeId,
-  obraId: sql<string>`${obraDelMensaje}`,
+  obraId: sql<string | null>`${obraDelMensaje}`,
   obraNombre: obras.nombre,
+  empresaId: sql<EmpresaId | null>`${empresaDelMensaje}`,
   autorNombre: whatsappMensajes.autorNombre,
   enviadoEn: whatsappMensajes.enviadoEn,
   categoria: whatsappMensajes.categoria,
@@ -69,7 +85,18 @@ function consulta() {
     .from(whatsappExcepciones)
     .innerJoin(whatsappMensajes, eq(whatsappMensajes.id, whatsappExcepciones.mensajeId))
     .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
-    .innerJoin(obras, sql`${obras.id} = ${obraDelMensaje}`);
+    .leftJoin(obras, sql`${obras.id} = ${obraDelMensaje}`);
+}
+
+/** Las empresas con grupo a las que entra la sesión (spec 038, RF-26, RF-29). */
+function empresasDeLaSesion(sesion: PersonaEnSesion): EmpresaConGrupo[] {
+  return EMPRESAS_CON_GRUPO.filter((e) => alcanzaLaEmpresa(sesion.rol, e));
+}
+
+/** Lo del grupo de una de esas empresas, como condición. */
+function deSusEmpresas(sesion: PersonaEnSesion) {
+  const suyas = empresasDeLaSesion(sesion);
+  return suyas.length > 0 ? sql`${empresaDelMensaje} in ${suyas}` : sql`false`;
 }
 
 function aFila(f: Awaited<ReturnType<typeof consulta>>[number]): ExcepcionFila {
@@ -77,7 +104,8 @@ function aFila(f: Awaited<ReturnType<typeof consulta>>[number]): ExcepcionFila {
     id: f.id,
     mensajeId: f.mensajeId,
     obraId: f.obraId,
-    obraNombre: f.obraNombre,
+    obraNombre: f.obraNombre ?? (f.empresaId ? nombreDeEmpresa(f.empresaId) : '—'),
+    empresaId: f.empresaId,
     autorNombre: f.autorNombre,
     enviadoEn: f.enviadoEn.toISOString(),
     categoria: f.categoria,
@@ -98,11 +126,22 @@ function aFila(f: Awaited<ReturnType<typeof consulta>>[number]): ExcepcionFila {
  */
 export async function listarExcepciones(
   sesion: PersonaEnSesion,
-  filtro: { obraId: string | null; estado: EstadoDeExcepcion; desde: string; hasta: string },
+  filtro: {
+    obraId: string | null;
+    estado: EstadoDeExcepcion;
+    desde: string;
+    hasta: string;
+    /** Spec 038 (RF-26): solo lo del grupo de esta empresa. */
+    empresa?: EmpresaConGrupo | null;
+  },
 ): Promise<{ excepciones: ExcepcionFila[]; anterioresPendientes: number }> {
   const alcance = and(
-    filtroDeObraEstricto(sesion, obraDelMensaje),
-    veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
+    filtro.empresa
+      ? alcanzaLaEmpresa(sesion.rol, filtro.empresa)
+        ? sql`${empresaDelMensaje} = ${filtro.empresa}`
+        : sql`false`
+      : filtroDeObraEstricto(sesion, obraDelMensaje),
+    !filtro.empresa && veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
     eq(whatsappExcepciones.estado, filtro.estado),
   );
   const filas = await consulta()
@@ -129,10 +168,24 @@ export async function listarExcepciones(
 /** Una excepción al alcance de la sesión, o `null`. */
 async function leerExcepcion(sesion: PersonaEnSesion, id: string) {
   const [fila] = await consulta()
-    .where(and(eq(whatsappExcepciones.id, id), filtroDeObraEstricto(sesion, obraDelMensaje)))
+    .where(
+      and(eq(whatsappExcepciones.id, id), or(filtroDeObraEstricto(sesion, obraDelMensaje), deSusEmpresas(sesion))),
+    )
     .limit(1);
   return fila ?? null;
 }
+
+/**
+ * ¿Puede atender esta excepción? Lo de una obra, quien aprueba en su bandeja (024); lo del
+ * grupo de una empresa, quien lleva su bitácora (spec 038, RF-11, RF-18).
+ */
+function puedeAtender(sesion: PersonaEnSesion, excepcion: { obraId: string | null; empresaId: EmpresaId | null }) {
+  return excepcion.obraId
+    ? alcanza(sesion.rol, 'whatsapp', 'aprobar')
+    : !!excepcion.empresaId && alcanza(sesion.rol, 'bitacora_empresa', 'escribir');
+}
+
+const sinPermiso = () => errorDePeticion('No tiene permiso para atender este renglón.', 403);
 
 /** La marca la resuelve, condicionada a que siga pendiente: si otro se adelantó, 409. */
 async function resolver(
@@ -182,10 +235,11 @@ export async function guardarExcepcion(
 ): Promise<{ guardado: string } | Response> {
   const excepcion = await leerExcepcion(sesion, id);
   if (!excepcion) return noEncontrado('ese renglón');
+  if (!puedeAtender(sesion, excepcion)) return sinPermiso();
   if (excepcion.estado !== 'pendiente') return yaResuelta();
 
   const fecha = pedido.fecha ?? excepcion.fecha;
-  const { seccion, renglon, mensajeId, obraId } = excepcion;
+  const { seccion, renglon, mensajeId } = excepcion;
 
   // Lo del mensaje entero: reintentarlo (RF-61). Vuelve a pendiente y lo toma el pulso.
   if (renglon === null) {
@@ -205,6 +259,34 @@ export async function guardarExcepcion(
   }
   if (!fecha) return errorDePeticion('Diga el día del reporte.', 400);
   if (pedido.datos === undefined) return errorDePeticion('Complete el renglón antes de guardarlo.', 400);
+
+  // Spec 038 (RF-11): un renglón del grupo de una empresa va a su bitácora.
+  if (!excepcion.obraId) {
+    if (!excepcion.empresaId || !(SECCIONES_DE_EMPRESA as readonly string[]).includes(seccion)) {
+      return errorDePeticion('Este renglón no se puede completar aquí.', 400);
+    }
+    if (typeof pedido.datos !== 'object' || pedido.datos === null || Array.isArray(pedido.datos)) {
+      return errorDePeticion('El renglón no tiene la forma esperada. Vuelva a abrir la lista.', 400);
+    }
+    const hecho = await completarRenglonDeEmpresa({
+      mensajeId,
+      empresaId: excepcion.empresaId,
+      fecha,
+      seccion: seccion as SeccionDeEmpresa,
+      renglon,
+      renglonCompletado: pedido.datos as Record<string, unknown>,
+      reportadoPor: excepcion.autorDelMensaje ?? 'WhatsApp',
+      enviadoEn: excepcion.enviadoEnDelMensaje,
+      actor: sesion,
+    });
+    if ('faltas' in hecho) return respuestaDeFaltas(hecho.faltas.map((mensaje) => ({ seccion, renglon, mensaje })));
+    if ('cerrada' in hecho) {
+      return errorDePeticion(`La bitácora del ${fecha} está cerrada: para agregar esto, anúlela primero.`, 409);
+    }
+    if (!(await resolver(sesion, id, 'guardada'))) return yaResuelta();
+    return hecho;
+  }
+  const obraId = excepcion.obraId;
 
   let reporte: ReporteDelDia;
   try {
@@ -297,6 +379,7 @@ export async function descartarExcepcion(
 ): Promise<{ descartado: true } | Response> {
   const excepcion = await leerExcepcion(sesion, id);
   if (!excepcion) return noEncontrado('ese renglón');
+  if (!puedeAtender(sesion, excepcion)) return sinPermiso();
   if (!(await resolver(sesion, id, 'descartada', motivo))) return yaResuelta();
   return { descartado: true };
 }

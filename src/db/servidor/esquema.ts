@@ -70,10 +70,19 @@ import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rule
 import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
 import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
+import { IDS_DE_ESTADOS_DE_PAGO } from '../../shared/rules/pagos';
 import type { AdjuntoGuardado, FuenteDeRespuesta, ModuloConsultable } from '../../shared/rules/asistente';
 import type { LecturaDeIa } from '../../shared/rules/formulario-presupuesto-ia';
 import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
 import type { EmpresaId } from '../../shared/rules/empresas';
+import type {
+  ActividadDeMantenimiento,
+  EstadoDelEquipo,
+  ListaReemplazada,
+  Origen,
+  PendienteDelDia,
+  TrabajoDeMantenimiento,
+} from '../../shared/rules/bitacora-occ';
 import type {
   MasasDelEnsayo,
   ResultadoGranulometria,
@@ -367,6 +376,12 @@ export const vehiculos = pgTable(
      * de un día anterior no la cambia (RF-43). Nulo en lo de antes del cambio.
      */
     medidorDia: date('medidor_dia', { mode: 'string' }),
+    /**
+     * Como lo nombran en el grupo de WhatsApp de OCC, que no usa placas para la
+     * maquinaria amarilla: «Pajarita Case cantera» (spec 038, RF-12, D11). Lista y no
+     * tabla aparte: son pocos por equipo y se editan con la ficha.
+     */
+    nombresWhatsapp: text('nombres_whatsapp').array().notNull().default(sql`'{}'::text[]`),
     estado: estadoVehiculo('estado').notNull().default('operativo'),
     eliminadoEn: eliminadoEn(),
     creadoEn: creadoEn(),
@@ -1185,12 +1200,25 @@ export const whatsappGrupos = pgTable(
     id: text('id').primaryKey(),
     nombre: text('nombre').notNull(),
     obraId: text('obra_id').references(() => obras.id),
+    /**
+     * Spec 038: el grupo de una empresa —OCC o Geolab— en vez de una obra (RF-1, RF-2).
+     * Nunca las dos: un mensaje no puede armar a la vez la bitácora de una obra y la de
+     * OCC.
+     */
+    empresaId: text('empresa_id')
+      .$type<EmpresaId>()
+      .references(() => empresas.id),
     asociadoPor: text('asociado_por').references(() => usuarios.id),
     asociadoEn: timestamp('asociado_en', { withTimezone: true, mode: 'date' }),
     creadoEn: creadoEn(),
     actualizadoEn: actualizadoEn(),
   },
-  (t) => [index('ix_whatsapp_grupo_obra').on(t.obraId)],
+  (t) => [
+    index('ix_whatsapp_grupo_obra').on(t.obraId),
+    index('ix_whatsapp_grupo_empresa').on(t.empresaId),
+    check('ck_whatsapp_grupo_dueno', sql`${t.obraId} is null or ${t.empresaId} is null`),
+    check('ck_whatsapp_grupo_empresa', sql`${t.empresaId} is null or ${t.empresaId} in ('occ', 'geolab')`),
+  ],
 );
 
 /**
@@ -1262,6 +1290,13 @@ export const whatsappMensajes = pgTable(
      * (migración 0019); el plan original no la tenía.
      */
     obraDecididaId: text('obra_decidida_id').references(() => obras.id),
+    /**
+     * Spec 038 (RF-4): la empresa en cuya bitácora se guardó, escrita al guardar. Gemela
+     * de `obra_decidida_id`: pasar el grupo a una obra no se lleva lo ya guardado.
+     */
+    empresaDecididaId: text('empresa_decidida_id')
+      .$type<EmpresaId>()
+      .references(() => empresas.id),
     recibidoEn: timestamp('recibido_en', { withTimezone: true, mode: 'date' })
       .notNull()
       .default(sql`now()`),
@@ -1314,9 +1349,11 @@ export const whatsappReportesEsperados = pgTable(
   'whatsapp_reportes_esperados',
   {
     id: text('id').primaryKey(),
-    obraId: text('obra_id')
-      .notNull()
-      .references(() => obras.id),
+    /** La obra **o** la empresa que lo espera (spec 038, RF-16): nunca las dos. */
+    obraId: text('obra_id').references(() => obras.id),
+    empresaId: text('empresa_id')
+      .$type<EmpresaId>()
+      .references(() => empresas.id),
     tipoReporte: tipoReporteWhatsapp('tipo_reporte').notNull(),
     autorId: text('autor_id'),
     autorNombre: text('autor_nombre'),
@@ -1328,8 +1365,9 @@ export const whatsappReportesEsperados = pgTable(
   },
   (t) => [
     uniqueIndex('ux_whatsapp_esperado')
-      .on(t.obraId, t.tipoReporte, sql`coalesce(${t.autorId}, '')`)
+      .on(sql`coalesce(${t.obraId}, ${t.empresaId})`, t.tipoReporte, sql`coalesce(${t.autorId}, '')`)
       .where(sql`eliminado_en is null`),
+    check('ck_whatsapp_esperado_dueno', sql`(${t.obraId} is null) <> (${t.empresaId} is null)`),
   ],
 );
 
@@ -1437,9 +1475,9 @@ export const bitacoraFotos = pgTable(
   {
     /** `idDeterminista(parteId, 'foto-del-dia', mediaId)`: reintentar no duplica. */
     id: text('id').primaryKey(),
-    parteId: text('parte_id')
-      .notNull()
-      .references(() => partesDeObra.id),
+    /** La bitácora de la obra **o** la de una empresa (spec 038, RF-8): nunca las dos. */
+    parteId: text('parte_id').references(() => partesDeObra.id),
+    bitacoraEmpresaId: text('bitacora_empresa_id').references((): AnyPgColumn => bitacorasEmpresa.id),
     mediaId: text('media_id')
       .notNull()
       .references(() => media.id),
@@ -1458,10 +1496,11 @@ export const bitacoraFotos = pgTable(
     motivoQuitada: text('motivo_quitada'),
   },
   (t) => [
-    uniqueIndex('ux_bitacora_foto_media').on(t.parteId, t.mediaId),
+    uniqueIndex('ux_bitacora_foto_media').on(sql`coalesce(${t.parteId}, ${t.bitacoraEmpresaId})`, t.mediaId),
     uniqueIndex('ux_bitacora_foto_huella')
-      .on(t.parteId, t.sha256)
+      .on(sql`coalesce(${t.parteId}, ${t.bitacoraEmpresaId})`, t.sha256)
       .where(sql`${t.sha256} is not null`),
+    check('ck_bitacora_foto_dueno', sql`(${t.parteId} is null) <> (${t.bitacoraEmpresaId} is null)`),
     check(
       'ck_bitacora_foto_quitada',
       // Quitar exige quién y por qué (RF-24, RF-25).
@@ -1469,6 +1508,91 @@ export const bitacoraFotos = pgTable(
        or (${t.quitadaPor} is not null and ${t.motivoQuitada} is not null and length(trim(${t.motivoQuitada})) > 0)`,
     ),
   ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Bitácora diaria de una empresa (spec 038)                                 */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * La bitácora de un día de una empresa —hoy, OCC—, armada desde su grupo de WhatsApp
+ * (spec 038, RF-7 a RF-21). Una por empresa y día, como `partes_de_obra` por obra.
+ *
+ * Las secciones van en `jsonb` con ids fijos por renglón, por lo mismo que las del parte:
+ * llevar un mensaje es una sola sentencia que reemplaza la sección mezclada
+ * (`rules/bitacora-occ`), y Neon por HTTP no da transacciones para escribir varias
+ * tablas. `version` sube en cada escritura: el mensaje o la persona que llegue con una
+ * vieja vuelve a leer (RF-15, casos límite).
+ *
+ * El índice único es parcial sobre la anulación, como el del parte: anular deja el día
+ * libre para abrir otra (RF-20). Cerrada no se cambia (RF-19).
+ */
+export const bitacorasEmpresa = pgTable(
+  'bitacoras_empresa',
+  {
+    id: text('id').primaryKey(),
+    empresaId: text('empresa_id')
+      .$type<EmpresaId>()
+      .notNull()
+      .references(() => empresas.id),
+    /** `YYYY-MM-DD`, el día que describe (RF-9a), no el de los mensajes. */
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    estadoEquipos: jsonb('estado_equipos').$type<EstadoDelEquipo[]>().notNull().default([]),
+    trabajos: jsonb('trabajos').$type<TrabajoDeMantenimiento[]>().notNull().default([]),
+    actividades: jsonb('actividades').$type<ActividadDeMantenimiento[]>().notNull().default([]),
+    pendientes: jsonb('pendientes').$type<PendienteDelDia[]>().notNull().default([]),
+    /** De qué mensaje salió la lista vigente (RF-9b). */
+    lista: jsonb('lista').$type<Origen>(),
+    /** Las listas reemplazadas por otra del mismo día, para el historial (RF-9b, RF-30). */
+    listas: jsonb('listas').$type<ListaReemplazada[]>().notNull().default([]),
+    /** La lista vigente dice un día dudoso (D12). */
+    fechaDudosa: boolean('fecha_dudosa').notNull().default(false),
+    version: integer('version').notNull().default(0),
+    cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
+    cerradoPor: text('cerrado_por').references(() => usuarios.id),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_bitacora_empresa_fecha')
+      .on(t.empresaId, t.fecha)
+      .where(sql`anulado_en is null`),
+    index('ix_bitacora_empresa_fecha').on(t.fecha),
+    check('ck_bitacora_empresa_version', sql`${t.version} >= 0`),
+    check('ck_bitacora_empresa_cierre', sql`${t.cerradoEn} is null or ${t.cerradoPor} is not null`),
+    check(
+      'ck_bitacora_empresa_anulacion',
+      // Anular exige quién y por qué (RF-20), y no basta con espacios.
+      sql`${t.anuladoEn} is null
+       or (${t.anuladoPor} is not null and ${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+  ],
+);
+
+/**
+ * En qué va la bitácora de un día de una empresa (spec 038, RF-16, RF-17): la gemela de
+ * `whatsapp_dias`. Aparte y no con `obra_id` nulo, porque `obra_id` es parte de la llave
+ * de aquella y cambiarla en producción es más riesgo que una tabla pequeña (plan).
+ */
+export const whatsappDiasEmpresa = pgTable(
+  'whatsapp_dias_empresa',
+  {
+    empresaId: text('empresa_id')
+      .$type<EmpresaId>()
+      .notNull()
+      .references(() => empresas.id),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    estado: estadoDiaWhatsapp('estado').notNull().default('en_espera'),
+    faltaron: jsonb('faltaron').$type<{ tipoReporte: string; autorNombre: string | null }[]>(),
+    bitacoraEmpresaId: text('bitacora_empresa_id').references(() => bitacorasEmpresa.id),
+    armadaEn: timestamp('armada_en', { withTimezone: true, mode: 'date' }),
+    armadaPor: text('armada_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+  },
+  (t) => [primaryKey({ columns: [t.empresaId, t.fecha] })],
 );
 
 /**
@@ -2033,6 +2157,8 @@ export const documentosDelGrupo = pgTable(
     personaId: text('persona_id').references(() => usuarios.id),
     /** Spec 036: la solicitud de compra dueña, con sus soportes (RF-17). */
     solicitudId: text('solicitud_id').references((): AnyPgColumn => solicitudesCompra.id),
+    /** Spec 037: la solicitud de pago dueña, con sus soportes y comprobantes (RF-6, RF-13). */
+    solicitudPagoId: text('solicitud_pago_id').references((): AnyPgColumn => solicitudesPago.id),
     /** El slug de `rules/documentos.ts`, y su nombre el día que se subió. */
     clase: text('clase').notNull(),
     claseNombre: text('clase_nombre').notNull(),
@@ -2060,7 +2186,7 @@ export const documentosDelGrupo = pgTable(
     check(
       'ck_documento_grupo_dueno',
       sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int + (${t.personaId} is not null)::int
-         + (${t.solicitudId} is not null)::int) = 1
+         + (${t.solicitudId} is not null)::int + (${t.solicitudPagoId} is not null)::int) = 1
        and (${t.empresaId} is null or ${t.empresaId} <> 'proyectos')`,
     ),
     check('ck_documento_grupo_vence', sql`${t.vence} is null or ${t.vence} >= ${t.fecha}`),
@@ -2074,6 +2200,7 @@ export const documentosDelGrupo = pgTable(
     index('ix_documento_grupo_obra').on(t.obraId, t.fecha),
     index('ix_documento_grupo_persona').on(t.personaId, t.fecha),
     index('ix_documento_grupo_solicitud').on(t.solicitudId, t.fecha),
+    index('ix_documento_grupo_solicitud_pago').on(t.solicitudPagoId, t.fecha),
   ],
 );
 
@@ -2368,6 +2495,143 @@ export const recepcionesCompra = pgTable(
   (t) => [
     check('ck_recepcion_compra_cantidad', sql`${t.cantidad} > 0`),
     index('ix_recepciones_compra_solicitud').on(t.solicitudId),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* Tesorería (spec 037)                                                      */
+/* ------------------------------------------------------------------------ */
+
+/** Los estados de `rules/pagos.ts` (RF-7, RF-11, RF-12, RF-14). */
+export const estadoSolicitudPago = pgEnum('estado_solicitud_pago', IDS_DE_ESTADOS_DE_PAGO);
+
+/**
+ * Una solicitud de pago (RF-6, RF-7), como la de compra (spec 036): **de un lugar** —una
+ * obra, OCC o Geolab; Elemental no pide—, con su número por identidad (`SP-0001`), su
+ * versión para que dos pasos no se pisen, y sin borrar nada (RF-29). Los motivos viven en
+ * `solicitud_pago_eventos`.
+ *
+ * Los conceptos son la lista de `rules/pagos.ts`, con un `check` aquí que la repite: como los
+ * catálogos de la ficha (035), un enum pediría una migración por cada concepto nuevo.
+ */
+export const solicitudesPago = pgTable(
+  'solicitudes_pago',
+  {
+    id: text('id').primaryKey(),
+    numero: integer('numero').generatedAlwaysAsIdentity().notNull(),
+    empresaId: text('empresa_id').references(() => empresas.id).$type<EmpresaId>(),
+    obraId: text('obra_id').references(() => obras.id),
+    estado: estadoSolicitudPago('estado').notNull().default('enviada'),
+    beneficiario: text('beneficiario').notNull(),
+    /** NIT o cédula, si se tiene. Vacío si no. */
+    beneficiarioDocumento: text('beneficiario_documento').notNull().default(''),
+    concepto: text('concepto').notNull(),
+    paraQue: text('para_que').notNull(),
+    /** Pesos, sin decimales: lo pedido (RF-6). */
+    valor: bigint('valor', { mode: 'number' }).notNull(),
+    /** Lo aprobado (RF-11): nulo hasta aprobar; puede ser menos que lo pedido. */
+    valorAprobado: bigint('valor_aprobado', { mode: 'number' }),
+    paraCuando: date('para_cuando', { mode: 'string' }).notNull(),
+    urgente: boolean('urgente').notNull().default(false),
+    pedidaPor: text('pedida_por')
+      .notNull()
+      .references(() => usuarios.id),
+    pedidaEn: timestamp('pedida_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    version: integer('version').notNull().default(1),
+    actualizadaEn: timestamp('actualizada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex('ux_solicitud_pago_numero').on(t.numero),
+    check(
+      'ck_solicitud_pago_lugar',
+      sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int) = 1
+       and (${t.empresaId} is null or ${t.empresaId} in ('occ', 'geolab'))`,
+    ),
+    check(
+      'ck_solicitud_pago_concepto',
+      sql`${t.concepto} in ('proveedor', 'anticipo', 'alquiler', 'transporte', 'servicios', 'caja_menor', 'viaticos', 'otro')`,
+    ),
+    check('ck_solicitud_pago_valor', sql`${t.valor} > 0`),
+    check(
+      'ck_solicitud_pago_aprobado',
+      sql`${t.valorAprobado} is null or (${t.valorAprobado} > 0 and ${t.valorAprobado} <= ${t.valor})`,
+    ),
+    check('ck_solicitud_pago_beneficiario', sql`length(trim(${t.beneficiario})) > 0`),
+    index('ix_solicitud_pago_obra').on(t.obraId, t.estado),
+    index('ix_solicitud_pago_empresa').on(t.empresaId, t.estado),
+    index('ix_solicitud_pago_bandeja').on(t.estado, t.urgente, t.paraCuando),
+  ],
+);
+
+/** La historia de una solicitud de pago (RF-20): cada paso, con su motivo y lo que cambió. */
+export const solicitudPagoEventos = pgTable(
+  'solicitud_pago_eventos',
+  {
+    id: text('id').primaryKey(),
+    solicitudPagoId: text('solicitud_pago_id')
+      .notNull()
+      .references(() => solicitudesPago.id),
+    paso: text('paso').notNull(),
+    motivo: text('motivo'),
+    cambios: jsonb('cambios').$type<unknown[]>().notNull().default([]),
+    por: text('por')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [index('ix_solicitud_pago_eventos').on(t.solicitudPagoId, t.en)],
+);
+
+/**
+ * Un pago (RF-13 a RF-18): de una solicitud de pago **o** de una compra de la spec 036, uno
+ * de los dos. Así «Pagos» (RF-23) suma los dos lados con una sola consulta y las compras se
+ * pagan sin solicitud aparte (D4). No se edita: se anula con motivo (RF-16, RF-29).
+ *
+ * Que no se pague de más lo cuidan el servidor y la regla (`faltasDelPago`): en una
+ * solicitud, tomando su versión; en una compra, con un `insert … select … where` que revisa
+ * lo ya pagado en la misma sentencia.
+ */
+export const pagos = pgTable(
+  'pagos',
+  {
+    id: text('id').primaryKey(),
+    solicitudPagoId: text('solicitud_pago_id').references(() => solicitudesPago.id),
+    compraId: text('compra_id').references(() => compras.id),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    /** Pesos, sin decimales. */
+    valor: bigint('valor', { mode: 'number' }).notNull(),
+    medio: text('medio').notNull(),
+    referencia: text('referencia').notNull().default(''),
+    /** El comprobante, si se adjuntó: en la solicitud de pago o en la de compra. */
+    documentoId: text('documento_id').references((): AnyPgColumn => documentosDelGrupo.id),
+    registradoPor: text('registrado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    registradoEn: timestamp('registrado_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+  },
+  (t) => [
+    check('ck_pago_dueno', sql`((${t.solicitudPagoId} is not null)::int + (${t.compraId} is not null)::int) = 1`),
+    check('ck_pago_valor', sql`${t.valor} > 0`),
+    check('ck_pago_medio', sql`${t.medio} in ('transferencia', 'consignacion', 'cheque', 'efectivo')`),
+    check(
+      'ck_pago_anulado',
+      sql`(${t.anuladoEn} is null) = (${t.motivoAnulacion} is null)
+       and (${t.motivoAnulacion} is null or length(trim(${t.motivoAnulacion})) > 0)`,
+    ),
+    index('ix_pagos_solicitud').on(t.solicitudPagoId),
+    index('ix_pagos_compra').on(t.compraId),
+    index('ix_pagos_fecha').on(t.fecha),
   ],
 );
 

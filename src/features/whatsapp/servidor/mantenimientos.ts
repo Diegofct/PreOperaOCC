@@ -14,12 +14,12 @@
  * registro (`on conflict do nothing`). Marcar resuelto solo toca los correctivos que
  * siguen pendientes.
  */
-import { and, eq, isNull, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { mantenimientos } from '@/db/servidor/esquema';
+import { mantenimientos, tiposVehiculo, vehiculos } from '@/db/servidor/esquema';
 import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
-import { fechaDeJornada, sumarDias } from '@/shared/rules/jornada';
+import { fechaDeJornada, medidorDeClase, sumarDias } from '@/shared/rules/jornada';
 import { faltasDelReporte, type ReporteDelDia } from '@/shared/rules/whatsapp';
 import { separarRenglones } from '@/shared/rules/whatsapp-automatico';
 
@@ -47,6 +47,31 @@ export function idDeMantenimiento(vehiculoId: string, clase: string, fecha: stri
 }
 
 /**
+ * La obra y la lectura registrada de cada equipo, para los mantenimientos de un mensaje
+ * que no es de una obra (spec 038, RF-9h): el grupo de OCC habla de equipos de todas.
+ */
+async function obraYLecturaDeLosEquipos(ids: readonly string[]) {
+  if (ids.length === 0) return new Map<string, { obraId: string | null; valor: number | null }>();
+  const filas = await baseServidor()
+    .select({
+      id: vehiculos.id,
+      obraId: vehiculos.obraId,
+      clase: tiposVehiculo.claseMedidor,
+      odometroKm: vehiculos.odometroKm,
+      horometroH: vehiculos.horometroH,
+    })
+    .from(vehiculos)
+    .innerJoin(tiposVehiculo, eq(tiposVehiculo.id, vehiculos.tipoVehiculoId))
+    .where(inArray(vehiculos.id, [...ids]));
+  return new Map(
+    filas.map((f) => [
+      f.id,
+      { obraId: f.obraId, valor: medidorDeClase(f.clase) === 'odometro' ? f.odometroKm : f.horometroH },
+    ]),
+  );
+}
+
+/**
  * Guarda los mantenimientos del reporte (RF-36 a RF-42). Sin fecha válida no se sabe
  * de qué día son: no se guarda nada aquí, y el mensaje entero se aparta por la fecha
  * cuando se arma su día.
@@ -54,10 +79,14 @@ export function idDeMantenimiento(vehiculoId: string, clase: string, fecha: stri
  * `actor` es quien queda como autor: el sistema al procesar el mensaje, o la persona
  * que completa el renglón en «No se pudo guardar» (RF-40). El origen sigue siendo
  * WhatsApp: el dato salió del mensaje.
+ *
+ * Sin `obraId` —un mensaje del grupo de OCC (spec 038, RF-9h)— cada mantenimiento queda en
+ * la obra donde está su equipo, que es de donde sale el alcance del residente, y la lectura
+ * que el mensaje no dijo es la registrada del equipo.
  */
 export async function guardarMantenimientos(datos: {
   mensajeId: string;
-  obraId: string;
+  obraId: string | null;
   reporte: ReporteDelDia;
   actor?: Actor;
 }): Promise<MantenimientosGuardados> {
@@ -76,7 +105,10 @@ export async function guardarMantenimientos(datos: {
   const fuera = new Set(excepciones.map((e) => e.renglon));
 
   // La lectura que no dijo el mensaje es la última registrada hasta ese día (RF-38).
-  const lecturas = await lecturasAnteriores(obraId, sumarDias(fecha, 1));
+  const lecturas = obraId ? await lecturasAnteriores(obraId, sumarDias(fecha, 1)) : {};
+  const deLosEquipos = obraId
+    ? null
+    : await obraYLecturaDeLosEquipos(lista.flatMap((m) => (m.vehiculoId ? [m.vehiculoId] : [])));
 
   const db = baseServidor();
   const resultado: MantenimientosGuardados = { ...NADA, guardados: [], apartados: excepciones.length };
@@ -89,10 +121,10 @@ export async function guardarMantenimientos(datos: {
         .values({
           id: await idDeMantenimiento(m.vehiculoId, m.clase, fecha),
           vehiculoId: m.vehiculoId,
-          obraId,
+          obraId: obraId ?? deLosEquipos?.get(m.vehiculoId)?.obraId ?? null,
           clase: m.clase,
           fecha,
-          lectura: m.lectura ?? lecturas[m.vehiculoId]?.valor ?? null,
+          lectura: m.lectura ?? lecturas[m.vehiculoId]?.valor ?? deLosEquipos?.get(m.vehiculoId)?.valor ?? null,
           nota: m.descripcion,
           origen: 'whatsapp',
           mensajeId,

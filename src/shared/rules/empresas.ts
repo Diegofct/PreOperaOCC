@@ -102,7 +102,8 @@ const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> 
   ],
   occ: [
     e('whatsapp', 'Reportes de WhatsApp', 'whatsapp'),
-    e('bitacora', 'Bitácora', 'bitacoras'),
+    // Spec 038: su bitácora propia y la de las obras, con el permiso de la de empresa.
+    e('bitacora', 'Bitácora', 'bitacora_empresa'),
     e('documentos', 'Documentos', 'documentos'),
     // Spec 035, RF-3: el personal de OCC, de consulta.
     e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
@@ -114,8 +115,11 @@ const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> 
     ASISTENTE,
   ],
   geolab: [
-    e('bitacora', 'Bitácora', 'bitacoras'),
-    e('whatsapp', 'Reportes de WhatsApp', 'whatsapp'),
+    // Spec 038, RF-27, RF-29: el laboratorio de las obras, que el laboratorista consulta.
+    e('bitacora', 'Bitácora', 'bitacora_empresa'),
+    // Spec 038, RF-28: el grupo de Geolab, que el laboratorista consulta con el permiso de la
+    // Bitácora de la empresa. No con el de WhatsApp: ese le abriría las bandejas de las obras.
+    e('whatsapp', 'Reportes de WhatsApp', 'bitacora_empresa'),
     e('laboratorio', 'Laboratorio', 'laboratorio'),
     e('reportes', 'Reportes de laboratorio', 'reportes'),
     e('documentos', 'Documentos', 'documentos'),
@@ -595,6 +599,25 @@ export function tituloDelLugar(lugar: LugarDelPanel | null): string | null {
  * 2026-10-27: las mismas pestañas de siempre, con el selector de obra). OCC, las de los
  * equipos; Geolab, la de los ensayos. `null` es «todas»: dentro de una obra.
  */
+/**
+ * Las pestañas de la Bitácora de cada empresa (spec 038, RF-22, RF-27). OCC: su bitácora
+ * diaria, armada desde su grupo, y «En las obras», la sección Maquinaria de las bitácoras
+ * de las obras, para compararlas (H4, D3). Geolab, una sola vista: el laboratorio de las
+ * obras, hasta que tenga grupo y bitácora propios (D6). Quién entra lo decide el menú,
+ * con los permisos de siempre (RF-29).
+ */
+export function pestanasDeBitacora(
+  empresa: EmpresaId,
+): readonly { clave: 'propia' | 'obras'; titulo: string }[] {
+  if (empresa === 'occ') {
+    return [
+      { clave: 'propia', titulo: 'Bitácora de OCC' },
+      { clave: 'obras', titulo: 'En las obras' },
+    ];
+  }
+  return [];
+}
+
 export function pestanasDeReportes(
   empresa: EmpresaId | null,
 ): readonly ('maquinas' | 'mantenimiento' | 'calidad')[] | null {

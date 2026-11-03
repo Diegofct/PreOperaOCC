@@ -13,7 +13,8 @@
  */
 import { fechaDeJornada, restarDias } from './jornada';
 import { diasDe } from './periodos';
-import { modulosVisibles, type Modulo, type ModulosDeObra, type Rol } from './permisos';
+import { alcanzaLaEmpresa } from './empresas';
+import { alcanza, modulosVisibles, type Modulo, type ModulosDeObra, type Rol } from './permisos';
 import { normalizar } from './texto';
 
 /** RF-1: quiénes lo usan. El operador no (RF-2: el asistente no está en el celular). */
@@ -60,20 +61,35 @@ export interface AlcanceDelAsistente {
   obras: 'todas' | string[];
   /** Los módulos que alcanza, en el orden del menú (RF-3, RF-5). */
   modulos: ModuloConsultable[];
+  /**
+   * Spec 038 (RF-31): si alcanza la Bitácora de OCC, con los mismos permisos que su
+   * pantalla: gerencia y el Encargado de OCC. Aparte de `modulos` porque no es de una obra.
+   */
+  bitacoraDeOcc?: boolean;
 }
 
 const NADA: AlcanceDelAsistente = { usa: false, obras: [], modulos: [] };
+
+/** RF-31: ¿ve la Bitácora de OCC? La misma regla que la pantalla (RF-29). */
+function veLaBitacoraDeOcc(rol: Rol): boolean {
+  return alcanzaLaEmpresa(rol, 'occ') && alcanza(rol, 'bitacora_empresa', 'listar');
+}
 
 /** Lo que alcanza el asistente para quien pregunta. */
 export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
   if (!ROLES_DEL_ASISTENTE.includes(quien.rol)) return NADA;
   if (quien.rol === 'admin') {
-    return { usa: true, obras: 'todas', modulos: consultables(modulosVisibles('admin')) };
+    return { usa: true, obras: 'todas', modulos: consultables(modulosVisibles('admin')), bitacoraDeOcc: veLaBitacoraDeOcc('admin') };
   }
   // Spec 034, RF-15: el Encargado de OCC no tiene obra y ve todas, como en sus pantallas;
   // los módulos, los de OCC que alcanza.
   if (quien.rol === 'encargado_occ') {
-    return { usa: true, obras: 'todas', modulos: consultables(modulosVisibles('encargado_occ')) };
+    return {
+      usa: true,
+      obras: 'todas',
+      modulos: consultables(modulosVisibles('encargado_occ')),
+      bitacoraDeOcc: veLaBitacoraDeOcc('encargado_occ'),
+    };
   }
   // RF-10: sin obra no hay nada a su alcance; puede entrar, pero el asistente se lo dice.
   if (!quien.obraId) return { usa: true, obras: [], modulos: [] };

@@ -1,5 +1,5 @@
 import { excepcionGuardada } from '@/features/panel/contratos';
-import { requerirPermiso } from '@/features/servidor/guardia';
+import { requerirSesion } from '@/features/servidor/guardia';
 import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
 import { guardarExcepcion } from '@/features/whatsapp/servidor/excepciones';
 import { idDeLaRuta } from '@/features/whatsapp/servidor/obra';
@@ -13,7 +13,8 @@ import { idDeLaRuta } from '@/features/whatsapp/servidor/obra';
  */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirPermiso(peticion, 'whatsapp', 'aprobar');
+    // Quién puede lo decide la excepción: aprobar en una obra, o la Bitácora de la empresa (spec 038).
+    const sesion = await requerirSesion(peticion);
     if (sesion instanceof Response) return sesion;
 
     const resultado = await guardarExcepcion(sesion, idDeLaRuta(id), await cuerpoJson(peticion, excepcionGuardada));

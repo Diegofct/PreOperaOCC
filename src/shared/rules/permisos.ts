@@ -119,6 +119,8 @@ export const MODULOS_DE_EMPRESA = [
   'documentos',
   'licitaciones',
   'solicitudes',
+  // Spec 038: la Bitácora de OCC y la de Geolab, aparte de `bitacoras`, que es la de las obras.
+  'bitacora_empresa',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -369,6 +371,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   },
   // Spec 033, RF-34, RF-39 y RF-44. Los cortes financieros y el consolidado: solo la
   // gerencia. `anular` es anular un corte con su motivo; no hay corregir (RF-40).
+  // Spec 037, D9: la auxiliar de RR. HH. consulta los cortes en Tesorería; no los registra ni los anula.
   finanzas: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
     supervisor: NADA,
@@ -377,7 +380,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
-    auxiliar_rrhh: NADA,
+    auxiliar_rrhh: ['ver', 'listar'],
   },
   // Cambio del 2026-10-27 (menús definitivos). Recursos Humanos lo lleva Elemental; el
   // residente consulta el de su obra (spec 035).
@@ -451,6 +454,23 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar', 'escribir'],
     encargado_occ: ['ver', 'listar', 'escribir'],
+    auxiliar_rrhh: NADA,
+  },
+  /*
+   * Spec 038 (RF-18, RF-20, RF-29). La Bitácora de una empresa, aparte de `bitacoras`:
+   * el Encargado de OCC lleva la de OCC —la corrige, la cierra y la anula, como el
+   * residente la de su obra—, pero las de las obras las sigue solo consultando (033/RF-22).
+   * El laboratorista consulta la de Geolab, que es el laboratorio de las obras. A cuál
+   * empresa entra cada uno lo decide `alcanzaLaEmpresa`, no esta fila.
+   */
+  bitacora_empresa: {
+    admin: ['ver', 'listar', 'escribir', 'anular'],
+    supervisor: NADA,
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: ['ver', 'listar'],
+    encargado_occ: ['ver', 'listar', 'escribir', 'anular'],
     auxiliar_rrhh: NADA,
   },
 };
@@ -566,7 +586,11 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
     escribir: 'registrar compras',
     anular: 'anular compras',
   },
-  tesoreria: { aprobar: 'aprobar ni rechazar solicitudes de pago' },
+  tesoreria: {
+    aprobar: 'aprobar ni rechazar solicitudes de pago',
+    escribir: 'registrar pagos',
+    anular: 'anular pagos',
+  },
 };
 
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
@@ -661,6 +685,7 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   documentos: 'Documentos',
   licitaciones: 'Licitaciones',
   solicitudes: 'Solicitudes de compra y de pago',
+  bitacora_empresa: 'Bitácora',
 };
 
 /**

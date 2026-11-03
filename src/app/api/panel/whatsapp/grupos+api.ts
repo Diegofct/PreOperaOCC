@@ -4,6 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { obras, whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
 import { requerirAdmin } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
+import { nombreDeEmpresa } from '@/shared/rules/empresas';
 
 /**
  * Los grupos de WhatsApp que han mandado mensajes. `GET /api/panel/whatsapp/grupos`
@@ -15,7 +16,8 @@ import { ok, responder } from '@/features/servidor/respuestas';
  * en ninguna bandeja hasta entonces (RF-11).
  *
  * Con cada grupo va cuántos mensajes tiene pendientes, para que la gerencia vea
- * qué pesa dejar un grupo sin asociar.
+ * qué pesa dejar un grupo sin asociar. Desde la spec 038 (RF-3), también su empresa,
+ * si es de OCC o de Geolab; sin obra ni empresa es «sin asociar».
  */
 export async function GET(peticion: Request) {
   return responder(async () => {
@@ -28,6 +30,7 @@ export async function GET(peticion: Request) {
         nombre: whatsappGrupos.nombre,
         obraId: whatsappGrupos.obraId,
         obraNombre: obras.nombre,
+        empresaId: whatsappGrupos.empresaId,
         asociadoEn: whatsappGrupos.asociadoEn,
         // Con la misma regla que la bandeja: lo que complementa a un mensaje que
         // existe —la foto de un reporte— va dentro de él y no cuenta aparte (RF-20).
@@ -43,8 +46,13 @@ export async function GET(peticion: Request) {
       })
       .from(whatsappGrupos)
       .leftJoin(obras, eq(obras.id, whatsappGrupos.obraId))
-      .orderBy(sql`${whatsappGrupos.obraId} is not null`, asc(whatsappGrupos.nombre));
+      .orderBy(
+        sql`(${whatsappGrupos.obraId} is not null or ${whatsappGrupos.empresaId} is not null)`,
+        asc(whatsappGrupos.nombre),
+      );
 
-    return ok({ grupos });
+    return ok({
+      grupos: grupos.map((g) => ({ ...g, empresaNombre: g.empresaId ? nombreDeEmpresa(g.empresaId) : null })),
+    });
   });
 }

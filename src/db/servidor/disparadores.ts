@@ -48,6 +48,8 @@ const TABLAS_CON_RELOJ = [
   'empresas',
   // Spec 035: cuándo se cambió la ficha laboral.
   'fichas_laborales',
+  // Spec 038: la bitácora de una empresa, como la de una obra.
+  'bitacoras_empresa',
 ];
 
 const FUNCION = `

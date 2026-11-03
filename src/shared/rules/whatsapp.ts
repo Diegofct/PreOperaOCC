@@ -57,6 +57,7 @@ import {
   type LecturaRegistrada,
 } from './jornada';
 import { faltasDeActividad, faltasDelEnsayo, type UbicacionPorValidar } from './parte';
+import type { EmpresaId } from './empresas';
 import { esClaseDeMantenimiento, type ClaseDeMantenimiento } from './mantenimiento';
 import { normalizar } from './texto';
 
@@ -189,6 +190,11 @@ export interface VehiculoConocido {
   tipoId?: string | null;
   marca?: string | null;
   modelo?: string | null;
+  /**
+   * Como lo nombran en el grupo de OCC, que no usa placas para la maquinaria amarilla:
+   * «Pajarita Case cantera», «Vibrocompactador Volvo» (spec 038, RF-12, D11).
+   */
+  nombresWhatsapp?: readonly string[];
 }
 
 /** Lo que hace falta saber de una persona para reconocerla en un reporte. */
@@ -280,6 +286,116 @@ export function candidatosDeVehiculo(
       clavesLeidasDe(v).some((c) => c.length >= LARGO_MINIMO_PARA_BUSCAR_DENTRO && leido.includes(c)),
     ),
   );
+}
+
+/* ── La placa mal escrita (spec 038) ──────────────────────────────────── */
+
+/** Una placa de carro en Colombia: tres letras y tres cifras, ya `compacto`. */
+const FORMA_DE_PLACA = /^[a-z]{3}\d{3}$/;
+
+/**
+ * Las placas que hay en lo escrito: tres letras y tres cifras, con o sin espacio o
+ * guion en medio, sueltas («Km final 74609 LUY002» trae `luy002`).
+ */
+function placasEscritas(texto: string): string[] {
+  const encontradas = normalizar(texto).matchAll(/(?:^|[^a-z0-9])([a-z]{3})[\s.-]?(\d{3})(?![0-9])/g);
+  return [...new Set([...encontradas].map((m) => m[1] + m[2]))];
+}
+
+/**
+ * ¿Se diferencian en una sola letra o cifra, o en dos vecinas intercambiadas? Es lo que
+ * deja un error al teclear: «LVY 499» por LVY498, «CZW 128» por ZCW128.
+ */
+function aUnErrorDeDistancia(a: string, b: string): boolean {
+  if (a.length !== b.length || a === b) return false;
+  const distintas: number[] = [];
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) distintas.push(i);
+  if (distintas.length === 1) return true;
+  const [i, j] = distintas;
+  return distintas.length === 2 && j === i + 1 && a[i] === b[j] && a[j] === b[i];
+}
+
+/** La placa registrada a la que se parece lo escrito (spec 038, RF-12a). */
+export interface PlacaParecida {
+  vehiculoId: string;
+  /** Como se muestra en la nota: «LVY498». */
+  placa: string;
+}
+
+/**
+ * La placa registrada que **posiblemente** quiso escribir el reporte (spec 038, RF-12a,
+ * D5): lo escrito tiene forma de placa, no es ninguna registrada —tampoco con los
+ * caracteres que se confunden al leer una foto— y hay **una sola** registrada a un error
+ * de distancia.
+ *
+ * No liga el renglón al equipo: el renglón se guarda con la placa tal cual la
+ * escribieron, y esto es solo la nota «Posiblemente sea la placa registrada LVY498».
+ * Con dos parecidas no se sugiere ninguna: sería adivinar. Busca entre **todos** los
+ * equipos, sin filtrar por obra, porque OCC lleva la maquinaria de todas.
+ */
+export function placaParecida(
+  texto: string | null | undefined,
+  vehiculos: readonly VehiculoConocido[],
+): PlacaParecida | null {
+  if (!texto) return null;
+  const escritas = placasEscritas(texto);
+  if (escritas.length === 0) return null;
+
+  const registradas = vehiculos
+    .filter((v) => v.placa)
+    .map((v) => ({ id: v.id, placa: compacto(v.placa!) }))
+    .filter((v) => FORMA_DE_PLACA.test(v.placa));
+
+  // Si alguna escrita ya es una registrada, el equipo se reconoce por su placa: no está mal escrita.
+  const exactas = new Set(registradas.flatMap((v) => [v.placa, sinConfusiones(v.placa)]));
+  if (escritas.some((e) => exactas.has(e) || exactas.has(sinConfusiones(e)))) return null;
+
+  const parecidas = registradas.filter((v) => escritas.some((e) => aUnErrorDeDistancia(e, v.placa)));
+  if (parecidas.length !== 1) return null;
+  return { vehiculoId: parecidas[0].id, placa: parecidas[0].placa.toUpperCase() };
+}
+
+/* ── El dueño de un grupo (spec 038) ──────────────────────────────────── */
+
+/**
+ * Las empresas que pueden tener grupo de WhatsApp (RF-1, RF-2). Elemental es la parte
+ * administrativa y Proyectos son sus obras, que ya tienen cada una el suyo.
+ */
+export const EMPRESAS_CON_GRUPO = ['occ', 'geolab'] as const satisfies readonly EmpresaId[];
+
+export type EmpresaConGrupo = (typeof EMPRESAS_CON_GRUPO)[number];
+
+/**
+ * Las que arman bitácora propia desde su grupo (RF-7, RF-28, D6). Geolab todavía no: su
+ * grupo se guarda y se ve en Reportes de WhatsApp, y su bitácora llega con otra spec.
+ */
+export const EMPRESAS_CON_BITACORA_PROPIA: readonly EmpresaConGrupo[] = ['occ'];
+
+export type DuenoDelGrupo =
+  | { tipo: 'obra'; obraId: string }
+  | { tipo: 'empresa'; empresaId: EmpresaConGrupo }
+  /** Sin dueño, sus mensajes se guardan sin procesar (RF-5, 021/RF-11). */
+  | { tipo: 'ninguno' };
+
+/**
+ * De quién es un grupo: de una obra **o** de una empresa, nunca de las dos (RF-1), y
+ * solo de OCC o Geolab entre las empresas (RF-2). Lo usan la asociación del panel, para
+ * responder qué está mal, y el guardado automático, para saber a qué bitácora va.
+ */
+export function duenoDelGrupo(datos: {
+  obraId?: string | null;
+  empresaId?: string | null;
+}): DuenoDelGrupo | { error: string } {
+  const obraId = datos.obraId?.trim() || null;
+  const empresaId = datos.empresaId?.trim() || null;
+  if (obraId && empresaId) return { error: 'Un grupo es de una obra o de una empresa, no de las dos.' };
+  if (empresaId) {
+    if (!(EMPRESAS_CON_GRUPO as readonly string[]).includes(empresaId)) {
+      return { error: 'Solo OCC o Geolab pueden tener un grupo de WhatsApp.' };
+    }
+    return { tipo: 'empresa', empresaId: empresaId as EmpresaConGrupo };
+  }
+  return obraId ? { tipo: 'obra', obraId } : { tipo: 'ninguno' };
 }
 
 /* ── La maquinaria por su nombre (spec 026) ─────────────────────────────── */
@@ -375,6 +491,120 @@ export function reconocerMaquina(
   );
   if (porTipoYMarca.length === 1) return { id: porTipoYMarca[0].id, como: 'tipo_marca', candidatos: [], tipoId };
   return { ...ninguno, candidatos: porTipoYMarca.map((v) => v.id) };
+}
+
+/* ── Los equipos del grupo de una empresa (spec 038) ──────────────────── */
+
+/** Cuántos nombres en WhatsApp puede llevar un equipo, y de qué largo (D11). */
+export const MAXIMO_DE_NOMBRES_EN_WHATSAPP = 10;
+export const LARGO_MAXIMO_DE_NOMBRE_EN_WHATSAPP = 60;
+
+/**
+ * Cómo se comparan dos nombres en WhatsApp: sin tildes, mayúsculas, espacios ni signos,
+ * igual que los reconoce `reconocerEquipoDeEmpresa`. «Pajarita Case cantera» y
+ * «pajarita  case-cantera» son el mismo nombre.
+ */
+export function claveDeNombreEnWhatsapp(nombre: string): string {
+  return compacto(nombre);
+}
+
+/**
+ * Los nombres en WhatsApp de un equipo como se guardan (D11): sin espacios de sobra, sin
+ * vacíos y sin repetir el mismo nombre escrito de dos formas. Queda el primero como lo
+ * escribieron.
+ */
+export function limpiarNombresEnWhatsapp(nombres: readonly string[]): string[] {
+  const vistos = new Set<string>();
+  const limpios: string[] = [];
+  for (const nombre of nombres) {
+    const limpio = nombre.trim().replace(/\s+/g, ' ');
+    const clave = claveDeNombreEnWhatsapp(limpio);
+    if (clave === '' || vistos.has(clave)) continue;
+    vistos.add(clave);
+    limpios.push(limpio);
+  }
+  return limpios;
+}
+
+/** Un nombre en WhatsApp de menos de cuatro letras no se busca dentro de un texto. */
+const LARGO_MINIMO_DE_NOMBRE = 4;
+
+/**
+ * Los equipos que nombra lo escrito por uno de sus nombres en WhatsApp (D11): primero
+ * el nombre igual a lo escrito; si no, el **más largo** contenido en lo escrito, para que
+ * «Pajarita Case cantera» gane a «Pajarita Case» cuando los dos están registrados.
+ */
+function candidatosPorNombreEnWhatsapp(texto: string, vehiculos: readonly VehiculoConocido[]): string[] {
+  const escrito = compacto(texto);
+  const nombres = vehiculos.flatMap((v) =>
+    (v.nombresWhatsapp ?? []).map((n) => ({ id: v.id, nombre: compacto(n) })).filter((n) => n.nombre !== ''),
+  );
+  const unicos = (lista: { id: string }[]) => [...new Set(lista.map((n) => n.id))];
+
+  const iguales = nombres.filter((n) => n.nombre === escrito);
+  if (iguales.length > 0) return unicos(iguales);
+
+  const contenidos = nombres.filter((n) => n.nombre.length >= LARGO_MINIMO_DE_NOMBRE && escrito.includes(n.nombre));
+  const masLargo = Math.max(0, ...contenidos.map((n) => n.nombre.length));
+  return unicos(contenidos.filter((n) => n.nombre.length === masLargo));
+}
+
+/** El equipo que nombra un renglón del grupo de una empresa (spec 038, RF-12 a RF-12c). */
+export interface EquipoDeEmpresa {
+  /** El equipo ligado, o `null` si no hay uno solo. */
+  vehiculoId: string | null;
+  como: 'placa' | 'nombre_whatsapp' | 'modelo' | 'tipo_marca' | 'parecida' | null;
+  /** Solo con `como: 'parecida'`: la placa de la nota «Posiblemente sea…» (RF-12a). */
+  posiblePlaca: PlacaParecida | null;
+  /** Los que pueden ser, si son dos o más: se elige en «No se pudo guardar». */
+  candidatos: string[];
+  tipoId: string | null;
+}
+
+/**
+ * El equipo que nombra un renglón del grupo de OCC (spec 038, RF-12 a RF-12c), entre
+ * **todos** los equipos —OCC lleva la maquinaria de todas las obras—, en este orden:
+ *
+ *  1. la placa o el código, como siempre (`candidatosDeVehiculo`);
+ *  2. uno de sus nombres en WhatsApp (D11);
+ *  3. el modelo, o el tipo y la marca (spec 026, `reconocerMaquina`);
+ *  4. si nada de eso, una placa mal escrita parecida a una sola registrada: el renglón
+ *     **no** se liga y lleva la nota (RF-12a, D5).
+ *
+ * Dos o más candidatos en un paso son ninguno, y no se sigue al siguiente: si «TFO 427»
+ * fuera de dos equipos, un nombre parecido no puede decidir por la persona.
+ */
+export function reconocerEquipoDeEmpresa(
+  texto: string | null | undefined,
+  vehiculos: readonly VehiculoConocido[],
+  ia: { tipo?: string | null; marca?: string | null } = {},
+  /** Los que otro renglón del mensaje ya tomó sin dudas (026/RF-50). */
+  excluidos: ReadonlySet<string> = new Set(),
+): EquipoDeEmpresa {
+  // Sin obra: el filtro por obra de las reglas de la 021 y la 026 deja pasar los que no tienen.
+  const todos = vehiculos.map((v) => ({ ...v, obraId: null }));
+  // La lista del día pone la cantidad delante («1 Vibrocompactador dynapac»), y el tipo
+  // se reconoce por cómo empieza lo escrito.
+  const escrito = texto?.replace(/^\s*\d+\s+(?=[^\d\s])/, '') ?? '';
+  const tipoId = tipoDeEquipo(ia.tipo) ?? tipoDeEquipo(escrito);
+  const ninguno: EquipoDeEmpresa = { vehiculoId: null, como: null, posiblePlaca: null, candidatos: [], tipoId };
+  if (!escrito.trim()) return ninguno;
+  const ligado = (vehiculoId: string, como: EquipoDeEmpresa['como']): EquipoDeEmpresa => ({ ...ninguno, vehiculoId, como });
+
+  const porPlaca = candidatosDeVehiculo(escrito, todos, '');
+  if (porPlaca.length === 1) return ligado(porPlaca[0], 'placa');
+  if (porPlaca.length > 1) return { ...ninguno, candidatos: porPlaca };
+
+  const porNombre = candidatosPorNombreEnWhatsapp(escrito, todos);
+  if (porNombre.length === 1) return ligado(porNombre[0], 'nombre_whatsapp');
+  if (porNombre.length > 1) return { ...ninguno, candidatos: porNombre };
+
+  const maquina = reconocerMaquina(escrito, todos, '', ia, excluidos);
+  if (maquina.id) return ligado(maquina.id, maquina.como);
+  if (maquina.candidatos.length > 0) return { ...ninguno, candidatos: maquina.candidatos };
+
+  const parecida = placaParecida(escrito, todos);
+  return parecida ? { ...ninguno, como: 'parecida', posiblePlaca: parecida } : ninguno;
 }
 
 /**
@@ -1984,6 +2214,10 @@ export const CATEGORIAS_DE_WHATSAPP = [
   'reporte_almacen',
   'seguimiento',
   'ignorar',
+  // Spec 038: las del grupo de mantenimiento de OCC (D1).
+  'lista_equipos',
+  'trabajo_mantenimiento',
+  'informe_mantenimiento',
 ] as const;
 
 export type CategoriaDeWhatsapp = (typeof CATEGORIAS_DE_WHATSAPP)[number];
@@ -2025,6 +2259,10 @@ const DESTINOS: Record<CategoriaDeWhatsapp, DestinoDeWhatsapp> = {
   reporte_almacen: 'almacen',
   seguimiento: 'ninguno',
   ignorar: 'ninguno',
+  // Son del grupo de una empresa; en el de una obra no hay a dónde llevarlas.
+  lista_equipos: 'ninguno',
+  trabajo_mantenimiento: 'ninguno',
+  informe_mantenimiento: 'ninguno',
 };
 
 /** Cómo se nombra cada categoría en la bandeja (RF-18). */
@@ -2040,6 +2278,9 @@ const ETIQUETAS_DE_CATEGORIA: Record<CategoriaDeWhatsapp, string> = {
   reporte_almacen: 'Reporte de almacén',
   seguimiento: 'Seguimiento',
   ignorar: 'Ignorar',
+  lista_equipos: 'Lista de equipos operativos',
+  trabajo_mantenimiento: 'Trabajo de mantenimiento',
+  informe_mantenimiento: 'Informe de mantenimiento',
 };
 
 /** La categoría como se lee; una que la IA estrene se muestra tal cual vino. */
@@ -2050,6 +2291,38 @@ export function etiquetaDeCategoria(categoria: string | null | undefined): strin
 
 export function destinoDeCategoria(categoria: string | null | undefined): DestinoDeWhatsapp {
   return (categoria && DESTINOS[categoria as CategoriaDeWhatsapp]) || 'ninguno';
+}
+
+/**
+ * Las categorías que arman la bitácora de una empresa (spec 038, RF-9 a RF-9f, RF-10):
+ * las tres del grupo de mantenimiento, y también una novedad de vehículo o un incidente,
+ * que en el grupo de OCC son varadas y daños. El resto —una autorización de compra, una
+ * pregunta de una obra, un saludo— no arma renglones: se ve en Reportes de WhatsApp y
+ * nada más (RF-9g).
+ */
+const CATEGORIAS_DE_BITACORA_DE_EMPRESA: readonly CategoriaDeWhatsapp[] = [
+  'lista_equipos',
+  'trabajo_mantenimiento',
+  'informe_mantenimiento',
+  'vehiculo_maquinaria',
+  'incidente',
+];
+
+/**
+ * De dónde vienen los reportes que ve una empresa en Reportes de WhatsApp (spec 038, RF-25,
+ * D4): su propio grupo, los de vehículos y maquinaria de las obras (033/RF-23), o todos.
+ */
+export const ORIGENES_DE_LA_BANDEJA = ['todos', 'grupo', 'obras'] as const;
+export type OrigenDeLaBandeja = (typeof ORIGENES_DE_LA_BANDEJA)[number];
+
+/** El origen pedido; sin él o si no existe, todos (RF-25: no se pierde lo que se veía). */
+export function origenDeLaBandeja(texto: string | null | undefined): OrigenDeLaBandeja {
+  return (ORIGENES_DE_LA_BANDEJA as readonly string[]).includes(texto ?? '') ? (texto as OrigenDeLaBandeja) : 'todos';
+}
+
+/** A dónde va un mensaje del grupo de una empresa (spec 038). */
+export function destinoEnGrupoDeEmpresa(categoria: string | null | undefined): 'bitacora_empresa' | 'ninguno' {
+  return CATEGORIAS_DE_BITACORA_DE_EMPRESA.includes(categoria as CategoriaDeWhatsapp) ? 'bitacora_empresa' : 'ninguno';
 }
 
 /**

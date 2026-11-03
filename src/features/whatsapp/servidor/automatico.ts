@@ -30,6 +30,7 @@ import { canteraViajes, obras, whatsappGrupos, whatsappMensajes } from '@/db/ser
 import { eleccionesAjenas, opcionesDeLaObra } from '@/features/cantera/servidor/viajes';
 import { reporteCorregido } from '@/features/panel/contratos';
 import { valeLimpio } from '@/shared/rules/cantera';
+import type { EmpresaId } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
   candidatosDeVehiculo,
@@ -68,7 +69,8 @@ import {
 import { actualizarDia } from './dias';
 import { idDeterminista } from './ids';
 import { guardarMantenimientos, type MantenimientosGuardados } from './mantenimientos';
-import { obraDelMensaje } from './obra';
+import { procesarMensajeDeEmpresa, type ResultadoEnEmpresa } from './empresa';
+import { empresaDelMensaje, obraDelMensaje } from './obra';
 
 /** Lo que pasó con un mensaje al procesarlo. */
 export type ResultadoDelProceso =
@@ -80,7 +82,8 @@ export type ResultadoDelProceso =
   | { estado: 'en_espera'; resultado: ResultadoGuardado }
   /** Ignorar o una categoría sin destino: no se guarda nada (RF-6). */
   | { estado: 'sin_destino' }
-  | { estado: 'guardado'; resultado: ResultadoGuardado };
+  /** En la bitácora de una obra, o en la de una empresa (spec 038). */
+  | { estado: 'guardado'; resultado: ResultadoGuardado | ResultadoEnEmpresa };
 
 /** Lo que queda escrito en el mensaje para el historial (RF-58, RF-59). */
 export interface ResultadoGuardado {
@@ -114,6 +117,10 @@ async function leerMensaje(id: string) {
       propuestaIa: whatsappMensajes.propuestaIa,
       propuesta: whatsappMensajes.propuesta,
       obraId: sql<string | null>`${obraDelMensaje}`,
+      // Spec 038: el grupo de una empresa va a su bitácora, no a la de una obra.
+      empresaId: sql<EmpresaId | null>`${empresaDelMensaje}`,
+      autorId: whatsappMensajes.autorId,
+      autorNombre: whatsappMensajes.autorNombre,
       canteraActiva: obras.canteraActivo,
       almacenActivo: obras.almacenActivo,
     })
@@ -433,6 +440,19 @@ async function guardarEnAlmacen(datos: {
 export async function procesarMensaje(id: string): Promise<ResultadoDelProceso> {
   const mensaje = await leerMensaje(id);
   if (!mensaje || mensaje.estado !== 'pendiente') return { estado: 'no_pendiente' };
+  if (!mensaje.obraId && mensaje.empresaId) {
+    // Spec 038 (RF-10): el grupo de OCC arma la bitácora de OCC, con su propio camino.
+    return procesarMensajeDeEmpresa({
+      id,
+      version: mensaje.version,
+      categoria: mensaje.categoria,
+      enviadoEn: mensaje.enviadoEn,
+      propuestaIa: mensaje.propuestaIa,
+      autorId: mensaje.autorId,
+      autorNombre: mensaje.autorNombre,
+      empresaId: mensaje.empresaId,
+    });
+  }
   if (!mensaje.obraId) return { estado: 'sin_obra' };
   const obraId = mensaje.obraId;
 

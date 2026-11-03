@@ -22,7 +22,16 @@ import { whatsappGrupos, whatsappMensajes } from '@/db/servidor/esquema';
  * La obra del mensaje como expresión SQL, para consultas que ya juntan
  * `whatsapp_mensajes` con `whatsapp_grupos`.
  */
-export const obraDelMensaje: SQL<string | null> = sql<string | null>`coalesce(${whatsappMensajes.obraDecididaId}, ${whatsappGrupos.obraId})`;
+export const obraDelMensaje: SQL<string | null> = sql<string | null>`case when ${whatsappMensajes.empresaDecididaId} is not null then null else coalesce(${whatsappMensajes.obraDecididaId}, ${whatsappGrupos.obraId}) end`;
+
+/**
+ * La empresa del mensaje (spec 038, RF-4, RF-26): con la misma regla que la obra. La
+ * decidida, si ya se guardó en la bitácora de una empresa; si no, la de su grupo. Un
+ * mensaje que ya se decidió en una obra no es de ninguna empresa aunque su grupo pase a
+ * OCC, y uno guardado en OCC no es de ninguna obra aunque su grupo pase a una: lo
+ * guardado se queda donde se guardó.
+ */
+export const empresaDelMensaje: SQL<string | null> = sql<string | null>`case when ${whatsappMensajes.obraDecididaId} is not null then null else coalesce(${whatsappMensajes.empresaDecididaId}, ${whatsappGrupos.empresaId}) end`;
 
 /**
  * El día del reporte de un mensaje, como expresión SQL: el del hecho, o el día en

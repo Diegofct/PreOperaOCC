@@ -7,7 +7,7 @@ import { vehiculoNuevo } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { DESGASTE_PARA_CAMBIO } from '@/shared/catalogos/llantas';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { placaOcupada } from '@/features/servidor/placas';
+import { nombresEnWhatsappOcupados, placaOcupada } from '@/features/servidor/placas';
 import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
@@ -42,6 +42,8 @@ export async function GET(peticion: Request) {
         horometroH: vehiculos.horometroH,
         // Spec 026, RF-21: cuándo se actualizó la última lectura.
         medidorActualizadoEn: vehiculos.medidorActualizadoEn,
+        // Spec 038 (D11): como lo nombran en el grupo de OCC.
+        nombresWhatsapp: vehiculos.nombresWhatsapp,
         estado: vehiculos.estado,
         // Spec 024, RF-32: la marca «creado desde WhatsApp».
         desdeWhatsapp: sql<boolean>`exists (
@@ -96,6 +98,9 @@ export async function POST(peticion: Request) {
     // Spec 032, RF-10: la placa no se repite entre vehículos vigentes.
     const ocupada = await placaOcupada(datos.placa);
     if (ocupada) return ocupada;
+    // Spec 038 (D11): un nombre en WhatsApp no se repite entre equipos vigentes.
+    const nombreOcupado = await nombresEnWhatsappOcupados(datos.nombresWhatsapp ?? []);
+    if (nombreOcupado) return nombreOcupado;
 
     // Si se registra un medidor de partida, queda fechado: `medidorActualizadoEn`
     // es lo que el móvil compara para decidir si una lectura es plausible.
