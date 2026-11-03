@@ -25,7 +25,7 @@ import { alcanza } from '@/shared/rules/permisos';
 import { etiquetaDeCategoria, type EstadoMensajeWhatsapp } from '@/shared/rules/whatsapp';
 
 import { useLugarDelPanel, useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
-import { rutaDeObra } from '@/shared/rules/empresas';
+import { nombreDeEmpresa, rutaDeEmpresa, rutaDeObra } from '@/shared/rules/empresas';
 
 import { api } from '../cliente-api';
 import {
@@ -109,7 +109,35 @@ function dondeQuedo(p: PropuestaFila): { renglones: string[]; enlace: Enlace | n
   ].filter((x): x is string => !!x);
   // A la página de la obra del mensaje, el día del hecho si lo hay.
   const enLaObra = (pagina: string, conDia = true) =>
-    `${rutaDeObra(p.obraId, pagina)}${conDia && p.fechaHecho ? `?${new URLSearchParams({ fecha: p.fechaHecho })}` : ''}`;
+    p.obraId
+      ? `${rutaDeObra(p.obraId, pagina)}${conDia && p.fechaHecho ? `?${new URLSearchParams({ fecha: p.fechaHecho })}` : ''}`
+      : '#';
+
+  // Spec 038 (RF-10, RF-25): lo del grupo de OCC queda en la bitácora de OCC de su día.
+  if (p.estado === 'guardado' && r.modulo === 'bitacora_empresa' && p.empresaId) {
+    const empresa = nombreDeEmpresa(p.empresaId);
+    const diaDeLaBitacora = r.fecha ?? p.fechaHecho;
+    const llego = (r.guardados?.length ?? 0) > 0;
+    return {
+      renglones: [
+        llego ? `Bitácora de ${empresa} del ${diaDeLaBitacora}` : 'No trajo nada para la bitácora',
+        ...(r.fechaDudosa ? ['Con fecha dudosa: revísela'] : []),
+        ...(r.mantenimientos?.guardados?.length ? [cuenta(r.mantenimientos.guardados.length, 'mantenimiento', 'mantenimientos')] : []),
+        ...(r.apartados ? [`${cuenta(r.apartados, 'renglón', 'renglones')} en «No se pudo guardar»`] : []),
+      ],
+      enlace:
+        llego && diaDeLaBitacora
+          ? {
+              titulo: 'Ver bitácora',
+              ruta: `${rutaDeEmpresa(p.empresaId, 'bitacora')}?${new URLSearchParams({ dia: diaDeLaBitacora })}`,
+            }
+          : null,
+    };
+  }
+  // Del grupo de una empresa sin destino (una conversación, o el grupo de Geolab): se ve aquí y nada más.
+  if (p.empresaId && !p.obraId && p.estado === 'pendiente') {
+    return { renglones: ['Se ve aquí: no arma renglones (RF-9g, RF-28)'], enlace: null };
+  }
 
   switch (p.estado) {
     case 'en_espera':
@@ -182,8 +210,21 @@ export default function PantallaBandeja() {
   // pestañas son del día de cada obra (armar la bitácora, reportes esperados…): van en la obra.
   const lugar = useLugarDelPanel();
   const empresa = lugar?.tipo === 'empresa' ? lugar.empresa : undefined;
-  const pestanas = empresa === 'occ' ? PESTANAS.filter((p) => p.valor === 'historial') : PESTANAS;
-  const pestana: Pestana = empresa === 'occ' ? 'historial' : pestanaElegida;
+  // Spec 038: en OCC, también «No se pudo guardar» y los reportes esperados de su grupo
+  // (RF-16, RF-26); «Creado automáticamente» no, porque el grupo de OCC no crea nada (RF-13), y
+  // el estado del día está en su Bitácora. En Geolab, solo el historial (RF-28).
+  const pestanas =
+    empresa === 'occ'
+      ? PESTANAS.filter((p) => ['historial', 'excepciones', 'esperados'].includes(p.valor))
+      : empresa === 'geolab'
+        ? PESTANAS.filter((p) => p.valor === 'historial')
+        : PESTANAS;
+  const pestana: Pestana = pestanas.some((p) => p.valor === pestanaElegida) ? pestanaElegida : 'historial';
+  // Spec 038 (RF-25): de dónde vienen los reportes en una empresa con grupo. Quien no tiene el
+  // permiso de WhatsApp (el laboratorista) solo ve el grupo, y no se le ofrece elegir.
+  const conGrupo = empresa === 'occ' || empresa === 'geolab';
+  const eligeOrigen = conGrupo && alcanza(rol, 'whatsapp', 'listar');
+  const [origen, setOrigen] = useState<string>('todos');
   const [estado, setEstado] = useState<EstadoMensajeWhatsapp>('guardado');
   const [obraDelSelector, setObraId] = useState<string | null>(null);
   // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
@@ -200,8 +241,8 @@ export default function PantallaBandeja() {
   const { desde, hasta } = fechas.consultado;
   const propuestas = useListado<PropuestaFila>(
     useCallback(
-      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }, empresa),
-      [estado, obraId, desde, hasta, empresa],
+      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }, empresa, conGrupo ? origen : undefined),
+      [estado, obraId, desde, hasta, empresa, conGrupo, origen],
     ),
   );
 
@@ -296,15 +337,18 @@ export default function PantallaBandeja() {
       ancho: 100,
       // No por debajo de su botón: «Revisar» mide 87 (spec 022, RF-27).
       anchoMinimo: 90,
-      pintar: (p) => (
-        <Acciones>
-          <Boton
-            titulo={p.estado === 'pendiente' ? 'Revisar' : 'Ver'}
-            tono={p.estado === 'pendiente' ? 'primario' : 'secundario'}
-            onPress={() => setAbierta(p.id)}
-          />
-        </Acciones>
-      ),
+      // Lo del grupo de una empresa no tiene un reporte de obra que revisar (spec 038): se lee
+      // en la fila y se ve en su bitácora con «Ver bitácora».
+      pintar: (p) =>
+        p.obraId ? (
+          <Acciones>
+            <Boton
+              titulo={p.estado === 'pendiente' ? 'Revisar' : 'Ver'}
+              tono={p.estado === 'pendiente' ? 'primario' : 'secundario'}
+              onPress={() => setAbierta(p.id)}
+            />
+          </Acciones>
+        ) : null,
     },
   ];
 
@@ -314,7 +358,8 @@ export default function PantallaBandeja() {
   return (
     <MarcoPantalla
       modulo="whatsapp"
-      exigeObra
+      // En OCC y Geolab no hace falta obra: el laboratorista no tiene una y ve su grupo (RF-28).
+      exigeObra={!conGrupo}
       titulo="Reportes de WhatsApp"
       descripcion="Lo que se reportó en los grupos de la obra se guarda solo en su módulo. Aquí se ve qué se guardó y dónde."
       error={propuestas.error}
@@ -348,9 +393,9 @@ export default function PantallaBandeja() {
         </Acciones>
       )}
       {!abierta && pestana === 'dias' ? <EstadoDelDia opcionesDeObra={opcionesDeObra} /> : null}
-      {!abierta && pestana === 'excepciones' ? <NoSePudoGuardar opcionesDeObra={opcionesDeObra} /> : null}
+      {!abierta && pestana === 'excepciones' ? <NoSePudoGuardar opcionesDeObra={opcionesDeObra} empresa={empresa} /> : null}
       {!abierta && pestana === 'creados' ? <CreadoAutomaticamente opcionesDeObra={opcionesDeObra} /> : null}
-      {!abierta && pestana === 'esperados' ? <ReportesEsperados opcionesDeObra={opcionesDeObra} /> : null}
+      {!abierta && pestana === 'esperados' ? <ReportesEsperados opcionesDeObra={opcionesDeObra} empresa={empresa} /> : null}
 
       {abierta || pestana !== 'historial' ? null : (
       <Seccion titulo="Historial">
@@ -362,7 +407,20 @@ export default function PantallaBandeja() {
             onChange={(v) => setEstado((v as EstadoMensajeWhatsapp | null) ?? 'guardado')}
             ancho={200}
           />
-          {esGerencia && !obraDeLaRuta ? (
+          {eligeOrigen ? (
+            <Selector
+              etiqueta="Origen"
+              valor={origen}
+              opciones={[
+                { valor: 'todos', etiqueta: 'Todos' },
+                { valor: 'grupo', etiqueta: `Grupo de ${nombreDeEmpresa(empresa!)}` },
+                { valor: 'obras', etiqueta: 'Obras' },
+              ]}
+              onChange={(v) => setOrigen(v ?? 'todos')}
+              ancho={200}
+            />
+          ) : null}
+          {esGerencia && !obraDeLaRuta && (!conGrupo || origen !== 'grupo') ? (
             <Selector
               etiqueta="Obra"
               valor={obraId}
@@ -398,6 +456,10 @@ export default function PantallaBandeja() {
  * Los grupos de WhatsApp y su obra, para la gerencia (RF-8 a RF-13). Asociar es
  * elegir la obra y guardar; cambiarla, lo mismo. Al hacerlo, los pendientes del
  * grupo pasan a la bandeja de esa obra, y lo ya decidido se queda donde estaba.
+ *
+ * Desde la spec 038 (RF-1 a RF-3) un grupo también puede ser de una empresa —OCC o
+ * Geolab—. Un solo selector, con las empresas arriba y las obras abajo, para no pedir
+ * primero «obra o empresa»: el valor dice cuál es (`empresa:occ`, `obra:<id>`).
  */
 function GruposDeWhatsapp({
   opcionesDeObra,
@@ -410,16 +472,33 @@ function GruposDeWhatsapp({
   const [elegidas, setElegidas] = useState<Record<string, string | null>>({});
   const [hecho, setHecho] = useState<string | null>(null);
 
-  const sinObra = grupos.datos.filter((g) => !g.obraId).length;
+  // Spec 038: un grupo de OCC o de Geolab tampoco está sin asociar.
+  const sinObra = grupos.datos.filter((g) => !g.obraId && !g.empresaId).length;
+
+  // Spec 038 (RF-1, RF-2): las dos empresas que pueden tener grupo, arriba de las obras.
+  const opcionesDeDueno: Opcion[] = [
+    { valor: 'empresa:occ', etiqueta: 'OCC', detalle: 'Empresa' },
+    { valor: 'empresa:geolab', etiqueta: 'Geolab', detalle: 'Empresa' },
+    ...opcionesDeObra.map((o) => ({ ...o, valor: `obra:${o.valor}` })),
+  ];
+  const duenoActual = (g: GrupoFila) => (g.empresaId ? `empresa:${g.empresaId}` : g.obraId ? `obra:${g.obraId}` : null);
 
   async function asociar(grupo: GrupoFila) {
-    const obraId = elegidas[grupo.id];
-    if (!obraId) return;
+    const elegido = elegidas[grupo.id];
+    if (!elegido) return;
     setHecho(null);
-    const bien = await grupos.ejecutar(() => api.whatsapp.grupos.asociar(grupo.id, obraId));
+    const corte = elegido.indexOf(':');
+    const tipo = elegido.slice(0, corte);
+    const id = elegido.slice(corte + 1);
+    const dueno = tipo === 'empresa' ? { empresaId: id as 'occ' | 'geolab' } : { obraId: id };
+    const bien = await grupos.ejecutar(() => api.whatsapp.grupos.asociar(grupo.id, dueno));
     if (bien) {
-      const nombre = opcionesDeObra.find((o) => o.valor === obraId)?.etiqueta ?? 'la obra';
-      setHecho(`«${grupo.nombre}» quedó en ${nombre}. Sus pendientes ya están en esa bandeja.`);
+      const nombre = opcionesDeDueno.find((o) => o.valor === elegido)?.etiqueta ?? 'la obra';
+      setHecho(
+        tipo === 'empresa'
+          ? `«${grupo.nombre}» quedó en ${nombre}. Sus pendientes ya están en Reportes de WhatsApp de ${nombre}.`
+          : `«${grupo.nombre}» quedó en ${nombre}. Sus pendientes ya están en esa bandeja.`,
+      );
       setElegidas((antes) => ({ ...antes, [grupo.id]: null }));
       alAsociar();
     }
@@ -434,13 +513,16 @@ function GruposDeWhatsapp({
     },
     {
       clave: 'obra',
-      titulo: 'Obra',
+      // Spec 038 (RF-3): su obra o su empresa.
+      titulo: 'Obra o empresa',
       ancho: 210,
       pintar: (g) =>
         g.obraNombre ? (
           <Celda lineas={2}>{g.obraNombre}</Celda>
+        ) : g.empresaNombre ? (
+          <Celda lineas={2}>{`${g.empresaNombre} (empresa)`}</Celda>
         ) : (
-          <Etiqueta tono="atencion">Sin obra</Etiqueta>
+          <Etiqueta tono="atencion">Sin asociar</Etiqueta>
         ),
     },
     {
@@ -461,11 +543,11 @@ function GruposDeWhatsapp({
       ancho: 260,
       pintar: (g) => (
         <Selector
-          etiqueta={g.obraId ? 'Cambiar a' : 'Obra'}
+          etiqueta={duenoActual(g) ? 'Cambiar a' : 'Obra o empresa'}
           valor={elegidas[g.id] ?? null}
-          opciones={opcionesDeObra.filter((o) => o.valor !== g.obraId)}
+          opciones={opcionesDeDueno.filter((o) => o.valor !== duenoActual(g))}
           onChange={(v) => setElegidas((antes) => ({ ...antes, [g.id]: v }))}
-          vacio="Elija la obra"
+          vacio="Elija la obra o la empresa"
         />
       ),
     },
@@ -478,8 +560,8 @@ function GruposDeWhatsapp({
       pintar: (g) => (
         <Acciones>
           <Boton
-            titulo={g.obraId ? 'Cambiar' : 'Asociar'}
-            tono={g.obraId ? 'secundario' : 'primario'}
+            titulo={duenoActual(g) ? 'Cambiar' : 'Asociar'}
+            tono={duenoActual(g) ? 'secundario' : 'primario'}
             deshabilitado={!elegidas[g.id]}
             onPress={() => asociar(g)}
           />
@@ -496,8 +578,8 @@ function GruposDeWhatsapp({
       {sinObra > 0 ? (
         <Aviso tono="info">
           {sinObra === 1
-            ? 'Hay un grupo sin obra: sus mensajes no salen en ninguna bandeja hasta que lo asocie.'
-            : `Hay ${sinObra} grupos sin obra: sus mensajes no salen en ninguna bandeja hasta que los asocie.`}
+            ? 'Hay un grupo sin asociar a una obra ni a una empresa: sus mensajes no salen en ninguna bandeja hasta que lo asocie.'
+            : `Hay ${sinObra} grupos sin asociar a una obra ni a una empresa: sus mensajes no salen en ninguna bandeja hasta que los asocie.`}
         </Aviso>
       ) : null}
       {grupos.error ? <Aviso tono="error">{grupos.error}</Aviso> : null}

@@ -31,6 +31,7 @@ import {
 import { baseServidor } from "@/db/servidor/cliente";
 import {
   bitacoraFotos,
+  bitacorasEmpresa,
   media,
   partesDeObra,
   usuarios,
@@ -52,7 +53,7 @@ import { etiquetaDeCategoria } from "@/shared/rules/whatsapp";
 
 import { apartar } from "./apartados";
 import { idDeterminista } from "./ids";
-import { obraDelMensaje } from "./obra";
+import { empresaDelMensaje, obraDelMensaje } from "./obra";
 
 /**
  * El día de la foto (RF-2): el del hecho que se fijó al guardar el mensaje y, si el mensaje
@@ -75,6 +76,9 @@ export interface FotosSincronizadas {
   apartadas: number;
 }
 
+/** De quién es la bitácora del día: una obra (027) o una empresa (spec 038, RF-8). */
+type DuenoDeLasFotos = { tipo: "obra"; obraId: string } | { tipo: "empresa"; empresaId: string };
+
 /**
  * Pone en la bitácora de la obra y el día las fotos de WhatsApp que le faltan (RF-1, RF-2,
  * RF-8, RF-9, RF-12, RF-27), y aparta las que llegaron con la bitácora ya cerrada (RF-21).
@@ -90,23 +94,56 @@ export async function sincronizarFotosDelDia(
     sinApartar?: boolean;
   } = {},
 ): Promise<FotosSincronizadas> {
+  return sincronizarFotos({ tipo: "obra", obraId }, fecha, opciones);
+}
+
+/**
+ * Lo mismo para la bitácora del día de una empresa (spec 038, RF-8): las fotos de su grupo
+ * con ese día del hecho, a «Fotos del día» de la bitácora de OCC, con las mismas reglas.
+ */
+export async function sincronizarFotosDeEmpresa(empresaId: string, fecha: string): Promise<FotosSincronizadas> {
+  return sincronizarFotos({ tipo: "empresa", empresaId }, fecha, {});
+}
+
+async function sincronizarFotos(
+  dueno: DuenoDeLasFotos,
+  fecha: string,
+  opciones: { simular?: boolean; sinApartar?: boolean },
+): Promise<FotosSincronizadas> {
   const db = baseServidor();
   const nada = { agregadas: 0, apartadas: 0 };
 
-  const [parte] = await db
-    .select({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn })
-    .from(partesDeObra)
-    .where(
-      and(
-        eq(partesDeObra.obraId, obraId),
-        eq(partesDeObra.fecha, fecha),
-        isNull(partesDeObra.anuladoEn),
-      ),
-    )
-    .limit(1);
-  if (!parte) return nada;
+  const [bitacoraDelDia] =
+    dueno.tipo === "obra"
+      ? await db
+          .select({ id: partesDeObra.id, cerradoEn: partesDeObra.cerradoEn })
+          .from(partesDeObra)
+          .where(
+            and(
+              eq(partesDeObra.obraId, dueno.obraId),
+              eq(partesDeObra.fecha, fecha),
+              isNull(partesDeObra.anuladoEn),
+            ),
+          )
+          .limit(1)
+      : await db
+          .select({ id: bitacorasEmpresa.id, cerradoEn: bitacorasEmpresa.cerradoEn })
+          .from(bitacorasEmpresa)
+          .where(
+            and(
+              sql`${bitacorasEmpresa.empresaId} = ${dueno.empresaId}`,
+              eq(bitacorasEmpresa.fecha, fecha),
+              isNull(bitacorasEmpresa.anuladoEn),
+            ),
+          )
+          .limit(1);
+  if (!bitacoraDelDia) return nada;
 
-  // Las fotos de WhatsApp de la obra con ese día del hecho (RF-2), con lo que la regla mira.
+  // Las fotos de WhatsApp del lugar con ese día del hecho (RF-2), con lo que la regla mira.
+  const delLugar =
+    dueno.tipo === "obra"
+      ? sql`${obraDelMensaje} = ${dueno.obraId}`
+      : sql`${empresaDelMensaje} = ${dueno.empresaId}`;
   const candidatas: FotoCandidata[] = (
     await db
       .select({
@@ -130,7 +167,7 @@ export async function sincronizarFotosDelDia(
           sql`${media.claveR2} is not null`,
           like(media.mime, "image/%"),
           sql`${diaDeLaFoto} = ${fecha}`,
-          sql`${obraDelMensaje} = ${obraId}`,
+          delLugar,
         ),
       )
       .orderBy(asc(media.recibidoEn))
@@ -140,29 +177,33 @@ export async function sincronizarFotosDelDia(
   }));
   if (candidatas.length === 0) return nada;
 
-  const bitacora = { fecha, cerradaEnMs: parte.cerradoEn?.getTime() ?? null };
+  const bitacora = { fecha, cerradaEnMs: bitacoraDelDia.cerradoEn?.getTime() ?? null };
   const decididas = candidatas.map((foto) => ({
     foto,
     decision: fotoEntraALaBitacora(foto, bitacora),
   }));
 
-  // Lo que ya está: las filas de la sección —agregadas o quitadas— y la foto principal, que
-  // no se repite (RF-12) aunque haya llegado por otro mensaje.
+  // Lo que ya está: las filas de la sección —agregadas o quitadas— y, en una obra, la foto
+  // principal, que no se repite (RF-12) aunque haya llegado por otro mensaje.
+  const columnaDelDueno =
+    dueno.tipo === "obra" ? bitacoraFotos.parteId : bitacoraFotos.bitacoraEmpresaId;
   const yaEstan = [
     ...(await db
       .select({ mediaId: bitacoraFotos.mediaId, sha256: bitacoraFotos.sha256 })
       .from(bitacoraFotos)
-      .where(eq(bitacoraFotos.parteId, parte.id))),
-    ...(await db
-      .select({ mediaId: media.id, sha256: media.sha256 })
-      .from(media)
-      .where(
-        and(
-          eq(media.duenoTipo, "bitacora"),
-          eq(media.duenoId, parte.id),
-          isNull(media.itemKey),
-        ),
-      )),
+      .where(eq(columnaDelDueno, bitacoraDelDia.id))),
+    ...(dueno.tipo === "obra"
+      ? await db
+          .select({ mediaId: media.id, sha256: media.sha256 })
+          .from(media)
+          .where(
+            and(
+              eq(media.duenoTipo, "bitacora"),
+              eq(media.duenoId, bitacoraDelDia.id),
+              isNull(media.itemKey),
+            ),
+          )
+      : []),
   ];
 
   const nuevas = fotosParaAgregar(
@@ -185,8 +226,9 @@ export async function sincronizarFotosDelDia(
       .values(
         await Promise.all(
           nuevas.map(async (f) => ({
-            id: await idDeterminista(parte.id, "foto-del-dia", f.mediaId),
-            parteId: parte.id,
+            id: await idDeterminista(bitacoraDelDia.id, "foto-del-dia", f.mediaId),
+            parteId: dueno.tipo === "obra" ? bitacoraDelDia.id : null,
+            bitacoraEmpresaId: dueno.tipo === "empresa" ? bitacoraDelDia.id : null,
             mediaId: f.mediaId,
             mensajeId: f.mensajeId,
             sha256: f.sha256,
@@ -198,7 +240,11 @@ export async function sincronizarFotosDelDia(
 
   const apartadas = opciones.sinApartar
     ? 0
-    : await apartarLasDeBitacoraCerrada(deCerrada, candidatas);
+    : await apartarLasDeBitacoraCerrada(
+        deCerrada,
+        candidatas,
+        dueno.tipo === "obra" ? "bitacora" : "bitacora_empresa",
+      );
   return { agregadas: nuevas.length, apartadas };
 }
 
@@ -213,6 +259,8 @@ export async function sincronizarFotosDelDia(
 async function apartarLasDeBitacoraCerrada(
   fotos: readonly FotoCandidata[],
   candidatas: readonly FotoCandidata[],
+  /** La sección con que se apartó el mensaje entero por la bitácora cerrada. */
+  seccionDelMensaje: "bitacora" | "bitacora_empresa",
 ): Promise<number> {
   if (fotos.length === 0) return 0;
   const mensajes = [...new Set(fotos.map((f) => f.mensajeId))];
@@ -224,7 +272,7 @@ async function apartarLasDeBitacoraCerrada(
         .where(
           and(
             inArray(whatsappExcepciones.mensajeId, mensajes),
-            eq(whatsappExcepciones.seccion, "bitacora"),
+            eq(whatsappExcepciones.seccion, seccionDelMensaje),
             isNull(whatsappExcepciones.renglon),
           ),
         )

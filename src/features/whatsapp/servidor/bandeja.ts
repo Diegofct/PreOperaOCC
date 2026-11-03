@@ -18,7 +18,7 @@
  *
  * Solo servidor.
  */
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import {
@@ -36,6 +36,7 @@ import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { nombreDeCargo } from '@/shared/catalogos/cargos';
 import { avisoDeValeRepetido } from '@/shared/rules/cantera';
+import { alcanzaLaEmpresa, nombreDeEmpresa, type EmpresaId } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
   destinoDeCategoria,
@@ -46,18 +47,20 @@ import {
   type EstadoMensajeWhatsapp,
   type PropuestaLeible,
   type ReporteDelDia,
+  type OrigenDeLaBandeja,
 } from '@/shared/rules/whatsapp';
 
 import { catalogosDeLaObra } from './catalogos';
-import { diaDelMensaje, obraDelMensaje } from './obra';
+import { diaDelMensaje, empresaDelMensaje, obraDelMensaje } from './obra';
 
 const COLUMNAS_DE_LA_FILA = {
   id: whatsappMensajes.id,
   enviadoEn: whatsappMensajes.enviadoEn,
   autorNombre: whatsappMensajes.autorNombre,
   grupoNombre: whatsappGrupos.nombre,
-  obraId: sql<string>`${obraDelMensaje}`,
+  obraId: sql<string | null>`${obraDelMensaje}`,
   obraNombre: obras.nombre,
+  empresaId: sql<EmpresaId | null>`${empresaDelMensaje}`,
   categoria: whatsappMensajes.categoria,
   resumen: sql<string | null>`${whatsappMensajes.propuestaIa}->>'resumen'`,
   motivoRevision: sql<string | null>`${whatsappMensajes.propuestaIa}->>'motivo_revision'`,
@@ -81,8 +84,9 @@ function aFila(fila: {
   enviadoEn: Date;
   autorNombre: string | null;
   grupoNombre: string;
-  obraId: string;
-  obraNombre: string;
+  obraId: string | null;
+  obraNombre: string | null;
+  empresaId: EmpresaId | null;
   categoria: string | null;
   resumen: string | null;
   motivoRevision: string | null;
@@ -95,6 +99,8 @@ function aFila(fila: {
 }): PropuestaFila {
   return {
     ...fila,
+    // Del grupo de una empresa no hay obra: se muestra la empresa (spec 038, RF-25).
+    obraNombre: fila.obraNombre ?? (fila.empresaId ? nombreDeEmpresa(fila.empresaId) : '—'),
     enviadoEn: fila.enviadoEn.toISOString(),
     resultado: fila.resultado as PropuestaFila['resultado'],
   };
@@ -115,20 +121,34 @@ export async function leerBandeja(
     hasta: string;
     /** Spec 033, RF-23: las categorías de la empresa; `null`, todas. */
     categorias?: readonly string[] | null;
+    /**
+     * Spec 038 (RF-25, D4): la bandeja de una empresa con grupo. `grupo` es solo su grupo,
+     * `obras` lo de las obras con `categorias` (lo de la 033), y `todos` las dos cosas.
+     */
+    empresa?: { id: EmpresaId; origen: OrigenDeLaBandeja } | null;
   },
 ): Promise<PropuestaFila[]> {
-  // El mensaje con su grupo y su obra: la obra sale de `obraDelMensaje`.
+  const deLasObras = and(
+    filtroDeObraEstricto(sesion, obraDelMensaje),
+    veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
+    filtro.categorias ? inArray(whatsappMensajes.categoria, [...filtro.categorias]) : undefined,
+  );
+  // El grupo de la empresa, solo para quien entra a esa empresa (RF-29).
+  const empresa = filtro.empresa && alcanzaLaEmpresa(sesion.rol, filtro.empresa.id) ? filtro.empresa : null;
+  const delGrupo = empresa ? sql`${empresaDelMensaje} = ${empresa.id}` : sql`false`;
+  const origen = empresa?.origen ?? 'obras';
+  const delOrigen = origen === 'grupo' ? delGrupo : origen === 'obras' ? deLasObras : or(deLasObras, delGrupo);
+
+  // El mensaje con su grupo y su obra (o su empresa): salen de `obra.ts`.
   const filas = await baseServidor()
     .select(COLUMNAS_DE_LA_FILA)
     .from(whatsappMensajes)
     .innerJoin(whatsappGrupos, eq(whatsappGrupos.id, whatsappMensajes.grupoId))
-    .innerJoin(obras, sql`${obras.id} = ${obraDelMensaje}`)
+    .leftJoin(obras, sql`${obras.id} = ${obraDelMensaje}`)
     .where(
       and(
-        filtroDeObraEstricto(sesion, obraDelMensaje),
-        veTodasLasObras(sesion) && filtro.obraId ? sql`${obraDelMensaje} = ${filtro.obraId}` : undefined,
+        delOrigen,
         eq(whatsappMensajes.estado, filtro.estado),
-        filtro.categorias ? inArray(whatsappMensajes.categoria, [...filtro.categorias]) : undefined,
         sql`${diaDelMensaje} between ${filtro.desde} and ${filtro.hasta}`,
         // Lo que complementa a un mensaje que existe va dentro de él (RF-20).
         sql`not exists (select 1 from whatsapp_mensajes p where p.id = ${whatsappMensajes.complementaA})`,
@@ -227,14 +247,16 @@ export async function leerDetalle(
     .innerJoin(obras, sql`${obras.id} = ${obraDelMensaje}`)
     .where(and(eq(whatsappMensajes.id, id), filtroDeObraEstricto(sesion, obraDelMensaje)))
     .limit(1);
-  if (!fila) return null;
+  // Del grupo de una empresa no hay detalle de obra que revisar (spec 038): «no existe» aquí.
+  if (!fila?.obraId) return null;
+  const obraId = fila.obraId;
 
   // El día del hecho que dice la IA y el del mensaje: los dos pueden importar para el
   // preoperacional de una volqueta (cambio de la 021 del 2026-10-08, RF-105).
   const diaDelMensaje = fechaDeJornada(fila.enviadoEn.getTime());
   const fechaDeLaIa = (fila.propuestaIa as PropuestaLeible).fecha_evento?.trim() ?? '';
   const { catalogos, claseDe, cargoDe, personasDeLaObra, opciones } = await catalogosDeLaObra(
-    fila.obraId,
+    obraId,
     [diaDelMensaje, fechaDeLaIa],
   );
   const destino = destinoDeCategoria(fila.categoria);
@@ -282,7 +304,7 @@ export async function leerDetalle(
         .from(partesDeObra)
         .where(
           and(
-            eq(partesDeObra.obraId, fila.obraId),
+            eq(partesDeObra.obraId, obraId),
             eq(partesDeObra.fecha, reporte.fecha),
             isNull(partesDeObra.anuladoEn),
           ),
@@ -323,7 +345,7 @@ export async function leerDetalle(
     ),
   };
 
-  const avisosDeVale = await avisosDeValeDelReporte(fila.obraId, id, reporte);
+  const avisosDeVale = await avisosDeValeDelReporte(obraId, id, reporte);
 
   const autorId = reconocerPersona(fila.autorNombre, catalogos.personas);
   const autor = catalogos.personas.find((p) => p.id === autorId);

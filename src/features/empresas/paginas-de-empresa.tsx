@@ -27,6 +27,8 @@ import PantallaBandeja from '@/features/panel/whatsapp/pantalla-bandeja';
 import { usePersona } from '@/features/panel/sesion';
 import PantallaReportes from '@/features/reportes/pantalla-reportes';
 import PantallaPersonal from '@/features/rrhh/pantalla-personal';
+import PantallaSolicitudesDePago from '@/features/tesoreria/pantalla-solicitudes-pago';
+import PantallaTesoreria from '@/features/tesoreria/pantalla-tesoreria';
 import {
   alcanzaLaEmpresa,
   alcanzaLaObraDeLaRuta,
@@ -40,40 +42,28 @@ import {
 import { TODOS_LOS_MODULOS } from '@/shared/rules/permisos';
 
 import { useObraDelLugar } from './contexto-empresa';
-import { PantallaBitacoraDeMaquinaria } from './pantalla-maquinaria';
+import { PantallaBitacoraDeOcc } from './pantalla-bitacora-occ';
+import { PantallaLaboratorioDeLasObras } from './pantalla-laboratorio-de-obras';
 import { PantallaRecursosHumanos } from './pantalla-recursos-humanos';
-import { PantallaEnConstruccion, PantallaQueNoExiste, PantallaSinAcceso } from './pantallas-de-aviso';
+import { PantallaQueNoExiste, PantallaSinAcceso } from './pantallas-de-aviso';
 
 type EmpresaConMenu = Exclude<EmpresaId, 'proyectos'>;
-
-/** Un módulo que llega con su propia spec: el aviso, con el título y la descripción que tendrá. */
-const enConstruccion = (titulo: string, descripcion: string) =>
-  function Pantalla() {
-    return <PantallaEnConstruccion titulo={titulo} descripcion={descripcion} />;
-  };
-
-const SOLICITUDES_DE_PAGO = enConstruccion(
-  'Solicitudes de pago',
-  'Los pagos y anticipos que se piden, para que Tesorería de Elemental los apruebe y los pague.',
-);
 
 const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>> = {
   elemental: {
     'recursos-humanos': PantallaRecursosHumanos,
     // Spec 036, RF-3.
     compras: PantallaCompras,
-    tesoreria: enConstruccion(
-      'Tesorería',
-      'Las solicitudes de pago del grupo y los cortes financieros de cada empresa y cada obra.',
-    ),
+    // Spec 037, RF-3.
+    tesoreria: PantallaTesoreria,
     documentos: PantallaDocumentos,
     asistente: PantallaAsistente,
   },
   occ: {
     whatsapp: PantallaBandeja,
-    // Mientras no llegue su grupo de WhatsApp propio (spec 038), la maquinaria de las
-    // bitácoras de todas las obras (RF-22).
-    bitacora: PantallaBitacoraDeMaquinaria,
+    // Spec 038 (RF-22): su bitácora propia, desde su grupo de WhatsApp, y en otra pestaña
+    // la maquinaria de las bitácoras de todas las obras (033/RF-22).
+    bitacora: PantallaBitacoraDeOcc,
     documentos: PantallaDocumentos,
     // Spec 035, RF-3: el personal de OCC, de consulta.
     'recursos-humanos': PantallaPersonal,
@@ -83,11 +73,13 @@ const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>
     asignaciones: PantallaAsignaciones,
     // Spec 036, RF-1.
     'solicitudes-compra': PantallaSolicitudes,
-    'solicitudes-pago': SOLICITUDES_DE_PAGO,
+    // Spec 037, RF-1.
+    'solicitudes-pago': PantallaSolicitudesDePago,
     asistente: PantallaAsistente,
   },
   geolab: {
-    bitacora: enConstruccion('Bitácora', 'Los ensayos y el laboratorio de las bitácoras de todas las obras.'),
+    // Spec 038 (RF-27): el laboratorio de las bitácoras de todas las obras.
+    bitacora: PantallaLaboratorioDeLasObras,
     whatsapp: PantallaBandeja,
     laboratorio: PantallaLaboratorio,
     reportes: PantallaReportes,
@@ -95,7 +87,8 @@ const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>
     'recursos-humanos': PantallaPersonal,
     // Spec 036, RF-1.
     'solicitudes-compra': PantallaSolicitudes,
-    'solicitudes-pago': SOLICITUDES_DE_PAGO,
+    // Spec 037, RF-1.
+    'solicitudes-pago': PantallaSolicitudesDePago,
     asistente: PantallaAsistente,
   },
 };
@@ -115,7 +108,8 @@ const PANTALLAS_DE_OBRA: Record<string, ComponentType> = {
   documentos: PantallaDocumentos,
   // Spec 036, RF-1.
     'solicitudes-compra': PantallaSolicitudes,
-  'solicitudes-pago': SOLICITUDES_DE_PAGO,
+  // Spec 037, RF-1.
+    'solicitudes-pago': PantallaSolicitudesDePago,
   asistente: PantallaAsistente,
 };
 

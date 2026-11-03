@@ -17,10 +17,10 @@ import { normalizar } from './texto';
 
 /**
  * Dónde vive un documento: una de las tres empresas, una obra (Proyectos no tiene), una
- * persona, en su carpeta de Recursos Humanos (spec 035, RF-23), o una solicitud de compra,
- * con sus soportes (spec 036, RF-17).
+ * persona, en su carpeta de Recursos Humanos (spec 035, RF-23), una solicitud de compra,
+ * con sus soportes (spec 036, RF-17), o una solicitud de pago (spec 037, RF-6).
  */
-export type LugarDeDocumentos = 'elemental' | 'occ' | 'geolab' | 'obra' | 'persona' | 'solicitud';
+export type LugarDeDocumentos = 'elemental' | 'occ' | 'geolab' | 'obra' | 'persona' | 'solicitud' | 'pago';
 
 export interface ClaseDeDocumento {
   /** Slug estable. Es lo que se guarda; no se renombra ni se reutiliza. */
@@ -102,6 +102,18 @@ const CLASES_PROPIAS: Record<LugarDeDocumentos, readonly ClaseDeDocumento[]> = {
     clase('remision', 'Remisión'),
     clase('foto', 'Foto'),
     clase('ficha_tecnica', 'Ficha técnica'),
+    // Spec 037, RF-18: el comprobante del pago de una compra va con su solicitud de compra.
+    clase('comprobante_de_pago', 'Comprobante de pago'),
+  ],
+  // Spec 037, RF-6, RF-13: los soportes de una solicitud de pago y el comprobante de cada pago.
+  // La certificación bancaria reemplaza los datos bancarios del beneficiario (D5).
+  pago: [
+    clase('cuenta_de_cobro', 'Cuenta de cobro'),
+    clase('factura', 'Factura'),
+    clase('cotizacion', 'Cotización'),
+    clase('rut', 'RUT'),
+    clase('certificacion_bancaria', 'Certificación bancaria'),
+    clase('comprobante_de_pago', 'Comprobante de pago'),
   ],
 };
 
@@ -110,7 +122,7 @@ export function clasesDe(lugar: LugarDeDocumentos): readonly ClaseDeDocumento[] 
   const propias = CLASES_PROPIAS[lugar];
   // Las comunes son de empresa: ni la obra, ni la persona, ni la solicitud tienen cámara de
   // comercio ni RUT.
-  return lugar === 'obra' || lugar === 'persona' || lugar === 'solicitud'
+  return lugar === 'obra' || lugar === 'persona' || lugar === 'solicitud' || lugar === 'pago'
     ? [...propias, OTRO]
     : [...CLASES_COMUNES, ...propias, OTRO];
 }
@@ -119,7 +131,7 @@ export function clasesDe(lugar: LugarDeDocumentos): readonly ClaseDeDocumento[] 
  * Las clases de una solicitud que dicen cuánto costó (spec 036, RF-31): el almacenista no
  * las recibe, como no recibe los valores.
  */
-const CLASES_CON_PRECIO: readonly string[] = ['cotizacion', 'orden_de_compra', 'factura'];
+const CLASES_CON_PRECIO: readonly string[] = ['cotizacion', 'orden_de_compra', 'factura', 'comprobante_de_pago'];
 
 export function llevaPrecio(clase: string): boolean {
   return CLASES_CON_PRECIO.includes(clase);

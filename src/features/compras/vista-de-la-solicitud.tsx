@@ -35,6 +35,7 @@ import type { SolicitudDetallada } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { veLosValores } from '@/shared/rules/compras';
+import { NOMBRE_DEL_PAGO_DE_LA_COMPRA, pagoDeLaCompra } from '@/shared/rules/pagos';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
@@ -338,7 +339,11 @@ export function VistaDeLaSolicitud({
       ),
     },
     ...(conValores
-      ? [{ clave: 'valor', titulo: 'Valor', ancho: 130, pintar: (c: Compra) => <Celda>{c.valor ? enPesos(c.valor) : '—'}</Celda> }]
+      ? [
+          { clave: 'valor', titulo: 'Valor', ancho: 130, pintar: (c: Compra) => <Celda>{c.valor ? enPesos(c.valor) : '—'}</Celda> },
+          // Spec 037, RF-19: lo pagado por Tesorería, sin guardar un estado aparte.
+          { clave: 'pago', titulo: 'Pago', ancho: 160, pintar: (c: Compra) => <PagoDeLaCompraEnCelda compra={c} /> },
+        ]
       : []),
     { clave: 'fecha', titulo: 'Fecha', ancho: 110, pintar: (c) => <Celda>{fechaDelCorte(c.fecha)}</Celda> },
     { clave: 'factura', titulo: 'Factura o remisión', ancho: 140, pintar: (c) => <Celda>{c.factura || '—'}</Celda> },
@@ -428,9 +433,10 @@ export function VistaDeLaSolicitud({
           <Dato titulo="Estado">
             <View style={estilos.marcas}>
               {s.estado === 'devuelta' ? null : <EstadoDeLaSolicitud estado={s.estado} />}
+              {/* «Corrígela» le habla a quien puede corregirla; a los demás basta «Devuelta». */}
               {s.marcas.map((m) => (
                 <Etiqueta key={m} tono="malo">
-                  {m}
+                  {m === 'Devuelta: corrígela' && !s.pasos.includes('corregir') ? 'Devuelta' : m}
                 </Etiqueta>
               ))}
               {s.urgente ? <Etiqueta tono="malo">Urgente</Etiqueta> : null}
@@ -526,3 +532,15 @@ const estilos = StyleSheet.create({
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
   anulado: { textDecorationLine: 'line-through', color: Panel.textoApoyo },
 });
+
+/** Pagada, en parte o sin pagar, con lo pagado; nada si la compra se anuló o no trae lo pagado. */
+function PagoDeLaCompraEnCelda({ compra: c }: { compra: Compra }) {
+  if (c.anulada || c.valor === undefined || c.pagado === undefined) return <Celda>—</Celda>;
+  const pago = pagoDeLaCompra(c.valor, c.pagado);
+  return (
+    <View style={estilos.celdaDoble}>
+      <Etiqueta tono={pago === 'pagada' ? 'bueno' : pago === 'en_parte' ? 'atencion' : 'neutro'}>{NOMBRE_DEL_PAGO_DE_LA_COMPRA[pago]}</Etiqueta>
+      {pago === 'en_parte' ? <Text style={estilos.apoyo}>{`Pagado ${enPesos(c.pagado)}`}</Text> : null}
+    </View>
+  );
+}

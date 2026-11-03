@@ -103,7 +103,8 @@ export default function PantallaVehiculos() {
     vehiculos.datos,
     // El código interno ya es la placa (spec 032); se sigue buscando por él porque
     // los equipos sin placa conservan su código «WA-…» y así se encuentran.
-    (v) => [v.placa, v.codigoInterno, v.marca, v.modelo, v.tipoNombre, v.obraNombre],
+    // Y por sus nombres en WhatsApp (spec 038, D11).
+    (v) => [v.placa, v.codigoInterno, v.marca, v.modelo, v.tipoNombre, v.obraNombre, ...(v.nombresWhatsapp ?? [])],
     useCallback(
       (v: VehiculoFila) =>
         (obraFiltro === null || v.obraId === obraFiltro) &&

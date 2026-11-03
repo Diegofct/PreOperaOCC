@@ -2,6 +2,7 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
 import { listarExcepciones } from '@/features/whatsapp/servidor/excepciones';
 import { ESTADOS_DE_EXCEPCION, type EstadoDeExcepcion } from '@/shared/rules/whatsapp-automatico';
+import { EMPRESAS_CON_GRUPO, type EmpresaConGrupo } from '@/shared/rules/whatsapp';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { MENSAJES_DE_RANGO, rangoDeFechas } from '@/shared/rules/rango';
 
@@ -30,6 +31,10 @@ export async function GET(peticion: Request) {
         obraId: parametros.get('obraId'),
         estado: estado as EstadoDeExcepcion,
         ...rango,
+        // Spec 038 (RF-26): `?empresa=occ`, solo lo del grupo de OCC.
+        empresa: (EMPRESAS_CON_GRUPO as readonly string[]).includes(parametros.get('empresa') ?? '')
+          ? (parametros.get('empresa') as EmpresaConGrupo)
+          : null,
       }),
     );
   });

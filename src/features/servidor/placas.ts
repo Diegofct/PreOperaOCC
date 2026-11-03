@@ -4,6 +4,7 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { vehiculos } from '@/db/servidor/esquema';
 import type { ErrorConCampos } from '@/features/servidor/respuestas';
 import { identificacionDelVehiculo, type VehiculoNombrable } from '@/shared/rules/vehiculos';
+import { claveDeNombreEnWhatsapp } from '@/shared/rules/whatsapp';
 
 /**
  * El rechazo de una placa que ya tiene otro vehículo vigente (spec 032, RF-10), o
@@ -35,6 +36,43 @@ export async function placaOcupada(placa: string, salvoId?: string): Promise<Res
   if (!otro) return null;
   const mensaje = `Ya hay un vehículo con la placa ${placa}.`;
   return Response.json({ error: mensaje, campos: { placa: mensaje } } satisfies ErrorConCampos, { status: 409 });
+}
+
+/**
+ * El rechazo de un nombre en WhatsApp que ya tiene otro equipo vigente (spec 038, D11),
+ * o `null` si todos están libres. Si dos equipos se llamaran igual, el grupo de OCC no
+ * podría reconocer ninguno de los dos (RF-12): mejor decirlo al guardarlo que descubrirlo
+ * en «No se pudo guardar». Se compara como se reconoce, sin tildes ni espacios.
+ *
+ * Son pocos equipos con nombres, así que se leen y se comparan aquí, en una sola regla
+ * con el reconocimiento, en vez de repetir la normalización en SQL.
+ */
+export async function nombresEnWhatsappOcupados(
+  nombres: readonly string[],
+  salvoId?: string,
+): Promise<Response | null> {
+  if (nombres.length === 0) return null;
+  const otros = await baseServidor()
+    .select({ id: vehiculos.id, nombres: vehiculos.nombresWhatsapp, ...columnasParaNombrar })
+    .from(vehiculos)
+    .where(
+      and(
+        isNull(vehiculos.eliminadoEn),
+        sql`cardinality(${vehiculos.nombresWhatsapp}) > 0`,
+        salvoId ? ne(vehiculos.id, salvoId) : undefined,
+      ),
+    );
+  for (const nombre of nombres) {
+    const clave = claveDeNombreEnWhatsapp(nombre);
+    const otro = otros.find((v) => v.nombres.some((n) => claveDeNombreEnWhatsapp(n) === clave));
+    if (otro) {
+      const mensaje = `«${nombre}» ya es un nombre en WhatsApp de ${nombrarVehiculo(otro)}.`;
+      return Response.json({ error: mensaje, campos: { nombresWhatsapp: mensaje } } satisfies ErrorConCampos, {
+        status: 409,
+      });
+    }
+  }
+  return null;
 }
 
 /**

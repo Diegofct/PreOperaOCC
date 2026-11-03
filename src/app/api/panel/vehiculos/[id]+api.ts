@@ -5,7 +5,7 @@ import { vehiculos } from '@/db/servidor/esquema';
 import { vehiculoEditado } from '@/features/panel/contratos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso, type PersonaEnSesion } from '@/features/servidor/guardia';
-import { placaOcupada } from '@/features/servidor/placas';
+import { nombresEnWhatsappOcupados, placaOcupada } from '@/features/servidor/placas';
 import {
   cuerpoJson,
   errorDePeticion,
@@ -29,6 +29,7 @@ const COLUMNAS = {
   obraId: vehiculos.obraId,
   odometroKm: vehiculos.odometroKm,
   horometroH: vehiculos.horometroH,
+  nombresWhatsapp: vehiculos.nombresWhatsapp,
   estado: vehiculos.estado,
 };
 
@@ -63,6 +64,13 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const cambios = await cuerpoJson(peticion, vehiculoEditado);
 
     const tocaMedidor = cambios.odometroKm !== undefined || cambios.horometroH !== undefined;
+
+    // Spec 038 (D11): un nombre en WhatsApp no se repite entre equipos vigentes. Quién los
+    // escribe ya lo decidió el permiso de la ruta: gerencia y el Encargado de OCC.
+    if (cambios.nombresWhatsapp !== undefined) {
+      const ocupado = await nombresEnWhatsappOcupados(cambios.nombresWhatsapp, id);
+      if (ocupado) return ocupado;
+    }
 
     // Spec 003 / RF-7. El celular ya rechazaba una lectura que retrocede; esta
     // ruta no, y era la puerta de atrás: corregir un medidor desde el panel

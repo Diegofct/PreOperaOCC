@@ -11,6 +11,9 @@
  * preoperacional del operador y el cierre del parte diario, y el servidor
  * rechaza que retrocedan.
  *
+ * Los nombres en WhatsApp (spec 038, D11) son como lo llama el grupo de OCC cuando no usa
+ * la placa —«Pajarita Case cantera»—, uno por renglón. Con ellos el grupo lo reconoce.
+ *
  * Se manda **solo lo que cambió**. Mandarlo todo convertiría cada corrección en
  * un riesgo de pisar un dato que otro acaba de escribir desde el otro
  * computador.
@@ -18,6 +21,7 @@
 import { useState } from 'react';
 
 import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
+import { limpiarNombresEnWhatsapp } from '@/shared/rules/whatsapp';
 
 import { api } from './cliente-api';
 import {
@@ -56,6 +60,7 @@ export function VentanaCorregirVehiculo({
   const [modelo, setModelo] = useState(vehiculo.modelo ?? '');
   const [obraId, setObraId] = useState<string | null>(vehiculo.obraId);
   const [estado, setEstado] = useState<EstadoVehiculo>(vehiculo.estado);
+  const [nombres, setNombres] = useState((vehiculo.nombresWhatsapp ?? []).join('\n'));
   /*
    * Un choque en la placa se queda en la ventana, bajo su campo, y cualquier
    * otro fallo arriba de ella: el aviso de la página queda detrás del telón y no
@@ -77,6 +82,11 @@ export function VentanaCorregirVehiculo({
     if (modelo !== (vehiculo.modelo ?? '')) cambios.modelo = modelo;
     if (obraId !== vehiculo.obraId) cambios.obraId = obraId;
     if (estado !== vehiculo.estado) cambios.estado = estado;
+    // Spec 038 (D11): uno por renglón; se mandan si cambió la lista ya limpia.
+    const nombresLimpios = limpiarNombresEnWhatsapp(nombres.split('\n'));
+    if (nombresLimpios.join('\n') !== (vehiculo.nombresWhatsapp ?? []).join('\n')) {
+      cambios.nombresWhatsapp = nombresLimpios;
+    }
 
     // Nada que mandar es un cierre, no una petición: pulsar «guardar» sin
     // haber tocado nada no tiene por qué escribir en la base.
@@ -129,6 +139,14 @@ export function VentanaCorregirVehiculo({
           }))}
           onChange={(v) => setEstado((v as EstadoVehiculo) ?? 'operativo')}
           ancho={200}
+        />
+        <Campo
+          etiqueta="Nombres en WhatsApp"
+          valor={nombres}
+          onChange={setNombres}
+          multilinea
+          ayuda="Como lo nombran en el grupo de OCC cuando no dicen la placa, uno por renglón. Ej.: Pajarita Case cantera"
+          error={accion.campoConError('nombresWhatsapp')}
         />
         <AccionesFormulario>
           <Acciones>

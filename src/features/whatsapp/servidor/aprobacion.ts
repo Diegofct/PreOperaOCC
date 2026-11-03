@@ -537,7 +537,7 @@ export async function guardarEnBitacora(datos: {
  * registrada no se escribe aunque sea mayor (RF-43): la del día más nuevo manda. Lo de
  * antes del cambio no tiene día y se compara con el día en que se actualizó.
  */
-async function actualizarMedidores(
+export async function actualizarMedidores(
   filas: readonly { vehiculoId: string; claseMedidor: ClaseDeMedidor; medidorFinal: number | null }[],
   fecha: string,
 ): Promise<void> {

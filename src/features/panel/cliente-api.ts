@@ -16,11 +16,19 @@
  */
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EstadoDeSolicitud } from '@/shared/rules/compras';
+import type { EstadoDePago, PagoDeLaCompra } from '@/shared/rules/pagos';
 import type { EmpresaId } from '@/shared/rules/empresas';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
+import type { z } from 'zod';
+
 import type {
+  BitacoraDeEmpresaDelDia,
+  EnsayoDeLasObrasFila,
+  ReportesEsperadosDeLaEmpresa,
+  correccionDeBitacoraDeEmpresa,
+  DiaDeBitacoraDeEmpresaFila,
   ConversacionDelAsistente,
   CupoDelAsistente,
   EventoDelAsistente,
@@ -57,13 +65,22 @@ import type {
   FichaDeLaPersona,
   FichaEditada,
   BandejaDeCompras,
+  BandejaDeTesoreria,
+  CompraPorPagar,
   CompraPedida,
   GastoDeCompras,
   PasoPedido,
   PersonalDelLugar,
   ReciboDeLaSolicitud,
   SolicitudCorregida,
+  PagoPedido,
+  PagosDelRango,
+  PasoDePagoPedido,
+  SolicitudDePagoCorregida,
+  SolicitudDePagoDetallada,
+  SolicitudDePagoPedida,
   SolicitudDetallada,
+  SolicitudesDePagoDelLugar,
   SolicitudesDelLugar,
   SolicitudPedida,
   PolizaNueva,
@@ -250,7 +267,8 @@ export type LugarDeLosDocumentos =
   | { empresa: 'elemental' | 'occ' | 'geolab' }
   | { obraId: string }
   | { personaId: string }
-  | { solicitudId: string };
+  | { solicitudId: string }
+  | { solicitudPagoId: string };
 
 const delLugar = (lugar: LugarDeLosDocumentos) =>
   'empresa' in lugar
@@ -259,7 +277,9 @@ const delLugar = (lugar: LugarDeLosDocumentos) =>
       ? `?obraId=${encodeURIComponent(lugar.obraId)}`
       : 'personaId' in lugar
         ? `?personaId=${encodeURIComponent(lugar.personaId)}`
-        : `?solicitudId=${encodeURIComponent(lugar.solicitudId)}`;
+        : 'solicitudId' in lugar
+          ? `?solicitudId=${encodeURIComponent(lugar.solicitudId)}`
+          : `?solicitudPagoId=${encodeURIComponent(lugar.solicitudPagoId)}`;
 
 /** Spec 035: el personal de una empresa con menú o de una obra. */
 export type LugarDelPersonal = { empresa: 'elemental' | 'occ' | 'geolab' } | { obraId: string };
@@ -296,6 +316,36 @@ export const api = {
     listar: () => panel<EmpresaFila[]>('/empresas'),
     editar: (id: EmpresaId, cambios: EmpresaEditada) =>
       panelEnviar<DatosDeEmpresa>(`/empresas/${id}`, 'PATCH', cambios),
+  },
+
+  /** La Bitácora diaria de una empresa, armada desde su grupo de WhatsApp (spec 038). */
+  bitacoraDeEmpresa: {
+    dias: (empresa: EmpresaId, rango: Partial<RangoDeFechas>) => {
+      const parametros = new URLSearchParams();
+      if (rango.desde) parametros.set('desde', rango.desde);
+      if (rango.hasta) parametros.set('hasta', rango.hasta);
+      return panel<{ dias: DiaDeBitacoraDeEmpresaFila[] }>(`/empresas/${empresa}/bitacora?${parametros}`).then((r) => r.dias);
+    },
+    dia: (empresa: EmpresaId, fecha: string, filtro: { equipo?: string | null; estado?: string | null } = {}) => {
+      const parametros = new URLSearchParams();
+      if (filtro.equipo) parametros.set('equipo', filtro.equipo);
+      if (filtro.estado) parametros.set('estado', filtro.estado);
+      return panel<BitacoraDeEmpresaDelDia>(`/empresas/${empresa}/bitacora/${fecha}?${parametros}`);
+    },
+    corregir: (empresa: EmpresaId, fecha: string, correccion: z.input<typeof correccionDeBitacoraDeEmpresa>) =>
+      panelEnviar<BitacoraDeEmpresaDelDia>(`/empresas/${empresa}/bitacora/${fecha}`, 'PATCH', correccion),
+    cerrar: (empresa: EmpresaId, fecha: string, version: number) =>
+      panelEnviar<BitacoraDeEmpresaDelDia>(`/empresas/${empresa}/bitacora/${fecha}/cerrar`, 'POST', { version }),
+    /** La Bitácora de Geolab: el laboratorio de las bitácoras de todas las obras (RF-27). */
+    laboratorio: (filtro: { obraId?: string | null } & Partial<RangoDeFechas>) => {
+      const parametros = new URLSearchParams();
+      if (filtro.obraId) parametros.set('obraId', filtro.obraId);
+      if (filtro.desde) parametros.set('desde', filtro.desde);
+      if (filtro.hasta) parametros.set('hasta', filtro.hasta);
+      return panel<{ ensayos: EnsayoDeLasObrasFila[] }>(`/empresas/geolab/laboratorio?${parametros}`).then((r) => r.ensayos);
+    },
+    anular: (empresa: EmpresaId, fecha: string, version: number, motivo: string) =>
+      panelEnviar<{ id: string; anuladoEn: string }>(`/empresas/${empresa}/bitacora/${fecha}/anular`, 'POST', { version, motivo }),
   },
 
   /** Los cortes financieros de una empresa o de una obra, y el consolidado (spec 033). */
@@ -621,6 +671,42 @@ export const api = {
       ),
   },
 
+  /** Spec 037: las solicitudes de pago y la Tesorería de Elemental. */
+  tesoreria: {
+    solicitudes: (lugar: LugarDeLasSolicitudes) => panel<SolicitudesDePagoDelLugar>(`/solicitudes-pago${deLasSolicitudes(lugar)}`),
+    /** Pide un pago en ese lugar; responde su número (RF-7). */
+    crear: (lugar: LugarDeLasSolicitudes, datos: SolicitudDePagoPedida) =>
+      panelEnviar<{ id: string; numero: number; codigo: string }>(`/solicitudes-pago${deLasSolicitudes(lugar)}`, 'POST', datos),
+    /** Entera, con la versión que se leyó: una vieja responde con el aviso de que cambió. */
+    corregir: (id: string, datos: SolicitudDePagoCorregida) =>
+      panelEnviar<{ version: number }>(`/solicitudes-pago/${encodeURIComponent(id)}`, 'PUT', datos),
+    /** Con su historia, sus pagos y los pasos que puede dar quien la mira (RF-20). */
+    detalle: (id: string) => panel<SolicitudDePagoDetallada>(`/solicitudes-pago/${encodeURIComponent(id)}`),
+    /** Cancelar, aprobar, rechazar o devolver, con la versión que se leyó. */
+    paso: (id: string, pedido: PasoDePagoPedido) =>
+      panelEnviar<{ estado: EstadoDePago; version: number }>(`/solicitudes-pago/${encodeURIComponent(id)}/paso`, 'POST', pedido),
+    /** Tesorería de Elemental: todas las del grupo, en su orden, con el resumen (RF-3, RF-10). */
+    bandeja: () => panel<BandejaDeTesoreria>('/tesoreria'),
+    /** Un pago de una solicitud aprobada, con la versión que se leyó (RF-13). */
+    registrarPago: (id: string, pago: PagoPedido) =>
+      panelEnviar<{ pagoId: string; estado: EstadoDePago; version: number }>(
+        `/solicitudes-pago/${encodeURIComponent(id)}/pagos`,
+        'POST',
+        pago,
+      ),
+    /** Con la versión de su solicitud, si es de una; y el motivo (RF-16). */
+    anularPago: (pagoId: string, pedido: { version?: number; motivo: string }) =>
+      panelEnviar<{ estado: string; version?: number }>(`/pagos/${encodeURIComponent(pagoId)}/anular`, 'POST', pedido),
+    /** Las compras de la 036 que faltan por pagar, la más antigua primero (RF-17). */
+    comprasPorPagar: () => panel<CompraPorPagar[]>('/tesoreria/compras-por-pagar'),
+    /** Pagar una compra, sin versión: lo ya pagado lo revisa el servidor (RF-18). */
+    pagarCompra: (compraId: string, pago: PagoPedido) =>
+      panelEnviar<{ pagoId: string; pago: PagoDeLaCompra }>(`/compras/${encodeURIComponent(compraId)}/pagos`, 'POST', pago),
+    /** Los pagos vigentes del grupo entre dos fechas de pago (RF-23). Solo la gerencia. */
+    pagos: (desde: string, hasta: string) =>
+      panel<PagosDelRango>(`/tesoreria/pagos?desde=${encodeURIComponent(desde)}&hasta=${encodeURIComponent(hasta)}`),
+  },
+
   /** Spec 034: los documentos de Elemental, OCC, Geolab y cada obra. */
   documentos: {
     listar: (lugar: LugarDeLosDocumentos) => panel<DocumentosDelLugar>(`/documentos${delLugar(lugar)}`),
@@ -761,8 +847,9 @@ reportes: {
   whatsapp: {
     grupos: {
       listar: () => panel<{ grupos: GrupoFila[] }>('/whatsapp/grupos').then((r) => r.grupos),
-      asociar: (id: string, obraId: string) =>
-        panelEnviar<GrupoFila>(`/whatsapp/grupos/${encodeURIComponent(id)}`, 'PATCH', { obraId }),
+      /** Spec 038 (RF-1): a una obra o a una empresa, nunca a las dos. */
+      asociar: (id: string, dueno: { obraId: string } | { empresaId: 'occ' | 'geolab' }) =>
+        panelEnviar<GrupoFila>(`/whatsapp/grupos/${encodeURIComponent(id)}`, 'PATCH', dueno),
     },
     propuestas: {
       /** Con el rango de días del reporte (spec 025, RF-45); sin él, la última semana. */
@@ -772,10 +859,13 @@ reportes: {
         rango?: RangoDeFechas,
         /** Spec 033, RF-23: OCC ve solo lo de vehículos y maquinaria. */
         empresa?: EmpresaId,
+        /** Spec 038, RF-25: «todos», «grupo» (el de la empresa) u «obras». */
+        origen?: string,
       ) => {
         const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
         if (empresa) parametros.set('empresa', empresa);
+        if (empresa && origen) parametros.set('origen', origen);
         return panel<{ propuestas: PropuestaFila[] }>(
           `/whatsapp/propuestas?${parametros.toString()}`,
         ).then((r) => r.propuestas);
@@ -842,9 +932,16 @@ reportes: {
     /** «No se pudo guardar»: completar o descartar (spec 024, RF-60 a RF-63). */
     excepciones: {
       /** Con los pendientes anteriores a «Desde» (spec 025, RF-46). */
-      listar: (estado: 'pendiente' | 'guardada' | 'descartada', obraId?: string | null, rango?: RangoDeFechas) => {
+      listar: (
+        estado: 'pendiente' | 'guardada' | 'descartada',
+        obraId?: string | null,
+        rango?: RangoDeFechas,
+        /** Spec 038, RF-26: solo lo del grupo de esta empresa. */
+        empresa?: EmpresaId,
+      ) => {
         const parametros = new URLSearchParams({ estado, ...rango });
         if (obraId) parametros.set('obraId', obraId);
+        if (empresa) parametros.set('empresa', empresa);
         return panel<{ excepciones: ExcepcionFila[]; anterioresPendientes: number }>(
           `/whatsapp/excepciones?${parametros.toString()}`,
         );
@@ -867,6 +964,10 @@ reportes: {
         ),
       guardar: (obraId: string, esperados: ReporteEsperadoFila[]) =>
         panelEnviar<ReportesEsperadosDeLaObra>('/whatsapp/esperados', 'PUT', { obraId, esperados }),
+      /** Spec 038, RF-16: los de la bitácora de una empresa. */
+      leerDeEmpresa: (empresa: EmpresaId) => panel<ReportesEsperadosDeLaEmpresa>(`/whatsapp/esperados?empresa=${empresa}`),
+      guardarDeEmpresa: (empresa: EmpresaId, esperados: ReporteEsperadoFila[]) =>
+        panelEnviar<ReportesEsperadosDeLaEmpresa>('/whatsapp/esperados', 'PUT', { empresaId: empresa, esperados }),
     },
     /** El estado de la bitácora de cada día y «Guardar con lo que hay» (spec 024, RF-48, RF-55). */
     dias: {

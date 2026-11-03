@@ -84,7 +84,9 @@ export function useDocumentosDelLugar(pedido: LugarDeLosDocumentos | null) {
         ? pedido.obraId
         : 'personaId' in pedido
           ? pedido.personaId
-          : pedido.solicitudId
+          : 'solicitudId' in pedido
+            ? pedido.solicitudId
+            : pedido.solicitudPagoId
     : null;
   return useListado<DocumentosDelLugar>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -180,7 +182,7 @@ export function CarpetaDeDocumentos({
   const vigentes = documentos.filter((d) => d.anulado === null).length;
   const anulados = documentos.length - vigentes;
   // Spec 036: los soportes de una compra no vencen; sus cifras y su columna serían ruido.
-  const conVencimientos = deQuien !== 'solicitud';
+  const conVencimientos = deQuien !== 'solicitud' && deQuien !== 'pago';
 
   const columnas: Columna<DocumentoDelLugar>[] = [
     {
@@ -431,7 +433,7 @@ function VentanaDeSubir({
       </View>
       <Campo etiqueta="Nombre" obligatorio valor={nombre} onChange={setNombre} ayuda="Por ejemplo: Cámara de comercio octubre 2026." />
       <CampoDeFecha etiqueta="Fecha del documento" valor={fecha} onChange={setFecha} />
-      {lugar === 'solicitud' ? null : (
+      {lugar === 'solicitud' || lugar === 'pago' ? null : (
         <CampoDeFecha
           etiqueta="Vence"
           valor={vence}

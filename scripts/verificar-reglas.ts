@@ -194,6 +194,13 @@ import {
   reconocerEnCantera,
   reconocerPorNombre,
   reconocerVehiculo,
+  placaParecida,
+  duenoDelGrupo,
+  reconocerEquipoDeEmpresa,
+  EMPRESAS_CON_BITACORA_PROPIA,
+  origenDeLaBandeja,
+  limpiarNombresEnWhatsapp,
+  destinoEnGrupoDeEmpresa,
   rechazoDeArchivo,
   resolverPropuesta,
   type CatalogosDeLaObra,
@@ -204,6 +211,33 @@ import {
   type ReporteDelDia,
   type VehiculoConocido,
 } from '../src/shared/rules/whatsapp';
+import {
+  anotarCambio,
+  BITACORA_OCC_VACIA,
+  conteoDelDia,
+  diaDeEmpresa,
+  agregarEstadoAlDia,
+  estadoActual,
+  estadoDelDiaDeEmpresa,
+  faltaDeLaCorreccion,
+  filtrarDia,
+  cambioDeEstadoDeTexto,
+  estadoDeEquipoDeTexto,
+  lecturaVacia,
+  leerMensajeDeEmpresa,
+  llevarAlDia,
+  mantenimientosDelMensaje,
+  tipoDeTrabajoDeTexto,
+  mantenimientoDelCambio,
+  mantenimientosDelTrabajo,
+  mezclarRenglones,
+  reemplazarLista,
+  type ActividadDeMantenimiento,
+  type CambioDelDia,
+  type EquipoDelRenglon,
+  type EstadoDelEquipo,
+  type TrabajoDeMantenimiento,
+} from '../src/shared/rules/bitacora-occ';
 import {
   completarIniciales,
   completarViaje,
@@ -217,6 +251,10 @@ import {
   renglonesGuardados,
   separarRenglones,
   tipoDeReporte,
+  tipoDeReporteDeEmpresa,
+  TIPOS_DE_REPORTE,
+  TIPOS_DE_REPORTE_DE_EMPRESA,
+  TIPOS_DE_REPORTE_DE_OBRA,
   viajeRepetido,
   viajesQueFaltan,
 } from '../src/shared/rules/whatsapp-automatico';
@@ -275,6 +313,7 @@ import {
   lugarDeLaRuta,
   menuDeEmpresa,
   menuDelLugar,
+  pestanasDeBitacora,
   pestanasDeReportes,
   tituloDelLugar,
   menuDeObra,
@@ -347,6 +386,42 @@ import {
   type SolicitudEnLista,
   type SolicitudParaPaso,
 } from '../src/shared/rules/compras';
+import {
+  aprobacionDelPago,
+  camposDelPagoCorregidos,
+  coincideElPago,
+  CONCEPTOS_DE_PAGO,
+  ESTADOS_DE_PAGO,
+  estadoTrasPagos,
+  estaVencidoElPago,
+  faltaDelMotivoDePago,
+  faltasDelPago,
+  faltasDeLaSolicitudDePago,
+  faltasDelPagoPorCampo,
+  marcasDelPago,
+  MEDIOS_DE_PAGO,
+  NOMBRE_DEL_PAGO_DE_LA_COMPRA,
+  nombreDeConcepto,
+  nombreDeEstadoDePago,
+  nombreDeMedio,
+  numeroDePago,
+  ordenDeLaBandejaDePagos,
+  ordenDelLugarDePagos,
+  pagoAbierto,
+  pagoDeLaCompra,
+  PASOS_DE_PAGO,
+  pasaLosFiltrosDePago,
+  porQueNoPuedeDarPaso,
+  puedeDarPaso,
+  resumenDeLaBandejaDePagos,
+  veElValorDelPago,
+  veLosPagos,
+  type DatosDeLaSolicitudDePago,
+  type DatosDelPago,
+  type EstadoDePago,
+  type FiltrosDeLaBandejaDePagos,
+  type SolicitudDePagoParaPaso,
+} from '../src/shared/rules/pagos';
 import {
   clasesDe,
   coincideBusqueda,
@@ -585,6 +660,9 @@ import {
   devolucionAPendiente,
   entregaDeWhatsapp,
   grupoAsociado,
+  vehiculoEditado,
+  anulacionDeBitacoraDeEmpresa,
+  correccionDeBitacoraDeEmpresa,
   propuestaCorregida,
   personasDesdeLaBandeja,
   propuestaDeIa,
@@ -8087,12 +8165,14 @@ prueba('las fotos por actividad se eligen por renglón (RF-50)', () => {
   );
 });
 
-prueba('asociar un grupo exige la obra (RF-8)', () => {
-  const sinObra = grupoAsociado.safeParse({});
-  assert.equal(sinObra.success, false);
-  assert.equal(sinObra.error!.issues[0].message, 'Elija la obra.');
-  assert.equal(grupoAsociado.safeParse({ obraId: '  ' }).success, false);
-  assert.equal(grupoAsociado.parse({ obraId: 'obra-a' }).obraId, 'obra-a');
+prueba('asociar un grupo exige la obra o la empresa (021/RF-8, 038/RF-1)', () => {
+  // Desde la spec 038 el pedido trae una obra o una empresa, y quién es el dueño lo decide
+  // `duenoDelGrupo`; sin ninguno, el servidor responde «Elija la obra o la empresa del grupo».
+  assert.deepEqual(duenoDelGrupo(grupoAsociado.parse({})), { tipo: 'ninguno' });
+  assert.deepEqual(duenoDelGrupo(grupoAsociado.parse({ obraId: '  ' })), { tipo: 'ninguno' });
+  assert.deepEqual(duenoDelGrupo(grupoAsociado.parse({ obraId: 'obra-a' })), { tipo: 'obra', obraId: 'obra-a' });
+  assert.deepEqual(duenoDelGrupo(grupoAsociado.parse({ empresaId: 'occ' })), { tipo: 'empresa', empresaId: 'occ' });
+  assert.ok('error' in duenoDelGrupo(grupoAsociado.parse({ obraId: 'obra-a', empresaId: 'occ' })));
 });
 
 /* ------------------------------------------------------------------------ */
@@ -11298,13 +11378,16 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   assert.deepEqual(paginas(menuDeObra('almacenista', { almacen: false, cantera: true, laboratorio: true })), [
     'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
-  // Con los documentos de Geolab desde la spec 034 (RF-7).
+  // Con los documentos de Geolab desde la spec 034 (RF-7), y su Bitácora y sus Reportes de
+  // WhatsApp desde la 038 (RF-27 a RF-29).
   assert.deepEqual(paginas(menuDeEmpresa('geolab', 'laboratorista')), [
-    'laboratorio', 'documentos', 'recursos-humanos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'bitacora', 'whatsapp', 'laboratorio', 'documentos', 'recursos-humanos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
   for (const rol of ROLES.filter((r) => r !== 'admin')) {
     for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
-      assert.equal(alcanza(rol, 'finanzas', accion), false, `${rol} finanzas/${accion}`);
+      // La auxiliar de RR. HH. consulta los cortes desde la spec 037 (D9): su prueba es la de 037/RF-24.
+      const consulta = rol === 'auxiliar_rrhh' && (accion === 'ver' || accion === 'listar');
+      assert.equal(alcanza(rol, 'finanzas', accion), consulta, `${rol} finanzas/${accion}`);
       assert.equal(alcanza(rol, 'empresa', accion), false, `${rol} empresa/${accion}`);
     }
   }
@@ -11584,8 +11667,9 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   // El laboratorista en Geolab: sin «← Empresas», que no tiene a dónde ir.
   const geolab = menuDelLugar({ tipo: 'empresa', empresa: 'geolab', pagina: null }, 'laboratorista');
   assert.deepEqual(geolab.navegacion, []);
+  // Con su Bitácora y sus Reportes de WhatsApp desde la spec 038 (RF-27 a RF-29).
   assert.deepEqual(titulos(geolab.entradas), [
-    'Laboratorio', 'Documentos', 'Recursos Humanos', 'Solicitudes de compra', 'Solicitudes de pago', 'Asistente',
+    'Bitácora', 'Reportes de WhatsApp', 'Laboratorio', 'Documentos', 'Recursos Humanos', 'Solicitudes de compra', 'Solicitudes de pago', 'Asistente',
   ]);
 
   // En una obra: «Cambiar de obra» para la gerencia, y sin los módulos apagados.
@@ -12510,10 +12594,11 @@ prueba('036/RF-12, RF-24, RF-25: vencidas, marcas, orden de la bandeja y del lug
 
 prueba('036/RF-17, RF-31: las clases de los adjuntos de una solicitud y las que llevan precio', () => {
   const ids = clasesDe('solicitud').map((c) => c.id);
-  assert.deepEqual(ids, ['cotizacion', 'orden_de_compra', 'factura', 'remision', 'foto', 'ficha_tecnica', 'otro']);
+  // «Comprobante de pago» llega con la spec 037 (RF-18).
+  assert.deepEqual(ids, ['cotizacion', 'orden_de_compra', 'factura', 'remision', 'foto', 'ficha_tecnica', 'comprobante_de_pago', 'otro']);
   // Solo en la solicitud: ni las empresas, ni la obra, ni la persona las ofrecen.
   const otros: LugarDeDocumentos[] = ['elemental', 'occ', 'geolab', 'obra', 'persona'];
-  for (const id of ids.filter((x) => x !== 'otro')) {
+  for (const id of ids.filter((x) => x !== 'otro' && x !== 'comprobante_de_pago')) {
     assert.deepEqual(otros.filter((l) => esClaseDe(l, id)), [], id);
   }
   // Ni las comunes de empresa ni las de la persona son de una solicitud.
@@ -12521,7 +12606,7 @@ prueba('036/RF-17, RF-31: las clases de los adjuntos de una solicitud y las que 
   assert.equal(nombreDeClase('solicitud', 'orden_de_compra'), 'Orden de compra');
 
   // RF-31: cotización, orden de compra y factura llevan precio; las demás, no.
-  assert.deepEqual(ids.filter(llevaPrecio), ['cotizacion', 'orden_de_compra', 'factura']);
+  assert.deepEqual(ids.filter(llevaPrecio), ['cotizacion', 'orden_de_compra', 'factura', 'comprobante_de_pago']);
   assert.equal(llevaPrecio('planos'), false);
 });
 
@@ -12705,6 +12790,1149 @@ prueba('036/RF-9, RF-10: cada falta de la solicitud, junto a su campo', () => {
     'La fecha «para cuándo» no puede ser anterior a hoy.',
     'El valor estimado va en pesos, sin decimales y mayor que cero.',
   ]);
+});
+
+prueba('037/RF-7: el número SP, los estados, los conceptos y los medios', () => {
+  assert.equal(numeroDePago(1), 'SP-0001');
+  assert.equal(numeroDePago(12345), 'SP-12345');
+  assert.equal(nombreDeEstadoDePago('pagada_en_parte'), 'Pagada en parte');
+  // RF-21: abiertas arriba; pagada, rechazada y cancelada, cerradas.
+  assert.deepEqual(
+    ESTADOS_DE_PAGO.filter((e) => !pagoAbierto(e.id)).map((e) => e.id),
+    ['pagada', 'rechazada', 'cancelada'],
+  );
+  // D2 y D6: los ocho conceptos y los cuatro medios acordados.
+  assert.equal(CONCEPTOS_DE_PAGO.length, 8);
+  assert.equal(nombreDeConcepto('caja_menor'), 'Reembolso de caja menor');
+  assert.deepEqual(MEDIOS_DE_PAGO.map((m) => m.id), ['transferencia', 'consignacion', 'cheque', 'efectivo']);
+  assert.equal(nombreDeMedio('consignacion'), 'Consignación');
+});
+
+prueba('037/RF-6, RF-8: lo que impide enviar una solicitud de pago', () => {
+  const hoy = '2026-10-29';
+  const buena: DatosDeLaSolicitudDePago = {
+    beneficiario: 'Transportes La Sabana',
+    beneficiarioDocumento: '',
+    concepto: 'transporte',
+    paraQue: 'Acarreo de material de la cantera',
+    valor: 1_500_000,
+    paraCuando: hoy,
+    urgente: true,
+  };
+  assert.deepEqual(faltasDeLaSolicitudDePago(buena, hoy), []);
+  assert.deepEqual(faltasDeLaSolicitudDePago({ ...buena, beneficiarioDocumento: '900123456-7', paraCuando: '2026-11-20' }, hoy), []);
+
+  // Cada falta, junto a su campo.
+  assert.deepEqual(
+    faltasDelPagoPorCampo({ ...buena, beneficiario: ' ', concepto: '', paraQue: '', valor: 0, paraCuando: '2026-10-28' }, hoy),
+    {
+      beneficiario: 'Diga a quién se le paga.',
+      concepto: 'Elija el concepto.',
+      paraQue: 'Diga para qué es el pago.',
+      valor: 'El valor va en pesos, sin decimales y mayor que cero.',
+      paraCuando: 'La fecha «para cuándo» no puede ser anterior a hoy.',
+    },
+  );
+  // La lista del servidor, en el orden del formulario.
+  assert.deepEqual(faltasDeLaSolicitudDePago({ ...buena, concepto: 'nomina', paraCuando: '' }, hoy), [
+    'Ese concepto no existe.',
+    'Diga para cuándo se necesita.',
+  ]);
+  for (const valor of [-1, 1500.5, Number.NaN, 2 ** 60]) {
+    assert.deepEqual(faltasDeLaSolicitudDePago({ ...buena, valor }, hoy), [
+      'El valor va en pesos, sin decimales y mayor que cero.',
+    ]);
+  }
+  assert.deepEqual(faltasDeLaSolicitudDePago({ ...buena, paraCuando: '2026-02-30' }, hoy), ['Diga para cuándo se necesita.']);
+});
+
+prueba('037/RF-5, RF-9, RF-11, RF-12, RF-16: quién da cada paso de un pago y desde qué estado', () => {
+  const residente = { id: 'r1', rol: 'supervisor' as const };
+  const gerencia = { id: 'g1', rol: 'admin' as const };
+  const enviada: SolicitudDePagoParaPaso = { estado: 'enviada', pedidaPor: 'r1' };
+
+  // RF-9: corregir y cancelar, solo quien la pidió, enviada o devuelta.
+  assert.equal(porQueNoPuedeDarPaso('corregir', residente, enviada), null);
+  assert.ok(puedeDarPaso('cancelar', residente, { ...enviada, estado: 'devuelta' }));
+  assert.deepEqual(porQueNoPuedeDarPaso('cancelar', { id: 'r2', rol: 'supervisor' }, enviada), {
+    estado: 403,
+    mensaje: 'Solo quien pidió la solicitud puede cancelarla.',
+  });
+  assert.deepEqual(porQueNoPuedeDarPaso('corregir', residente, { ...enviada, estado: 'aprobada' }), {
+    estado: 409,
+    mensaje: 'Esta solicitud está aprobada: no se puede corregir.',
+  });
+
+  // RF-5: aprobar, rechazar, devolver, pagar y anular, solo la gerencia; ni el Encargado ni la auxiliar.
+  for (const paso of ['aprobar', 'rechazar', 'devolver'] as const) {
+    assert.ok(puedeDarPaso(paso, gerencia, enviada), paso);
+    for (const rol of ROLES.filter((r) => r !== 'admin')) {
+      assert.equal(puedeDarPaso(paso, { id: 'r1', rol }, enviada), false, `${paso} ${rol}`);
+    }
+  }
+  assert.deepEqual(porQueNoPuedeDarPaso('aprobar', { id: 'e1', rol: 'encargado_occ' }, enviada), {
+    estado: 403,
+    mensaje: 'No puede aprobar ni rechazar solicitudes de pago: lo hace la gerencia.',
+  });
+  const aprobada: SolicitudDePagoParaPaso = { ...enviada, estado: 'aprobada' };
+  assert.ok(puedeDarPaso('registrar_pago', gerencia, aprobada));
+  assert.ok(puedeDarPaso('registrar_pago', gerencia, { ...enviada, estado: 'pagada_en_parte' }));
+  assert.equal(puedeDarPaso('registrar_pago', gerencia, enviada), false);
+  assert.deepEqual(porQueNoPuedeDarPaso('registrar_pago', { id: 'x', rol: 'auxiliar_rrhh' }, aprobada), {
+    estado: 403,
+    mensaje: 'No puede registrar pagos: lo hace la gerencia.',
+  });
+  // RF-16: anular un pago, solo con pagos (pagada en parte o pagada).
+  assert.equal(puedeDarPaso('anular_pago', gerencia, aprobada), false);
+  assert.ok(puedeDarPaso('anular_pago', gerencia, { ...enviada, estado: 'pagada' }));
+  assert.equal(puedeDarPaso('anular_pago', residente, { ...enviada, estado: 'pagada' }), false);
+
+  // Una pagada solo admite anular un pago; rechazada y cancelada, nada.
+  assert.deepEqual(
+    PASOS_DE_PAGO.filter((p) => puedeDarPaso(p, gerencia, { estado: 'pagada', pedidaPor: 'g1' })),
+    ['anular_pago'],
+  );
+  for (const estado of ['rechazada', 'cancelada'] as const) {
+    assert.deepEqual(PASOS_DE_PAGO.filter((p) => puedeDarPaso(p, gerencia, { estado, pedidaPor: 'g1' })), [], estado);
+  }
+
+  // Los motivos.
+  assert.equal(faltaDelMotivoDePago('devolver', ' '), 'Diga qué debe corregirse.');
+  assert.equal(faltaDelMotivoDePago('anular_pago', ''), 'Diga por qué se anula el pago.');
+  assert.equal(faltaDelMotivoDePago('aprobar', ''), null);
+  assert.equal(motivoDeRechazo('tesoreria', 'anular'), 'No puede anular pagos: lo hace la gerencia.');
+});
+
+prueba('037/RF-11: aprobar un pago por lo pedido o por menos', () => {
+  assert.deepEqual(aprobacionDelPago(1_500_000, null), { falta: null, aprobado: 1_500_000 });
+  assert.deepEqual(aprobacionDelPago(1_500_000, 1_200_000), { falta: null, aprobado: 1_200_000 });
+  for (const valor of [0, 1_600_000, 1000.5, -5]) {
+    assert.deepEqual(aprobacionDelPago(1_500_000, valor), {
+      falta: 'El valor aprobado va de $ 1 a $ 1.500.000.',
+      aprobado: 1_500_000,
+    });
+  }
+});
+
+prueba('037/RF-13, RF-15: lo que impide registrar un pago', () => {
+  const pago: DatosDelPago = { fecha: '2026-10-29', valor: 500_000, medio: 'transferencia', referencia: '' };
+  assert.deepEqual(faltasDelPago(pago, 1_200_000), []);
+  // Justo lo que falta, sí.
+  assert.deepEqual(faltasDelPago({ ...pago, valor: 1_200_000 }, 1_200_000), []);
+  // RF-15: de más no, y dice cuánto falta.
+  assert.deepEqual(faltasDelPago({ ...pago, valor: 1_200_001 }, 1_200_000), [
+    'Ese pago pasa de lo que falta: faltan $ 1.200.000.',
+  ]);
+  assert.deepEqual(faltasDelPago(pago, 0), ['Ya está pagado todo.']);
+  for (const valor of [0, -1, 500_000.5]) {
+    assert.deepEqual(faltasDelPago({ ...pago, valor }, 1_200_000), [
+      'El valor del pago va en pesos, sin decimales y mayor que cero.',
+    ]);
+  }
+  assert.deepEqual(faltasDelPago({ ...pago, fecha: '', medio: '' }, 1_200_000), [
+    'Diga la fecha del pago.',
+    'Elija el medio de pago.',
+  ]);
+  assert.deepEqual(faltasDelPago({ ...pago, medio: 'bitcoin' }, 1_200_000), ['Ese medio de pago no existe.']);
+});
+
+prueba('037/RF-14, RF-16, RF-19: el estado después de pagar o anular, y el pago de una compra', () => {
+  // Anticipo y saldo.
+  assert.equal(estadoTrasPagos(1_200_000, 500_000), 'pagada_en_parte');
+  assert.equal(estadoTrasPagos(1_200_000, 1_200_000), 'pagada');
+  // Anular el saldo la devuelve a pagada en parte; anular todo, a aprobada.
+  assert.equal(estadoTrasPagos(1_200_000, 500_000), 'pagada_en_parte');
+  assert.equal(estadoTrasPagos(1_200_000, 0), 'aprobada');
+  // Una compra: sin pagar, en parte y pagada.
+  assert.equal(pagoDeLaCompra(870_000, 0), 'sin_pagar');
+  assert.equal(pagoDeLaCompra(870_000, 400_000), 'en_parte');
+  assert.equal(pagoDeLaCompra(870_000, 870_000), 'pagada');
+  assert.equal(NOMBRE_DEL_PAGO_DE_LA_COMPRA.en_parte, 'Pagada en parte');
+});
+
+prueba('037/RF-5a, RF-23: quién ve el valor de un pago y quién ve Pagos', () => {
+  // D1: el almacenista ve el valor solo de las que pidió él.
+  assert.ok(veElValorDelPago('almacenista', 'a1', 'a1'));
+  assert.equal(veElValorDelPago('almacenista', 'r1', 'a1'), false);
+  for (const rol of ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_rrhh'] as const) {
+    assert.ok(veElValorDelPago(rol, 'otro', 'yo'), rol);
+  }
+  // D9: Pagos, solo la gerencia.
+  assert.deepEqual(ROLES.filter(veLosPagos), ['admin']);
+});
+
+prueba('037/RF-10, RF-21, RF-22: vencidas, marcas, orden, resumen y búsqueda de los pagos', () => {
+  const hoy = '2026-10-29';
+  assert.equal(estaVencidoElPago({ estado: 'aprobada', paraCuando: hoy }, hoy), false);
+  assert.equal(estaVencidoElPago({ estado: 'pagada_en_parte', paraCuando: '2026-10-28' }, hoy), true);
+  assert.equal(estaVencidoElPago({ estado: 'pagada', paraCuando: '2026-10-01' }, hoy), false);
+  assert.deepEqual(marcasDelPago({ estado: 'devuelta', paraCuando: '2026-10-28' }, hoy), ['Devuelta: corrígela', 'Vencida']);
+
+  const s = (numero: number, estado: EstadoDePago, urgente: boolean, paraCuando: string, valorAprobado: number | null = null, pagado = 0) => ({
+    numero,
+    estado,
+    urgente,
+    paraCuando,
+    valorAprobado,
+    pagado,
+  });
+  const lista = [
+    s(1, 'pagada', true, '2026-10-01', 500_000, 500_000),
+    s(2, 'aprobada', false, '2026-11-02', 1_000_000),
+    s(3, 'enviada', false, '2026-11-01'),
+    s(4, 'cancelada', false, '2026-10-20'),
+    s(5, 'enviada', true, '2026-11-10'),
+    s(6, 'pagada_en_parte', true, '2026-10-25', 1_200_000, 500_000),
+    s(7, 'devuelta', false, '2026-10-30'),
+  ];
+  assert.deepEqual(ordenDeLaBandejaDePagos(lista).map((x) => x.numero), [5, 3, 6, 7, 2, 4, 1]);
+  assert.deepEqual(ordenDelLugarDePagos(lista).map((x) => x.numero), [6, 5, 7, 3, 2, 4, 1]);
+  // Por pagar: la aprobada (1 000 000) y lo que le falta a la pagada en parte (700 000).
+  assert.deepEqual(resumenDeLaBandejaDePagos(lista, hoy), { porAprobar: 2, porPagar: 2, valorPorPagar: 1_700_000, vencidas: 1 });
+
+  const pago = {
+    numero: 5,
+    beneficiario: 'Transportes La Sabana',
+    beneficiarioDocumento: '900123456-7',
+    paraQue: 'Acarreo de material',
+    pedidaPor: { nombre: 'María Pérez' },
+  };
+  for (const texto of ['SP-0005', 'sp5', '5', 'sabana', '900123456', 'acarreo', 'maria perez', '']) {
+    assert.ok(coincideElPago(pago, texto), texto);
+  }
+  for (const texto of ['SP-0006', 'cemento']) assert.equal(coincideElPago(pago, texto), false, texto);
+
+  const conLugar = { ...pago, estado: 'enviada' as const, urgente: true, lugar: { id: 'occ' }, pedidaEl: '2026-10-20' };
+  const sin: FiltrosDeLaBandejaDePagos = { lugar: null, estado: null, soloUrgentes: false, desde: null, hasta: null, texto: '' };
+  assert.ok(pasaLosFiltrosDePago(conLugar, { ...sin, lugar: 'occ', estado: 'enviada', soloUrgentes: true, desde: '2026-10-20', hasta: '2026-10-20' }));
+  assert.equal(pasaLosFiltrosDePago(conLugar, { ...sin, lugar: 'geolab' }), false);
+  assert.equal(pasaLosFiltrosDePago(conLugar, { ...sin, estado: 'aprobada' }), false);
+  assert.equal(pasaLosFiltrosDePago(conLugar, { ...sin, desde: '2026-10-21' }), false);
+  assert.equal(pasaLosFiltrosDePago(conLugar, { ...sin, texto: 'cemento' }), false);
+});
+
+prueba('037/RF-6, RF-13, RF-18, RF-24: los adjuntos de un pago, el comprobante de una compra y los cortes de la auxiliar', () => {
+  // RF-6, D5: los soportes de una solicitud de pago, sin las clases de empresa.
+  assert.deepEqual(clasesDe('pago').map((c) => c.id), [
+    'cuenta_de_cobro', 'factura', 'cotizacion', 'rut', 'certificacion_bancaria', 'comprobante_de_pago', 'otro',
+  ]);
+  assert.ok(!esClaseDe('pago', 'camara_de_comercio') && !esClaseDe('pago', 'remision'));
+  assert.equal(nombreDeClase('pago', 'cuenta_de_cobro'), 'Cuenta de cobro');
+  // La cuenta de cobro es solo de los pagos.
+  const lugares: LugarDeDocumentos[] = ['elemental', 'occ', 'geolab', 'obra', 'persona', 'solicitud'];
+  assert.deepEqual(lugares.filter((l) => esClaseDe(l, 'cuenta_de_cobro')), []);
+  // RF-18: el comprobante de pago de una compra va con su solicitud de compra, y lleva precio.
+  assert.ok(esClaseDe('solicitud', 'comprobante_de_pago') && llevaPrecio('comprobante_de_pago'));
+  // RF-24, D9: la auxiliar consulta los cortes; registrar y anular, solo la gerencia.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'finanzas', 'ver')), ['admin', 'auxiliar_rrhh']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'finanzas', 'escribir')), ['admin']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'finanzas', 'anular')), ['admin']);
+});
+
+prueba('037/RF-9, RF-20: qué cambió al corregir una solicitud de pago', () => {
+  const antes: DatosDeLaSolicitudDePago = {
+    beneficiario: 'Transportes La Sabana',
+    beneficiarioDocumento: '',
+    concepto: 'transporte',
+    paraQue: 'Acarreo',
+    valor: 1_000_000,
+    paraCuando: '2026-11-01',
+    urgente: false,
+  };
+  assert.deepEqual(camposDelPagoCorregidos(antes, { ...antes, paraQue: ' Acarreo ' }), []);
+  assert.deepEqual(
+    camposDelPagoCorregidos(antes, { ...antes, beneficiarioDocumento: '900123456', valor: 1_200_000, urgente: true }),
+    ['NIT o cédula', 'valor', 'urgencia'],
+  );
+});
+
+/* ── Spec 038: grupos de empresa y placas mal escritas ─────────────────── */
+
+const EQUIPOS_DE_OCC: VehiculoConocido[] = [
+  { id: 'lvy498', codigoInterno: 'LVY498', placa: 'LVY498', obraId: 'obra-a' },
+  { id: 'lvy002', codigoInterno: 'LVY002', placa: 'LVY 002', obraId: 'obra-b' },
+  { id: 'zcw128', codigoInterno: 'ZCW128', placa: 'ZCW-128', obraId: null },
+  { id: 'tfo427', codigoInterno: 'TFO427', placa: 'TFO427', obraId: 'obra-a' },
+  { id: 'tfo429', codigoInterno: 'TFO429', placa: 'TFO429', obraId: 'obra-a' },
+  { id: 'pajarita', codigoInterno: 'MC762962', placa: null, obraId: 'obra-a' },
+];
+
+prueba('038/RF-1, RF-2: un grupo es de una obra o de una empresa, nunca de las dos', () => {
+  assert.deepEqual(duenoDelGrupo({ obraId: 'obra-a' }), { tipo: 'obra', obraId: 'obra-a' });
+  assert.deepEqual(duenoDelGrupo({ empresaId: 'occ' }), { tipo: 'empresa', empresaId: 'occ' });
+  assert.deepEqual(duenoDelGrupo({ empresaId: 'geolab', obraId: '  ' }), { tipo: 'empresa', empresaId: 'geolab' });
+  assert.deepEqual(duenoDelGrupo({ obraId: null, empresaId: null }), { tipo: 'ninguno' });
+  assert.deepEqual(duenoDelGrupo({}), { tipo: 'ninguno' });
+  assert.ok('error' in duenoDelGrupo({ obraId: 'obra-a', empresaId: 'occ' }));
+  // Elemental es lo administrativo y Proyectos son sus obras: ninguna tiene grupo.
+  assert.ok('error' in duenoDelGrupo({ empresaId: 'elemental' }));
+  assert.ok('error' in duenoDelGrupo({ empresaId: 'proyectos' }));
+  assert.ok('error' in duenoDelGrupo({ empresaId: 'otra' }));
+});
+
+prueba('038/RF-12a, D5: una placa mal escrita sugiere la registrada, sin ligarla', () => {
+  // Los tres errores reales del grupo de OCC (16-oct a 3-nov).
+  assert.deepEqual(placaParecida('1 camión fotón LVY 499', EQUIPOS_DE_OCC), { vehiculoId: 'lvy498', placa: 'LVY498' });
+  assert.deepEqual(placaParecida('1 Carrotanque Ford CZW 128', EQUIPOS_DE_OCC), { vehiculoId: 'zcw128', placa: 'ZCW128' });
+  assert.deepEqual(placaParecida('Km final 74609 29/10/2026 LUY002', EQUIPOS_DE_OCC), {
+    vehiculoId: 'lvy002',
+    placa: 'LVY002',
+  });
+  // Busca en todas las obras: OCC lleva la maquinaria de todas.
+  assert.equal(placaParecida('LVY 003', EQUIPOS_DE_OCC)?.vehiculoId, 'lvy002');
+});
+
+prueba('038/RF-12a: una placa bien escrita o sin parecida no sugiere nada', () => {
+  // Bien escrita, con o sin espacio, o con caracteres que se confunden en una foto: se reconoce por su placa.
+  assert.equal(placaParecida('TFO 427', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida('volqueta tfo427', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida('TFO 42O', EQUIPOS_DE_OCC), null);
+  // A un error de dos registradas (TFO427 y TFO429): sería adivinar.
+  assert.equal(placaParecida('TFO 428', EQUIPOS_DE_OCC), null);
+  // A dos errores de cualquiera.
+  assert.equal(placaParecida('LVY 477', EQUIPOS_DE_OCC), null);
+  // Sin forma de placa: la maquinaria por nombre y los códigos no son placas.
+  assert.equal(placaParecida('Pajarita Case cantera', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida('MC762963', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida('Km 74609', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida('', EQUIPOS_DE_OCC), null);
+  assert.equal(placaParecida(null, EQUIPOS_DE_OCC), null);
+});
+
+const MAQUINARIA_DE_OCC: VehiculoConocido[] = [
+  ...EQUIPOS_DE_OCC,
+  {
+    id: 'pajarita-cantera',
+    codigoInterno: 'MC762956',
+    placa: null,
+    obraId: 'obra-a',
+    tipoId: 'retrocargador',
+    marca: 'Case',
+    nombresWhatsapp: ['Pajarita Case cantera'],
+  },
+  {
+    id: 'pajarita-campamento',
+    codigoInterno: 'MC762962',
+    placa: null,
+    obraId: 'obra-b',
+    tipoId: 'retrocargador',
+    marca: 'Case',
+    nombresWhatsapp: ['Pajarita Case campamento', 'Pajarita Case'],
+  },
+  { id: 'vibro-dynapac', codigoInterno: 'VIB-01', placa: null, obraId: 'obra-a', tipoId: 'vibrocompactadora', marca: 'Dynapac' },
+  { id: 'vibro-volvo', codigoInterno: 'VIB-02', placa: null, obraId: 'obra-b', tipoId: 'vibrocompactadora', marca: 'Volvo' },
+  {
+    id: 'moto-12h',
+    codigoInterno: 'MOTONV-03',
+    placa: null,
+    obraId: null,
+    tipoId: 'motoniveladora',
+    marca: 'Caterpillar',
+    nombresWhatsapp: ['Motoniveladora alquilada 12 H'],
+  },
+];
+
+prueba('038/RF-12: el grupo de OCC reconoce el equipo por placa, nombre en WhatsApp o tipo y marca', () => {
+  const r = (texto: string) => reconocerEquipoDeEmpresa(texto, MAQUINARIA_DE_OCC);
+  // Por placa, de cualquier obra: OCC lleva la maquinaria de todas.
+  assert.deepEqual([r('TFO 427').vehiculoId, r('TFO 427').como], ['tfo427', 'placa']);
+  assert.deepEqual([r('1 Camioneta LVY 002').vehiculoId, r('1 Camioneta LVY 002').como], ['lvy002', 'placa']);
+  // Por su nombre en WhatsApp: el más largo contenido gana.
+  assert.deepEqual([r('1 Pajarita Case cantera').vehiculoId, r('1 Pajarita Case cantera').como], [
+    'pajarita-cantera',
+    'nombre_whatsapp',
+  ]);
+  assert.equal(r('Engrase pajarita case campamento').vehiculoId, 'pajarita-campamento');
+  assert.equal(r('Pajarita Case').vehiculoId, 'pajarita-campamento');
+  assert.equal(r('1 motoniveladora alquilada 12 H ').vehiculoId, 'moto-12h');
+  // Por tipo y marca (spec 026), sin nombre en WhatsApp.
+  assert.deepEqual([r('1 Vibrocompactador dynapac').vehiculoId, r('1 Vibrocompactador dynapac').como], [
+    'vibro-dynapac',
+    'tipo_marca',
+  ]);
+  assert.equal(r('1 Vibrocompactador volvo INGENIUM').vehiculoId, 'vibro-volvo');
+  // Ligado: no lleva nota de placa.
+  assert.equal(r('TFO 427').posiblePlaca, null);
+});
+
+prueba('038/RF-12a, RF-12c: placa mal escrita sin ligar, desconocido y dudas', () => {
+  const r = (texto: string | null) => reconocerEquipoDeEmpresa(texto, MAQUINARIA_DE_OCC);
+  // RF-12a: se guarda tal cual, sin equipo, con la placa probable.
+  assert.deepEqual(r('1 camión fotón LVY 499'), {
+    vehiculoId: null,
+    como: 'parecida',
+    posiblePlaca: { vehiculoId: 'lvy498', placa: 'LVY498' },
+    candidatos: [],
+    tipoId: 'camion',
+  });
+  // RF-12c: no se parece a nada.
+  const grua = r('Grúa XYZ');
+  assert.deepEqual([grua.vehiculoId, grua.como, grua.posiblePlaca, grua.candidatos], [null, null, null, []]);
+  // Un vibro sin marca: con dos en el grupo no se sabe cuál, y no se adivina (026: el tipo solo no basta).
+  const vibro = r('vibrocompactador');
+  assert.deepEqual([vibro.vehiculoId, vibro.como, vibro.tipoId], [null, null, 'vibrocompactadora']);
+  // Dos equipos con el mismo nombre en WhatsApp: tampoco se elige.
+  const repetidos: VehiculoConocido[] = [
+    { id: 'a', codigoInterno: 'A-1', placa: null, obraId: null, nombresWhatsapp: ['Planta estadio'] },
+    { id: 'b', codigoInterno: 'B-1', placa: null, obraId: null, nombresWhatsapp: ['planta  estadio'] },
+  ];
+  assert.deepEqual(reconocerEquipoDeEmpresa('Planta estadio', repetidos).candidatos, ['a', 'b']);
+  assert.equal(r('').como, null);
+  assert.equal(r(null).vehiculoId, null);
+});
+
+/** Un instante en hora de Colombia (UTC-5), como lo manda la integración. */
+const enColombia = (fechaHora: string) => Date.parse(`${fechaHora}:00-05:00`);
+
+prueba('038/RF-9a, D12: la lista cuenta para el día que dice, y la de la noche para el mismo día es dudosa', () => {
+  // La lista del 27-oct a las 20:30 «para el día 28»: lo normal, sin marca.
+  assert.deepEqual(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: '2026-10-28', enviadoEn: enColombia('2026-10-27T20:30') }),
+    { fecha: '2026-10-28', dudosa: false },
+  );
+  // La del 28-oct a las 22:59 que también dijo «para el día 28» (era para el 29): queda en el 28, marcada.
+  assert.deepEqual(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: '2026-10-28', enviadoEn: enColombia('2026-10-28T22:59') }),
+    { fecha: '2026-10-28', dudosa: true },
+  );
+  // Un día que ya pasó: dudosa a cualquier hora.
+  assert.deepEqual(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: '2026-10-27', enviadoEn: enColombia('2026-10-28T09:00') }),
+    { fecha: '2026-10-27', dudosa: true },
+  );
+  // La del mismo día por la mañana describe ese día; la del sábado para el lunes tampoco es dudosa.
+  assert.equal(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: '2026-10-28', enviadoEn: enColombia('2026-10-28T06:30') }).dudosa,
+    false,
+  );
+  assert.equal(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: '2026-10-26', enviadoEn: enColombia('2026-10-24T19:59') }).dudosa,
+    false,
+  );
+  // Sin fecha, una lista de la noche cae en el día de envío y queda dudosa.
+  assert.deepEqual(
+    diaDeEmpresa({ clase: 'lista_equipos', fechaQueDice: null, enviadoEn: enColombia('2026-10-29T20:11') }),
+    { fecha: '2026-10-29', dudosa: true },
+  );
+});
+
+prueba('038/RF-9e: el informe cuenta para su fecha; lo demás, para la que dice o la de envío', () => {
+  // «Fecha 19/10/2026» enviado el 20 a las 12:19.
+  assert.deepEqual(
+    diaDeEmpresa({ clase: 'informe_mantenimiento', fechaQueDice: '2026-10-19', enviadoEn: enColombia('2026-10-20T12:19') }),
+    { fecha: '2026-10-19', dudosa: false },
+  );
+  // «fecha 30/10/2026» enviado pasada la medianoche, el 31 a las 00:44.
+  assert.equal(
+    diaDeEmpresa({ clase: 'informe_mantenimiento', fechaQueDice: '2026-10-30', enviadoEn: enColombia('2026-10-31T00:44') }).fecha,
+    '2026-10-30',
+  );
+  // Una foto sin fecha: el día de envío en Colombia, aunque en UTC ya sea el siguiente.
+  assert.deepEqual(diaDeEmpresa({ clase: 'otro', fechaQueDice: '', enviadoEn: enColombia('2026-10-27T20:30') }), {
+    fecha: '2026-10-27',
+    dudosa: false,
+  });
+  // Una fecha que no existe no se toma: vale la de envío.
+  assert.equal(
+    diaDeEmpresa({ clase: 'otro', fechaQueDice: '2026-02-30', enviadoEn: enColombia('2026-10-22T09:37') }).fecha,
+    '2026-10-22',
+  );
+  // La bitácora de un día empieza vacía y sin marca.
+  assert.deepEqual(BITACORA_OCC_VACIA, {
+    estadoEquipos: [],
+    trabajos: [],
+    actividades: [],
+    pendientes: [],
+    lista: null,
+    listas: [],
+    fechaDudosa: false,
+  });
+});
+
+/* ── Spec 038, T4: llevar los mensajes del grupo de OCC al día ─────────── */
+
+const milena = (mensajeId: string, hora: string) => ({ mensajeId, reportadoPor: 'Milena Ariza', hora });
+const equipoOcc = (vehiculoId: string | null, escrito: string): EquipoDelRenglon => ({
+  vehiculoId,
+  escrito,
+  posiblePlaca: null,
+});
+const renglonDeLista = (
+  id: string,
+  equipo: EquipoDelRenglon,
+  estado: 'operativo' | 'inoperativo',
+  motivo = '',
+): EstadoDelEquipo => ({ ...equipo, id, estado, motivo, origen: null, cambios: [] });
+const cambioOcc = (mensajeId: string, hora: string, estado: CambioDelDia['estado'], texto: string): CambioDelDia => ({
+  mensajeId,
+  reportadoPor: 'Luis Javier',
+  hora,
+  estado,
+  texto,
+});
+const TFO429 = equipoOcc('tfo429', 'TFO 429');
+const TFO420 = equipoOcc('tfo420', 'TFO 420');
+const KOMATSU = equipoOcc('komatsu', 'motoniveladora komatsu');
+
+prueba('038/RF-9b, RF-9f: la segunda lista del día reemplaza a la primera, que queda en el historial', () => {
+  const primera = reemplazarLista(
+    BITACORA_OCC_VACIA,
+    {
+      origen: milena('lista-1', '20:30'),
+      estadoEquipos: [
+        renglonDeLista('r1', TFO429, 'operativo'),
+        renglonDeLista('r2', KOMATSU, 'inoperativo', 'cilindros de dirección'),
+      ],
+      pendientes: [
+        {
+          ...milena('lista-1', '20:30'),
+          id: 'p1',
+          texto: 'LLQ 379 pendiente instalar plumillas',
+          equipo: equipoOcc('llq379', 'LLQ 379'),
+        },
+      ],
+      dudosa: false,
+    },
+    '2026-10-27T20:30:00-05:00',
+  );
+  assert.equal(primera.lista?.mensajeId, 'lista-1');
+  assert.equal(primera.estadoEquipos[0].origen?.reportadoPor, 'Milena Ariza');
+  // RF-9f: la nota queda en Pendientes, ligada a su equipo.
+  assert.equal(primera.pendientes[0].equipo?.vehiculoId, 'llq379');
+  assert.deepEqual(primera.listas, []);
+
+  const segunda = reemplazarLista(
+    primera,
+    {
+      origen: milena('lista-2', '22:59'),
+      estadoEquipos: [
+        renglonDeLista('s1', TFO429, 'operativo'),
+        renglonDeLista('s2', TFO420, 'inoperativo', 'bomba de dirección'),
+      ],
+      pendientes: [],
+      dudosa: true,
+    },
+    '2026-10-28T22:59:00-05:00',
+  );
+  assert.deepEqual(
+    segunda.estadoEquipos.map((r) => [r.id, r.estado]),
+    [
+      ['s1', 'operativo'],
+      ['s2', 'inoperativo'],
+    ],
+  );
+  assert.deepEqual(segunda.pendientes, []);
+  assert.equal(segunda.fechaDudosa, true);
+  // La primera no se borra: queda con sus equipos y sus pendientes.
+  assert.equal(segunda.listas.length, 1);
+  assert.deepEqual(
+    [segunda.listas[0].mensajeId, segunda.listas[0].estadoEquipos.length, segunda.listas[0].pendientes.length],
+    ['lista-1', 2, 1],
+  );
+  // RF-15: la misma lista otra vez, o la ya reemplazada, no cambia nada.
+  const vacia = { estadoEquipos: [], pendientes: [], dudosa: false };
+  assert.equal(reemplazarLista(segunda, { ...vacia, origen: milena('lista-2', '22:59') }, 'x'), segunda);
+  assert.equal(reemplazarLista(segunda, { ...vacia, origen: milena('lista-1', '20:30') }, 'x'), segunda);
+});
+
+prueba('038/RF-9c, RF-24: los cambios del día se anotan sin borrar la lista, y cuentan al final', () => {
+  let dia = reemplazarLista(
+    BITACORA_OCC_VACIA,
+    {
+      origen: milena('lista-27', '20:30'),
+      estadoEquipos: [renglonDeLista('r1', TFO429, 'operativo'), renglonDeLista('r2', KOMATSU, 'inoperativo')],
+      pendientes: [],
+      dudosa: false,
+    },
+    'x',
+  );
+  assert.deepEqual(conteoDelDia(dia), { operativos: 1, inoperativos: 1 });
+  // La TFO 429 entra varada a las 08:48 y queda disponible a las 14:45 (27-oct). El de las 14:45 llega primero.
+  dia = anotarCambio(dia, TFO429, cambioOcc('m2', '14:45', 'operativo', 'Vehículo disponible'), 'nuevo-1');
+  dia = anotarCambio(
+    dia,
+    equipoOcc('tfo429', 'TFO429'),
+    cambioOcc('m1', '08:48', 'varado', 'ingresa varado por cápsula'),
+    'nuevo-2',
+  );
+  const tfo = dia.estadoEquipos.find((r) => r.vehiculoId === 'tfo429')!;
+  assert.deepEqual([tfo.id, tfo.estado], ['r1', 'operativo']);
+  assert.deepEqual(
+    tfo.cambios.map((c) => [c.hora, c.estado]),
+    [
+      ['08:48', 'varado'],
+      ['14:45', 'operativo'],
+    ],
+  );
+  assert.equal(estadoActual(tfo), 'operativo');
+  // Repetir el mismo mensaje no repite el cambio (RF-15).
+  const otraVez = anotarCambio(dia, TFO429, cambioOcc('m1', '08:48', 'varado', 'ingresa varado por cápsula'), 'nuevo-3');
+  assert.equal(otraVez.estadoEquipos.find((r) => r.vehiculoId === 'tfo429')!.cambios.length, 2);
+  // Un equipo que se vara sin estar en la lista cuenta como inoperativo al final del día.
+  dia = anotarCambio(dia, TFO420, cambioOcc('m3', '14:43', 'varado', 'daño bomba hidráulica'), 'nuevo-4');
+  assert.deepEqual(conteoDelDia(dia), { operativos: 1, inoperativos: 2 });
+});
+
+prueba('038/RF-9c, RF-15: un cambio antes de la lista crea el renglón, y la lista lo conserva', () => {
+  // La placa mal escrita se agrupa por lo escrito, sin importar espacios ni mayúsculas.
+  const lvy499 = { ...equipoOcc(null, 'LVY 499'), posiblePlaca: { vehiculoId: 'lvy498', placa: 'LVY498' } };
+  let dia = anotarCambio(BITACORA_OCC_VACIA, TFO420, cambioOcc('m1', '09:52', 'operativo', 'TFO 420 OPERATIVO'), 'c-1');
+  dia = anotarCambio(dia, lvy499, cambioOcc('m2', '10:00', 'en_mantenimiento', 'cambio de cárter'), 'c-2');
+  dia = anotarCambio(dia, { ...lvy499, escrito: 'lvy499' }, cambioOcc('m3', '15:00', 'operativo', 'listo'), 'c-3');
+  assert.deepEqual(
+    dia.estadoEquipos.map((r) => [r.id, r.estado, r.cambios.length]),
+    [
+      ['c-1', null, 1],
+      ['c-2', null, 2],
+    ],
+  );
+  assert.equal(dia.estadoEquipos[1].posiblePlaca?.placa, 'LVY498');
+  // Llega la lista sin la TFO 420: su renglón se queda, sin estado de lista.
+  dia = reemplazarLista(
+    dia,
+    {
+      origen: milena('lista', '20:11'),
+      estadoEquipos: [renglonDeLista('l1', equipoOcc(null, 'LVY499'), 'inoperativo', 'cárter')],
+      pendientes: [],
+      dudosa: false,
+    },
+    'x',
+  );
+  assert.deepEqual(
+    dia.estadoEquipos.map((r) => [r.id, r.estado, r.cambios.length]),
+    [
+      ['l1', 'inoperativo', 2],
+      ['c-1', null, 1],
+    ],
+  );
+  // No había lista antes: nada al historial.
+  assert.deepEqual(dia.listas, []);
+});
+
+prueba('038/RF-9d, RF-9e, RF-15: repetir un mensaje no duplica trabajos ni actividades', () => {
+  const trabajo = (id: string, descripcion: string): TrabajoDeMantenimiento => ({
+    ...TFO420,
+    ...milena('m', '09:35'),
+    id,
+    tipo: 'preventivo',
+    descripcion,
+  });
+  const dia = mezclarRenglones([], [trabajo('m-0', 'Engrase TFO420'), trabajo('m-1', 'Postura de racor')]);
+  // El mismo mensaje otra vez, con la descripción corregida: reemplaza, no suma.
+  const otraVez = mezclarRenglones(dia, [trabajo('m-0', 'Engrase housing TFO420'), trabajo('m-1', 'Postura de racor')]);
+  assert.deepEqual(
+    otraVez.map((t) => [t.id, t.descripcion]),
+    [
+      ['m-0', 'Engrase housing TFO420'],
+      ['m-1', 'Postura de racor'],
+    ],
+  );
+  // Otro mensaje del mismo día y la misma máquina: se suma.
+  assert.equal(mezclarRenglones(otraVez, [trabajo('n-0', 'Llenado housing')]).length, 3);
+  const actividad = (id: string): ActividadDeMantenimiento => ({
+    ...milena('informe', '21:20'),
+    reportadoPor: 'pedro cartagena',
+    id,
+    persona: 'Pedro Luis Cartagena',
+    descripcion: 'se ajusta cápsula de bastidor de TFO429',
+    equipo: TFO429,
+  });
+  assert.equal(mezclarRenglones([actividad('i-0')], [actividad('i-0')]).length, 1);
+});
+
+prueba('038/RF-9h: los trabajos del grupo de OCC que van también a Mantenimientos', () => {
+  const trabajo = (equipo: EquipoDelRenglon, tipo: TrabajoDeMantenimiento['tipo'], descripcion: string) =>
+    mantenimientosDelTrabajo({ ...equipo, ...milena('m', '14:40'), id: 'm-0', tipo, descripcion });
+  const NPX602 = equipoOcc('npx602', 'NPX 602');
+  // 28-oct: el cambio de aceite y filtros de la JMC.
+  assert.deepEqual(
+    trabajo(NPX602, 'preventivo', 'Cambio de aceite motor, cambio filtro aire, combustible y aceite motor'),
+    [
+      {
+        vehiculoId: 'npx602',
+        escrito: 'NPX 602',
+        clase: 'aceite',
+        resuelto: false,
+        lectura: null,
+        descripcion: 'Cambio de aceite motor, cambio filtro aire, combustible y aceite motor',
+      },
+    ],
+  );
+  assert.equal(trabajo(TFO420, 'preventivo', 'Engrase TFO420')[0].clase, 'preventivo');
+  // 29-oct: «TFO 420 presenta daño bomba hidráulica de dirección»; y una reparación.
+  assert.equal(trabajo(TFO420, 'dano', 'presenta daño bomba hidráulica de dirección (bomba Viker)')[0].clase, 'correctivo');
+  assert.equal(trabajo(TFO429, 'reparacion', 'cambio de tornillo central del muelle')[0].clase, 'correctivo');
+  // Llantas, repuestos y suministros se quedan solo en la bitácora.
+  assert.deepEqual(trabajo(equipoOcc('tfo427', 'TFO 427'), 'llantas', '4 llantas nuevas en posición #3 a #6'), []);
+  assert.deepEqual(trabajo(TFO420, 'repuesto_o_compra', 'Factura de valvulina 5 galones'), []);
+  assert.deepEqual(trabajo(TFO420, 'suministro', 'se adiciona 1/2 galón de hidráulico'), []);
+  // Sin equipo ligado, o con la placa mal escrita, no va: no se sabe a qué máquina.
+  const lvy499 = { ...equipoOcc(null, 'LVY 499'), posiblePlaca: { vehiculoId: 'lvy498', placa: 'LVY498' } };
+  assert.deepEqual(trabajo(lvy499, 'preventivo', 'cambio de aceite y cárter'), []);
+  assert.deepEqual(trabajo(equipoOcc(null, 'Grúa XYZ'), 'dano', 'fuga'), []);
+});
+
+prueba('038/RF-9h: «operativo» resuelve los correctivos del equipo; varado no registra nada', () => {
+  assert.deepEqual(mantenimientoDelCambio(TFO420, { estado: 'operativo', texto: 'Vehículo TFO 420 OPERATIVO' }), [
+    {
+      vehiculoId: 'tfo420',
+      escrito: 'TFO 420',
+      clase: null,
+      resuelto: true,
+      lectura: null,
+      descripcion: 'Vehículo TFO 420 OPERATIVO',
+    },
+  ]);
+  assert.deepEqual(mantenimientoDelCambio(TFO429, { estado: 'varado', texto: 'ingresa varado' }), []);
+  assert.deepEqual(mantenimientoDelCambio(TFO429, { estado: 'en_mantenimiento', texto: 'En Mantenimiento' }), []);
+  const lvy499 = { ...equipoOcc(null, 'LVY 499'), posiblePlaca: { vehiculoId: 'lvy498', placa: 'LVY498' } };
+  assert.deepEqual(mantenimientoDelCambio(lvy499, { estado: 'operativo', texto: 'listo' }), []);
+});
+
+prueba('038/RF-9, RF-9g, RF-10: a dónde va cada mensaje del grupo de una empresa', () => {
+  for (const c of ['lista_equipos', 'trabajo_mantenimiento', 'informe_mantenimiento', 'vehiculo_maquinaria', 'incidente']) {
+    assert.equal(destinoEnGrupoDeEmpresa(c), 'bitacora_empresa', c);
+  }
+  // RF-9g: autorizaciones, preguntas de las obras y saludos no arman renglones.
+  for (const c of ['administrativo', 'seguimiento', 'ignorar', 'reporte_diario', 'suministro_cantera', null, 'inventada']) {
+    assert.equal(destinoEnGrupoDeEmpresa(c), 'ninguno', String(c));
+  }
+  // En el grupo de una obra, las categorías nuevas no tienen a dónde ir, y las de siempre siguen igual.
+  for (const c of ['lista_equipos', 'trabajo_mantenimiento', 'informe_mantenimiento']) {
+    assert.equal(destinoDeCategoria(c), 'ninguno', c);
+  }
+  assert.equal(destinoDeCategoria('vehiculo_maquinaria'), 'notas');
+  assert.equal(destinoDeCategoria('reporte_diario'), 'reporte');
+  assert.equal(destinoDeCategoria('suministro_cantera'), 'cantera');
+  assert.equal(etiquetaDeCategoria('lista_equipos'), 'Lista de equipos operativos');
+  // Entran pendientes a la bandeja, como cualquier reporte.
+  assert.equal(estadoInicialDeCategoria('trabajo_mantenimiento'), 'pendiente');
+});
+
+prueba('038/RF-16: los reportes que espera una empresa, aparte de los de una obra', () => {
+  assert.deepEqual([...TIPOS_DE_REPORTE_DE_EMPRESA], ['lista_equipos', 'informe_mantenimiento']);
+  // La base tiene todos; cada lugar ofrece los suyos, sin cruzarse.
+  assert.deepEqual([...TIPOS_DE_REPORTE], [...TIPOS_DE_REPORTE_DE_OBRA, ...TIPOS_DE_REPORTE_DE_EMPRESA]);
+  assert.ok(!(TIPOS_DE_REPORTE_DE_OBRA as readonly string[]).includes('lista_equipos'));
+  assert.equal(tipoDeReporteDeEmpresa('lista_equipos'), 'lista_equipos');
+  assert.equal(tipoDeReporteDeEmpresa('informe_mantenimiento'), 'informe_mantenimiento');
+  // Una foto de un trabajo o una varada no completan la bitácora del día.
+  assert.equal(tipoDeReporteDeEmpresa('trabajo_mantenimiento'), null);
+  assert.equal(tipoDeReporteDeEmpresa('vehiculo_maquinaria'), null);
+});
+
+prueba('038/RF-22, RF-27, RF-29: pestañas de la Bitácora de OCC, y quién entra a cada una', () => {
+  assert.deepEqual(pestanasDeBitacora('occ'), [
+    { clave: 'propia', titulo: 'Bitácora de OCC' },
+    { clave: 'obras', titulo: 'En las obras' },
+  ]);
+  assert.deepEqual(pestanasDeBitacora('geolab'), []);
+  const entraA = (rol: Rol, empresa: 'occ' | 'geolab') =>
+    alcanzaLaEmpresa(rol, empresa) && menuDeEmpresa(empresa, rol).some((e) => e.pagina === 'bitacora');
+  // RF-29: los permisos de hoy. Gerencia y el Encargado de OCC en OCC; gerencia y el laboratorista en Geolab.
+  assert.ok(entraA('admin', 'occ') && entraA('encargado_occ', 'occ'));
+  assert.ok(!entraA('laboratorista', 'occ') && !entraA('supervisor', 'occ'));
+  assert.ok(entraA('admin', 'geolab') && entraA('laboratorista', 'geolab'));
+  assert.ok(!entraA('encargado_occ', 'geolab') && !entraA('operador', 'geolab'));
+});
+
+prueba('038/D11: los nombres en WhatsApp de un equipo, limpios y sin repetir', () => {
+  assert.deepEqual(
+    limpiarNombresEnWhatsapp(['  Pajarita Case   cantera ', 'pajarita case-cantera', '', '   ', 'Pajarita cantera']),
+    ['Pajarita Case cantera', 'Pajarita cantera'],
+  );
+  assert.deepEqual(limpiarNombresEnWhatsapp([]), []);
+  // El contrato los limpia al llegar, y sin el campo no los toca.
+  assert.deepEqual(vehiculoEditado.parse({ nombresWhatsapp: [' Vibro Volvo ', 'VIBRO volvo'] }).nombresWhatsapp, ['Vibro Volvo']);
+  assert.equal(vehiculoEditado.parse({ marca: 'Case' }).nombresWhatsapp, undefined);
+  assert.equal(vehiculoEditado.safeParse({ nombresWhatsapp: ['x'.repeat(61)] }).success, false);
+  assert.equal(vehiculoEditado.safeParse({ nombresWhatsapp: Array.from({ length: 11 }, (_, i) => `Equipo ${i}`) }).success, false);
+  // Los escriben gerencia y el Encargado de OCC, con el permiso de Vehículos; el residente no.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'vehiculos', 'escribir')), ['admin', 'encargado_occ']);
+  // Lo guardado es lo que reconoce el grupo de OCC (RF-12).
+  const equipo: VehiculoConocido = {
+    id: 'pajarita',
+    codigoInterno: 'MC762956',
+    placa: null,
+    obraId: null,
+    nombresWhatsapp: limpiarNombresEnWhatsapp([' Pajarita  Case cantera ']),
+  };
+  assert.equal(reconocerEquipoDeEmpresa('1 Pajarita Case cantera', [equipo]).vehiculoId, 'pajarita');
+});
+
+/* ── Spec 038, T10: leer un mensaje del grupo de OCC ──────────────────── */
+
+const ORIGEN_OCC = { mensajeId: 'm-lista', reportadoPor: 'Milena Ariza', hora: '20:11' };
+
+prueba('038/RF-9, RF-9c, RF-9d: las palabras del grupo de OCC', () => {
+  assert.equal(estadoDeEquipoDeTexto('Operativo'), 'operativo');
+  assert.equal(estadoDeEquipoDeTexto('Disponible'), 'operativo');
+  assert.equal(estadoDeEquipoDeTexto('INOPERATIVO'), 'inoperativo');
+  assert.equal(estadoDeEquipoDeTexto('fisura de housing, varada'), 'inoperativo');
+  assert.equal(estadoDeEquipoDeTexto('pendiente'), null);
+  assert.equal(cambioDeEstadoDeTexto('ingresa varado'), 'varado');
+  assert.equal(cambioDeEstadoDeTexto('En Mantenimiento'), 'en_mantenimiento');
+  assert.equal(cambioDeEstadoDeTexto('Vehículo disponible'), 'operativo');
+  assert.equal(cambioDeEstadoDeTexto('en_mantenimiento'), 'en_mantenimiento');
+  assert.equal(cambioDeEstadoDeTexto('quedó bien'), null);
+  assert.equal(tipoDeTrabajoDeTexto('preventivo'), 'preventivo');
+  assert.equal(tipoDeTrabajoDeTexto('Daño'), 'dano');
+  assert.equal(tipoDeTrabajoDeTexto('cambio de llantas'), 'llantas');
+  assert.equal(tipoDeTrabajoDeTexto('compra de repuesto'), 'repuesto_o_compra');
+  assert.equal(tipoDeTrabajoDeTexto('suministro de ACPM'), 'suministro');
+  assert.equal(tipoDeTrabajoDeTexto('algo'), null);
+});
+
+prueba('038/RF-9, RF-9f, RF-12a, RF-12c: la lista del 29-oct, leída contra los equipos', () => {
+  const lectura = leerMensajeDeEmpresa(
+    {
+      lista: {
+        fecha: '2026-10-30',
+        equipos: [
+          { equipo: 'TFO 429', estado: 'operativo' },
+          { equipo: 'Pajarita Case cantera', estado: 'operativo' },
+          { equipo: 'camión fotón LVY 499', estado: 'operativo' },
+          { equipo: 'Grúa XYZ', estado: 'operativo' },
+          { equipo: 'Vibrocompactador volvo', estado: 'inoperativo', motivo: 'se recalienta' },
+          { equipo: 'TFO 427', estado: '' },
+          // Nombrado otra vez abajo, en INOPERATIVOS: queda lo último.
+          { equipo: 'TFO429', estado: 'inoperativo', motivo: 'automático auxiliar' },
+        ],
+        notas: [{ texto: 'LLQ 379 pendiente instalar brazos y plumillas', equipo: 'LLQ 379' }, { texto: '  ' }],
+      },
+    },
+    [...MAQUINARIA_DE_OCC, { id: 'llq379', codigoInterno: 'LLQ379', placa: 'LLQ379', obraId: 'obra-a' }],
+    ORIGEN_OCC,
+  );
+  assert.deepEqual(
+    lectura.lista!.estadoEquipos.map((r) => [r.id, r.vehiculoId, r.escrito, r.estado, r.posiblePlaca?.placa ?? null]),
+    [
+      ['m-lista#estado-6', 'tfo429', 'TFO429', 'inoperativo', null],
+      ['m-lista#estado-1', 'pajarita-cantera', 'Pajarita Case cantera', 'operativo', null],
+      ['m-lista#estado-2', null, 'camión fotón LVY 499', 'operativo', 'LVY498'],
+      ['m-lista#estado-4', 'vibro-volvo', 'Vibrocompactador volvo', 'inoperativo', null],
+    ],
+  );
+  assert.equal(lectura.lista!.estadoEquipos[0].motivo, 'automático auxiliar');
+  // RF-9f: las notas, a Pendientes, con su equipo; las vacías no.
+  assert.deepEqual(
+    lectura.lista!.pendientes.map((p) => [p.id, p.equipo?.vehiculoId, p.reportadoPor]),
+    [['m-lista#pendiente-0', 'llq379', 'Milena Ariza']],
+  );
+  // RF-12c y el estado que no se entendió: a «No se pudo guardar», con su motivo.
+  assert.deepEqual(
+    lectura.apartados.map((a) => [a.seccion, a.renglon]),
+    [
+      ['estado_equipos', 3],
+      ['estado_equipos', 5],
+    ],
+  );
+  assert.match(lectura.apartados[0].motivo, /No se reconoció el equipo «Grúa XYZ»/);
+  assert.match(lectura.apartados[1].motivo, /operativo o inoperativo/);
+});
+
+prueba('038/RF-9c, RF-9d, RF-9e: cambios, trabajos y el informe de Pedro', () => {
+  const origen = { mensajeId: 'm-foto', reportadoPor: 'Luis Javier', hora: '14:43' };
+  const lectura = leerMensajeDeEmpresa(
+    {
+      cambios: [
+        { equipo: 'TFO 429', estado: 'varado', texto: 'ingresa varado por cápsula de bastidor' },
+        { equipo: 'Grúa XYZ', estado: 'operativo' },
+      ],
+      trabajos: [
+        { equipo: 'TFO 427', tipo_trabajo: 'dano', descripcion: 'presenta daño bomba hidráulica de dirección' },
+        { equipo: 'TFO 427', tipo_trabajo: 'cosa rara', descripcion: 'algo' },
+        { equipo: 'TFO 427', tipo_trabajo: 'reparacion', descripcion: '' },
+        { equipo: '', tipo_trabajo: 'llantas', descripcion: '4 llantas nuevas' },
+      ],
+      informe: {
+        fecha: '2026-10-29',
+        persona: 'Pedro Luis Cartagena',
+        actividades: [
+          { descripcion: 'se recoge personal a la obra' },
+          { descripcion: 'se cambia espejo izquierdo de JMC NPX 602', equipo: 'NPX 602' },
+          { descripcion: 'se lleva arranque a pto berrio', equipo: 'Grúa XYZ' },
+          { descripcion: ' ' },
+        ],
+      },
+    },
+    MAQUINARIA_DE_OCC,
+    origen,
+  );
+  assert.deepEqual(
+    lectura.cambios.map((c) => [c.id, c.equipo.vehiculoId, c.cambio.estado, c.cambio.hora]),
+    [['m-foto#cambio-0', 'tfo429', 'varado', '14:43']],
+  );
+  assert.deepEqual(
+    lectura.trabajos.map((t) => [t.id, t.vehiculoId, t.tipo, t.reportadoPor]),
+    [['m-foto#trabajo-0', 'tfo427', 'dano', 'Luis Javier']],
+  );
+  // En las actividades el equipo es un dato más: sin reconocer, la viñeta se guarda igual.
+  assert.deepEqual(
+    lectura.actividades.map((a) => [a.id, a.persona, a.equipo?.vehiculoId ?? null, a.equipo?.escrito ?? null]),
+    [
+      ['m-foto#actividad-0', 'Pedro Luis Cartagena', null, null],
+      ['m-foto#actividad-1', 'Pedro Luis Cartagena', null, 'NPX 602'],
+      ['m-foto#actividad-2', 'Pedro Luis Cartagena', null, 'Grúa XYZ'],
+    ],
+  );
+  assert.deepEqual(
+    lectura.apartados.map((a) => [a.seccion, a.renglon, a.motivo]),
+    [
+      ['cambios', 1, 'No se reconoció el equipo «Grúa XYZ»: no está registrado.'],
+      ['trabajos', 1, 'No se entendió qué tipo de trabajo fue.'],
+      ['trabajos', 2, 'Falta qué se hizo.'],
+      ['trabajos', 3, 'Falta a qué equipo se le hizo el trabajo.'],
+    ],
+  );
+});
+
+prueba('038/RF-10, RF-15: llevar al día, y otra vez el mismo mensaje no duplica', () => {
+  const lista = leerMensajeDeEmpresa(
+    { lista: { equipos: [{ equipo: 'TFO 429', estado: 'operativo' }], notas: [{ texto: 'LVY 498 cambio de cárter' }] } },
+    MAQUINARIA_DE_OCC,
+    ORIGEN_OCC,
+  );
+  const foto = leerMensajeDeEmpresa(
+    {
+      cambios: [{ equipo: 'TFO 429', estado: 'varado', texto: 'varada' }],
+      trabajos: [{ equipo: 'TFO 429', tipo_trabajo: 'reparacion', descripcion: 'cambio de tornillo central' }],
+    },
+    MAQUINARIA_DE_OCC,
+    { mensajeId: 'm-foto', reportadoPor: 'Luis Javier', hora: '08:48' },
+  );
+  const datos = { origen: ORIGEN_OCC, dudosa: true, ahora: '2026-10-29T20:11:00-05:00' };
+  let dia = llevarAlDia(BITACORA_OCC_VACIA, lista, datos);
+  dia = llevarAlDia(dia, foto, { ...datos, origen: { mensajeId: 'm-foto', reportadoPor: 'Luis Javier', hora: '08:48' } });
+  const otraVez = llevarAlDia(llevarAlDia(dia, lista, datos), foto, datos);
+  for (const d of [dia, otraVez]) {
+    assert.deepEqual(
+      [d.estadoEquipos.length, d.estadoEquipos[0].cambios.length, d.trabajos.length, d.pendientes.length, d.listas.length],
+      [1, 1, 1, 1, 0],
+    );
+  }
+  assert.equal(dia.fechaDudosa, true);
+  assert.equal(dia.lista?.mensajeId, 'm-lista');
+  assert.equal(estadoActual(dia.estadoEquipos[0]), 'inoperativo');
+});
+
+prueba('038/RF-14, RF-12b: las lecturas del grupo de OCC, solo de un equipo ligado', () => {
+  const lectura = leerMensajeDeEmpresa(
+    {
+      lecturas: [
+        { equipo: 'LVY 002', valor: '74609', unidad: 'Km final' },
+        { equipo: 'LUY002', valor: 74609, unidad: 'km' },
+        { equipo: 'TFO 427', valor: 5828.4, unidad: 'horas' },
+        { equipo: 'TFO 429', valor: 1200, unidad: '' },
+        { equipo: 'Grúa XYZ', valor: 10, unidad: 'km' },
+        { equipo: 'TFO 429', valor: null, unidad: 'km' },
+      ],
+    },
+    MAQUINARIA_DE_OCC,
+    { mensajeId: 'm-km', reportadoPor: 'pedro cartagena', hora: '20:31' },
+  );
+  assert.deepEqual(lectura.lecturas, [
+    { vehiculoId: 'lvy002', clase: 'odometro', valor: 74609 },
+    { vehiculoId: 'tfo427', clase: 'horometro', valor: 5828.4 },
+  ]);
+  // La placa mal escrita no va a ningún medidor, pero se avisa; sin unidad, tampoco.
+  assert.deepEqual(
+    lectura.apartados.map((a) => [a.seccion, a.renglon]),
+    [
+      ['lecturas', 1],
+      ['lecturas', 3],
+      ['lecturas', 4],
+    ],
+  );
+  assert.match(lectura.apartados[0].motivo, /posiblemente sea LVY002/);
+  assert.match(lectura.apartados[1].motivo, /kilómetros o de horas/);
+  // Una lectura sola no abre la bitácora del día.
+  assert.equal(lecturaVacia(lectura), true);
+});
+
+prueba('038/RF-9h: los mantenimientos de un mensaje, de sus trabajos y sus cambios', () => {
+  const lectura = leerMensajeDeEmpresa(
+    {
+      trabajos: [
+        { equipo: 'TFO 427', tipo_trabajo: 'preventivo', descripcion: 'Cambio de aceite motor y filtros' },
+        { equipo: 'TFO 427', tipo_trabajo: 'llantas', descripcion: '4 llantas nuevas' },
+      ],
+      cambios: [
+        { equipo: 'TFO 429', estado: 'operativo', texto: 'Vehículo disponible' },
+        { equipo: 'TFO 420', estado: 'varado', texto: 'varado' },
+      ],
+    },
+    [...MAQUINARIA_DE_OCC, { id: 'tfo420', codigoInterno: 'TFO420', placa: 'TFO420', obraId: 'obra-a' }],
+    { mensajeId: 'm-t', reportadoPor: 'Luis Javier', hora: '14:45' },
+  );
+  assert.deepEqual(
+    mantenimientosDelMensaje(lectura).map((m) => [m.vehiculoId, m.clase, m.resuelto]),
+    [
+      ['tfo427', 'aceite', false],
+      ['tfo429', null, true],
+    ],
+  );
+});
+
+prueba('038/RF-16, RF-17: el día de OCC con la lista y el informe esperados', () => {
+  const esperados = [
+    { tipoReporte: 'lista_equipos' as const, autorId: null, autorNombre: null },
+    { tipoReporte: 'informe_mantenimiento' as const, autorId: '83618886111404@lid', autorNombre: 'pedro cartagena' },
+  ];
+  const lista = { tipoReporte: 'lista_equipos' as const, autorId: '195700201640119@lid' };
+  const informeDePedro = { tipoReporte: 'informe_mantenimiento' as const, autorId: '83618886111404' };
+  const informeDeOtro = { tipoReporte: 'informe_mantenimiento' as const, autorId: '111789543034999@lid' };
+  const dia = (recibidos: { tipoReporte: 'lista_equipos' | 'informe_mantenimiento' | null; autorId: string }[], fecha = '2026-10-29') =>
+    diaCompleto({ esperados, recibidos, horario: HORARIO_PROPUESTO, fecha });
+  // Un jueves: espera los dos, y el informe de quien se dijo.
+  assert.deepEqual(dia([]).completo, false);
+  assert.deepEqual(dia([lista]).faltan.map((f) => f.tipoReporte), ['informe_mantenimiento']);
+  assert.equal(dia([lista, informeDeOtro]).completo, false);
+  assert.equal(dia([lista, informeDePedro]).completo, true);
+  // Una foto (sin reporte) no completa nada.
+  assert.equal(dia([{ tipoReporte: null, autorId: 'x' }]).completo, false);
+  // Un domingo basta el primer mensaje, como en una obra que no trabaja ese día.
+  assert.equal(dia([lista], '2026-10-25').completo, true);
+  // Sin esperados, también.
+  assert.equal(diaCompleto({ esperados: [], recibidos: [lista], horario: HORARIO_PROPUESTO, fecha: '2026-10-29' }).completo, true);
+});
+
+prueba('038/RF-20, RF-23: el estado de un día de la bitácora de OCC en la lista', () => {
+  assert.equal(estadoDelDiaDeEmpresa({ anulada: true, cerrada: true, armado: 'armada' }), 'anulada');
+  assert.equal(estadoDelDiaDeEmpresa({ anulada: false, cerrada: true, armado: 'incompleta' }), 'cerrada');
+  assert.equal(estadoDelDiaDeEmpresa({ anulada: false, cerrada: false, armado: 'incompleta' }), 'incompleta');
+  assert.equal(estadoDelDiaDeEmpresa({ anulada: false, cerrada: false, armado: null }), 'en_espera');
+});
+
+prueba('038/RF-24: filtrar el día por equipo y por cómo quedó', () => {
+  const lectura = leerMensajeDeEmpresa(
+    {
+      lista: {
+        equipos: [
+          { equipo: 'TFO 429', estado: 'operativo' },
+          { equipo: 'TFO 427', estado: 'operativo' },
+          { equipo: 'Vibrocompactador volvo', estado: 'inoperativo' },
+        ],
+        notas: [{ texto: 'TFO 427 pendiente plumillas', equipo: 'TFO 427' }],
+      },
+      cambios: [{ equipo: 'TFO 427', estado: 'varado', texto: 'dirección dura' }],
+      trabajos: [
+        { equipo: 'TFO 427', tipo_trabajo: 'reparacion', descripcion: 'revisión de dirección' },
+        { equipo: 'TFO 429', tipo_trabajo: 'preventivo', descripcion: 'engrase' },
+      ],
+      informe: { actividades: [{ descripcion: 'se lleva personal' }, { descripcion: 'se revisa TFO 427', equipo: 'TFO 427' }] },
+    },
+    MAQUINARIA_DE_OCC,
+    ORIGEN_OCC,
+  );
+  const dia = llevarAlDia(BITACORA_OCC_VACIA, lectura, { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' });
+  assert.equal(filtrarDia(dia, {}), dia);
+  const tfo427 = filtrarDia(dia, { equipo: 'v:tfo427' });
+  assert.deepEqual(
+    [tfo427.estadoEquipos.length, tfo427.trabajos.length, tfo427.actividades.length, tfo427.pendientes.length],
+    [1, 1, 1, 1],
+  );
+  // La TFO 427 se varó: queda entre las inoperativas con el vibro, y la TFO 429 no.
+  const inoperativos = filtrarDia(dia, { estado: 'inoperativo' });
+  assert.deepEqual(inoperativos.estadoEquipos.map((r) => r.vehiculoId).sort(), ['tfo427', 'vibro-volvo']);
+  assert.deepEqual(inoperativos.trabajos.map((t) => t.vehiculoId), ['tfo427']);
+  assert.deepEqual(filtrarDia(dia, { estado: 'operativo' }).estadoEquipos.map((r) => r.vehiculoId), ['tfo429']);
+});
+
+prueba('038/RF-18, RF-20: lo que impide corregir o anular la bitácora de OCC', () => {
+  const dia = llevarAlDia(
+    BITACORA_OCC_VACIA,
+    leerMensajeDeEmpresa({ lista: { equipos: [{ equipo: 'TFO 429', estado: 'operativo' }] } }, MAQUINARIA_DE_OCC, ORIGEN_OCC),
+    { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' },
+  );
+  assert.equal(faltaDeLaCorreccion(dia), null);
+  assert.match(faltaDeLaCorreccion({ estadoEquipos: [...dia.estadoEquipos, { ...dia.estadoEquipos[0], id: 'otro' }] })!, /dos veces/);
+  assert.match(faltaDeLaCorreccion({ estadoEquipos: dia.estadoEquipos, trabajos: [{ ...dia.estadoEquipos[0], ...ORIGEN_OCC, id: dia.estadoEquipos[0].id, tipo: 'preventivo', descripcion: 'x' }] })!, /mismo id/);
+  // El contrato: lo leído por el sistema vuelve igual, y lo vacío no pasa.
+  assert.equal(correccionDeBitacoraDeEmpresa.safeParse({ version: 3, estadoEquipos: dia.estadoEquipos }).success, true);
+  assert.equal(correccionDeBitacoraDeEmpresa.safeParse({ version: 3, trabajos: [{ ...dia.estadoEquipos[0], ...ORIGEN_OCC, tipo: 'preventivo', descripcion: '  ' }] }).success, false);
+  assert.equal(correccionDeBitacoraDeEmpresa.safeParse({ estadoEquipos: [] }).success, false);
+  assert.equal(anulacionDeBitacoraDeEmpresa.safeParse({ version: 1, motivo: '   ' }).success, false);
+  assert.equal(anulacionDeBitacoraDeEmpresa.safeParse({ version: 1, motivo: 'Lista del 28 era del 29' }).success, true);
+});
+
+prueba('038/RF-25: el origen de la bandeja de una empresa', () => {
+  assert.equal(origenDeLaBandeja('grupo'), 'grupo');
+  assert.equal(origenDeLaBandeja('obras'), 'obras');
+  assert.equal(origenDeLaBandeja('todos'), 'todos');
+  // Sin origen o uno que no existe: todos, para no perder lo que ya se veía.
+  assert.equal(origenDeLaBandeja(null), 'todos');
+  assert.equal(origenDeLaBandeja('otro'), 'todos');
+});
+
+prueba('038/RF-11: un equipo completado en «No se pudo guardar» entra sin reemplazar la lista', () => {
+  const dia = llevarAlDia(
+    BITACORA_OCC_VACIA,
+    leerMensajeDeEmpresa(
+      {
+        lista: { equipos: [{ equipo: 'TFO 429', estado: 'operativo' }] },
+        cambios: [{ equipo: 'TFO 427', estado: 'varado', texto: 'dirección dura' }],
+      },
+      MAQUINARIA_DE_OCC,
+      ORIGEN_OCC,
+    ),
+    { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' },
+  );
+  const completado = (equipo: string, vehiculoId: string, estado: 'operativo' | 'inoperativo') => ({
+    vehiculoId,
+    escrito: equipo,
+    posiblePlaca: null,
+    id: `m-lista#excepcion-estado_equipos-3#estado-0`,
+    estado,
+    motivo: 'completado',
+    origen: ORIGEN_OCC,
+    cambios: [],
+  });
+  // Un equipo nuevo se suma; la lista sigue igual.
+  const conNuevo = agregarEstadoAlDia(dia, completado('LVY 002', 'lvy002', 'operativo'));
+  assert.deepEqual(conNuevo.estadoEquipos.map((r) => r.vehiculoId), ['tfo429', 'tfo427', 'lvy002']);
+  assert.equal(conNuevo.lista?.mensajeId, 'm-lista');
+  // Uno que ya tenía renglón por un cambio del día toma el estado y conserva sus cambios.
+  const tfo427 = agregarEstadoAlDia(dia, completado('TFO 427', 'tfo427', 'inoperativo')).estadoEquipos.find(
+    (r) => r.vehiculoId === 'tfo427',
+  )!;
+  assert.deepEqual([tfo427.estado, tfo427.motivo, tfo427.cambios.length], ['inoperativo', 'completado', 1]);
+});
+
+prueba('038/RF-28, RF-29, RF-31: Geolab sin bitácora propia; quién alcanza la de OCC y sus reportes', () => {
+  // RF-28: el grupo de Geolab se guarda y se ve, sin armar bitácora; OCC sí la arma.
+  assert.deepEqual([...EMPRESAS_CON_BITACORA_PROPIA], ['occ']);
+  // RF-31: el asistente consulta la bitácora de OCC con los permisos de su pantalla.
+  const quien = (rol: Rol, obraId: string | null = null) => ({ rol, obraId, modulosDeObra: TODOS_LOS_MODULOS });
+  assert.equal(alcanceDelAsistente(quien('admin')).bitacoraDeOcc, true);
+  assert.equal(alcanceDelAsistente(quien('encargado_occ')).bitacoraDeOcc, true);
+  assert.ok(!alcanceDelAsistente(quien('supervisor', 'o1')).bitacoraDeOcc);
+  assert.ok(!alcanceDelAsistente(quien('laboratorista', 'o1')).bitacoraDeOcc);
+  // RF-28: el laboratorista ve los Reportes de WhatsApp de Geolab con el permiso de la Bitácora
+  // de la empresa, y no el de WhatsApp, que le abriría las bandejas y el asistente de las obras.
+  assert.equal(alcanza('laboratorista', 'whatsapp', 'listar'), false);
+  assert.equal(alcanza('laboratorista', 'bitacora_empresa', 'listar'), true);
+  assert.ok(!alcanceDelAsistente(quien('laboratorista', 'o1')).modulos.includes('whatsapp'));
+});
+
+prueba('038/RF-9b: un bloque de lista vacío (como lo manda la IA) no borra la lista del día', () => {
+  const dia = llevarAlDia(
+    BITACORA_OCC_VACIA,
+    leerMensajeDeEmpresa({ lista: { equipos: [{ equipo: 'TFO 429', estado: 'operativo' }] } }, MAQUINARIA_DE_OCC, ORIGEN_OCC),
+    { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' },
+  );
+  const foto = leerMensajeDeEmpresa(
+    {
+      lista: { fecha: '', equipos: [], notas: [] },
+      informe: { fecha: '', persona: '', actividades: [] },
+      trabajos: [{ equipo: 'TFO 429', tipo_trabajo: 'preventivo', descripcion: 'engrase' }],
+    },
+    MAQUINARIA_DE_OCC,
+    { mensajeId: 'm-foto', reportadoPor: 'Luis Javier', hora: '09:00' },
+  );
+  assert.equal(foto.lista, null);
+  const despues = llevarAlDia(dia, foto, { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' });
+  assert.deepEqual([despues.estadoEquipos.length, despues.lista?.mensajeId, despues.trabajos.length], [1, 'm-lista', 1]);
 });
 
 verificarFirmaS3()

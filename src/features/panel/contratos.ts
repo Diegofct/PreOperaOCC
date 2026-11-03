@@ -19,10 +19,22 @@ import { z } from 'zod';
 import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EstadoDeSolicitud, PasoDeSolicitud } from '@/shared/rules/compras';
+import type { EstadoDePago, PasoDePago } from '@/shared/rules/pagos';
 import type { ValoresDelCorte } from '@/shared/rules/cortes';
 import type { AvisoDeVencimiento } from '@/shared/rules/documentos';
 import type { AvisoDePersona, DatosDeLaFicha, ResumenDelPersonal } from '@/shared/rules/ficha';
 import type { EmpresaId } from '@/shared/rules/empresas';
+import {
+  CAMBIOS_DE_ESTADO,
+  ESTADOS_DE_EQUIPO,
+  TIPOS_DE_TRABAJO,
+  type ActividadDeMantenimiento,
+  type EstadoDelDiaDeEmpresa,
+  type EstadoDelEquipo,
+  type ListaReemplazada,
+  type PendienteDelDia,
+  type TrabajoDeMantenimiento,
+} from '@/shared/rules/bitacora-occ';
 import type { EnsayoDeObra } from '@/shared/rules/ensayos-de-obra';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '@/shared/rules/mantenimiento';
 import {
@@ -87,13 +99,17 @@ import {
 } from '@/shared/rules/horas';
 import { ETIQUETA_ROL, ROLES, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
 import {
-  TIPOS_DE_REPORTE,
+  TIPOS_DE_REPORTE_DE_EMPRESA,
+  TIPOS_DE_REPORTE_DE_OBRA,
   type EstadoDelDia,
   type TipoCreado,
   type TipoDeReporte,
 } from '@/shared/rules/whatsapp-automatico';
 import {
   CAMINOS_DEL_CONDUCTOR,
+  LARGO_MAXIMO_DE_NOMBRE_EN_WHATSAPP,
+  limpiarNombresEnWhatsapp,
+  MAXIMO_DE_NOMBRES_EN_WHATSAPP,
   type CaminoDelConductor,
   type DestinoDeWhatsapp,
   type EstadoMensajeWhatsapp,
@@ -369,6 +385,19 @@ export const vehiculoNuevo = z.object({
   odometroKm: medidorOpcional,
   horometroH: medidorOpcional,
   estado: z.enum(ESTADOS_VEHICULO, { error: 'Ese estado de vehículo no existe.' }).default('operativo'),
+  /**
+   * Spec 038 (RF-12, D11): como lo nombran en el grupo de OCC. Opcional: sin él, el
+   * equipo se crea sin nombres y al editar no se tocan.
+   */
+  nombresWhatsapp: z
+    .array(
+      z
+        .string({ error: 'Cada nombre en WhatsApp es un texto.' })
+        .max(LARGO_MAXIMO_DE_NOMBRE_EN_WHATSAPP, `Cada nombre en WhatsApp va hasta ${LARGO_MAXIMO_DE_NOMBRE_EN_WHATSAPP} caracteres.`),
+    )
+    .max(MAXIMO_DE_NOMBRES_EN_WHATSAPP, `Son ${MAXIMO_DE_NOMBRES_EN_WHATSAPP} nombres en WhatsApp como mucho.`)
+    .transform(limpiarNombresEnWhatsapp)
+    .optional(),
 });
 
 export const vehiculoEditado = vehiculoNuevo.partial();
@@ -392,6 +421,8 @@ export interface VehiculoFila {
   horometroH: number | null;
   /** ISO 8601, o `null` si nunca se registró una lectura (spec 026, RF-21). */
   medidorActualizadoEn?: string | null;
+  /** Spec 038 (D11): como lo nombran en el grupo de WhatsApp de OCC. */
+  nombresWhatsapp: string[];
   estado: EstadoVehiculo;
   /** Llantas puestas a las que les queda 30% de vida o menos. Ver spec 003. */
   llantasPorCambiar: number;
@@ -1866,6 +1897,48 @@ export const propuestaDeIa = z.looseObject({
     }),
   ),
   /**
+   * Spec 038 (RF-9 a RF-9f): lo que la IA lee de un mensaje del grupo de una empresa —la
+   * lista del día, los cambios de estado, los trabajos y el informe del personal de
+   * mantenimiento—. Opcional: los grupos de obra no lo mandan. Su forma la lee
+   * `PropuestaDeEmpresa` en `rules/bitacora-occ`.
+   */
+  occ: z
+    .looseObject({
+      lista: z
+        .looseObject({
+          fecha: textoDeIa,
+          equipos: listaDeIa(
+            z.looseObject({ equipo: textoDeIa, tipo: textoDeIa, marca: textoDeIa, estado: textoDeIa, motivo: textoDeIa }),
+          ),
+          notas: listaDeIa(z.looseObject({ texto: textoDeIa, equipo: textoDeIa })),
+        })
+        .nullish(),
+      cambios: listaDeIa(
+        z.looseObject({ equipo: textoDeIa, tipo: textoDeIa, marca: textoDeIa, estado: textoDeIa, texto: textoDeIa }),
+      ),
+      trabajos: listaDeIa(
+        z.looseObject({
+          equipo: textoDeIa,
+          tipo: textoDeIa,
+          marca: textoDeIa,
+          tipo_trabajo: textoDeIa,
+          descripcion: textoDeIa,
+        }),
+      ),
+      informe: z
+        .looseObject({
+          fecha: textoDeIa,
+          persona: textoDeIa,
+          actividades: listaDeIa(z.looseObject({ descripcion: textoDeIa, equipo: textoDeIa })),
+        })
+        .nullish(),
+      // RF-14: «Km final 74609 29/10/2026 LVY002».
+      lecturas: listaDeIa(
+        z.looseObject({ equipo: textoDeIa, tipo: textoDeIa, marca: textoDeIa, valor: numeroOTextoDeIa, unidad: textoDeIa }),
+      ),
+    })
+    .nullish(),
+  /**
    * Spec 030, RF-36 a RF-41: los mantenimientos que dice el mensaje. `clase` llega como
    * texto y se entiende al leerla: la IA puede escribir «cambio de aceite».
    */
@@ -2228,6 +2301,9 @@ export interface GrupoFila {
   nombre: string;
   obraId: string | null;
   obraNombre: string | null;
+  /** Spec 038 (RF-3): la empresa del grupo, si es de OCC o de Geolab y no de una obra. */
+  empresaId: EmpresaId | null;
+  empresaNombre: string | null;
   asociadoEn: string | null;
   pendientes: number;
   ultimoMensajeEn: string | null;
@@ -2239,8 +2315,11 @@ export interface PropuestaFila {
   enviadoEn: string;
   autorNombre: string | null;
   grupoNombre: string;
-  obraId: string;
+  /** Nula si es del grupo de una empresa (spec 038, RF-25): entonces `obraNombre` es la empresa. */
+  obraId: string | null;
   obraNombre: string;
+  /** La empresa, si es del grupo de una empresa (spec 038, RF-25). */
+  empresaId?: EmpresaId | null;
   categoria: string | null;
   resumen: string | null;
   motivoRevision: string | null;
@@ -2256,14 +2335,20 @@ export interface PropuestaFila {
 
 /** Lo que el sistema guardó de un mensaje, para el historial (spec 024, RF-58, RF-59). */
 export interface ResultadoDelMensaje {
-  modulo?: 'cantera' | 'almacen' | 'bitacora';
-  /** Los ids de los viajes o movimientos guardados. */
+  /** `bitacora_empresa`: la bitácora de OCC (spec 038). */
+  modulo?: 'cantera' | 'almacen' | 'bitacora' | 'bitacora_empresa';
+  /** Los ids de los viajes o movimientos guardados; en una empresa, el de su bitácora. */
   guardados?: string[];
   repetidos?: number;
   apartados?: number;
   creados?: number;
   /** La bitácora a la que fue, si fue a una. */
   parteId?: string | null;
+  /** Spec 038: el día de la bitácora de la empresa, y si la lista decía un día dudoso. */
+  fecha?: string;
+  fechaDudosa?: boolean;
+  /** Spec 038 (RF-9h): lo que fue a Mantenimientos. */
+  mantenimientos?: { guardados?: string[]; resueltos?: number };
 }
 
 /** Un archivo del mensaje o de sus complementos, servido por `/api/panel/media/:id`. */
@@ -2371,7 +2456,8 @@ export const reportesEsperadosPedido = z.object({
   esperados: z
     .array(
       z.object({
-        tipoReporte: z.enum(TIPOS_DE_REPORTE, { error: 'Ese reporte no se puede esperar.' }),
+        // Spec 038: una obra espera solo los suyos; los de empresa van con su propio pedido (T12).
+        tipoReporte: z.enum(TIPOS_DE_REPORTE_DE_OBRA, { error: 'Ese reporte no se puede esperar.' }),
         autorId: z.string().trim().max(200).nullable().default(null),
         autorNombre: z.string().trim().max(200).nullable().default(null),
       }),
@@ -2400,12 +2486,51 @@ export interface DiaDeWhatsapp {
   enEspera: number;
 }
 
+/**
+ * El estado de un día de la bitácora de una empresa (spec 038, RF-16, RF-17): qué reportes
+ * esperados llegaron y si se armó completa. `cerrada` sale de la bitácora.
+ */
+export interface DiaDeEmpresa {
+  empresaId: EmpresaId;
+  fecha: string;
+  estado: EstadoDelDia | 'cerrada';
+  bitacoraEmpresaId: string | null;
+  reportes: ReporteDelDiaFila[];
+  /** Los esperados que no llegaron, si se armó incompleta (RF-17, como 024/RF-47). */
+  faltaron: { tipoReporte: string; autorNombre: string | null }[];
+}
+
+/** `GET /api/panel/whatsapp/esperados?empresa=` (spec 038, RF-16). */
+export interface ReportesEsperadosDeLaEmpresa {
+  empresaId: EmpresaId;
+  esperados: ReporteEsperadoFila[];
+  /** Quiénes han escrito en el grupo de la empresa, para elegir el autor. */
+  autores: { autorId: string; autorNombre: string | null }[];
+}
+
+/** `PUT /api/panel/whatsapp/esperados` con `empresaId`: la lista entera de la empresa. */
+export const reportesEsperadosDeEmpresaPedido = z.object({
+  empresaId: z.enum(['occ', 'geolab'], { error: 'Elija OCC o Geolab.' }),
+  esperados: z
+    .array(
+      z.object({
+        tipoReporte: z.enum(TIPOS_DE_REPORTE_DE_EMPRESA, { error: 'Ese reporte no se puede esperar en una empresa.' }),
+        autorId: z.string().trim().max(200).nullable().default(null),
+        autorNombre: z.string().trim().max(200).nullable().default(null),
+      }),
+    )
+    .max(20, 'Son demasiados reportes para un día.'),
+});
+
 /** Un renglón de «No se pudo guardar», con su mensaje (spec 024, RF-60). */
 export interface ExcepcionFila {
   id: string;
   mensajeId: string;
-  obraId: string;
+  /** Nula si es del grupo de una empresa (spec 038, RF-26): entonces `obraNombre` es la empresa. */
+  obraId: string | null;
   obraNombre: string;
+  /** La empresa, si el mensaje es del grupo de una empresa (spec 038, RF-26). */
+  empresaId?: EmpresaId | null;
   autorNombre: string | null;
   enviadoEn: string;
   categoria: string | null;
@@ -2461,8 +2586,10 @@ export const creadoUnido = z.object({
 
 /** `PATCH /api/panel/whatsapp/grupos/:id` (RF-8, RF-9, RF-13). */
 export const grupoAsociado = z.object({
-  // Con su mensaje también cuando no viene: sin él, Zod responde en inglés.
-  obraId: z.string({ error: 'Elija la obra.' }).trim().min(1, 'Elija la obra.').max(64),
+  // Spec 038 (RF-1): una obra **o** una empresa. Cuál vale lo decide `duenoDelGrupo`,
+  // para que el panel y el servidor digan lo mismo.
+  obraId: z.string().trim().max(64).nullish(),
+  empresaId: z.string().trim().max(32).nullish(),
 });
 
 /* ------------------------------------------------------------------------ */
@@ -3333,6 +3460,8 @@ export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones'
     id: string;
     proveedor: string;
     valor?: number;
+    /** Spec 037, RF-19: lo pagado sin anular. Como `valor`, solo para quien ve los valores. */
+    pagado?: number;
     fecha: string;
     factura: string;
     renglonIds: string[];
@@ -3408,3 +3537,310 @@ export interface GastoDeCompras {
   lugares: { lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string }; total: number; compras: number }[];
   total: number;
 }
+
+/* ── Tesorería (spec 037) ───────────────────────────────────────────────── */
+
+/**
+ * Una solicitud de pago al pedirla o corregirla (RF-6). Aquí solo la forma: lo que la impide
+ * lo dice `faltasDeLaSolicitudDePago` con un 422.
+ */
+export const solicitudDePagoPedida = z.object({
+  beneficiario: z.string().trim().max(200),
+  beneficiarioDocumento: z.string().trim().max(40).default(''),
+  concepto: z.string().trim().max(40),
+  paraQue: z.string().trim().max(1000),
+  valor: z.number({ error: 'El valor va en pesos, sin decimales y mayor que cero.' }),
+  paraCuando: z.string().trim().max(20),
+  urgente: z.boolean().default(false),
+});
+
+export type SolicitudDePagoPedida = z.input<typeof solicitudDePagoPedida>;
+
+/**
+ * Una solicitud de pago en una lista (RF-21, RF-22). `valor`, `valorAprobado` y `pagado` no
+ * existen para quien no `veElValorDelPago` (RF-5a): ni en `null`.
+ */
+export interface SolicitudDePagoEnElLugar {
+  id: string;
+  numero: number;
+  /** `SP-0001`. */
+  codigo: string;
+  lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string };
+  estado: EstadoDePago;
+  beneficiario: string;
+  beneficiarioDocumento: string;
+  concepto: string;
+  paraQue: string;
+  valor?: number;
+  valorAprobado?: number | null;
+  /** Lo pagado sin anular. */
+  pagado?: number;
+  paraCuando: string;
+  urgente: boolean;
+  pedidaPor: { id: string; nombre: string };
+  pedidaEn: string;
+  pedidaEl: string;
+  /** «Devuelta: corrígela», «Vencida» (RF-21). */
+  marcas: string[];
+  version: number;
+}
+
+export interface SolicitudesDePagoDelLugar {
+  /** En el orden de RF-21: abiertas y después cerradas. */
+  solicitudes: SolicitudDePagoEnElLugar[];
+  /** ¿Puede pedir aquí? No, en una obra inactiva. */
+  sePuedePedir: boolean;
+}
+
+/** Corregir una solicitud de pago enviada o devuelta (RF-9): la misma forma, con su versión. */
+export const solicitudDePagoCorregida = solicitudDePagoPedida.extend({ version: z.number().int().min(1) });
+
+export type SolicitudDePagoCorregida = z.input<typeof solicitudDePagoCorregida>;
+
+/** Un paso sobre la solicitud de pago (RF-9, RF-11, RF-12). `valorAprobado`, solo al aprobar por menos. */
+export const pasoDePagoPedido = z.object({
+  paso: z.enum(['cancelar', 'aprobar', 'rechazar', 'devolver']),
+  version: z.number().int().min(1),
+  motivo: z.string().trim().max(1000).default(''),
+  valorAprobado: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
+});
+
+export type PasoDePagoPedido = z.input<typeof pasoDePagoPedido>;
+
+/** Un pago registrado (RF-13, RF-16). */
+export interface PagoRegistrado {
+  id: string;
+  fecha: string;
+  valor: number;
+  medio: string;
+  referencia: string;
+  documentoId: string | null;
+  registradoPor: string;
+  registradoEn: string;
+  anulado: { en: string; por: string; motivo: string } | null;
+}
+
+/**
+ * Una solicitud de pago con todo lo que le pasó (RF-20). Los valores y los pagos no existen
+ * para el almacenista en las que no pidió (RF-5a), y la historia le llega sin cambios.
+ * `pasos`: los que puede dar quien la mira.
+ */
+export interface SolicitudDePagoDetallada extends Omit<SolicitudDePagoEnElLugar, 'pedidaEl'> {
+  pagos?: PagoRegistrado[];
+  historia: { paso: string; motivo: string | null; cambios: unknown[]; por: string; en: string }[];
+  pasos: PasoDePago[];
+}
+
+/**
+ * Registrar un pago (RF-13): de una solicitud, con su `version`; de una compra, sin ella (el
+ * servidor revisa lo pagado en la misma sentencia). Lo que lo impide lo dice `faltasDelPago`.
+ */
+export const pagoPedido = z.object({
+  version: z.number().int().min(1).optional(),
+  fecha: z.string().trim().max(20),
+  valor: z.number({ error: 'El valor del pago va en pesos, sin decimales y mayor que cero.' }),
+  medio: z.string().trim().max(40),
+  referencia: z.string().trim().max(100).default(''),
+  documentoId: z
+    .string()
+    .max(64)
+    .nullish()
+    .transform((v) => v || null),
+});
+
+export type PagoPedido = z.input<typeof pagoPedido>;
+
+/** Anular un pago (RF-16): el motivo y, si es de una solicitud, su versión. */
+export const pagoAnulado = z.object({
+  version: z.number().int().min(1).optional(),
+  motivo: z.string().trim().max(1000).default(''),
+});
+
+/** Una compra de la spec 036 que falta por pagar (RF-17). */
+export interface CompraPorPagar {
+  id: string;
+  solicitudId: string;
+  /** `SC-0001`, el de su solicitud de compra. */
+  codigoSolicitud: string;
+  lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string };
+  proveedor: string;
+  valor: number;
+  fecha: string;
+  factura: string;
+  pagado: number;
+  porPagar: number;
+}
+
+/** Tesorería de Elemental (RF-3, RF-10): lo filtrado, en el orden de la bandeja, y el resumen de todo el grupo. */
+export interface BandejaDeTesoreria {
+  solicitudes: SolicitudDePagoEnElLugar[];
+  resumen: { porAprobar: number; porPagar: number; valorPorPagar: number; vencidas: number };
+  total: number;
+}
+
+/** Los pagos vigentes entre dos fechas, de solicitudes y de compras, con el total por lugar (RF-23). */
+export interface PagosDelRango {
+  desde: string;
+  hasta: string;
+  pagos: {
+    id: string;
+    fecha: string;
+    valor: number;
+    medio: string;
+    referencia: string;
+    lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string };
+    /**
+     * `SP-…` con el beneficiario, o `SC-…` con el proveedor; `id` es el de la solicitud (de pago
+     * o de compra); `compraAnulada` marca el caso límite.
+     */
+    origen: { tipo: 'solicitud' | 'compra'; id: string; codigo: string; quien: string; compraAnulada: boolean };
+  }[];
+  lugares: { lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string }; total: number; pagos: number }[];
+  total: number;
+}
+
+/* ------------------------------------------------------------------------ */
+/* La Bitácora de una empresa (spec 038, RF-18 a RF-24)                      */
+/* ------------------------------------------------------------------------ */
+
+/** Un ensayo del laboratorio de las obras, en la Bitácora de Geolab (spec 038, RF-27). */
+export interface EnsayoDeLasObrasFila extends EnsayoDeObra {
+  obraNombre: string;
+}
+
+/** Un día en la lista de la Bitácora de OCC (RF-23). */
+export interface DiaDeBitacoraDeEmpresaFila {
+  id: string;
+  fecha: string;
+  estado: EstadoDelDiaDeEmpresa;
+  operativos: number;
+  inoperativos: number;
+  trabajos: number;
+  actividades: number;
+  pendientes: number;
+  fechaDudosa: boolean;
+  motivoAnulacion: string | null;
+}
+
+/** Una foto de las «Fotos del día» de la bitácora de la empresa (RF-8). */
+export interface FotoDeBitacoraDeEmpresa {
+  id: string;
+  mediaId: string;
+  mensajeId: string | null;
+  quitada: boolean;
+}
+
+/** `GET /api/panel/empresas/:id/bitacora/:fecha`: el día abierto (RF-23, RF-24). */
+export interface BitacoraDeEmpresaDelDia {
+  id: string;
+  empresaId: EmpresaId;
+  fecha: string;
+  version: number;
+  estado: EstadoDelDiaDeEmpresa;
+  cerradoEn: string | null;
+  fechaDudosa: boolean;
+  estadoEquipos: EstadoDelEquipo[];
+  trabajos: TrabajoDeMantenimiento[];
+  actividades: ActividadDeMantenimiento[];
+  pendientes: PendienteDelDia[];
+  listas: ListaReemplazada[];
+  fotos: FotoDeBitacoraDeEmpresa[];
+  /** El nombre de cada equipo ligado, por id, para mostrarlo con su placa. */
+  equipos: Record<string, string>;
+  operativos: number;
+  inoperativos: number;
+  /** Las bitácoras anuladas de ese mismo día, para el historial (RF-20, RF-30). */
+  anuladas: { id: string; anuladoEn: string; motivo: string }[];
+}
+
+const versionDeLaBitacora = z.number({ error: 'Falta la versión de la bitácora que se leyó.' }).int().min(0);
+const textoDelRenglon = (max: number, campo: string) =>
+  z.string({ error: `Falta ${campo}.` }).trim().min(1, `Falta ${campo}.`).max(max, `${campo} es muy largo.`);
+const equipoDelRenglon = {
+  vehiculoId: z.string().max(64).nullable(),
+  escrito: z.string().trim().max(200),
+  posiblePlaca: z.object({ vehiculoId: z.string().max(64), placa: z.string().max(16) }).nullable(),
+};
+const origenDelRenglon = {
+  mensajeId: z.string().max(240),
+  reportadoPor: z.string().trim().max(200),
+  hora: z.string().regex(/^\d{2}:\d{2}$/, 'La hora va en HH:MM.'),
+};
+const equipoOpcional = z.object(equipoDelRenglon).nullable();
+
+/**
+ * `PATCH /api/panel/empresas/:id/bitacora/:fecha` (RF-18): las secciones corregidas, cada
+ * una entera. La que no viene no se toca. Con la versión que se leyó: si otra persona o un
+ * mensaje escribió en medio, 409.
+ */
+export const correccionDeBitacoraDeEmpresa = z.object({
+  version: versionDeLaBitacora,
+  estadoEquipos: z
+    .array(
+      z.object({
+        ...equipoDelRenglon,
+        id: z.string().min(1).max(260),
+        estado: z.enum(ESTADOS_DE_EQUIPO, { error: 'El estado es operativo o inoperativo.' }).nullable(),
+        motivo: z.string().trim().max(1000),
+        origen: z.object(origenDelRenglon).nullable(),
+        cambios: z
+          .array(
+            z.object({
+              ...origenDelRenglon,
+              estado: z.enum(CAMBIOS_DE_ESTADO, { error: 'Ese cambio de estado no existe.' }),
+              texto: z.string().trim().max(1000),
+            }),
+          )
+          .max(50),
+      }),
+    )
+    .max(300)
+    .optional(),
+  trabajos: z
+    .array(
+      z.object({
+        ...equipoDelRenglon,
+        ...origenDelRenglon,
+        id: z.string().min(1).max(260),
+        tipo: z.enum(TIPOS_DE_TRABAJO, { error: 'Ese tipo de trabajo no existe.' }),
+        descripcion: textoDelRenglon(2000, 'qué se hizo'),
+      }),
+    )
+    .max(300)
+    .optional(),
+  actividades: z
+    .array(
+      z.object({
+        ...origenDelRenglon,
+        id: z.string().min(1).max(260),
+        persona: textoDelRenglon(200, 'quién la hizo'),
+        descripcion: textoDelRenglon(2000, 'la actividad'),
+        equipo: equipoOpcional,
+      }),
+    )
+    .max(300)
+    .optional(),
+  pendientes: z
+    .array(
+      z.object({
+        ...origenDelRenglon,
+        id: z.string().min(1).max(260),
+        texto: textoDelRenglon(2000, 'el pendiente'),
+        equipo: equipoOpcional,
+      }),
+    )
+    .max(300)
+    .optional(),
+});
+
+/** `POST …/:fecha/cerrar` (RF-18). */
+export const cierreDeBitacoraDeEmpresa = z.object({ version: versionDeLaBitacora });
+
+/** `POST …/:fecha/anular` (RF-20): con motivo escrito, como toda evidencia. */
+export const anulacionDeBitacoraDeEmpresa = z.object({
+  version: versionDeLaBitacora,
+  motivo: textoDelRenglon(500, 'el motivo de la anulación'),
+});

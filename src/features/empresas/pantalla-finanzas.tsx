@@ -3,7 +3,11 @@
  *
  * Arriba el último corte con su diferencia frente al anterior; debajo, registrar uno
  * nuevo y el historial, del más reciente al más antiguo, con los anulados. Un corte no se
- * corrige: se anula con motivo y se registra otro (RF-40). Solo la gerencia entra.
+ * corrige: se anula con motivo y se registra otro (RF-40).
+ *
+ * Spec 037 (RF-24, D9): el contenido (`InformacionFinanciera`) va también en la pestaña Cortes
+ * de Tesorería, bajo el consolidado y dentro de su marco. La auxiliar de RR. HH. consulta: sin
+ * `finanzas/escribir` no ve el formulario, y sin `finanzas/anular`, el botón de anular.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -27,6 +31,7 @@ import {
 } from '@/features/panel/componentes';
 import type { CorteFila, CortesDe } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
+import { usePersona } from '@/features/panel/sesion';
 import {
   fechaDelCorte,
   pesosDeTexto,
@@ -36,6 +41,7 @@ import {
 } from '@/shared/rules/cortes';
 import type { EmpresaId } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { alcanza } from '@/shared/rules/permisos';
 import { enPesos } from '@/shared/rules/pesos';
 
 /** De quién son los cortes: una empresa con corte propio o una obra. */
@@ -51,6 +57,29 @@ export function PantallaInformacionFinanciera({
   obraId?: string;
   nombre: string;
 }) {
+  return (
+    <MarcoPantalla
+      titulo="Información financiera"
+      descripcion={`${nombre}: los cortes que registra la gerencia. Un corte no se corrige: se anula con su motivo y se registra otro.`}
+    >
+      <InformacionFinanciera empresa={empresa} obraId={obraId} />
+    </MarcoPantalla>
+  );
+}
+
+/** Lo de la pantalla sin su marco; `alCambiar` avisa cuando se registra o se anula un corte. */
+export function InformacionFinanciera({
+  empresa,
+  obraId,
+  alCambiar,
+}: {
+  empresa?: Exclude<EmpresaId, 'proyectos'>;
+  obraId?: string;
+  alCambiar?: () => void;
+}) {
+  const persona = usePersona();
+  const registra = alcanza(persona.rol, 'finanzas', 'escribir');
+  const anula = alcanza(persona.rol, 'finanzas', 'anular');
   // Con `useMemo` sobre los dos valores: un objeto nuevo en cada pintada haría que el
   // listado se pidiera una y otra vez.
   const dueno = useMemo<DuenoDeLaPantalla>(() => (empresa ? { empresa } : { obraId: obraId ?? '' }), [empresa, obraId]);
@@ -62,15 +91,20 @@ export function PantallaInformacionFinanciera({
   const [anulados, setAnulados] = useState(0);
 
   return (
-    <MarcoPantalla
-      titulo="Información financiera"
-      descripcion={`${nombre}: los cortes que registra la gerencia. Un corte no se corrige: se anula con su motivo y se registra otro.`}
-      error={cortes.error}
-      cargando={cortes.cargando}
-    >
+    <>
+      {cortes.error ? <Aviso tono="error">{cortes.error}</Aviso> : null}
       {datos ? <UltimoCorte datos={datos} /> : null}
-      <RegistrarCorte dueno={dueno} alRegistrar={cortes.recargar} anulados={anulados} />
-      {datos ? <Historial cortes={datos.cortes} alAnular={setPorAnular} /> : null}
+      {registra ? (
+        <RegistrarCorte
+          dueno={dueno}
+          alRegistrar={() => {
+            cortes.recargar();
+            alCambiar?.();
+          }}
+          anulados={anulados}
+        />
+      ) : null}
+      {datos ? <Historial cortes={datos.cortes} alAnular={anula ? setPorAnular : null} /> : null}
       {porAnular ? (
         <VentanaAnular
           corte={porAnular}
@@ -79,10 +113,11 @@ export function PantallaInformacionFinanciera({
             setPorAnular(null);
             setAnulados((n) => n + 1);
             cortes.recargar();
+            alCambiar?.();
           }}
         />
       ) : null}
-    </MarcoPantalla>
+    </>
   );
 }
 
@@ -92,7 +127,7 @@ function UltimoCorte({ datos }: { datos: CortesDe }) {
   if (!ultimo) {
     return (
       <Seccion titulo="Último corte">
-        <Aviso tono="info">{SIN_INFORMACION_FINANCIERA}. Registre el primer corte abajo.</Aviso>
+        <Aviso tono="info">{`${SIN_INFORMACION_FINANCIERA}.`}</Aviso>
       </Seccion>
     );
   }
@@ -224,7 +259,7 @@ function RegistrarCorte({
 }
 
 /** RF-37, RF-39: todos, del más reciente al más antiguo; los anulados, con su motivo. */
-function Historial({ cortes, alAnular }: { cortes: CorteFila[]; alAnular: (corte: CorteFila) => void }) {
+function Historial({ cortes, alAnular }: { cortes: CorteFila[]; alAnular: ((corte: CorteFila) => void) | null }) {
   const columnas: Columna<CorteFila>[] = [
     { clave: 'fecha', titulo: 'Fecha de corte', ancho: 120, pintar: (c) => <Celda>{fechaDelCorte(c.fechaCorte)}</Celda> },
     { clave: 'saldo', titulo: 'Saldo', ancho: 150, pintar: (c) => <Celda>{enPesos(c.saldo)}</Celda> },
@@ -243,14 +278,18 @@ function Historial({ cortes, alAnular }: { cortes: CorteFila[]; alAnular: (corte
         </Celda>
       ),
     },
-    {
-      clave: 'anular',
-      titulo: '',
-      ancho: 110,
-      anchoMinimo: 110,
-      pintar: (c) =>
-        c.anuladoEn ? null : <Boton titulo="Anular" tono="peligro" onPress={() => alAnular(c)} />,
-    },
+    ...(alAnular
+      ? [
+          {
+            clave: 'anular',
+            titulo: '',
+            ancho: 110,
+            anchoMinimo: 110,
+            pintar: (c: CorteFila) =>
+              c.anuladoEn ? null : <Boton titulo="Anular" tono="peligro" onPress={() => alAnular(c)} />,
+          },
+        ]
+      : []),
   ];
   return (
     <Seccion titulo="Historial de cortes">

@@ -56,9 +56,11 @@ const PESTANAS = [
 export default function PantallaCompras() {
   const persona = usePersona();
   const [pestana, setPestana] = useParametroDeDireccion('pestana', 'solicitudes');
-  const [abierta] = useParametroDeDireccion('solicitud', '');
+  // La abierta se lleva aquí: el parámetro de la dirección es estado de quien lo usa, y si lo
+  // cambiara la bandeja, las pestañas seguirían encima del detalle.
+  const [abierta, setAbierta] = useParametroDeDireccion('solicitud', '');
   // Sin el gasto (la auxiliar) o con una solicitud abierta, no hay pestañas que elegir.
-  if (!veElGasto(persona.rol) || abierta) return <BandejaDelGrupo />;
+  if (!veElGasto(persona.rol) || abierta) return <BandejaDelGrupo abierta={abierta} setAbierta={setAbierta} />;
   return (
     <View style={estilos.pantalla}>
       <View style={estilos.pestanas}>
@@ -73,17 +75,16 @@ export default function PantallaCompras() {
           ))}
         </Acciones>
       </View>
-      {pestana === 'gasto' ? <PantallaGasto /> : <BandejaDelGrupo />}
+      {pestana === 'gasto' ? <PantallaGasto /> : <BandejaDelGrupo abierta={abierta} setAbierta={setAbierta} />}
     </View>
   );
 }
 
 const SIN_BANDEJA: BandejaDeCompras = { solicitudes: [], resumen: { porAprobar: 0, urgentes: 0, vencidas: 0 }, total: 0 };
 
-function BandejaDelGrupo() {
+function BandejaDelGrupo({ abierta, setAbierta }: { abierta: string; setAbierta: (id: string) => void }) {
   const cargada = useListado<BandejaDeCompras>(useCallback(() => api.compras.bandeja().then((b) => [b]), []));
   const { solicitudes, resumen } = cargada.datos[0] ?? SIN_BANDEJA;
-  const [abierta, setAbierta] = useParametroDeDireccion('solicitud', '');
 
   const [lugar, setLugar] = useState<string | null>(null);
   const [estado, setEstado] = useState<string | null>(null);
