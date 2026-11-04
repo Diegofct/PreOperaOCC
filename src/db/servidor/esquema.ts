@@ -66,6 +66,7 @@ import type { Cargo } from '../../shared/catalogos/cargos';
 import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
 import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
+import type { SeccionesSinRegistro } from '../../shared/rules/parte';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
 import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
@@ -718,6 +719,16 @@ export const partesDeObra = pgTable(
     motivoSinActividades: text('motivo_sin_actividades'),
     sinEnsayos: boolean('sin_ensayos').notNull().default(false),
     motivoSinEnsayos: text('motivo_sin_ensayos'),
+    /**
+     * «No aplica» en Maquinaria, Personal, Notas y Fotografía (spec 039, RF-11 a
+     * RF-14): que la clave exista es que la sección está marcada, con su motivo.
+     * Actividades y ensayos siguen en sus columnas de arriba. `{}` deja como
+     * estaban las bitácoras anteriores.
+     */
+    seccionesSinRegistro: jsonb('secciones_sin_registro')
+      .$type<SeccionesSinRegistro>()
+      .notNull()
+      .default({}),
 
     cerradoEn: timestamp('cerrado_en', { withTimezone: true, mode: 'date' }),
     anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),

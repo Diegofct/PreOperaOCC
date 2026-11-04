@@ -83,7 +83,7 @@ function VentanaDeAprobar({
   }
 
   return (
-    <Modal titulo={`Aprobar ${solicitud.codigo}`} onCerrar={alCerrar}>
+    <Modal titulo={`Aprobar ${solicitud.codigo}`} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>
         Se aprueba lo que dice cada renglón. Para aprobar menos, baje la cantidad; para quitar un renglón, póngalo en cero.
       </Text>
@@ -263,7 +263,7 @@ function VentanaDeAnularCompra({
   const [enviando, setEnviando] = useState(false);
   const elegida = vigentes.find((c) => c.id === compra);
   return (
-    <Modal titulo={`Anular una compra · ${solicitud.codigo}`} onCerrar={alCerrar}>
+    <Modal titulo={`Anular una compra · ${solicitud.codigo}`} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>
         La compra queda en la solicitud, tachada y con el motivo. Sus renglones quedan libres para comprarlos a otro.
       </Text>

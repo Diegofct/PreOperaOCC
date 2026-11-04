@@ -9,12 +9,21 @@ import { Estado, FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import { Aviso, Etiqueta } from '@/features/panel/componentes';
 import { diaDeLaSemana } from '@/shared/rules/festivos';
 import { diaCorto } from '@/shared/rules/jornada';
+import { mostrarLectura } from '@/shared/rules/lecturas';
 import type { EstadoDeMantenimiento } from '@/shared/rules/mantenimiento';
 
 /** Una cifra como se lee en Colombia: punto de miles y coma decimal, un decimal como mucho. */
 export function cifra(n: number | null | undefined, decimales = 1): string {
   if (n === null || n === undefined) return '—';
   return n.toLocaleString('es-CO', { maximumFractionDigits: decimales });
+}
+
+/**
+ * Una lectura de horómetro u odómetro, o lo que avanzó: con punto decimal, hasta dos
+ * decimales y sin miles, «4250.32» (spec 039, RF-17). `—` si no hay.
+ */
+export function lectura(n: number | null | undefined): string {
+  return n === null || n === undefined ? '—' : mostrarLectura(n);
 }
 
 /** Minutos en horas, con un decimal: 510 → «8,5». */

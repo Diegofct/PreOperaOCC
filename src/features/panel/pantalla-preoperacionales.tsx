@@ -20,6 +20,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { Estado, FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { identificacionDeFila } from '@/shared/rules/vehiculos';
+import { mostrarLectura } from '@/shared/rules/lecturas';
 import { fechaDeJornada, type Periodo, sumarDias } from '@/shared/rules/jornada';
 
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
@@ -218,8 +219,8 @@ export default function PantallaPreoperacionales() {
       ancho: 150,
       pintar: (p) => (
         <Celda>
-          {p.odometroKm !== null ? `${p.odometroKm} km` : '—'} ·{' '}
-          {p.horometroH !== null ? `${p.horometroH} h` : '—'}
+          {p.odometroKm !== null ? mostrarLectura(p.odometroKm, 'km') : '—'} ·{' '}
+          {p.horometroH !== null ? mostrarLectura(p.horometroH, 'h') : '—'}
         </Celda>
       ),
     },

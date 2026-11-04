@@ -80,7 +80,9 @@ import {
   LARGO_DEL_MOTIVO_SIN_REGISTRO,
   MENSAJES_DE_ENSAYO,
   METROS_MAXIMOS_DEL_ENSAYO,
+  type SeccionesSinRegistro,
 } from '@/shared/rules/parte';
+import { tieneDecimalesDeLectura } from '@/shared/rules/lecturas';
 import { IDS_DE_NOVEDAD, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
 import type { OrigenWhatsapp, UbicacionDelEnsayo, ViajeDelParte } from '@/features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '@/features/laboratorio/tipos';
@@ -128,11 +130,11 @@ const textoOpcional = (max: number) =>
 const textoObligatorio = (max: number, campo: string) =>
   z.string().trim().min(1, `Falta ${campo}.`).max(max);
 
-/** Lectura de medidor: entera, no negativa y opcional. */
+/** Lectura de medidor de un vehículo: no negativa, opcional y con hasta dos decimales (039/RF-16). */
 const medidorOpcional = z
   .number()
-  .int('El medidor va en números enteros.')
   .min(0, 'El medidor no puede ser negativo.')
+  .refine(tieneDecimalesDeLectura, 'La lectura va con hasta dos decimales.')
   .nullish()
   .transform((v) => v ?? null);
 
@@ -158,6 +160,17 @@ const medidorParcial = z
   .number()
   .int('El medidor va en números enteros.')
   .min(0, 'El medidor no puede ser negativo.')
+  .nullable()
+  .optional();
+
+/**
+ * Lectura de horómetro u odómetro de la bitácora, parcial como `medidorParcial`, pero
+ * con hasta dos decimales (spec 039, RF-16): «4250.32 km», «812.5 h».
+ */
+const lecturaParcial = z
+  .number()
+  .min(0, 'La lectura no puede ser negativa.')
+  .refine(tieneDecimalesDeLectura, 'La lectura va con hasta dos decimales.')
   .nullable()
   .optional();
 
@@ -829,9 +842,9 @@ const horaDelDia = z
 
 export const maquinaDelParte = z.object({
   vehiculoId: textoObligatorio(64, 'el equipo'),
-  /** Horas u odómetro según el equipo: lo decide el servidor por su tipo. */
-  medidorInicial: medidorParcial,
-  medidorFinal: medidorParcial,
+  /** Horas u odómetro según el equipo: lo decide el servidor por su tipo. Con decimales (039/RF-16). */
+  medidorInicial: lecturaParcial,
+  medidorFinal: lecturaParcial,
   /**
    * Lo que pasó con la máquina ese día (spec 004, RF-45). Mil caracteres dan
    * para un párrafo largo; más ya es un informe y va en las notas del día.
@@ -1016,6 +1029,11 @@ export const ensayoDelParte = z
     if (falta) contexto.addIssue({ code: 'custom', path: ['observacion'], message: falta });
   });
 
+/** Una marca «no aplica» de la 039 en un guardado parcial. */
+const marcaParcial = z
+  .object({ marcada: z.boolean().optional(), motivo: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO) })
+  .optional();
+
 export const parteEditado = z.object({
   maquinaria: z.array(maquinaDelParte).max(40).optional(),
   personal: z.array(personaDelParte).max(80).optional(),
@@ -1039,6 +1057,19 @@ export const parteEditado = z.object({
   motivoSinActividades: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
   sinEnsayos: z.boolean().optional(),
   motivoSinEnsayos: textoParcial(LARGO_DEL_MOTIVO_SIN_REGISTRO),
+  /**
+   * «No aplica» en Maquinaria, Personal, Notas y Fotografía (spec 039, RF-11 a RF-14).
+   * Solo las secciones que vienen se tocan; en cada una, ausente no toca la marca ni
+   * el motivo, como en las dos de arriba.
+   */
+  seccionesSinRegistro: z
+    .object({
+      maquinaria: marcaParcial,
+      personal: marcaParcial,
+      notas: marcaParcial,
+      fotografia: marcaParcial,
+    })
+    .optional(),
 });
 
 export type ParteEditado = z.input<typeof parteEditado>;
@@ -1162,14 +1193,11 @@ export interface ParteFila {
   motivoSinActividades: string | null;
   sinEnsayos: boolean;
   motivoSinEnsayos: string | null;
+  /** Spec 039: «no aplica» en Maquinaria, Personal, Notas y Fotografía, con su motivo. */
+  seccionesSinRegistro: SeccionesSinRegistro;
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;
-  /**
-   * El horario con que se calculan sus horas, ya decidido por el servidor con
-   * `horarioEfectivo`: el guardado, el de siempre o el vigente de la obra (spec 016).
-   */
-  horario: HorarioDeObra;
   /**
    * La lectura con la que empieza el día cada máquina, por id de vehículo (spec 029,
    * RF-1 a RF-3, RF-9). Vacío en un parte cerrado o anulado.
@@ -1887,8 +1915,9 @@ export const propuestaDeIa = z.looseObject({
     z.looseObject({
       equipo: textoDeIa,
       operador: textoDeIa,
-      medidor_inicial: numeroDeIa,
-      medidor_final: numeroDeIa,
+      // Spec 039, RF-15: con coma o con punto, también como texto.
+      medidor_inicial: numeroOTextoDeIa,
+      medidor_final: numeroOTextoDeIa,
       observacion: textoDeIa,
       /** Spec 026, RF-9, RF-16. */
       unidad_medidor: textoDeIa,
@@ -1949,7 +1978,8 @@ export const propuestaDeIa = z.looseObject({
       marca: textoDeIa,
       clase: textoDeIa,
       resuelto: z.boolean().nullish(),
-      lectura: numeroDeIa,
+      // Spec 039, RF-15: también como texto («5.830 h»), y se lee con `leerLectura`.
+      lectura: numeroOTextoDeIa,
       descripcion: textoDeIa,
     }),
   ),
@@ -2268,19 +2298,18 @@ export type PersonasDesdeLaBandeja = z.input<typeof personasDesdeLaBandeja>;
 /**
  * `POST /api/panel/whatsapp/propuestas/:id/aprobar` (RF-30 a RF-51, RF-96).
  *
- * Las fotos se eligen al aprobar (RF-50, RF-51): la del día, y por actividad, con
- * la clave como el número de renglón de la actividad en la propuesta («0», «1»…).
- * `soloViajes` es lo que se ofrece con la bitácora del día cerrada.
+ * Las fotos se eligen al aprobar y van todas a «Fotografía del día» (spec 039, RF-4):
+ * ya no se piden por actividad. `soloViajes` es lo que se ofrece con la bitácora del
+ * día cerrada.
  */
 export const aprobacion = z.object({
   version: versionLeida,
   propuesta: reporteCorregido,
   fotos: z
     .object({
-      delDia: z.string().trim().max(64).nullish().transform((v) => v || null),
-      porActividad: z.record(z.string().regex(/^\d+$/), z.string().trim().min(1).max(64)).default({}),
+      delDia: z.array(z.string().trim().min(1).max(64)).max(50).default([]),
     })
-    .default({ delDia: null, porActividad: {} }),
+    .default({ delDia: [] }),
   soloViajes: z.boolean().default(false),
 });
 

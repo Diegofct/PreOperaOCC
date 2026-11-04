@@ -117,7 +117,7 @@ export function VentanaDeMotivo({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   return (
-    <Modal titulo={titulo} onCerrar={alCerrar}>
+    <Modal titulo={titulo} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>{aviso}</Text>
       <Campo etiqueta={etiqueta} obligatorio valor={motivo} onChange={setMotivo} multilinea compacto />
       {error ? <Aviso tono="error">{error}</Aviso> : null}

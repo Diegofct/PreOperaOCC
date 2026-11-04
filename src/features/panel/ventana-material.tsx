@@ -81,7 +81,7 @@ export function VentanaCorregirMaterial({
   }
 
   return (
-    <Modal titulo={`Corregir ${material.nombre}`} onCerrar={onCerrar}>
+    <Modal titulo={`Corregir ${material.nombre}`} onCerrar={onCerrar} angosta>
       {/* Fuera del formulario, como en la ventana de vehículos: dentro, la fila de
           campos lo encoge al ancho de su texto y el aviso se sale de la ventana. */}
       {unidadBloqueada ? <Aviso tono="info">{unidadBloqueada}</Aviso> : null}

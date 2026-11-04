@@ -270,7 +270,6 @@ async function llevarABitacora(mensaje: MensajeEnEspera, obraId: string, fecha: 
     autorNombre: mensaje.autorNombre,
     enviadoEn: mensaje.enviadoEn,
     fotos: new Map(),
-    fotosElegidas: { delDia: null, porActividad: {} },
     viajesPendientes: false,
     renglonesOriginales: renglonesGuardados(reporte, excepciones),
   });

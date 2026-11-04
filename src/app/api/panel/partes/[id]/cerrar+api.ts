@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { media, partesDeObra, vehiculos } from '@/db/servidor/esquema';
+import { partesDeObra, vehiculos } from '@/db/servidor/esquema';
 import { fotosDeLaBitacora } from '@/features/whatsapp/servidor/fotos-del-dia';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
 import { horarioDeLaObraDelParte } from '@/features/bitacoras/servidor/horario';
@@ -55,6 +55,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         motivoSinActividades: partesDeObra.motivoSinActividades,
         sinEnsayos: partesDeObra.sinEnsayos,
         motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
+        // «No aplica» de Maquinaria, Personal, Notas y Fotografía (spec 039, RF-11 a RF-14).
+        seccionesSinRegistro: partesDeObra.seccionesSinRegistro,
       })
       .from(partesDeObra)
       .where(eq(partesDeObra.id, id))
@@ -63,18 +65,13 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     if (!parte) return noEncontrado('esa bitácora');
 
     // Las fotos viven en otra tabla, así que se leen aquí y la regla las recibe
-    // ya contadas: sigue siendo pura. Sin `item` son del día; con él, de la
-    // actividad cuyo id lleva.
-    const fotosDelParte = await db
-      .select({ itemKey: media.itemKey })
-      .from(media)
-      .where(and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, id)));
-
+    // ya contadas: sigue siendo pura. Desde la spec 039 (RF-1) no se piden por
+    // actividad: solo cuenta la fotografía del día.
     const fotos = {
-      // La fotografía del día es la sección entera: las de WhatsApp, las subidas y las
-      // principales viejas, sin las quitadas (spec 027, cambio del 2026-10-14, RF-41).
+      // La fotografía del día es la sección entera: las de WhatsApp, las subidas, las
+      // principales viejas y las que se subieron por actividad, sin las quitadas
+      // (spec 027, RF-41; spec 039, RF-5).
       delDia: (await fotosDeLaBitacora(id)).fotos.length,
-      itemsConFoto: fotosDelParte.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
     };
 
     // Qué impide cerrar lo decide `shared/rules/parte`, y lo decide una sola vez

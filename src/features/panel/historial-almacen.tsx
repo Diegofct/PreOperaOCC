@@ -314,7 +314,7 @@ function VentanaAnularMovimiento({
   }
 
   return (
-    <Modal titulo="Anular un movimiento" onCerrar={onCerrar}>
+    <Modal titulo="Anular un movimiento" onCerrar={onCerrar} angosta>
       <Aviso tono={rechazo ? 'error' : 'info'}>
         {rechazo ??
           `Va a anular ${que}. No se borra: queda en el historial, marcado, con su nombre y el motivo, y deja de contar en el stock.`}

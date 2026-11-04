@@ -22,6 +22,7 @@ import { CamposDeFechas, useFiltroDeFechas } from '@/features/panel/whatsapp/fil
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { alcanzaLaObraDeLaRuta, rutaDeObra } from '@/shared/rules/empresas';
 import { UNIDAD_DE_MEDIDOR } from '@/shared/rules/jornada';
+import { mostrarLectura } from '@/shared/rules/lecturas';
 
 /** «3.6000000000002» → 3,6: la resta de dos lecturas con decimales deja colas de coma flotante. */
 function unDecimal(valor: number): string {
@@ -64,7 +65,7 @@ export function PantallaBitacoraDeMaquinaria() {
       titulo: 'Lecturas',
       ancho: 160,
       pintar: (m) => (
-        <Celda>{`${m.medidorInicial ?? '—'} → ${m.medidorFinal ?? '—'} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}`}</Celda>
+        <Celda>{`${m.medidorInicial === null ? '—' : mostrarLectura(m.medidorInicial)} → ${m.medidorFinal === null ? '—' : mostrarLectura(m.medidorFinal)} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}`}</Celda>
       ),
     },
     {

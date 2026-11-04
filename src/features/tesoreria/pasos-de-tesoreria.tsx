@@ -33,7 +33,7 @@ function VentanaDeAprobar({ s, alCerrar, alAprobar }: { s: SolicitudDePagoDetall
   const elegido = aPesos(valor);
   const { falta } = aprobacionDelPago(pedido, Number.isNaN(elegido) ? 0 : elegido);
   return (
-    <Modal titulo={`Aprobar ${s.codigo}`} onCerrar={alCerrar}>
+    <Modal titulo={`Aprobar ${s.codigo}`} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>{`Se pidieron ${enPesos(pedido)}. Para aprobar menos, baje el valor.`}</Text>
       <Campo etiqueta="Valor aprobado (pesos)" valor={valor} onChange={setValor} error={falta ?? undefined} ancho={220} />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
@@ -176,7 +176,7 @@ function VentanaDeAnularPago({ s, alCerrar, alAnular }: { s: SolicitudDePagoDeta
   const [enviando, setEnviando] = useState(false);
   const elegido = vigentes.find((p) => p.id === pago);
   return (
-    <Modal titulo={`Anular un pago · ${s.codigo}`} onCerrar={alCerrar}>
+    <Modal titulo={`Anular un pago · ${s.codigo}`} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>El pago queda en la solicitud, tachado y con el motivo. Lo que falta por pagar vuelve a subir.</Text>
       <Selector
         etiqueta="Pago"

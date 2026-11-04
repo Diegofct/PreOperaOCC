@@ -53,6 +53,7 @@ import { CARGOS, type Cargo } from '@/shared/catalogos/cargos';
 import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/materiales';
 import { formatearCantidad, type TipoMovimiento } from '@/shared/rules/almacen';
 import { DESTINO_OBRA, OPCIONES_DE_PR } from '@/shared/rules/cantera';
+import { leerLectura, mostrarLectura } from '@/shared/rules/lecturas';
 import { alcanza } from '@/shared/rules/permisos';
 import { normalizar } from '@/shared/rules/texto';
 import {
@@ -72,6 +73,7 @@ import {
 import { api, mensajeDe } from '../cliente-api';
 import {
   Acciones,
+  AccionesFormulario,
   Aviso,
   Ayuda,
   Boton,
@@ -115,31 +117,39 @@ export function CampoNumero({
   onChange,
   editable,
   ancho = 120,
+  lectura = false,
 }: {
   etiqueta: string;
   valor: number | null | undefined;
   onChange: (n: number | null) => void;
   editable: boolean;
   ancho?: number;
+  /**
+   * Un horómetro u odómetro (spec 039, RF-15 a RF-17): se lee con coma o con punto
+   * («4.250,32» es 4250.32) y se escribe con punto, sin miles.
+   */
+  lectura?: boolean;
 }) {
-  const [texto, setTexto] = useState(valor === null || valor === undefined ? '' : String(valor));
+  const escrito = (n: number | null | undefined) =>
+    n === null || n === undefined ? '' : lectura ? mostrarLectura(n) : String(n);
+  const [texto, setTexto] = useState(escrito(valor));
   const [visto, setVisto] = useState(valor);
   // Si el valor cambia desde fuera (se recargó el detalle), se vuelve a escribir.
   if (valor !== visto) {
     setVisto(valor);
-    setTexto(valor === null || valor === undefined ? '' : String(valor));
+    setTexto(escrito(valor));
   }
   return (
     <Campo
       etiqueta={etiqueta}
       valor={texto}
-      soloNumeros
+      soloNumeros={!lectura}
       soloLectura={!editable}
       ancho={ancho}
       onChange={(v) => {
         setTexto(v);
         const limpio = v.trim().replace(',', '.');
-        const n = limpio === '' ? null : Number(limpio);
+        const n = limpio === '' ? null : lectura ? leerLectura(v) : Number(limpio);
         const leido = n === null || Number.isNaN(n) ? null : n;
         setVisto(leido);
         onChange(leido);
@@ -183,9 +193,8 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   const [guardando, setGuardando] = useState(false);
   const [cambiado, setCambiado] = useState(false);
   const [decidiendo, setDecidiendo] = useState(false);
-  // Las fotos elegidas para la bitácora: la del día y, por renglón, la de cada actividad.
+  // La foto elegida para «Fotografía del día» de la bitácora (spec 039, RF-4).
   const [fotoDelDia, setFotoDelDia] = useState<string | null>(null);
-  const [fotoPorActividad, setFotoPorActividad] = useState<Record<string, string>>({});
   const [descartando, setDescartando] = useState(false);
   // Las personas que se van a registrar desde la bandeja (spec 023, RF-57, RF-66).
   const [porRegistrar, setPorRegistrar] = useState<PorRegistrar[] | null>(null);
@@ -319,9 +328,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         propuesta: reporte!,
         soloViajes,
         fotos:
-          soloViajes || esAlmacen
-            ? { delDia: null, porActividad: {} }
-            : { delDia: fotoDelDia, porActividad: fotoPorActividad },
+          soloViajes || esAlmacen || !fotoDelDia ? { delDia: [] } : { delDia: [fotoDelDia] },
       });
       if ('movimientos' in hechoAsi) {
         // Spec 023, RF-38: lo aprobado queda en el Almacén, marcado «desde WhatsApp».
@@ -673,8 +680,8 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
               permiteVacio
               ancho={280}
             />
-            <CampoNumero etiqueta="Medidor inicial" valor={m.medidorInicial} editable={editable} onChange={(n) => cambiarRenglon('maquinaria', i, { medidorInicial: n })} ancho={140} />
-            <CampoNumero etiqueta="Medidor final" valor={m.medidorFinal} editable={editable} onChange={(n) => cambiarRenglon('maquinaria', i, { medidorFinal: n })} ancho={140} />
+            <CampoNumero lectura etiqueta="Medidor inicial" valor={m.medidorInicial} editable={editable} onChange={(n) => cambiarRenglon('maquinaria', i, { medidorInicial: n })} ancho={140} />
+            <CampoNumero lectura etiqueta="Medidor final" valor={m.medidorFinal} editable={editable} onChange={(n) => cambiarRenglon('maquinaria', i, { medidorFinal: n })} ancho={140} />
             {editable ? <Boton titulo="Quitar" tono="secundario" onPress={() => quitarRenglon('maquinaria', i)} /> : null}
             <Campo
               etiqueta="Observación"
@@ -1025,8 +1032,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
       {puedeDecidir && imagenes.length > 0 ? (
         <Seccion titulo="Fotos para la bitácora">
           <Ayuda>
-            Elija cuál es la fotografía del día y cuál va con cada actividad. Las que no elija se
-            quedan en el reporte.
+            Elija la foto que pasa a «Fotografía del día». Las que no elija se quedan en el reporte.
           </Ayuda>
           <FilaDeFormulario ultima>
             <Selector
@@ -1038,25 +1044,6 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
               permiteVacio
               ancho={200}
             />
-            {reporte.actividades.map((a, i) => (
-              <Selector
-                key={i}
-                etiqueta={`Actividad ${i + 1}${a.clave ? ` (${a.clave})` : ''}`}
-                valor={fotoPorActividad[String(i)] ?? null}
-                opciones={opcionesDeFoto}
-                onChange={(v) =>
-                  setFotoPorActividad((antes) => {
-                    const nuevas = { ...antes };
-                    if (v) nuevas[String(i)] = v;
-                    else delete nuevas[String(i)];
-                    return nuevas;
-                  })
-                }
-                vacio="Ninguna"
-                permiteVacio
-                ancho={200}
-              />
-            ))}
           </FilaDeFormulario>
         </Seccion>
       ) : null}
@@ -1097,7 +1084,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
           guardar aparecerá en «No se pudo guardar».
         </Aviso>
       ) : null}
-      <Acciones>
+      <AccionesFormulario>
         {editable ? (
           <Boton
             titulo={guardando ? 'Guardando…' : 'Guardar corrección'}
@@ -1126,7 +1113,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
         {manual && detalle.estado === 'ignorado' && alcanza(rol, 'whatsapp', 'escribir') ? (
           <Boton titulo="Devolver a la bandeja" tono="secundario" onPress={devolver} deshabilitado={decidiendo} />
         ) : null}
-      </Acciones>
+      </AccionesFormulario>
 
       {porRegistrar ? (
         <VentanaRegistrarPersonas

@@ -141,10 +141,12 @@ export default function PantallaPersonas() {
   const puedeDarDeBaja = yo ? alcanza(yo.rol, 'personas', 'activar') : false;
 
   // Spec 033, RF-28: en una empresa, sus personas; dentro de una obra de Proyectos, las de
-  // esa obra.
+  // esa obra. En Elemental, que lleva los accesos de todo el grupo, todas, con un filtro
+  // por empresa (spec 039, RF-27).
   const obraDeLaRuta = useObraDeLaRuta();
   const lugar = useLugarDelPanel();
-  const empresaDelLugar = lugar?.tipo === 'empresa' ? lugar.empresa : null;
+  const enElemental = lugar?.tipo === 'empresa' && lugar.empresa === 'elemental';
+  const empresaDelLugar = lugar?.tipo === 'empresa' && !enElemental ? lugar.empresa : null;
   const personas = useListado<PersonaFila>(
     useCallback(
       () =>
@@ -213,6 +215,7 @@ export default function PantallaPersonas() {
 
   const [obraFiltro, setObraFiltro] = useState<string | null>(null);
   const [accesoFiltro, setAccesoFiltro] = useState<string | null>(null);
+  const [empresaFiltro, setEmpresaFiltro] = useState<EmpresaId | null>(null);
 
   const { orden, pulsar: ordenarPor } = useOrdenRecordado(
     'personas',
@@ -226,8 +229,10 @@ export default function PantallaPersonas() {
     useCallback(
       (p: PersonaFila) =>
         (obraFiltro === null || p.obraId === obraFiltro) &&
-        (accesoFiltro === null || p.rol === accesoFiltro),
-      [obraFiltro, accesoFiltro],
+        (accesoFiltro === null || p.rol === accesoFiltro) &&
+        // `empresa` ya viene resuelta: la suya o la de su rol (spec 033, RF-46).
+        (empresaFiltro === null || p.empresa === empresaFiltro),
+      [obraFiltro, accesoFiltro, empresaFiltro],
     ),
     useCallback(
       (filas: PersonaFila[]) =>
@@ -546,6 +551,17 @@ export default function PantallaPersonas() {
           total={filtrado.total}
           mostradas={filtrado.coincidencias}
         >
+          {enElemental ? (
+            <Selector
+              etiqueta="Empresa"
+              valor={empresaFiltro}
+              opciones={EMPRESAS.map((e) => ({ valor: e.id, etiqueta: e.nombre }))}
+              onChange={(v) => setEmpresaFiltro(esEmpresa(v) ? v : null)}
+              permiteVacio
+              vacio="Todas las empresas"
+              ancho={220}
+            />
+          ) : null}
           {obraDeLaRuta ? null : (
             <Selector
               etiqueta="Obra"

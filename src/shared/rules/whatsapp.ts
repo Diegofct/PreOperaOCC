@@ -50,12 +50,12 @@ import {
 } from './horas';
 import {
   faltaContraElVehiculo,
-  lecturaSugerida,
   mensajeDeAvance,
   validarAvance,
   type ClaseDeMedidor,
   type LecturaRegistrada,
 } from './jornada';
+import { leerLectura } from './lecturas';
 import { faltasDeActividad, faltasDelEnsayo, type UbicacionPorValidar } from './parte';
 import type { EmpresaId } from './empresas';
 import { esClaseDeMantenimiento, type ClaseDeMantenimiento } from './mantenimiento';
@@ -1015,6 +1015,11 @@ export interface MaquinaDelReporte extends MaquinaReconocida {
   conflicto?: boolean;
   tipoId?: string | null;
   marcaEscrita?: string | null;
+  /**
+   * Spec 039 (RF-22): la inicial no vino en el reporte, la puso `completarIniciales` con
+   * la lectura anterior. Al llevarla a la bitácora, una inicial que ya estaba escrita manda.
+   */
+  inicialCompletada?: boolean;
 }
 
 export interface PersonaDelReporte {
@@ -1243,12 +1248,8 @@ export function faltasDelReporte(
       // El medidor que dice el reporte manda sobre el del tipo (026/RF-16, RF-17).
       const clase = maquina.unidad ?? contexto.claseDeMedidor(maquina.vehiculoId);
       const error = validarAvance(clase, maquina.medidorInicial, maquina.medidorFinal);
-      if (error) {
-        // Un punto de más se sugiere, no se corrige (026/RF-51).
-        const sugerida = lecturaSugerida(clase, maquina.medidorInicial, maquina.medidorFinal);
-        const motivo = mensajeDeAvance(clase, error, maquina.medidorInicial);
-        falta('maquinaria', i, sugerida === null ? motivo : `${motivo} ¿Quiso decir ${sugerida}?`);
-      }
+      // El punto siempre es decimal (spec 039, RF-15): ya no se sugiere quitarlo.
+      if (error) falta('maquinaria', i, mensajeDeAvance(clase, error, maquina.medidorInicial));
       // Contra lo registrado en Vehículos: ni hacia atrás ni más de lo posible (026/RF-18, RF-19).
       const contraElVehiculo =
         !error && contexto.lecturaDe
@@ -1487,8 +1488,9 @@ export interface PropuestaLeible {
   maquinaria?: readonly {
     equipo?: string | null;
     operador?: string | null;
-    medidor_inicial?: number | null;
-    medidor_final?: number | null;
+    /** Spec 039, RF-15: la IA puede mandarlas como texto («4250,32»); se leen con `leerLectura`. */
+    medidor_inicial?: number | string | null;
+    medidor_final?: number | string | null;
     observacion?: string | null;
     /** Spec 026: «km» u «h», el tipo de equipo y la marca, como los separa la IA. */
     unidad_medidor?: string | null;
@@ -1502,7 +1504,8 @@ export interface PropuestaLeible {
     marca?: string | null;
     clase?: string | null;
     resuelto?: boolean | null;
-    lectura?: number | null;
+    /** Spec 039, RF-15: la IA puede mandarla como texto («5.830»); se lee con `leerLectura`. */
+    lectura?: number | string | null;
     descripcion?: string | null;
   }[];
   personal?: readonly {
@@ -1899,7 +1902,7 @@ export function resolverPropuesta(
   });
 
   const conLecturas = (propuesta.maquinaria ?? []).filter(
-    (m) => numeroONulo(m.medidor_inicial) !== null || numeroONulo(m.medidor_final) !== null,
+    (m) => leerLectura(m.medidor_inicial) !== null || leerLectura(m.medidor_final) !== null,
   );
   // Primera pasada: lo que cada renglón toma por placa, código o modelo no es candidato por
   // tipo y marca de los demás (cambio 2026-10-13, RF-50).
@@ -1920,8 +1923,8 @@ export function resolverPropuesta(
         escrito: textoLimpio(m.equipo),
         operadorId: reconocerPersona(operadorEscrito, catalogos.personas),
         operadorEscrito,
-        medidorInicial: numeroONulo(m.medidor_inicial),
-        medidorFinal: numeroONulo(m.medidor_final),
+        medidorInicial: leerLectura(m.medidor_inicial),
+        medidorFinal: leerLectura(m.medidor_final),
         observaciones: textoLimpio(m.observacion),
         // Spec 026: solo lo que vino, para que lo resuelto antes se lea igual.
         ...soloLosQueHay({
@@ -2077,7 +2080,7 @@ export function resolverPropuesta(
       escrito: textoLimpio(m.equipo),
       clase: claseDeMantenimiento(m.clase),
       resuelto: m.resuelto === true,
-      lectura: numeroONulo(m.lectura),
+      lectura: leerLectura(m.lectura),
       descripcion: textoLimpio(m.descripcion),
       ...(reconocida.candidatos.length > 1 ? { conflicto: true } : {}),
     };
@@ -2362,7 +2365,8 @@ export interface SeccionesParaFusionar<
  * Pone un reporte aprobado en la bitácora del día (RF-63, RF-88, RF-92, RF-93).
  *
  *  · Una máquina o una persona que ya estaba se **reemplaza** en su sitio; si no
- *    estaba, se añade al final.
+ *    estaba, se añade al final. De la máquina se conservan la lectura inicial y la
+ *    final que ya tenía si el reporte no las trae (spec 039, RF-22).
  *  · El clima del reporte **reemplaza** todas las franjas: sumadas, las de dos
  *    reportes se pisarían y la bitácora las rechazaría. Un reporte sin clima deja
  *    el que había.
@@ -2374,7 +2378,7 @@ export interface SeccionesParaFusionar<
  * aprobación cortada a mitad de camino sin transacciones (plan, paso 5).
  */
 export function fusionarReporteEnParte<
-  M extends { id: string; vehiculoId: string },
+  M extends { id: string; vehiculoId: string; medidorInicial?: number | null; medidorFinal?: number | null },
   P extends { id: string; usuarioId: string },
   A extends { id: string },
   F extends { id: string },
@@ -2383,15 +2387,26 @@ export function fusionarReporteEnParte<
   parte: SeccionesParaFusionar<M, P, A, F, E>,
   reporte: SeccionesParaFusionar<M, P, A, F, E>,
 ): SeccionesParaFusionar<M, P, A, F, E> {
-  const reemplazarOAnadir = <T>(filas: T[], nuevas: T[], mismo: (a: T, b: T) => boolean) => {
+  const reemplazarOAnadir = <T>(
+    filas: T[],
+    nuevas: T[],
+    mismo: (a: T, b: T) => boolean,
+    combinar: (antes: T, nueva: T) => T = (_, nueva) => nueva,
+  ) => {
     const resultado = [...filas];
     for (const nueva of nuevas) {
       const donde = resultado.findIndex((fila) => mismo(fila, nueva));
       if (donde === -1) resultado.push(nueva);
-      else resultado[donde] = nueva;
+      else resultado[donde] = combinar(resultado[donde], nueva);
     }
     return resultado;
   };
+  // Un reporte con solo la final no borra la inicial que ya estaba, ni al revés (039/RF-22).
+  const conservarLecturas = (antes: M, nueva: M): M => ({
+    ...nueva,
+    ...(nueva.medidorInicial == null && antes.medidorInicial != null ? { medidorInicial: antes.medidorInicial } : {}),
+    ...(nueva.medidorFinal == null && antes.medidorFinal != null ? { medidorFinal: antes.medidorFinal } : {}),
+  });
   const anadirLasQueFaltan = <T extends { id: string }>(filas: T[], nuevas: T[]) => {
     const ids = new Set(filas.map((f) => f.id));
     return [...filas, ...nuevas.filter((n) => !ids.has(n.id))];
@@ -2411,6 +2426,7 @@ export function fusionarReporteEnParte<
       parte.maquinaria,
       reporte.maquinaria,
       (a, b) => a.vehiculoId === b.vehiculoId,
+      conservarLecturas,
     ),
     personal: reemplazarOAnadir(parte.personal, reporte.personal, (a, b) => a.usuarioId === b.usuarioId),
     clima: reporte.clima.length > 0 ? reporte.clima : parte.clima,

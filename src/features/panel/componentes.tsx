@@ -21,8 +21,11 @@
  *     eso solo sirve si se ve dónde está uno.
  */
 import {
+  Children,
+  cloneElement,
   createContext,
   createElement,
+  isValidElement,
   useContext,
   useEffect,
   useId,
@@ -153,7 +156,7 @@ export function Confirmacion({
   const accion = useAccionDeVentana();
 
   return (
-    <Modal titulo={titulo} onCerrar={accion.ejecutando ? () => {} : onCancelar}>
+    <Modal titulo={titulo} onCerrar={accion.ejecutando ? () => {} : onCancelar} angosta>
       <View style={estilos.confirmacion}>
         <Text style={estilos.confirmacionSimbolo}>!</Text>
         <View style={estilos.confirmacionCuerpo}>
@@ -305,16 +308,45 @@ const EnFormulario = createContext(false);
 const EnColumnaFinal = createContext(false);
 
 /**
- * El ancho de un campo con `ancho` (spec 026):
- *  · en el celular, el renglón entero: un campo por renglón (RF-35);
- *  · en un formulario de alta, ese ancho como base, creciendo hasta el doble (RF-29);
- *  · en lo demás, ese ancho fijo, como siempre.
+ * Los tres anchos de un campo en un formulario de alta (spec 039, RF-24): corto para un
+ * número, una hora o una fecha; medio para un nombre o un selector; largo, flexible,
+ * para un texto. Cada campo cae en el suyo por el `ancho` que pide, y así los
+ * formularios quedan en rejilla en vez de con un ancho distinto por campo.
  */
+export const ANCHOS_DE_CAMPO = { corto: 120, medio: 220 } as const;
+
+function anchoUniforme(ancho: number): FlexStyle {
+  if (ancho <= 160) return { flexBasis: ANCHOS_DE_CAMPO.corto, flexGrow: 1, minWidth: ANCHOS_DE_CAMPO.corto, maxWidth: ANCHOS_DE_CAMPO.corto * 1.5 };
+  if (ancho <= 280) return { flexBasis: ANCHOS_DE_CAMPO.medio, flexGrow: 1, minWidth: ANCHOS_DE_CAMPO.medio, maxWidth: ANCHOS_DE_CAMPO.medio * 1.5 };
+  return { flexBasis: ancho, flexGrow: 2, minWidth: ANCHOS_DE_CAMPO.medio };
+}
+
+/**
+ * El ancho de un campo con `ancho` (spec 026; spec 039, RF-24):
+ *  · en el celular, el renglón entero: un campo por renglón (RF-35);
+ *  · en un formulario de alta, uno de los tres anchos uniformes, creciendo un poco para
+ *    que el renglón quede parejo (RF-29);
+ *  · en lo demás —las filas de la bitácora, ya medidas a 1280 px—, ese ancho fijo.
+ */
+/**
+ * El ancho de un campo **sin** `ancho` (spec 039, RF-25): en el celular, el renglón entero;
+ * en un formulario de escritorio, el largo flexible, para que llene su renglón —con
+ * `alignSelf: 'stretch'` en una fila que envuelve se encogía a lo escrito: «Nombre» y
+ * «Dirección» del contrato salían de media caja—; fuera de un formulario, como siempre.
+ */
+function useAnchoSinMedida(): FlexStyle {
+  const angosto = useEsAngosto();
+  const enFormulario = useContext(EnFormulario);
+  if (angosto) return { width: '100%' };
+  if (enFormulario) return { flexBasis: 300, flexGrow: 2, minWidth: ANCHOS_DE_CAMPO.medio };
+  return estilos.campoLleno;
+}
+
 function useAnchoDeCampo(ancho: number): FlexStyle {
   const angosto = useEsAngosto();
   const enFormulario = useContext(EnFormulario);
   if (angosto) return { width: '100%' };
-  if (enFormulario) return { flexBasis: ancho, flexGrow: 1, minWidth: ancho, maxWidth: ancho * 2 };
+  if (enFormulario) return anchoUniforme(ancho);
   return { width: ancho };
 }
 
@@ -345,10 +377,17 @@ export function Campo({
   soloLectura,
   obligatorio,
   compacto,
+  envolver,
 }: {
   etiqueta: string;
   valor: string;
   onChange: (v: string) => void;
+  /**
+   * Con `soloLectura`, el texto envuelve en vez de cortarse: el nombre de una máquina o
+   * de una persona en la columna de 200 de la bitácora («Montacarga a Diesel · Falta la
+   * placa»), que antes se leía «Montacarga a Diesel · Falt» (spec 039, RF-26).
+   */
+  envolver?: boolean;
   ayuda?: string;
   error?: string;
   soloNumeros?: boolean;
@@ -391,6 +430,7 @@ export function Campo({
   const angosto = useEsAngosto();
   const [enfocado, setEnfocado] = useState(false);
   const anchoDeCampo = useAnchoDeCampo(ancho ?? 0);
+  const sinMedida = useAnchoSinMedida();
 
   return (
     <View
@@ -400,10 +440,18 @@ export function Campo({
           ? anchoDeCampo
           : multilinea
             ? estilos.campoRenglonEntero
-            : estilos.campoLleno,
+            : sinMedida,
       ]}
     >
       <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
+      {envolver && soloLectura ? (
+        <Text
+          style={[estilos.campoEntrada, estilos.campoSoloLectura, estilos.campoEnvuelto, angosto && estilos.controlAngosto]}
+          accessibilityLabel={`${etiqueta}: ${valor}`}
+        >
+          {valor}
+        </Text>
+      ) : (
       <TextInput
         value={valor}
         onChangeText={onChange}
@@ -429,6 +477,7 @@ export function Campo({
         ]}
         placeholderTextColor={Panel.textoApoyo}
       />
+      )}
       {error ? <Text style={estilos.campoError}>{error}</Text> : null}
       {!error && ayuda ? <Text style={[estilos.campoAyuda, angosto && estilos.textoAngosto]}>{ayuda}</Text> : null}
     </View>
@@ -851,6 +900,7 @@ export function Selector({
    */
   const buscador = useRef<TextInput>(null);
   const anchoDeCampo = useAnchoDeCampo(ancho ?? 0);
+  const sinMedida = useAnchoSinMedida();
   useEffect(() => {
     if (!abierto || !conBuscador) return;
     const pedido = setTimeout(() => buscador.current?.focus(), 0);
@@ -864,7 +914,7 @@ export function Selector({
   }, [abierto, idLista, senalada]);
 
   return (
-    <View style={[estilos.campo, ancho === undefined ? estilos.campoLleno : anchoDeCampo]}>
+    <View style={[estilos.campo, ancho === undefined ? sinMedida : anchoDeCampo]}>
       <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       <Pressable
         ref={boton}
@@ -1382,8 +1432,38 @@ export function Acciones({ children }: { children: ReactNode }) {
  * descolgaba a un renglón propio con un hueco raro encima, y no se leía como el
  * cierre de nada.
  */
+/**
+ * Los botones de un formulario en su orden (spec 039, RF-25): lo que no es un botón —un
+ * texto, un aviso— primero, luego los secundarios, el de peligro y el principal al final.
+ * Entre iguales se respeta el orden escrito. Entra también en un `Acciones` anidado, que
+ * es como lo escriben diecinueve formularios.
+ */
+function enOrdenDeFormulario(children: ReactNode): ReactNode[] {
+  const lugar = (hijo: ReactNode) => {
+    if (!isValidElement(hijo) || hijo.type !== Boton) return 0;
+    const tono = (hijo.props as { tono?: string }).tono;
+    // El de peligro («Descartar», «Anular») antes del principal: si los dos están, el
+    // principal es el que queda en el sitio de siempre.
+    return tono === 'secundario' ? 1 : tono === 'peligro' ? 2 : 3;
+  };
+  return Children.toArray(children)
+    .map((hijo) =>
+      isValidElement<{ children?: ReactNode }>(hijo) && hijo.type === Acciones
+        ? cloneElement(hijo, undefined, ...enOrdenDeFormulario(hijo.props.children))
+        : hijo,
+    )
+    .map((hijo, i) => ({ hijo, i }))
+    .sort((a, b) => lugar(a.hijo) - lugar(b.hijo) || a.i - b.i)
+    .map((h) => h.hijo);
+}
+
 export function AccionesFormulario({ children }: { children: ReactNode }) {
-  return <View style={estilos.acciones}>{children}</View>;
+  // El principal a la derecha y los secundarios a su izquierda, en todos los formularios,
+  // los haya escrito cada pantalla en el orden que fuera.
+  const ordenados = enOrdenDeFormulario(children);
+  // Sin botones (todos condicionales y ninguno aplica), ni la línea: sola parece un error.
+  if (ordenados.length === 0) return null;
+  return <View style={estilos.acciones}>{ordenados}</View>;
 }
 
 /** Una tarjeta blanca sobre el lienzo. La unidad de composición del panel. */
@@ -1427,6 +1507,11 @@ export function FilaDeFormulario({
 export const ANCHO_NOMBRE_DE_FILA = 200;
 /** El de la columna final: la casilla de observación y el «Quitar» (spec 032, RF-3). */
 export const ANCHO_FINAL_DE_FILA = 240;
+/**
+ * Lo que piden los campos de una fila en un renglón: el operador y las dos lecturas de
+ * Maquinaria, las tres horas y la novedad de Personal (spec 032, RF-4, RF-5).
+ */
+export const ANCHO_CAMPOS_DE_FILA = 441;
 
 /**
  * Una fila de Maquinaria, Personal, Actividades o Control de calidad (spec 032, RF-1 a
@@ -1458,20 +1543,33 @@ export function FilaDeSeccion({
   ultima?: boolean;
 }) {
   const angosto = useEsAngosto();
+  // A 1366 px con el menú abierto no caben las tres columnas: los campos se partían en
+  // dos renglones. Entonces la columna final —la observación y el «Quitar»— baja debajo
+  // de los campos y estos quedan en uno (spec 039, RF-26).
+  const [ancho, setAncho] = useState(0);
+  const finalAbajo =
+    !angosto && ancho > 0 && ancho < ANCHO_NOMBRE_DE_FILA + ANCHO_FINAL_DE_FILA + ANCHO_CAMPOS_DE_FILA + 2 * Spacing.three;
+  const columnaFinal = (
+    <EnColumnaFinal.Provider value={true}>
+      <View style={[estilos.filaSeccionFinal, (angosto || finalAbajo) && estilos.filaSeccionColumnaAngosta]}>
+        {final}
+      </View>
+    </EnColumnaFinal.Provider>
+  );
   return (
-    <View style={[estilos.filaSeccion, !ultima && estilos.filaConLinea]}>
+    <View
+      style={[estilos.filaSeccion, !ultima && estilos.filaConLinea]}
+      onLayout={(e) => setAncho(Math.round(e.nativeEvent.layout.width))}
+    >
       <View style={[estilos.filaSeccionColumnas, angosto && estilos.filaSeccionApilada]}>
         <View style={[estilos.filaSeccionNombre, angosto && estilos.filaSeccionColumnaAngosta]}>
           {nombre}
         </View>
         <View style={[estilos.filaSeccionCampos, angosto && estilos.filaSeccionColumnaAngosta]}>
           {children}
+          {finalAbajo ? columnaFinal : null}
         </View>
-        <EnColumnaFinal.Provider value={true}>
-          <View style={[estilos.filaSeccionFinal, angosto && estilos.filaSeccionColumnaAngosta]}>
-            {final}
-          </View>
-        </EnColumnaFinal.Provider>
+        {finalAbajo ? null : columnaFinal}
       </View>
       {debajo}
     </View>
@@ -1600,12 +1698,18 @@ export function Modal({
   onCerrar,
   soloBotonCierra = false,
   amplia = false,
+  angosta = false,
 }: {
   titulo: string;
   children: ReactNode;
   onCerrar: () => void;
   /** Más ancha (960 en vez de 720), para revisar algo con columnas, como la vista previa del presupuesto. */
   amplia?: boolean;
+  /**
+   * Más angosta (520), para una confirmación o un formulario de dos o tres campos
+   * (spec 039, RF-24): a 720 quedaban con media ventana vacía.
+   */
+  angosta?: boolean;
   /**
    * Quita Esc y el clic en el telón, y deja «Cerrar» como única salida
    * (spec 015, RF-31).
@@ -1624,7 +1728,7 @@ export function Modal({
     <CapaFlotante visible alCerrar={soloBotonCierra ? () => {} : onCerrar} telon="oscuro">
       {/* Centra la ventana y deja pasar los clics de fuera hasta el telón, que cierra. */}
       <View style={[estilos.centroModal, angosto && estilos.centroModalAngosto]}>
-        <View style={[estilos.ventana, amplia && estilos.ventanaAmplia, angosto && estilos.ventanaAngosta]}>
+        <View style={[estilos.ventana, amplia && estilos.ventanaAmplia, angosta && estilos.ventanaCompacta, angosto && estilos.ventanaAngosta]}>
           <View style={estilos.ventanaCabecera}>
             <Text style={estilos.ventanaTitulo}>{titulo}</Text>
             <Boton titulo="Cerrar" tono="secundario" onPress={onCerrar} />
@@ -1775,7 +1879,8 @@ const estilos = StyleSheet.create({
     // una misma fila las etiquetas quedaban a tres alturas distintas: visto en la
     // segunda línea de una actividad el 2026-09-15.
     alignItems: 'flex-start',
-    gap: Spacing.three,
+    // 12 y no 16 entre campos (spec 039, RF-24).
+    gap: Spacing.two + Spacing.one,
     padding: Spacing.three,
   },
   filaConLinea: { borderBottomWidth: 1, borderBottomColor: Panel.bordeSuave },
@@ -1886,13 +1991,15 @@ const estilos = StyleSheet.create({
   /** En el celular la ventana ocupa la pantalla entera (spec 026, RF-37). */
   centroModalAngosto: { padding: 0 },
   ventanaAmplia: { maxWidth: 960 },
+  ventanaCompacta: { maxWidth: 520 },
   ventanaAngosta: { maxWidth: '100%', height: '100%', maxHeight: '100%', borderRadius: 0 },
   ventanaCabecera: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
-    padding: Spacing.four,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.four,
     borderBottomWidth: 1,
     borderBottomColor: Panel.bordeSuave,
   },
@@ -1902,7 +2009,7 @@ const estilos = StyleSheet.create({
     fontWeight: '800',
     color: Panel.texto,
   },
-  ventanaCuerpo: { padding: Spacing.four, gap: Spacing.three },
+  ventanaCuerpo: { paddingVertical: Spacing.three, paddingHorizontal: Spacing.four, gap: Spacing.two + Spacing.one },
 
   barra: {
     flexDirection: 'row',
@@ -2023,6 +2130,8 @@ const estilos = StyleSheet.create({
   campoLleno: { alignSelf: 'stretch' },
   campoRenglonEntero: { width: '100%' },
   campoSoloLectura: { backgroundColor: Panel.fondoCabecera, color: Panel.textoApoyo },
+  // Alto mínimo de un campo, y lo que haga falta para un nombre de dos renglones.
+  campoEnvuelto: { paddingVertical: Spacing.two, lineHeight: 20 },
   campoAreaDeTexto: {
     minHeight: CampoPanel.altoAreaDeTexto,
     // Sin esto el texto nace centrado en vertical, como en un campo de una línea.
@@ -2239,7 +2348,8 @@ const estilos = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'flex-start',
-    gap: Spacing.three,
+    // 12 y no 16 entre campos (spec 039, RF-24).
+    gap: Spacing.two + Spacing.one,
     padding: Spacing.three,
     ...SUPERFICIE,
   },
@@ -2257,8 +2367,11 @@ const estilos = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',
+    // El principal en el mismo sitio en todos los formularios: a la derecha (039/RF-25).
+    justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: Spacing.two,
-    paddingTop: Spacing.three,
+    paddingTop: Spacing.two + Spacing.one,
     marginTop: Spacing.one,
     borderTopWidth: Grosor.linea,
     borderTopColor: Panel.bordeSuave,

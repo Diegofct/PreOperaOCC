@@ -432,7 +432,7 @@ function VentanaCorregir({
   }
 
   return (
-    <Modal titulo={titulo} onCerrar={onCerrar}>
+    <Modal titulo={titulo} onCerrar={onCerrar} angosta>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Campo

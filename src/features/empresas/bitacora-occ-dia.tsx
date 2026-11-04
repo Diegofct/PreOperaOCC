@@ -400,7 +400,7 @@ function VentanaEstado({
   const [motivo, setMotivo] = useState(renglon.motivo);
   const accion = useAccionDeVentana();
   return (
-    <Modal titulo={`Corregir ${nombre}`} onCerrar={onCerrar}>
+    <Modal titulo={`Corregir ${nombre}`} onCerrar={onCerrar} angosta>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Selector
@@ -448,7 +448,7 @@ function VentanaTrabajo({
   const accion = useAccionDeVentana();
   const falta = !tipo || descripcion.trim() === '';
   return (
-    <Modal titulo={`Corregir el trabajo de ${nombre}`} onCerrar={onCerrar}>
+    <Modal titulo={`Corregir el trabajo de ${nombre}`} onCerrar={onCerrar} angosta>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>
         <Selector
@@ -488,7 +488,7 @@ function VentanaAnular({
   const [motivo, setMotivo] = useState('');
   const accion = useAccionDeVentana();
   return (
-    <Modal titulo={`Anular la bitácora de OCC del ${fechaDelCorte(fecha)}`} onCerrar={onCerrar}>
+    <Modal titulo={`Anular la bitácora de OCC del ${fechaDelCorte(fecha)}`} onCerrar={onCerrar} angosta>
       <Aviso tono="info">
         No se borra: queda anulada, con quién, cuándo y por qué. El siguiente mensaje de este día abre otra.
       </Aviso>

@@ -723,7 +723,7 @@ function FormularioDeContrato({
       ) : null}
 
       {pidiendoMotivo ? (
-        <Modal titulo="Volver a borrador" onCerrar={() => setPidiendoMotivo(false)}>
+        <Modal titulo="Volver a borrador" onCerrar={() => setPidiendoMotivo(false)} angosta>
           <Text style={estilos.nota}>El contrato se podrá editar otra vez. El motivo queda en el historial.</Text>
           <Campo etiqueta="Motivo" obligatorio valor={motivo} onChange={setMotivo} multilinea />
           <AccionesFormulario>

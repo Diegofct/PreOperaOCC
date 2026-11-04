@@ -3,8 +3,9 @@
  *
  *  · Personal (spec 035): todo el personal del grupo, con su ficha, sus documentos y sus
  *    avisos. Es lo propio del módulo, así que abre primero.
- *  · Personas y accesos: la pantalla de siempre, donde se registra a una persona y se le
- *    da o se le quita el acceso al panel y al celular (RF-14).
+ *  · Accesos y contraseñas (antes «Personas y accesos»; spec 039, RF-27): la pantalla de
+ *    siempre, con todo el personal del grupo, donde se registra a una persona y se le da o
+ *    se le quita el acceso al panel y al celular (RF-14).
  *  · Obras, como hoy.
  *
  * La pestaña queda en la dirección (`?pestana=obras`), como en Reportes: así la dirección
@@ -21,7 +22,7 @@ import PantallaPersonal from '@/features/rrhh/pantalla-personal';
 
 const PESTANAS = [
   { clave: 'personal', titulo: 'Personal' },
-  { clave: 'personas', titulo: 'Personas y accesos' },
+  { clave: 'personas', titulo: 'Accesos y contraseñas' },
   { clave: 'obras', titulo: 'Obras' },
 ] as const;
 

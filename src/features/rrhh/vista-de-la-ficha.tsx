@@ -35,10 +35,11 @@ import {
   Tabla,
   type Columna,
 } from '@/features/panel/componentes';
-import type { EventoDeLaFicha, FichaDeLaPersona } from '@/features/panel/contratos';
+import type { ClaveTemporalFila, CodigosFila, EventoDeLaFicha, FichaDeLaPersona } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
-import { nombreDeCargo } from '@/shared/catalogos/cargos';
+import { DatoSecreto, VentanaDeSecreto } from '@/features/panel/ventana-de-secreto';
+import { nombreDeCargo, operaVehiculos } from '@/shared/catalogos/cargos';
 import { fechaDelCorte, pesosDeTexto } from '@/shared/rules/cortes';
 import { nombreDeEmpresa } from '@/shared/rules/empresas';
 import {
@@ -100,6 +101,9 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
   const datos = cargada.datos[0] ?? null;
   const documentos = useDocumentosDelLugar({ personaId: id });
   const [retirando, setRetirando] = useState(false);
+  // «Dar acceso» y «Códigos» también desde la ficha (spec 039, RF-28), con las mismas
+  // reglas y la misma ventana que en «Accesos y contraseñas».
+  const [ventana, setVentana] = useState<'acceso' | 'codigos' | null>(null);
 
   const [textos, setTextos] = useState<Textos | null>(null);
   const [aviso, setAviso] = useState<{ tono: 'exito' | 'error'; texto: string } | null>(null);
@@ -278,8 +282,62 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
           <Campo etiqueta="Empresa y obra" valor={dondeTrabaja || '—'} onChange={() => {}} soloLectura ancho={280} />
           <Campo etiqueta="Usuario" valor={persona.usuario} onChange={() => {}} soloLectura ancho={200} />
         </Formulario>
+        {/* Repartir accesos al panel es de gerencia, y un operador no entra a la web; los
+            códigos son de quien opera vehículos (spec 039, RF-28). */}
+        {(rol === 'admin' && persona.rol !== 'operador') || (puedeEditar && operaVehiculos(persona.cargo)) ? (
+          <Acciones>
+            {rol === 'admin' && persona.rol !== 'operador' ? (
+              <Boton titulo="Dar acceso" tono="secundario" onPress={() => setVentana('acceso')} />
+            ) : null}
+            {puedeEditar && operaVehiculos(persona.cargo) ? (
+              <Boton titulo="Códigos" tono="secundario" onPress={() => setVentana('codigos')} />
+            ) : null}
+          </Acciones>
+        ) : null}
         {puedeEditar ? (
-          <Text style={estilos.apoyo}>El nombre, el documento, el cargo, la obra y el acceso se cambian en «Personas y accesos».</Text>
+          <Text style={estilos.apoyo}>El nombre, el documento, el cargo, la obra y el acceso se cambian en «Accesos y contraseñas».</Text>
+        ) : null}
+        {ventana === 'acceso' ? (
+          <VentanaDeSecreto<ClaveTemporalFila>
+            titulo={`Contraseña de ${persona.usuario}`}
+            aviso={
+              `Se le va a generar una contraseña nueva a ${persona.nombreCompleto} ` +
+              `(usuario "${persona.usuario}"). La que tenga ahora deja de servir en ese ` +
+              'momento y se le cerrará la sesión si estaba dentro. La nueva se muestra una sola ' +
+              'vez: téngala a mano para dictársela.'
+            }
+            confirmar="Generar contraseña nueva"
+            generar={() => api.personas.generarClave(persona.id)}
+            pintar={(clave) => (
+              <DatoSecreto
+                rotulo={`Contraseña temporal de ${clave.nombreCompleto} · usuario "${clave.usuario}"`}
+                valor={clave.claveTemporal}
+                explicacion="Entréguesela ahora. Al entrar, esa persona tendrá que cambiarla por una suya."
+              />
+            )}
+            onCerrar={() => setVentana(null)}
+          />
+        ) : null}
+        {ventana === 'codigos' ? (
+          <VentanaDeSecreto<CodigosFila>
+            titulo={`Códigos de ${persona.usuario}`}
+            generar={() => api.personas.generarCodigos(persona.id)}
+            pintar={(c) => (
+              <>
+                <DatoSecreto
+                  rotulo={`Activación · ${c.nombreCompleto} (usuario "${c.usuario}")`}
+                  valor={c.codigoActivacion}
+                  explicacion={`Dícteselo por teléfono. Vence en ${c.horasDeVigencia} horas y sirve una sola vez.`}
+                />
+                <DatoSecreto
+                  rotulo="Respaldo"
+                  valor={c.codigoRespaldo}
+                  explicacion="Imprímalo y guárdelo en la carpeta de la obra: es la única forma de que recupere su PIN si lo olvida donde no hay señal."
+                />
+              </>
+            )}
+            onCerrar={() => setVentana(null)}
+          />
         ) : null}
       </Seccion>
 
@@ -366,10 +424,10 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
       {puedeEditar ? (
         <>
           {aviso ? <Aviso tono={aviso.tono}>{aviso.texto}</Aviso> : falta ? <Text style={estilos.falta}>{falta}</Text> : null}
-          <Acciones>
+          <AccionesFormulario>
             <Boton titulo={guardando ? 'Guardando…' : 'Guardar ficha'} onPress={guardar} deshabilitado={guardando || falta !== null} />
             {retirada ? null : <Boton titulo="Retirar" tono="peligro" onPress={() => setRetirando(true)} />}
-          </Acciones>
+          </AccionesFormulario>
           {ficha.actualizadoEn ? (
             <Text style={estilos.apoyo}>
               {`Última vez guardada por ${ficha.actualizadoPor ?? '—'} el ${new Date(ficha.actualizadoEn).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })}.`}
@@ -445,7 +503,7 @@ function VentanaDeRetirar({
   }
 
   return (
-    <Modal titulo={`Retirar a ${nombre}`} onCerrar={alCerrar}>
+    <Modal titulo={`Retirar a ${nombre}`} onCerrar={alCerrar} angosta>
       {faltan.length ? (
         <Aviso tono="error">
           {`Para retirarla faltan sus documentos de retiro: ${faltan.join('; ')}. Súbalos a su carpeta y vuelva a intentarlo.`}

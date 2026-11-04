@@ -131,7 +131,7 @@ async function reporteDePersonal(pedido: PedidoDeReporte) {
   const partes = await partesDelPeriodo(pedido);
   const { personas, cifras } = horasDelPersonal({
     dias: pedido.dias,
-    partes: partes.map((p) => ({ fecha: p.fecha, abierta: p.abierta, horario: p.horario, personal: p.personal })),
+    partes: partes.map((p) => ({ fecha: p.fecha, abierta: p.abierta, personal: p.personal })),
   });
   return {
     ...encabezado(pedido, partes),

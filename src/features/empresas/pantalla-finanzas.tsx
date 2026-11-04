@@ -15,6 +15,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
+  AccionesFormulario,
   Aviso,
   Ayuda,
   Boton,
@@ -316,7 +317,7 @@ function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerr
   }
 
   return (
-    <Modal titulo={`Anular el corte del ${fechaDelCorte(corte.fechaCorte)}`} onCerrar={alCerrar}>
+    <Modal titulo={`Anular el corte del ${fechaDelCorte(corte.fechaCorte)}`} onCerrar={alCerrar} angosta>
       <Campo
         etiqueta="Motivo"
         valor={motivo}
@@ -325,7 +326,7 @@ function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerr
         ayuda="Queda en el historial con su nombre. Después puede registrar el corte correcto."
       />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
-      <Acciones>
+      <AccionesFormulario>
         <Boton
           titulo="Confirmar anulación"
           tono="peligro"
@@ -333,7 +334,7 @@ function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerr
           deshabilitado={motivo.trim().length === 0 || ocupado}
         />
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }

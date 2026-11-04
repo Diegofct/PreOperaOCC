@@ -26,7 +26,8 @@ export const TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsh
 /** Las filas de arriba antes de los encabezados: título, periodo y una vacía. */
 const FILAS_DEL_TITULO = 3;
 
-const FORMATO: Record<string, string> = { numero: '#,##0.##', entero: '0' };
+// La lectura en «General»: sin separador de miles y con los decimales que tenga (039/RF-17).
+const FORMATO: Record<string, string> = { numero: '#,##0.##', entero: '0', lectura: 'General' };
 
 function escribirHoja(libro: ExcelJS.Workbook, hoja: HojaDeReporte, titulo: string, subtitulo: string) {
   // Excel no deja más de 31 caracteres ni algunos signos en el nombre de una hoja.

@@ -352,11 +352,9 @@ export async function fotosDeLaBitacora(
     })
     .from(media)
     .where(
-      and(
-        eq(media.duenoTipo, "bitacora"),
-        eq(media.duenoId, parteId),
-        isNull(media.itemKey),
-      ),
+      // Desde la spec 039 (RF-5) también las que se subieron por actividad: son fotos del
+      // día. `unificarFotosDelDia` descarta las repetidas por huella.
+      and(eq(media.duenoTipo, "bitacora"), eq(media.duenoId, parteId)),
     );
 
   // De dónde salió cada principal vieja: la foto de WhatsApp con su misma huella, si la hay.
@@ -499,7 +497,7 @@ export async function quitarFoto(datos: {
       select ${id}, ${datos.parteId}, m.id, null, m.sha256, now(), ${datos.quien}, ${datos.motivo}
       from ${media} m
       where m.id = ${mediaId} and m.dueno_tipo = 'bitacora' and m.dueno_id = ${datos.parteId}
-        and m.item_key is null and ${abierta}
+        and ${abierta}
       on conflict do nothing
       returning id`);
     if (creada.rows.length > 0) return "quitada";
@@ -517,7 +515,6 @@ export async function quitarFoto(datos: {
           eq(media.id, mediaId),
           eq(media.duenoTipo, "bitacora"),
           eq(media.duenoId, datos.parteId),
-          isNull(media.itemKey),
         ),
       )
       .limit(1);

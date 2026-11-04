@@ -116,7 +116,7 @@ export function VentanaDeSecreto<T>({
   const mostrandoSecreto = secreto !== null;
 
   return (
-    <Modal titulo={titulo} onCerrar={onCerrar} soloBotonCierra={mostrandoSecreto}>
+    <Modal titulo={titulo} onCerrar={onCerrar} soloBotonCierra={mostrandoSecreto} angosta>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
 
       {mostrandoSecreto ? (

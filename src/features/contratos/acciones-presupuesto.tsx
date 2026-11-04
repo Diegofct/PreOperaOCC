@@ -40,7 +40,7 @@ function VentanaDeTexto({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   return (
-    <Modal titulo={titulo} onCerrar={alCerrar}>
+    <Modal titulo={titulo} onCerrar={alCerrar} angosta>
       <Text style={estilos.nota}>{aviso}</Text>
       <Campo etiqueta={etiqueta} obligatorio valor={texto} onChange={setTexto} multilinea />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
@@ -141,7 +141,7 @@ export function AccionesDeVersion({
       ) : null}
 
       {ventana?.tipo === 'aprobar' ? (
-        <Modal titulo={`Aprobar la versión ${p.numeroVersion}`} onCerrar={() => setVentana(null)}>
+        <Modal titulo={`Aprobar la versión ${p.numeroVersion}`} onCerrar={() => setVentana(null)} angosta>
           <Aviso tono="error">
             {`Esta versión quita ${ventana.desaparecen.length === 1 ? 'un ítem que ya tiene' : `${ventana.desaparecen.length} ítems que ya tienen`} cantidades en la bitácora. Lo reportado se conserva, pero ya no contará contra ningún ítem del presupuesto vigente.`}
           </Aviso>

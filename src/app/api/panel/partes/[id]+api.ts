@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { baseServidor } from '@/db/servidor/cliente';
 import { partesDeObra } from '@/db/servidor/esquema';
 import { parteEditable } from '@/features/bitacoras/servidor/acceso';
+import { propagarFinales } from '@/features/bitacoras/servidor/lecturas';
 import {
   actividadesDelParte,
   climaDelParte,
@@ -22,11 +23,17 @@ import {
 } from '@/features/servidor/respuestas';
 import { catalogoDeLaObra } from '@/features/presupuestos/servidor/catalogo';
 import { granulometriasVigentes } from '@/features/laboratorio/servidor/parte';
+import { cambiosDeFinales } from '@/shared/rules/jornada';
+import { fotosDeLaBitacora } from '@/features/whatsapp/servidor/fotos-del-dia';
 import {
+  conMarcaDeSeccion,
+  marcaDeSeccion,
   mensajeDeDiaSinTrabajo,
   mensajeDeSeccionConRegistros,
   resolverDiaSinTrabajo,
   resolverSeccionSinRegistro,
+  SECCIONES_CON_MARCA,
+  type SeccionConMarca,
 } from '@/shared/rules/parte';
 
 /**
@@ -63,6 +70,7 @@ const COLUMNAS = {
   motivoSinActividades: partesDeObra.motivoSinActividades,
   sinEnsayos: partesDeObra.sinEnsayos,
   motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
+  seccionesSinRegistro: partesDeObra.seccionesSinRegistro,
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,
@@ -89,8 +97,15 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       cambios.motivoSinActividades !== undefined ||
       cambios.sinEnsayos !== undefined ||
       cambios.motivoSinEnsayos !== undefined;
+    // Las de la 039 (Maquinaria, Personal, Notas, Fotografía) dependen de sus filas.
+    const tocaLasMarcasNuevas =
+      cambios.seccionesSinRegistro !== undefined ||
+      cambios.maquinaria !== undefined ||
+      cambios.personal !== undefined ||
+      cambios.notas !== undefined;
     const leeLoGuardado =
       tocaLasMarcas ||
+      tocaLasMarcasNuevas ||
       cambios.sinTrabajo !== undefined ||
       cambios.motivoSinTrabajo !== undefined ||
       cambios.maquinaria !== undefined ||
@@ -108,6 +123,8 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
               motivoSinActividades: partesDeObra.motivoSinActividades,
               sinEnsayos: partesDeObra.sinEnsayos,
               motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
+              seccionesSinRegistro: partesDeObra.seccionesSinRegistro,
+              notas: partesDeObra.notas,
               maquinaria: partesDeObra.maquinaria,
               personal: partesDeObra.personal,
               actividades: partesDeObra.actividades,
@@ -229,6 +246,39 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       set.motivoSinEnsayos = marcaDeEnsayos.motivo;
     }
 
+    // «No aplica» en Maquinaria, Personal, Notas y Fotografía (spec 039, RF-11 a RF-14),
+    // con la misma regla que las dos de arriba: marcar una sección con filas se rechaza,
+    // y agregarle filas la desmarca. Las fotos solo se cuentan si se pide marcar
+    // Fotografía; subir una foto quita la marca en la ruta de la foto.
+    if (tocaLasMarcasNuevas) {
+      const pedidas = cambios.seccionesSinRegistro ?? {};
+      const filasDe = async (seccion: SeccionConMarca): Promise<number> => {
+        switch (seccion) {
+          case 'maquinaria':
+            return ((set.maquinaria as unknown[] | undefined) ?? guardado!.maquinaria).length;
+          case 'personal':
+            return ((set.personal as unknown[] | undefined) ?? guardado!.personal).length;
+          case 'notas': {
+            const notas = cambios.notas !== undefined ? cambios.notas : guardado!.notas;
+            return notas && notas.trim() !== '' ? 1 : 0;
+          }
+          case 'fotografia':
+            return pedidas.fotografia?.marcada === true ? (await fotosDeLaBitacora(id)).fotos.length : 0;
+        }
+      };
+      let marcas = guardado!.seccionesSinRegistro;
+      for (const seccion of SECCIONES_CON_MARCA) {
+        const marca = resolverSeccionSinRegistro(
+          marcaDeSeccion(marcas, seccion),
+          pedidas[seccion] ?? {},
+          await filasDe(seccion),
+        );
+        if (marca.error) return errorDePeticion(mensajeDeSeccionConRegistros(seccion), 400);
+        marcas = conMarcaDeSeccion(marcas, seccion, marca);
+      }
+      set.seccionesSinRegistro = marcas;
+    }
+
     if (Object.keys(set).length === 0) return errorDePeticion('No llegó nada que guardar.', 400);
 
     const [fila] = await db
@@ -237,6 +287,13 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
       .where(and(eq(partesDeObra.id, id), isNull(partesDeObra.cerradoEn)))
       .returning(COLUMNAS);
 
-    return fila ? ok(fila) : noEncontrado('esa bitácora');
+    if (!fila) return noEncontrado('esa bitácora');
+
+    // Una final escrita o corregida pasa a la inicial de la siguiente bitácora abierta
+    // de esa máquina (spec 039, RF-21).
+    if (cambios.maquinaria) {
+      await propagarFinales(id, estado.fecha, cambiosDeFinales(guardado!.maquinaria, fila.maquinaria));
+    }
+    return ok(fila);
   });
 }

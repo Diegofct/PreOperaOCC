@@ -11,6 +11,7 @@
  * hereda el de su clase de medidor sin que nadie tenga que sembrar nada (plan, decisiones).
  */
 import { UNIDAD_DE_MEDIDOR, type ClaseDeMedidor } from './jornada';
+import { mostrarLectura } from './lecturas';
 
 export const CLASES_DE_MANTENIMIENTO = ['aceite', 'preventivo', 'correctivo'] as const;
 
@@ -71,9 +72,9 @@ export const NOMBRE_DE_ESTADO: Record<EstadoDeMantenimiento, string> = {
   revisar: 'Revise lecturas',
 };
 
-/** Una cifra de horas o kilómetros como se lee: sin decimales de más. */
+/** Una cifra de horas o kilómetros como se lee: con punto decimal y sin miles (spec 039, RF-17). */
 function cifra(n: number): string {
-  return Number.isInteger(n) ? n.toLocaleString('es-CO') : n.toLocaleString('es-CO', { maximumFractionDigits: 1 });
+  return mostrarLectura(n);
 }
 
 /**

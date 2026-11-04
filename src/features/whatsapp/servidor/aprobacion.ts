@@ -71,8 +71,16 @@ import { filtroDeObraEstricto } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { DESTINO_OBRA, valeLimpio } from '@/shared/rules/cantera';
-import { DESFASE_COLOMBIA_MS, fechaDeJornada, medidorDeClase, type ClaseDeMedidor } from '@/shared/rules/jornada';
+import {
+  cambiosDeFinales,
+  DESFASE_COLOMBIA_MS,
+  fechaDeJornada,
+  medidorDeClase,
+  type ClaseDeMedidor,
+} from '@/shared/rules/jornada';
+import { lecturasAnteriores, propagarFinales } from '@/features/bitacoras/servidor/lecturas';
 import { resolverSeccionSinRegistro } from '@/shared/rules/parte';
+import { completarIniciales, respetarInicialesEscritas } from '@/shared/rules/whatsapp-automatico';
 import {
   claveDeMaterialNuevo,
   destinoDeCategoria,
@@ -152,10 +160,9 @@ export async function guardarViajes(
   return filas.length;
 }
 
-/** Las fotos elegidas: la del día y, por renglón de actividad, la de cada una. */
+/** Las fotos elegidas: todas van a «Fotografía del día» (spec 039, RF-4). */
 export interface FotosElegidas {
-  delDia: string | null;
-  porActividad: Record<string, string>;
+  delDia: string[];
 }
 
 /** Un archivo del mensaje que puede pasar a la bitácora. */
@@ -169,18 +176,14 @@ export interface FotoDelMensaje {
 
 /**
  * Las fotos elegidas, comprobadas antes de escribir nada: cada una tiene que ser
- * una imagen de este mensaje o de los que lo complementan, ya subida, y cada
- * actividad elegida tiene que existir en el reporte. Devuelve las fotos o las
- * faltas.
+ * una imagen de este mensaje o de los que lo complementan, ya subida. Devuelve las
+ * fotos o las faltas.
  */
 export async function fotosElegidas(
   mensajeId: string,
   fotos: FotosElegidas,
-  actividades: number,
 ): Promise<Map<string, FotoDelMensaje> | { seccion: string; renglon: number | null; mensaje: string }[]> {
-  const ids = [
-    ...new Set([fotos.delDia, ...Object.values(fotos.porActividad)].filter((f): f is string => !!f)),
-  ];
+  const ids = [...new Set(fotos.delDia)];
   if (ids.length === 0) return new Map();
 
   const db = baseServidor();
@@ -201,22 +204,14 @@ export async function fotosElegidas(
   const porId = new Map(delMensaje.map((f) => [f.id, f]));
 
   const faltas: { seccion: string; renglon: number | null; mensaje: string }[] = [];
-  const revisar = (fotoId: string, seccion: string, renglon: number | null) => {
+  ids.forEach((fotoId, renglon) => {
     const foto = porId.get(fotoId);
-    if (!foto || !foto.claveR2) faltas.push({ seccion, renglon, mensaje: 'Esa foto no es de este reporte.' });
-    else if (!foto.mime.startsWith('image/')) {
-      faltas.push({ seccion, renglon, mensaje: 'Solo una imagen puede ser fotografía de la bitácora.' });
+    if (!foto || !foto.claveR2) {
+      faltas.push({ seccion: 'fotos', renglon, mensaje: 'Esa foto no es de este reporte.' });
+    } else if (!foto.mime.startsWith('image/')) {
+      faltas.push({ seccion: 'fotos', renglon, mensaje: 'Solo una imagen puede ser fotografía de la bitácora.' });
     }
-  };
-  if (fotos.delDia) revisar(fotos.delDia, 'fotos', null);
-  for (const [renglon, fotoId] of Object.entries(fotos.porActividad)) {
-    const indice = Number(renglon);
-    if (indice >= actividades) {
-      faltas.push({ seccion: 'actividades', renglon: indice, mensaje: 'Esa actividad no está en el reporte.' });
-    } else {
-      revisar(fotoId, 'actividades', indice);
-    }
-  }
+  });
   return faltas.length > 0 ? faltas : porId;
 }
 
@@ -237,9 +232,8 @@ export async function guardarEnBitacora(datos: {
   actor: Actor;
   autorNombre: string | null;
   enviadoEn: Date;
-  /** Las fotos ya comprobadas por `fotosElegidas`. */
+  /** Las fotos ya comprobadas por `fotosElegidas`: todas van a «Fotografía del día». */
   fotos: Map<string, FotoDelMensaje>;
-  fotosElegidas: FotosElegidas;
   /** Si el reporte trae viajes sin aprobar: con la bitácora cerrada se ofrecen aparte. */
   viajesPendientes: boolean;
   /**
@@ -255,7 +249,7 @@ export async function guardarEnBitacora(datos: {
   renglonesOriginales?: { actividades: number[]; ensayos: number[] };
 }): Promise<{ parteId: string } | Response> {
   const db = baseServidor();
-  const { mensajeId, reporte, obraId, actor, autorNombre, enviadoEn, fotos, fotosElegidas, viajesPendientes } = datos;
+  const { mensajeId, reporte, obraId, actor, autorNombre, enviadoEn, fotos, viajesPendientes } = datos;
   const id = datos.claveDeIds ?? mensajeId;
   const fecha = reporte.fecha!;
 
@@ -367,6 +361,11 @@ export async function guardarEnBitacora(datos: {
 
   // 3. La bitácora del día: se abre si no existe (RF-40), y se escribe de una vez.
   let parteId: string | null = null;
+  // Las finales que cambió este guardado, para la inicial del día siguiente (039/RF-21).
+  let finales: ReturnType<typeof cambiosDeFinales> = [];
+  const completadas = new Set(
+    reporte.maquinaria.filter((m) => m.inicialCompletada && m.vehiculoId).map((m) => m.vehiculoId!),
+  );
   {
     // Cuatro intentos, releyendo cada vez: el pulso y la entrega pueden llevar a la vez
     // mensajes del mismo día (defecto visto el 8-oct, spec 025).
@@ -421,6 +420,8 @@ export async function guardarEnBitacora(datos: {
       }
 
       const fusion = fusionarReporteEnParte(parte, delReporte);
+      // La inicial que puso `completarIniciales` no pisa una ya escrita (039/RF-22).
+      fusion.maquinaria = respetarInicialesEscritas(parte.maquinaria, fusion.maquinaria, completadas);
       // Spec 032 (RF-27, RF-34): una actividad o un ensayo que llega a una sección
       // marcada «Hoy no se realizaron…» la desmarca; la misma regla que el panel.
       const actividadesMarcadas = resolverSeccionSinRegistro(
@@ -455,8 +456,12 @@ export async function guardarEnBitacora(datos: {
           ),
         )
         .returning({ id: partesDeObra.id });
-      if (escrita) parteId = escrita.id;
+      if (escrita) {
+        parteId = escrita.id;
+        finales = cambiosDeFinales(parte.maquinaria, fusion.maquinaria);
+      }
     }
+    if (parteId && finales.length > 0) await propagarFinales(parteId, fecha, finales);
     if (!parteId) {
       // `choque` distingue esto de la bitácora cerrada: es pasajero, y quien guarda solo
       // lo reintenta en vez de apartarlo (`llevarABitacora`).
@@ -467,57 +472,42 @@ export async function guardarEnBitacora(datos: {
     }
   }
 
-  // Las fotos elegidas, a la bitácora: otra fila de `media` sobre el mismo objeto
-  // de R2 (RF-50, RF-51). La del día, solo si la bitácora no tiene una.
+  // Las fotos elegidas, a «Fotografía del día»: otra fila de `media` sobre el mismo
+  // objeto de R2, sin actividad (spec 039, RF-4). `fotosDeLaBitacora` las junta con las
+  // de la lista y descarta las repetidas por huella.
   if (parteId && fotos.size > 0) {
-    const yaHayDelDia = fotosElegidas.delDia
-      ? (
-          await db
-            .select({ id: media.id })
-            .from(media)
-            .where(
-              and(eq(media.duenoTipo, 'bitacora'), eq(media.duenoId, parteId), isNull(media.itemKey)),
-            )
-            .limit(1)
-        ).length > 0
-      : true;
-    const elegidas = [
-      ...(fotosElegidas.delDia && !yaHayDelDia
-        ? [{ fotoId: fotosElegidas.delDia, itemKey: null as string | null, clave: 'dia' }]
-        : []),
-      ...(await Promise.all(
-        Object.entries(fotosElegidas.porActividad).map(async ([renglon, fotoId]) => ({
-          fotoId,
-          itemKey: await idDeterminista(id, 'actividades', Number(renglon)),
-          clave: `actividad-${renglon}`,
-        })),
-      )),
-    ];
-    if (elegidas.length > 0) {
-      await db
-        .insert(media)
-        .values(
-          await Promise.all(
-            elegidas.map(async (e) => {
-              const foto = fotos.get(e.fotoId)!;
-              return {
-                id: await idDeterminista(id, `foto-${e.clave}`, 0),
-                duenoTipo: 'bitacora' as const,
-                duenoId: parteId!,
-                proposito: 'evidencia' as const,
-                itemKey: e.itemKey,
-                mime: foto.mime,
-                bytes: foto.bytes,
-                sha256: foto.sha256,
-                // El mismo objeto: no se copia ni se vuelve a subir.
-                claveR2: foto.claveR2,
-                subidoEn: ahora,
-              };
-            }),
-          ),
-        )
-        .onConflictDoNothing({ target: media.id });
-    }
+    await db
+      .insert(media)
+      .values(
+        await Promise.all(
+          [...fotos.values()].map(async (foto) => ({
+            id: await idDeterminista(id, `foto-dia-${foto.id}`, 0),
+            duenoTipo: 'bitacora' as const,
+            duenoId: parteId!,
+            proposito: 'evidencia' as const,
+            itemKey: null,
+            mime: foto.mime,
+            bytes: foto.bytes,
+            sha256: foto.sha256,
+            // El mismo objeto: no se copia ni se vuelve a subir.
+            claveR2: foto.claveR2,
+            subidoEn: ahora,
+          })),
+        ),
+      )
+      .onConflictDoNothing({ target: media.id });
+
+    // Con una foto, «No se tomaron fotos» deja de ser cierto: se quita la marca (039/RF-13).
+    await db
+      .update(partesDeObra)
+      .set({ seccionesSinRegistro: sql`${partesDeObra.seccionesSinRegistro} - 'fotografia'` })
+      .where(
+        and(
+          eq(partesDeObra.id, parteId),
+          isNull(partesDeObra.cerradoEn),
+          sql`jsonb_exists(${partesDeObra.seccionesSinRegistro}, 'fotografia')`,
+        ),
+      );
   }
 
   // Las lecturas del día, a Vehículos: solo hacia adelante (spec 026, RF-15 a RF-17, RF-20),
@@ -659,8 +649,14 @@ export async function aprobarPropuesta(
     );
   }
 
-  const reporte = pedido.propuesta;
   const { soloViajes } = pedido;
+  // Una máquina que llega sin inicial empieza donde terminó (spec 039, RF-20), como en el
+  // guardado automático y en «No se pudo guardar». Antes de las faltas: sin esto, la
+  // propuesta con solo la final no se podía aprobar.
+  const reporte =
+    !soloViajes && pedido.propuesta.fecha && mensaje.obraId
+      ? completarIniciales(pedido.propuesta, await lecturasAnteriores(mensaje.obraId, pedido.propuesta.fecha))
+      : pedido.propuesta;
 
   // Spec 023: un reporte de almacén va al módulo Almacén y no a la bitácora (RF-40).
   if (destinoDeCategoria(mensaje.categoria) === 'almacen') {
@@ -719,7 +715,7 @@ export async function aprobarPropuesta(
   const fecha = reporte.fecha!;
 
   // Las fotos elegidas, también antes de escribir nada (RF-50 a RF-52).
-  const fotos = soloViajes ? new Map<string, FotoDelMensaje>() : await fotosElegidas(id, pedido.fotos, reporte.actividades.length);
+  const fotos = soloViajes ? new Map<string, FotoDelMensaje>() : await fotosElegidas(id, pedido.fotos);
   if (Array.isArray(fotos)) return respuestaDeFaltas(fotos);
 
   // Solo los viajes, con la bitácora del día cerrada (RF-96 a RF-98).
@@ -774,7 +770,6 @@ export async function aprobarPropuesta(
       autorNombre: mensaje.autorNombre,
       enviadoEn: mensaje.enviadoEn,
       fotos,
-      fotosElegidas: pedido.fotos,
       viajesPendientes,
     });
     if (enBitacora instanceof Response) return enBitacora;

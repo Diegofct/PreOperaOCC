@@ -41,6 +41,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { Spacing } from '@/constants/theme';
 import { RecuadroDelAsistente } from '@/features/asistente/recuadro-del-inicio';
 import { horasLegibles } from '@/shared/rules/horas';
+import { mostrarLectura } from '@/shared/rules/lecturas';
 import { PantallaEmpresas } from '@/features/empresas/pantalla-empresas';
 import { PantallaSinAcceso } from '@/features/empresas/pantallas-de-aviso';
 import { destinoAlEntrar, rutaDeObra } from '@/shared/rules/empresas';
@@ -235,12 +236,12 @@ function VistaGerencia({
         <Cifras>
           <Cifra
             titulo="Horas de máquina"
-            valor={`${datos.horasMaquina} h`}
+            valor={mostrarLectura(datos.horasMaquina, 'h')}
             pie="Maquinaria amarilla, por horómetro"
           />
           <Cifra
             titulo="Kilómetros"
-            valor={`${datos.kilometros} km`}
+            valor={mostrarLectura(datos.kilometros, 'km')}
             pie="Camionetas y volquetas, por odómetro"
           />
           <Cifra
@@ -376,8 +377,8 @@ function TablaEquivalente({ datos }: { datos: ResumenFila }) {
     { id: 'inspeccionados', concepto: 'Equipos inspeccionados hoy', valor: String(datos.inspeccionadosHoy) },
     { id: 'sin', concepto: 'Equipos sin preoperacional hoy', valor: String(datos.sinInspeccionar) },
     { id: 'noaptos', concepto: 'Equipos NO APTOS hoy', valor: String(datos.noAptos) },
-    { id: 'horas', concepto: 'Horas de máquina del periodo', valor: `${datos.horasMaquina} h` },
-    { id: 'km', concepto: 'Kilómetros del periodo', valor: `${datos.kilometros} km` },
+    { id: 'horas', concepto: 'Horas de máquina del periodo', valor: mostrarLectura(datos.horasMaquina, 'h') },
+    { id: 'km', concepto: 'Kilómetros del periodo', valor: mostrarLectura(datos.kilometros, 'km') },
     {
       id: 'personal',
       concepto: 'Horas de personal del periodo',

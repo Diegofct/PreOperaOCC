@@ -17,10 +17,11 @@ import {
   NOMBRE_DE_TIPO_DE_TRABAJO,
   TIPOS_DE_TRABAJO,
 } from '@/shared/rules/bitacora-occ';
+import { leerLectura } from '@/shared/rules/lecturas';
 import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
-import { Acciones, Aviso, Ayuda, Boton, Campo, FilaDeFormulario, Modal, Selector } from '../componentes';
+import { AccionesFormulario, Aviso, Ayuda, Boton, Campo, FilaDeFormulario, Modal, Selector } from '../componentes';
 import type { ExcepcionFila, VehiculoFila } from '../contratos';
 import { useListado } from '../marco';
 
@@ -77,7 +78,8 @@ export function VentanaCompletarDeEmpresa({
       case 'trabajos':
         return { vehiculoId, tipo_trabajo: tipo, descripcion: detalle };
       default:
-        return { vehiculoId, valor: Number(valor.replace(',', '.')), unidad };
+        // Con coma o con punto, «4.250,32» incluido (spec 039, RF-15).
+        return { vehiculoId, valor: leerLectura(valor) ?? Number.NaN, unidad };
     }
   }
 
@@ -86,7 +88,7 @@ export function VentanaCompletarDeEmpresa({
     (seccion === 'estado_equipos' && !estado) ||
     (seccion === 'cambios' && !estado) ||
     (seccion === 'trabajos' && (!tipo || detalle.trim() === '')) ||
-    (seccion === 'lecturas' && (!unidad || !(Number(valor.replace(',', '.')) > 0)));
+    (seccion === 'lecturas' && (!unidad || !((leerLectura(valor) ?? 0) > 0)));
 
   async function guardar() {
     setGuardando(true);
@@ -184,10 +186,10 @@ export function VentanaCompletarDeEmpresa({
         ) : null}
       </FilaDeFormulario>
       {faltas.length > 0 ? <Aviso tono="error">{faltas.join(' ')}</Aviso> : error ? <Aviso tono="error">{error}</Aviso> : null}
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo={guardando ? 'Guardando…' : 'Guardar'} deshabilitado={guardando || falta} onPress={guardar} />
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }

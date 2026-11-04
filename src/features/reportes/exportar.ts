@@ -14,13 +14,18 @@ import type { PeriodoDeReporte } from '@/shared/rules/periodos';
 import { nombreDeNovedad } from '@/shared/catalogos/bitacora';
 import { NOMBRE_DE_CLASE, type ClaseDeMantenimiento } from '@/shared/rules/mantenimiento';
 import { UNIDAD_DE_MEDIDOR, diaCorto } from '@/shared/rules/jornada';
+import { mostrarLectura, redondearLectura } from '@/shared/rules/lecturas';
+import { sinHorasEnElPeriodo } from '@/shared/rules/reportes';
 
 import type { PestanaDeReporte, ReporteDe } from './servidor/reportes';
 
 export type CeldaDeReporte = string | number | null;
 
-/** Cómo se escribe una columna: número con decimales o texto. Lo que no se dice, texto. */
-export type FormatoDeColumna = 'numero' | 'entero';
+/**
+ * Cómo se escribe una columna: número con decimales, entero, lectura de medidor (con
+ * punto decimal y sin miles, spec 039, RF-17) o texto. Lo que no se dice, texto.
+ */
+export type FormatoDeColumna = 'numero' | 'entero' | 'lectura';
 
 export interface HojaDeReporte {
   nombre: string;
@@ -40,6 +45,10 @@ export const TITULO_DE_PESTANA: Record<PestanaDeReporte, string> = {
 };
 
 const horas = (minutos: number) => Math.round((minutos / 60) * 100) / 100;
+/** Una lectura o lo que avanzó, con dos decimales como mucho: sin el 58.749999 de la resta. */
+const lectura = (n: number | null) => (n === null ? null : redondearLectura(n));
+/** Un día sin horas reportadas: la celda va en blanco, no en cero (spec 039, D4). */
+const SIN_HORAS = '';
 
 const TRABAJO: Record<string, string> = { si: 'Sí', no: 'No', sin_bitacora: 'Sin bitácora' };
 const ESTADO_PERSONA: Record<string, string> = { registrada: 'En la bitácora', ausente: 'No está', sin_bitacora: 'Sin bitácora' };
@@ -86,24 +95,24 @@ function hojasDeMaquinas(datos: ReporteDe<'maquinas'>): HojaDeReporte[] {
     {
       nombre: 'Máquinas',
       encabezados: ['Máquina', 'Tipo', 'Unidad', 'Total', 'Días trabajados', 'Días sin trabajar', 'Promedio por día', 'Mantenimiento'],
-      formatos: { Total: 'numero', 'Días trabajados': 'entero', 'Días sin trabajar': 'entero', 'Promedio por día': 'numero' },
+      formatos: { Total: 'lectura', 'Días trabajados': 'entero', 'Días sin trabajar': 'entero', 'Promedio por día': 'lectura' },
       filas: datos.maquinas.map((m) => [
         m.codigo,
         m.tipo,
         UNIDAD_DE_MEDIDOR[m.claseMedidor],
-        m.total,
+        lectura(m.total),
         m.diasTrabajados,
         m.diasSinTrabajar,
-        m.promedio,
+        lectura(m.promedio),
         m.mantenimiento ? m.mantenimiento.texto + (m.mantenimiento.correctivoPendiente ? ' · correctivo pendiente' : '') : null,
       ]),
     },
     {
       nombre: 'Por día',
       encabezados: ['Fecha', 'Máquina', 'Trabajó', 'Operador', 'Lectura inicial', 'Lectura final', 'Horas o km'],
-      formatos: { 'Lectura inicial': 'numero', 'Lectura final': 'numero', 'Horas o km': 'numero' },
+      formatos: { 'Lectura inicial': 'lectura', 'Lectura final': 'lectura', 'Horas o km': 'lectura' },
       filas: datos.maquinas.flatMap((m) =>
-        m.dias.map((d) => [d.fecha, m.codigo, TRABAJO[d.trabajo], d.operador, d.inicial, d.final, d.avance]),
+        m.dias.map((d) => [d.fecha, m.codigo, TRABAJO[d.trabajo], d.operador, lectura(d.inicial), lectura(d.final), lectura(d.avance)]),
       ),
     },
   ];
@@ -116,11 +125,11 @@ function hojasDeMantenimiento(datos: ReporteDe<'mantenimiento'>): HojaDeReporte[
     {
       nombre: 'Estado',
       encabezados: ['Máquina', 'Tipo', 'Lectura actual', 'Unidad', 'Aceite', 'Preventivo', 'Correctivo pendiente', 'Fuera de servicio'],
-      formatos: { 'Lectura actual': 'numero' },
+      formatos: { 'Lectura actual': 'lectura' },
       filas: datos.maquinas.map((m) => [
         m.codigo,
         m.tipo,
-        m.lectura,
+        lectura(m.lectura),
         UNIDAD_DE_MEDIDOR[m.claseMedidor],
         m.clases.aceite.texto,
         m.clases.preventivo.texto,
@@ -131,12 +140,12 @@ function hojasDeMantenimiento(datos: ReporteDe<'mantenimiento'>): HojaDeReporte[
     {
       nombre: 'Historial',
       encabezados: ['Fecha', 'Máquina', 'Clase', 'Lectura', 'Nota', 'Origen', 'Registró', 'Estado', 'Motivo de la anulación'],
-      formatos: { Lectura: 'numero' },
+      formatos: { Lectura: 'lectura' },
       filas: datos.historial.map((h) => [
         h.fecha,
         h.codigo,
         NOMBRE_DE_CLASE[h.clase as ClaseDeMantenimiento],
-        h.lectura,
+        lectura(h.lectura),
         h.nota,
         h.origen === 'whatsapp' ? 'WhatsApp' : 'Panel',
         h.registradoPor,
@@ -156,9 +165,9 @@ function hojasDePersonal(datos: ReporteDe<'personal'>): HojaDeReporte[] {
       filas: datos.personas.map((p) => [
         p.nombre,
         p.cargo,
-        horas(p.laboradas),
-        horas(p.extraDiurna),
-        horas(p.extraNocturna),
+        sinHorasEnElPeriodo(p) ? SIN_HORAS : horas(p.laboradas),
+        sinHorasEnElPeriodo(p) ? SIN_HORAS : horas(p.extraDiurna),
+        sinHorasEnElPeriodo(p) ? SIN_HORAS : horas(p.extraNocturna),
         p.diasTrabajados,
         Object.entries(p.novedades).map(([n, dias]) => `${nombreDeNovedad(n)}: ${dias} ${dias === 1 ? 'día' : 'días'}`).join(' · ') || null,
         [
@@ -177,10 +186,10 @@ function hojasDePersonal(datos: ReporteDe<'personal'>): HojaDeReporte[] {
         p.dias.map((d) => [
           d.fecha,
           p.nombre,
-          ESTADO_PERSONA[d.estado],
-          d.estado === 'registrada' ? horas(d.laboradas) : null,
-          d.estado === 'registrada' ? horas(d.extraDiurna) : null,
-          d.estado === 'registrada' ? horas(d.extraNocturna) : null,
+          d.estado === 'registrada' && d.sinHoras ? 'Horas no reportadas' : ESTADO_PERSONA[d.estado],
+          d.estado !== 'registrada' ? null : d.sinHoras ? SIN_HORAS : horas(d.laboradas),
+          d.estado !== 'registrada' ? null : d.sinHoras ? SIN_HORAS : horas(d.extraDiurna),
+          d.estado !== 'registrada' ? null : d.sinHoras ? SIN_HORAS : horas(d.extraNocturna),
           d.novedad ? nombreDeNovedad(d.novedad) : null,
         ]),
       ),
@@ -285,7 +294,10 @@ function escapar(texto: string): string {
 function celdaImpresa(valor: CeldaDeReporte, formato: FormatoDeColumna | undefined): string {
   if (valor === null) return '<td>—</td>';
   if (typeof valor === 'number') {
-    const texto = valor.toLocaleString('es-CO', { maximumFractionDigits: formato === 'entero' ? 0 : 2 });
+    const texto =
+      formato === 'lectura'
+        ? mostrarLectura(valor)
+        : valor.toLocaleString('es-CO', { maximumFractionDigits: formato === 'entero' ? 0 : 2 });
     return `<td class="numero">${texto}</td>`;
   }
   return `<td>${escapar(valor)}</td>`;
