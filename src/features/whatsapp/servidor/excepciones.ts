@@ -359,7 +359,6 @@ export async function guardarExcepcion(
       autorNombre: excepcion.autorDelMensaje,
       enviadoEn: excepcion.enviadoEnDelMensaje,
       fotos: new Map(),
-      fotosElegidas: { delDia: null, porActividad: {} },
       viajesPendientes: false,
       claveDeIds,
     });

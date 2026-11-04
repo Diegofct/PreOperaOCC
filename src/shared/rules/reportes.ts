@@ -6,7 +6,7 @@
  * bitácora abierta o una corregida se ven al volver a pedir el reporte (RF-7). Los
  * tipos de entrada son los mínimos, por su forma, para no depender de `features/`.
  */
-import { horasDeLaPersona, MAXIMO_MINUTOS_EXTRA_POR_DIA, type HorarioDeObra, type PersonaConHoras } from './horas';
+import { horasDeLaPersona, MAXIMO_MINUTOS_EXTRA_POR_DIA, type PersonaConHoras } from './horas';
 import { avanceDeMedidor, type ClaseDeMedidor } from './jornada';
 import { textosSinRegistro } from './parte';
 import { periodoDe } from './periodos';
@@ -171,8 +171,6 @@ export interface PersonaLeida extends PersonaConHoras {
 export interface ParteConPersonal {
   fecha: string;
   abierta: boolean;
-  /** El horario efectivo del parte, con el que se calculan las filas viejas (spec 016). */
-  horario: HorarioDeObra;
   personal: readonly PersonaLeida[];
 }
 
@@ -185,8 +183,8 @@ export interface DiaDePersona {
   extraDiurna: number;
   extraNocturna: number;
   novedad: string | null;
-  /** De dónde salieron las horas: reportadas o calculadas con la entrada y la salida. */
-  fuente: 'reportadas' | 'calculadas' | null;
+  /** Está en la bitácora y no tiene horas laboradas: se muestra en blanco (spec 039, D4). */
+  sinHoras: boolean;
   abierta: boolean;
 }
 
@@ -208,6 +206,19 @@ export interface HorasDePersona {
   semanasConExtraDeMas: { desde: string; extra: number }[];
 }
 
+/**
+ * ¿En todo el periodo no se le reportó ninguna hora? Está en alguna bitácora sin horas ni
+ * novedad, y nunca con horas. Sus totales van en blanco y no en cero (spec 039, D4): un
+ * cero diría que no trabajó, y lo que pasa es que no se sabe.
+ */
+export function sinHorasEnElPeriodo(persona: Pick<HorasDePersona, 'dias'>): boolean {
+  const registrados = persona.dias.filter((d) => d.estado === 'registrada');
+  return (
+    registrados.some((d) => d.sinHoras && !d.novedad) &&
+    registrados.every((d) => d.sinHoras)
+  );
+}
+
 export interface CifrasDePersonal {
   personas: number;
   laboradas: number;
@@ -221,8 +232,8 @@ export const MAXIMO_MINUTOS_EXTRA_POR_SEMANA = 12 * 60;
 
 /**
  * Las horas de cada persona en el periodo (RF-44 a RF-50), con la misma regla que la
- * bitácora: las reportadas si las hay, si no las calculadas con la entrada y la salida
- * y el horario del parte (RF-45, RF-56). Una novedad sola cuenta cero horas.
+ * bitácora: solo las reportadas (spec 039, RF-9). Un día sin horas laboradas cuenta
+ * cero y lleva `sinHoras` (D4); una novedad sola también cuenta cero.
  *
  * Las personas son las que aparecen en alguna bitácora del periodo (RF-44), con el
  * nombre y el cargo de la más reciente, por nombre.
@@ -245,11 +256,11 @@ export function horasDelPersonal(datos: {
   const personas: HorasDePersona[] = [...quienes].map(([usuarioId, quien]) => {
     const dias: DiaDePersona[] = datos.dias.map((fecha) => {
       const parte = parteDe.get(fecha);
-      const vacio = { fecha, laboradas: 0, extraDiurna: 0, extraNocturna: 0, novedad: null, fuente: null, abierta: false };
+      const vacio = { fecha, laboradas: 0, extraDiurna: 0, extraNocturna: 0, novedad: null, sinHoras: false, abierta: false };
       if (!parte) return { ...vacio, estado: 'sin_bitacora' };
       const fila = parte.personal.find((p) => p.usuarioId === usuarioId);
       if (!fila) return { ...vacio, estado: 'ausente', abierta: parte.abierta };
-      const horas = horasDeLaPersona(fecha, fila, parte.horario);
+      const horas = horasDeLaPersona(fila);
       return {
         fecha,
         estado: 'registrada',
@@ -257,7 +268,7 @@ export function horasDelPersonal(datos: {
         extraDiurna: horas?.extraDiurna ?? 0,
         extraNocturna: horas?.extraNocturna ?? 0,
         novedad: fila.novedad ?? null,
-        fuente: horas?.fuente ?? null,
+        sinHoras: horas === null,
         abierta: parte.abierta,
       };
     });

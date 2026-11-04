@@ -413,9 +413,32 @@ export function completarIniciales(
     maquinaria: reporte.maquinaria.map((m) => {
       if (m.medidorInicial !== null || m.medidorFinal === null || !m.vehiculoId) return m;
       const anterior = anteriores[m.vehiculoId];
-      return anterior ? { ...m, medidorInicial: anterior.valor } : m;
+      return anterior ? { ...m, medidorInicial: anterior.valor, inicialCompletada: true } : m;
     }),
   };
+}
+
+/**
+ * Después de fusionar el reporte en la bitácora (spec 039, RF-22): una máquina cuya
+ * inicial puso `completarIniciales` conserva la inicial que ya tenía escrita en la
+ * bitácora. Sin esto, el reporte con solo la final pisaba la inicial del residente con
+ * la lectura anterior. Las demás filas quedan como las dejó la fusión.
+ */
+export function respetarInicialesEscritas<M extends { vehiculoId: string; medidorInicial?: number | null }>(
+  antes: readonly { vehiculoId?: string; medidorInicial?: number | null }[],
+  fusionadas: M[],
+  completadas: ReadonlySet<string>,
+): M[] {
+  const escritas = new Map(
+    antes
+      .filter((m) => m.vehiculoId && m.medidorInicial !== null && m.medidorInicial !== undefined)
+      .map((m) => [m.vehiculoId!, m.medidorInicial!] as const),
+  );
+  return fusionadas.map((m) =>
+    completadas.has(m.vehiculoId) && escritas.has(m.vehiculoId)
+      ? { ...m, medidorInicial: escritas.get(m.vehiculoId)! }
+      : m,
+  );
 }
 
 /** Cuánto se espera el archivo de un mensaje antes de guardarlo sin él (026/RF-47). */

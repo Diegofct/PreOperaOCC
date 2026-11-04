@@ -29,7 +29,7 @@ import { useListado } from '@/features/panel/marco';
 import { POR_PAGINA, usePaginacion } from '@/features/panel/usar-listado-filtrado';
 import { diaCorto, UNIDAD_DE_MEDIDOR } from '@/shared/rules/jornada';
 
-import { AvisoDeAbiertas, cifra, EstadoDeMantenimientoEtiqueta, rotuloDelDia, TrabajoDelDia } from './comunes';
+import { AvisoDeAbiertas, EstadoDeMantenimientoEtiqueta, lectura, rotuloDelDia, TrabajoDelDia } from './comunes';
 
 type Reporte = ReporteFila<'maquinas'>;
 type Maquina = Reporte['maquinas'][number] & { id: string };
@@ -80,13 +80,13 @@ export function PestanaMaquinas({
     maquina,
     { clave: 'trabajo', titulo: 'Trabajó', ancho: 110, pintar: (m) => <TrabajoDelDia trabajo={m.dias[0].trabajo} /> },
     { clave: 'operador', titulo: 'Operador', ancho: 180, pintar: (m) => <Celda lineas={2}>{m.dias[0].operador ?? '—'}</Celda> },
-    { clave: 'inicial', titulo: 'Inicial', ancho: 100, pintar: (m) => <Celda>{cifra(m.dias[0].inicial)}</Celda> },
-    { clave: 'final', titulo: 'Final', ancho: 100, pintar: (m) => <Celda>{cifra(m.dias[0].final)}</Celda> },
+    { clave: 'inicial', titulo: 'Inicial', ancho: 100, pintar: (m) => <Celda>{lectura(m.dias[0].inicial)}</Celda> },
+    { clave: 'final', titulo: 'Final', ancho: 100, pintar: (m) => <Celda>{lectura(m.dias[0].final)}</Celda> },
     {
       clave: 'avance',
       titulo: 'Horas / km',
       ancho: 100,
-      pintar: (m) => <Celda>{m.dias[0].avance === null ? '—' : `${cifra(m.dias[0].avance)} ${unidad(m)}`}</Celda>,
+      pintar: (m) => <Celda>{m.dias[0].avance === null ? '—' : `${lectura(m.dias[0].avance)} ${unidad(m)}`}</Celda>,
     },
     mantenimiento,
   ];
@@ -102,7 +102,7 @@ export function PestanaMaquinas({
         pintar: (m) => (
           <View style={estilos.dia}>
             <TrabajoDelDia trabajo={m.dias[i].trabajo} />
-            {m.dias[i].trabajo === 'si' ? <Text style={estilos.apoyo}>{`${cifra(m.dias[i].avance)} ${unidad(m)}`}</Text> : null}
+            {m.dias[i].trabajo === 'si' ? <Text style={estilos.apoyo}>{`${lectura(m.dias[i].avance)} ${unidad(m)}`}</Text> : null}
           </View>
         ),
       }),
@@ -112,7 +112,7 @@ export function PestanaMaquinas({
       titulo: 'Total',
       ancho: 100,
       ordenar: (m) => String(m.total).padStart(12, '0'),
-      pintar: (m) => <Celda>{`${cifra(m.total)} ${unidad(m)}`}</Celda>,
+      pintar: (m) => <Celda>{`${lectura(m.total)} ${unidad(m)}`}</Celda>,
     },
     { clave: 'dias', titulo: 'Días', ancho: 70, pintar: (m) => <Celda>{String(m.diasTrabajados)}</Celda> },
   ];
@@ -124,7 +124,7 @@ export function PestanaMaquinas({
       titulo: 'Total',
       ancho: 110,
       ordenar: (m) => String(m.total).padStart(12, '0'),
-      pintar: (m) => <Celda>{`${cifra(m.total)} ${unidad(m)}`}</Celda>,
+      pintar: (m) => <Celda>{`${lectura(m.total)} ${unidad(m)}`}</Celda>,
     },
     { clave: 'trabajados', titulo: 'Días trabajados', ancho: 110, pintar: (m) => <Celda>{String(m.diasTrabajados)}</Celda> },
     { clave: 'sin', titulo: 'Días sin trabajar', ancho: 110, pintar: (m) => <Celda>{String(m.diasSinTrabajar)}</Celda> },
@@ -132,7 +132,7 @@ export function PestanaMaquinas({
       clave: 'promedio',
       titulo: 'Promedio por día',
       ancho: 120,
-      pintar: (m) => <Celda>{m.promedio === null ? '—' : `${cifra(m.promedio)} ${unidad(m)}`}</Celda>,
+      pintar: (m) => <Celda>{m.promedio === null ? '—' : `${lectura(m.promedio)} ${unidad(m)}`}</Celda>,
     },
     mantenimiento,
     {
@@ -159,8 +159,8 @@ export function PestanaMaquinas({
           <Cifras>
             <Cifra titulo="Trabajaron" valor={String(datos.cifras.trabajaron)} pie="máquinas con algún día de trabajo" tono="bueno" />
             <Cifra titulo="No trabajaron" valor={String(datos.cifras.noTrabajaron)} pie="ningún día del periodo" />
-            <Cifra titulo="Horas de máquina" valor={cifra(datos.cifras.horas)} pie="las de horómetro" />
-            <Cifra titulo="Kilómetros" valor={cifra(datos.cifras.kilometros)} pie="los de odómetro" />
+            <Cifra titulo="Horas de máquina" valor={lectura(datos.cifras.horas)} pie="las de horómetro" />
+            <Cifra titulo="Kilómetros" valor={lectura(datos.cifras.kilometros)} pie="los de odómetro" />
             <Cifra
               titulo="Mantenimiento vencido"
               valor={String(datos.cifras.mantenimientosVencidos)}
@@ -199,7 +199,7 @@ function DetalleDeLaMaquina({ maquina }: { maquina: Maquina }) {
       clave: 'avance',
       titulo: 'Horas / km',
       ancho: 100,
-      pintar: (d) => <Celda>{d.avance === null ? '—' : `${cifra(d.avance)} ${unidad}`}</Celda>,
+      pintar: (d) => <Celda>{d.avance === null ? '—' : `${lectura(d.avance)} ${unidad}`}</Celda>,
     },
   ];
   return <Tabla columnas={columnas} filas={filas} vacio="Ningún día con bitácora en este periodo." variante="desnuda" />;

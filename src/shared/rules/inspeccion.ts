@@ -6,6 +6,7 @@
  * autoritativa. Si difieren, gana el servidor y queda registrado — pero al
  * estar escritas una sola vez aquí, no deberían diferir nunca.
  */
+import { mostrarLectura } from './lecturas';
 import type {
   Conformidad,
   ItemChecklist,
@@ -332,7 +333,8 @@ export function validarMedidor(
   if (anterior == null) return { estado: 'ok' };
 
   const unidad = clase === 'horometro' ? 'h' : 'km';
-  const formatear = (n: number) => n.toLocaleString('es-CO');
+  // Con punto decimal y sin miles, como en el panel (spec 039, RF-17).
+  const formatear = (n: number) => mostrarLectura(n);
 
   if (valor < anterior) {
     return {

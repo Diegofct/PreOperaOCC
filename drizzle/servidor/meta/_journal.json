@@ -267,6 +267,13 @@
       "when": 1793715570103,
       "tag": "0037_busy_enchantress",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793811045245,
+      "tag": "0038_stiff_black_cat",
+      "breakpoints": true
     }
   ]
 }

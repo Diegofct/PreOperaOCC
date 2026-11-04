@@ -11,7 +11,7 @@
  * son las de la obra del mensaje: salen de su detalle, el mismo de la propuesta.
  */
 import { useCallback, useState } from 'react';
-import { Image, StyleSheet } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 
 import { Panel, Radio } from '@/constants/theme';
 import { NOVEDADES_DE_PERSONAL, type NovedadDePersonal } from '@/shared/catalogos/bitacora';
@@ -39,6 +39,7 @@ import type { EmpresaId } from '@/shared/rules/empresas';
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
 import {
   Acciones,
+  AccionesFormulario,
   Aviso,
   Ayuda,
   Boton,
@@ -378,11 +379,11 @@ function VentanaDescartar({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   return (
-    <Modal titulo="Descartar" onCerrar={alCerrar}>
+    <Modal titulo="Descartar" onCerrar={alCerrar} angosta>
       <Ayuda>{`${NOMBRE_DE_SECCION[excepcion.seccion] ?? excepcion.seccion}: ${excepcion.motivo}`}</Ayuda>
       <Campo etiqueta="Motivo" valor={motivo} onChange={setMotivo} multilinea obligatorio />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
-      <Acciones>
+      <AccionesFormulario>
         <Boton
           titulo={enviando ? 'Descartando…' : 'Descartar'}
           tono="peligro"
@@ -401,7 +402,7 @@ function VentanaDescartar({
           }}
         />
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }
@@ -462,10 +463,10 @@ function VentanaCompletar({
           </FilaDeFormulario>
           <FaltasDelRenglon faltas={faltas} />
           {error ? <Aviso tono="error">{error}</Aviso> : null}
-          <Acciones>
+          <AccionesFormulario>
             <Boton titulo={guardando ? 'Guardando…' : 'Guardar'} deshabilitado={guardando} onPress={guardar} />
             <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-          </Acciones>
+          </AccionesFormulario>
         </>
       )}
     </Modal>
@@ -489,7 +490,14 @@ function CamposDelRenglon({
     valor: e.id,
     etiqueta: e.nombre,
   }));
-  const escrito = (texto: string | null | undefined, que: string) => (texto ? <Ayuda>{`${que}: «${texto}»`}</Ayuda> : null);
+  // Lo que decía el reporte, en su propio renglón encima de su campo: entre los campos
+  // desordenaba la fila (spec 039, RF-26).
+  const escrito = (texto: string | null | undefined, que: string) =>
+    texto ? (
+      <View style={estilos.escrito}>
+        <Ayuda>{`${que}: «${texto}»`}</Ayuda>
+      </View>
+    ) : null;
 
   if (seccion === 'viajes') {
     const v = datos as unknown as ViajeDelReporte;
@@ -634,8 +642,8 @@ function CamposDelRenglon({
           permiteVacio
           ancho={240}
         />
-        <CampoNumero etiqueta="Inició" valor={m.medidorInicial} onChange={(n) => cambiar({ medidorInicial: n })} editable />
-        <CampoNumero etiqueta="Terminó" valor={m.medidorFinal} onChange={(n) => cambiar({ medidorFinal: n })} editable />
+        <CampoNumero lectura etiqueta="Inició" valor={m.medidorInicial} onChange={(n) => cambiar({ medidorInicial: n })} editable />
+        <CampoNumero lectura etiqueta="Terminó" valor={m.medidorFinal} onChange={(n) => cambiar({ medidorFinal: n })} editable />
       </>
     );
   }
@@ -791,7 +799,7 @@ function CamposDelRenglon({
           permiteVacio={m.resuelto}
           ancho={200}
         />
-        <CampoNumero etiqueta="Lectura (opcional)" valor={m.lectura} onChange={(n) => cambiar({ lectura: n })} editable />
+        <CampoNumero lectura etiqueta="Lectura (opcional)" valor={m.lectura} onChange={(n) => cambiar({ lectura: n })} editable />
         <Campo etiqueta="Qué se hizo" valor={m.descripcion ?? ''} onChange={(x) => cambiar({ descripcion: x })} ancho={280} />
         <Casilla
           etiqueta="Ya quedó reparada: cierra el correctivo pendiente"
@@ -806,6 +814,7 @@ function CamposDelRenglon({
 }
 
 const estilos = StyleSheet.create({
+  escrito: { width: '100%' },
   miniatura: {
     width: 120,
     height: 90,

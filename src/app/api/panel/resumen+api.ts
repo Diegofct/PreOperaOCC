@@ -14,7 +14,7 @@ import { requerirPermiso } from '@/features/servidor/guardia';
 import { ok, responder } from '@/features/servidor/respuestas';
 import { formatoPendiente } from '@/shared/catalogos/tipos-vehiculo';
 import { cumplimientoDelDia } from '@/shared/rules/cumplimiento';
-import { horarioEfectivo, horasDeLaPersona } from '@/shared/rules/horas';
+import { horasDeLaPersona } from '@/shared/rules/horas';
 import {
   avanceDeMedidor,
   fechaDeJornada,
@@ -69,8 +69,6 @@ export async function GET(peticion: Request) {
         personal: partesDeObra.personal,
         cerradoEn: partesDeObra.cerradoEn,
         anuladoEn: partesDeObra.anuladoEn,
-        horario: partesDeObra.horario,
-        horarioDeLaObra: obras.horario,
       })
       .from(partesDeObra)
       .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
@@ -96,14 +94,10 @@ export async function GET(peticion: Request) {
         else horasMaquina += avance;
       }
 
-      // Las extras se cuentan con el horario de cada parte, el mismo que usa el
-      // parte en pantalla (spec 016): con uno fijo, el Inicio y el parte darían
-      // cifras distintas para las mismas personas.
-      const horario = horarioEfectivo(parte, parte.horarioDeLaObra);
-      // Lo reportado manda sobre el cálculo (spec 025, RF-14, RF-17); una persona con
-      // novedad y sin horas cuenta, con 0 horas (RF-22).
+      // Solo lo reportado (spec 039, RF-9); una persona con novedad y sin horas
+      // cuenta, con 0 horas (025/RF-22).
       for (const persona of parte.personal) {
-        const horas = horasDeLaPersona(parte.fecha, persona, horario);
+        const horas = horasDeLaPersona(persona);
         if (!horas) {
           if (persona.novedad) personasContadas++;
           continue;

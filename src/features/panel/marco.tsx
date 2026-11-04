@@ -222,7 +222,8 @@ const estilos = StyleSheet.create({
   // flotando en un vacío del mismo color que ellos.
   pantalla: { flex: 1, backgroundColor: Panel.fondo },
   contenedor: { alignItems: 'center', padding: Spacing.four, paddingBottom: Spacing.six },
-  columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.four },
+  // 20 y no 24 entre secciones (spec 039, RF-24).
+  columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.three + Spacing.one },
   encabezado: { gap: Spacing.one, maxWidth: 720 },
   descripcion: {
     fontFamily: FuentePanel.texto,

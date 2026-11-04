@@ -340,9 +340,8 @@ const bitacoraDelDia = herramienta({
         consulto: consulta(obra.id, 'bitacoras'),
       };
     }
-    const { horario: _horario, ...sinHorario } = parte;
     return {
-      datos: { obra: obra.codigo, bitacora: sinHorario },
+      datos: { obra: obra.codigo, bitacora: parte },
       fuentes: [fuente],
       consulto: consulta(obra.id, 'bitacoras'),
     };

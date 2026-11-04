@@ -8,6 +8,8 @@
  * operadores. El "día de trabajo" es el suyo, no el UTC.
  */
 
+import { mostrarLectura } from './lecturas';
+
 /** "HH:MM" en hora local, como se imprime en el formato de OCC. */
 export function horaLocal(ms: number): string {
   const fecha = new Date(ms);
@@ -235,25 +237,6 @@ export function mensajeDeAvance(
   }
 }
 
-/**
- * La lectura que probablemente se quiso escribir, si a una de las dos le sobra el punto
- * decimal («18740.7» por 187407) y sin él el avance cuadra; `null` si no (spec 026,
- * RF-51). Es una sugerencia para el motivo: nunca corrige la lectura.
- */
-export function lecturaSugerida(
-  clase: ClaseDeMedidor,
-  inicial: number | null,
-  final: number | null,
-): number | null {
-  const sinPunto = (n: number | null) =>
-    n !== null && !Number.isInteger(n) ? Number(String(n).replace('.', '')) : null;
-  const finalSinPunto = sinPunto(final);
-  if (finalSinPunto !== null && validarAvance(clase, inicial, finalSinPunto) === null) return finalSinPunto;
-  const inicialSinPunto = sinPunto(inicial);
-  if (inicialSinPunto !== null && validarAvance(clase, inicialSinPunto, final) === null) return inicialSinPunto;
-  return null;
-}
-
 /** La última lectura registrada de un medidor del vehículo, y de qué día es. */
 export interface LecturaRegistrada {
   valor: number | null;
@@ -308,23 +291,52 @@ export interface LecturaAnterior {
 }
 
 /**
- * Cuál de las dos lecturas anteriores vale para el día `fecha` (029/RF-1 a RF-3).
+ * Cuál de las dos lecturas anteriores vale para el día `fecha` (029/RF-1 a RF-3;
+ * spec 039, RF-19).
  *
- * Gana la de la bitácora: es la final que se reportó en esta obra el último día
- * que trabajó. La de Vehículos solo sirve si es de un día anterior; una del mismo
- * día o posterior no es «la de ayer», es la de hoy o la de un reporte procesado
- * después.
+ * Gana **la más reciente**: la última final reportada en una bitácora (de cualquier
+ * obra) o la lectura registrada en Vehículos. Si son del mismo día, gana la de la
+ * bitácora. Las dos tienen que ser de un día anterior: una del mismo día o posterior
+ * no es «la de ayer», es la de hoy o la de un reporte procesado después.
  */
 export function lecturaAnterior(
   deBitacora: { valor: number; fecha: string } | null,
   delVehiculo: LecturaRegistrada,
   fecha: string,
 ): LecturaAnterior | null {
-  if (deBitacora && deBitacora.fecha < fecha) return { ...deBitacora, origen: 'bitacora' };
-  if (delVehiculo.valor !== null && delVehiculo.fecha && delVehiculo.fecha < fecha) {
-    return { valor: delVehiculo.valor, fecha: delVehiculo.fecha, origen: 'vehiculo' };
-  }
+  const bitacora = deBitacora && deBitacora.fecha < fecha ? deBitacora : null;
+  const vehiculo =
+    delVehiculo.valor !== null && delVehiculo.fecha && delVehiculo.fecha < fecha
+      ? { valor: delVehiculo.valor, fecha: delVehiculo.fecha }
+      : null;
+  if (bitacora && (!vehiculo || bitacora.fecha >= vehiculo.fecha)) return { ...bitacora, origen: 'bitacora' };
+  if (vehiculo) return { ...vehiculo, origen: 'vehiculo' };
   return null;
+}
+
+/** Una final que cambió en una bitácora, para llevarla a la inicial del día siguiente. */
+export interface FinalCambiada {
+  vehiculoId: string;
+  finalViejo: number | null;
+  finalNuevo: number;
+}
+
+/**
+ * Las máquinas cuya lectura final quedó escrita o cambió al guardar (spec 039, RF-21).
+ * Una final borrada no se propaga: la inicial del día siguiente se queda como estaba.
+ */
+export function cambiosDeFinales(
+  antes: readonly { vehiculoId?: string; medidorFinal?: number | null }[],
+  despues: readonly { vehiculoId?: string; medidorFinal?: number | null }[],
+): FinalCambiada[] {
+  const viejos = new Map(
+    antes.filter((m) => m.vehiculoId).map((m) => [m.vehiculoId!, m.medidorFinal ?? null] as const),
+  );
+  return despues.flatMap((m) => {
+    if (!m.vehiculoId || m.medidorFinal === null || m.medidorFinal === undefined) return [];
+    const finalViejo = viejos.get(m.vehiculoId) ?? null;
+    return finalViejo === m.medidorFinal ? [] : [{ vehiculoId: m.vehiculoId, finalViejo, finalNuevo: m.medidorFinal }];
+  });
 }
 
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -359,11 +371,16 @@ export function avisoDeLecturaInicial(
 ): { ayuda?: string; aviso?: string } {
   if (inicial === null || !anterior) return {};
   if (inicial !== anterior.valor) {
+    const deDonde =
+      anterior.origen === 'bitacora'
+        ? `la final del día anterior (${mostrarLectura(anterior.valor)}, ${diaCorto(anterior.fecha)})`
+        : `la última lectura del vehículo (${mostrarLectura(anterior.valor)}, ${diaCorto(anterior.fecha)})`;
+    // Por debajo es casi siempre un error de digitación: se dice, pero no bloquea (039/RF-18).
     return {
       aviso:
-        anterior.origen === 'bitacora'
-          ? `No coincide con la final del día anterior (${anterior.valor}, ${diaCorto(anterior.fecha)}).`
-          : `No coincide con la última lectura del vehículo (${anterior.valor}, ${diaCorto(anterior.fecha)}).`,
+        inicial < anterior.valor
+          ? `Queda por debajo de ${deDonde}. Revise la lectura; se puede guardar igual.`
+          : `No coincide con ${deDonde}.`,
     };
   }
   return {

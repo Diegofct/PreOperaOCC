@@ -268,7 +268,7 @@ function VentanaDePaso({
   }
 
   return (
-    <Modal titulo={texto.titulo} onCerrar={accion.ejecutando ? () => {} : onCerrar}>
+    <Modal titulo={texto.titulo} onCerrar={accion.ejecutando ? () => {} : onCerrar} angosta>
       <Aviso tono="info">{texto.aviso(detalle)}</Aviso>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
       <Formulario>

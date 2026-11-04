@@ -37,6 +37,7 @@ import { useListado } from '@/features/panel/marco';
 import { POR_PAGINA, usePaginacion } from '@/features/panel/usar-listado-filtrado';
 import { nombreDeNovedad } from '@/shared/catalogos/bitacora';
 import { diaCorto } from '@/shared/rules/jornada';
+import { sinHorasEnElPeriodo } from '@/shared/rules/reportes';
 import { normalizar } from '@/shared/rules/texto';
 
 import { AvisoDeAbiertas, cifra, enHoras, rotuloDelDia } from './comunes';
@@ -73,7 +74,12 @@ function HorasDelDia({ dia }: { dia: Persona['dias'][number] }) {
   const extra = dia.extraDiurna + dia.extraNocturna;
   return (
     <View style={estilos.celda}>
-      <Celda>{dia.laboradas > 0 ? `${enHoras(dia.laboradas)} h` : '0 h'}</Celda>
+      {/* Sin horas reportadas, en blanco y no «0 h» (spec 039, D4). */}
+      {dia.sinHoras ? (
+        <Text style={estilos.apoyo}>Horas no reportadas</Text>
+      ) : (
+        <Celda>{dia.laboradas > 0 ? `${enHoras(dia.laboradas)} h` : '0 h'}</Celda>
+      )}
       {extra > 0 ? <Etiqueta tono="atencion">{`+${enHoras(extra)} extra`}</Etiqueta> : null}
       {dia.novedad ? <Etiqueta tono="neutro">{nombreDeNovedad(dia.novedad)}</Etiqueta> : null}
     </View>
@@ -115,7 +121,8 @@ export function PestanaPersonal({ consulta }: { consulta: ConsultaDeReporte }) {
     clave,
     titulo,
     ancho,
-    pintar: (p) => <Celda>{`${enHoras(p[clave])} h`}</Celda>,
+    // Sin ninguna hora reportada en el periodo, en blanco (spec 039, D4).
+    pintar: (p) => <Celda>{sinHorasEnElPeriodo(p) ? (clave === 'laboradas' ? 'No reportadas' : '') : `${enHoras(p[clave])} h`}</Celda>,
   });
   const avisos: Columna<Persona> = { clave: 'avisos', titulo: 'Avisos', ancho: 190, anchoMinimo: 170, pintar: (p) => <AvisosDeExtras persona={p} /> };
   const novedades: Columna<Persona> = {
@@ -165,7 +172,7 @@ export function PestanaPersonal({ consulta }: { consulta: ConsultaDeReporte }) {
       clave: 'extras',
       titulo: 'Extras D / N',
       ancho: 100,
-      pintar: (p) => <Celda>{`${enHoras(p.extraDiurna)} / ${enHoras(p.extraNocturna)} h`}</Celda>,
+      pintar: (p) => <Celda>{sinHorasEnElPeriodo(p) ? '' : `${enHoras(p.extraDiurna)} / ${enHoras(p.extraNocturna)} h`}</Celda>,
     },
     { clave: 'dias', titulo: 'Días', ancho: 50, pintar: (p) => <Celda>{String(p.diasTrabajados)}</Celda> },
     avisos,
@@ -249,9 +256,10 @@ function DetalleDeLaPersona({ persona }: { persona: Persona }) {
   const filas: Dia[] = persona.dias.filter((d) => d.estado === 'registrada').map((d) => ({ ...d, id: d.fecha }));
   const columnas: Columna<Dia>[] = [
     { clave: 'fecha', titulo: 'Día', ancho: 90, pintar: (d) => <Celda>{diaCorto(d.fecha)}</Celda> },
-    { clave: 'laboradas', titulo: 'Laboradas', ancho: 100, pintar: (d) => <Celda>{`${enHoras(d.laboradas)} h`}</Celda> },
-    { clave: 'ed', titulo: 'Extra D', ancho: 80, pintar: (d) => <Celda>{`${enHoras(d.extraDiurna)} h`}</Celda> },
-    { clave: 'en', titulo: 'Extra N', ancho: 80, pintar: (d) => <Celda>{`${enHoras(d.extraNocturna)} h`}</Celda> },
+    // Sin horas reportadas, en blanco (spec 039, D4).
+    { clave: 'laboradas', titulo: 'Laboradas', ancho: 100, pintar: (d) => <Celda>{d.sinHoras ? 'No reportadas' : `${enHoras(d.laboradas)} h`}</Celda> },
+    { clave: 'ed', titulo: 'Extra D', ancho: 80, pintar: (d) => <Celda>{d.sinHoras ? '' : `${enHoras(d.extraDiurna)} h`}</Celda> },
+    { clave: 'en', titulo: 'Extra N', ancho: 80, pintar: (d) => <Celda>{d.sinHoras ? '' : `${enHoras(d.extraNocturna)} h`}</Celda> },
     { clave: 'novedad', titulo: 'Novedad', ancho: 130, pintar: (d) => <Celda>{d.novedad ? nombreDeNovedad(d.novedad) : '—'}</Celda> },
   ];
   return (

@@ -24,6 +24,7 @@ import {
   Spacing,
   TextoPanel,
 } from '@/constants/theme';
+import { mostrarLectura } from '@/shared/rules/lecturas';
 import { alcanza } from '@/shared/rules/permisos';
 
 import { api, mensajeDe } from './cliente-api';
@@ -148,8 +149,8 @@ export function DetallePreoperacional({
         </View>
 
         <View style={estilos.datos}>
-          <Dato titulo="Odómetro" valor={p.odometroKm !== null ? `${p.odometroKm} km` : '—'} />
-          <Dato titulo="Horómetro" valor={p.horometroH !== null ? `${p.horometroH} h` : '—'} />
+          <Dato titulo="Odómetro" valor={p.odometroKm !== null ? mostrarLectura(p.odometroKm, 'km') : '—'} />
+          <Dato titulo="Horómetro" valor={p.horometroH !== null ? mostrarLectura(p.horometroH, 'h') : '—'} />
           {/* El título sale del formato con que se firmó, no del tipo de hoy: si
               era prestado, lo dice (spec 020, RF-13 y RF-13b). Sin plantilla en
               el servidor queda el dato crudo, que al menos se puede rastrear. */}

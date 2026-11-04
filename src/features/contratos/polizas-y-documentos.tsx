@@ -196,7 +196,7 @@ export function VentanaDeAnular({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   return (
-    <Modal titulo={titulo} onCerrar={alCerrar}>
+    <Modal titulo={titulo} onCerrar={alCerrar} angosta>
       <Text style={estilos.nota}>{aviso}</Text>
       <Campo etiqueta="Motivo" obligatorio valor={motivo} onChange={setMotivo} multilinea />
       {error ? <Aviso tono="error">{error}</Aviso> : null}

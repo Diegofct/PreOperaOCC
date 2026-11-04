@@ -15,8 +15,18 @@ import { quitarFoto } from '@/features/whatsapp/servidor/fotos-del-dia';
  * `parteEditable` comprueba el alcance por obra y que la bitácora siga abierta (RF-28); el
  * `update` lo vuelve a exigir, por si se cerró entre medias.
  */
-export async function POST(peticion: Request, { id, fotoId }: { id: string; fotoId: string }) {
+export async function POST(peticion: Request, { id, fotoId: crudo }: { id: string; fotoId: string }) {
   return responder(async () => {
+    // El panel manda el id con `encodeURIComponent` y la ruta lo recibe tal cual: sin
+    // esto, «principal:<media>» llegaba como «principal%3A…» y nunca se encontraba
+    // (encontrado en la spec 039, T6, al quitar una foto vieja por actividad).
+    let fotoId = crudo;
+    try {
+      fotoId = decodeURIComponent(crudo);
+    } catch {
+      // Un id mal codificado se busca tal cual y sale «No existe esa foto».
+    }
+
     const sesion = await requerirPermiso(peticion, 'bitacoras', 'escribir');
     if (sesion instanceof Response) return sesion;
 

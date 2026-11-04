@@ -8,7 +8,6 @@ import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
-import { horarioEfectivo, type HorarioDeObra } from '@/shared/rules/horas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
 /**
@@ -18,11 +17,8 @@ import { fechaDeJornada } from '@/shared/rules/jornada';
  * la vez, y la pantalla se organiza alrededor de una fecha. La gerencia ve el de
  * todas las obras de ese día; el residente, el de la suya.
  *
- * Cada parte sale con **el horario con que se calculan sus horas** (spec 016), ya
- * decidido aquí con `horarioEfectivo`: el que se guardó al cerrarlo, la jornada
- * anterior si se cerró antes de la spec, o el vigente de su obra si sigue
- * abierto. Lo decide el servidor y no la pantalla para que el panel y el Inicio
- * no puedan discrepar sobre las horas extra de un mismo parte.
+ * Las horas de cada persona son las reportadas (spec 039, RF-9): el parte ya no sale
+ * con el horario de la obra, que solo servía para calcularlas.
  *
  * Cada parte **abierto** trae además la lectura con la que empieza el día cada
  * máquina (spec 029, RF-1 a RF-3, RF-9): la pantalla la pone al añadir la máquina y
@@ -47,26 +43,13 @@ const COLUMNAS = {
   motivoSinActividades: partesDeObra.motivoSinActividades,
   sinEnsayos: partesDeObra.sinEnsayos,
   motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
+  seccionesSinRegistro: partesDeObra.seccionesSinRegistro,
   cerradoEn: partesDeObra.cerradoEn,
   anuladoEn: partesDeObra.anuladoEn,
   motivoAnulacion: partesDeObra.motivoAnulacion,
-  horario: partesDeObra.horario,
   obraNombre: obras.nombre,
-  horarioDeLaObra: obras.horario,
   usuarioNombre: usuarios.nombreCompleto,
 };
-
-/** Cambia el horario guardado (o su ausencia) y el de la obra por el efectivo. */
-function conHorarioEfectivo<
-  F extends {
-    horario: HorarioDeObra | null;
-    horarioDeLaObra: HorarioDeObra;
-    cerradoEn: Date | null;
-    anuladoEn: Date | null;
-  },
->({ horarioDeLaObra, ...fila }: F) {
-  return { ...fila, horario: horarioEfectivo(fila, horarioDeLaObra) };
-}
 
 export async function GET(peticion: Request) {
   return responder(async () => {
@@ -89,7 +72,7 @@ export async function GET(peticion: Request) {
 
     const partes = await Promise.all(
       filas.map(async (fila) => ({
-        ...conHorarioEfectivo(fila),
+        ...fila,
         lecturasAnteriores:
           fila.cerradoEn || fila.anuladoEn ? {} : await lecturasAnteriores(fila.obraId, fila.fecha),
       })),
@@ -159,7 +142,7 @@ export async function POST(peticion: Request) {
       .limit(1);
 
     return fila
-      ? ok(conHorarioEfectivo(fila), fila.id === id ? 201 : 200)
+      ? ok(fila, fila.id === id ? 201 : 200)
       : errorDePeticion('No se pudo abrir la bitácora.', 500);
   });
 }

@@ -17,6 +17,7 @@ import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
+  AccionesFormulario,
   Aviso,
   Boton,
   Campo,
@@ -44,8 +45,9 @@ import {
   type ClaseConIntervalo,
   type ClaseDeMantenimiento,
 } from '@/shared/rules/mantenimiento';
+import { leerLectura, mostrarLectura } from '@/shared/rules/lecturas';
 
-import { cifra, EstadoDeMantenimientoEtiqueta } from './comunes';
+import { EstadoDeMantenimientoEtiqueta, lectura } from './comunes';
 
 type Reporte = ReporteFila<'mantenimiento'>;
 type Maquina = Reporte['maquinas'][number] & { id: string };
@@ -53,10 +55,10 @@ type Registro = Reporte['historial'][number];
 
 /** Una lectura escrita: con coma o punto decimal; vacía es «la registrada». */
 function numeroEscrito(texto: string): number | null | undefined {
-  const limpio = texto.trim().replace(',', '.');
+  const limpio = texto.trim();
   if (!limpio) return null;
-  const n = Number(limpio);
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
+  // Con coma o con punto, «4.250,32» incluido (spec 039, RF-15).
+  return leerLectura(limpio) ?? undefined;
 }
 
 export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: ConsultaDeReporte; esGerencia: boolean }) {
@@ -95,7 +97,7 @@ export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: Consu
         <View style={estilos.celda}>
           <EstadoDeMantenimientoEtiqueta estado={estado.estado} texto={estado.texto.replace(`${NOMBRE_DE_CLASE[c]}: `, '').replace(`${NOMBRE_DE_CLASE[c]} `, '')} correctivoPendiente={false} />
           <Text style={estilos.apoyo}>
-            {`Cada ${cifra(estado.intervalo.cada, 0)} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}${estado.intervalo.origen === 'vehiculo' ? ' (propio)' : ''}`}
+            {`Cada ${lectura(estado.intervalo.cada)} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}${estado.intervalo.origen === 'vehiculo' ? ' (propio)' : ''}`}
             {estado.ultimo ? ` · último ${diaCorto(estado.ultimo.fecha)}` : ''}
           </Text>
         </View>
@@ -120,7 +122,7 @@ export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: Consu
       clave: 'lectura',
       titulo: 'Lectura',
       ancho: 110,
-      pintar: (m) => <Celda>{m.lectura === null ? '—' : `${cifra(m.lectura)} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}`}</Celda>,
+      pintar: (m) => <Celda>{m.lectura === null ? '—' : `${lectura(m.lectura)} ${UNIDAD_DE_MEDIDOR[m.claseMedidor]}`}</Celda>,
     },
     clase('aceite'),
     clase('preventivo'),
@@ -167,7 +169,7 @@ export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: Consu
     { clave: 'fecha', titulo: 'Fecha', ancho: 90, pintar: (r) => <Celda>{diaCorto(r.fecha)}</Celda> },
     { clave: 'maquina', titulo: 'Máquina', ancho: 150, pintar: (r) => <Celda>{r.codigo}</Celda> },
     { clave: 'clase', titulo: 'Clase', ancho: 130, pintar: (r) => <Celda>{NOMBRE_DE_CLASE[r.clase]}</Celda> },
-    { clave: 'lectura', titulo: 'Lectura', ancho: 100, pintar: (r) => <Celda>{cifra(r.lectura)}</Celda> },
+    { clave: 'lectura', titulo: 'Lectura', ancho: 100, pintar: (r) => <Celda>{lectura(r.lectura)}</Celda> },
     { clave: 'nota', titulo: 'Nota', ancho: 220, pintar: (r) => <Celda lineas={2}>{r.nota || '—'}</Celda> },
     {
       clave: 'origen',
@@ -357,7 +359,7 @@ function VentanaRegistrar({
           soloNumeros
           ayuda={
             maquina?.lectura !== null && maquina?.lectura !== undefined
-              ? `Vacía: la registrada, ${cifra(maquina.lectura)} ${UNIDAD_DE_MEDIDOR[maquina.claseMedidor]}.`
+              ? `Vacía: la registrada, ${mostrarLectura(maquina.lectura)} ${UNIDAD_DE_MEDIDOR[maquina.claseMedidor]}.`
               : 'Vacía: la registrada de la máquina.'
           }
           error={leida === undefined ? 'Solo números.' : undefined}
@@ -365,10 +367,10 @@ function VentanaRegistrar({
         />
         <Campo etiqueta="Nota" valor={nota} onChange={setNota} multilinea compacto ayuda="Qué se hizo: filtros, aceite usado, quién lo hizo." />
       </Formulario>
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
         <Boton titulo={enviando ? 'Guardando…' : 'Registrar'} onPress={guardar} deshabilitado={enviando} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }
@@ -398,14 +400,14 @@ function VentanaAnular({
     }
   }
   return (
-    <Modal titulo={`Anular: ${NOMBRE_DE_CLASE[registro.clase]} de ${registro.codigo}`} onCerrar={onCerrar}>
+    <Modal titulo={`Anular: ${NOMBRE_DE_CLASE[registro.clase]} de ${registro.codigo}`} onCerrar={onCerrar} angosta>
       <Text style={estilos.apoyo}>Un mantenimiento no se edita: se anula, y deja de contar. Sigue en el historial.</Text>
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       <Campo etiqueta="Motivo" valor={motivo} onChange={setMotivo} multilinea compacto obligatorio />
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
         <Boton titulo={enviando ? 'Anulando…' : 'Anular'} tono="peligro" onPress={anular} deshabilitado={enviando} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }
@@ -437,16 +439,16 @@ function VentanaResolver({
     }
   }
   return (
-    <Modal titulo={`Correctivo de ${maquina.codigo} resuelto`} onCerrar={onCerrar}>
+    <Modal titulo={`Correctivo de ${maquina.codigo} resuelto`} onCerrar={onCerrar} angosta>
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       <Formulario>
         <CampoDeFecha etiqueta="Resuelto el" valor={fecha} onChange={setFecha} max={fechaDeJornada()} />
         <Campo etiqueta="Nota" valor={nota} onChange={setNota} multilinea compacto ayuda="Qué se reparó." />
       </Formulario>
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={onCerrar} />
         <Boton titulo={enviando ? 'Guardando…' : 'Marcar resuelto'} onPress={resolver} deshabilitado={enviando} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }
@@ -464,9 +466,9 @@ function VentanaIntervalos({ onCerrar, alTerminar }: { onCerrar: () => void; alT
       {tipos.datos.map((t) => (
         <FilaDeIntervalos key={t.tipoVehiculoId} tipo={t} alGuardar={() => tipos.recargar()} />
       ))}
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo="Listo" onPress={() => alTerminar('Intervalos actualizados.')} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }

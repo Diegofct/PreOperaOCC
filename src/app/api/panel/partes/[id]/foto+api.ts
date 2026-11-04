@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -14,8 +14,8 @@ import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servido
 /**
  * Subir una fotografía al parte. `POST /api/panel/partes/:id/foto`.
  *
- * La del día, o la de una actividad concreta —se distingue por `item`, que
- * lleva el id de la fila de actividad—.
+ * Siempre es una foto del día (spec 039, RF-2): desde entonces no hay fotos por
+ * actividad, y un `?item=` que mande una pantalla vieja se ignora.
  *
  * El cuerpo son los bytes de la imagen, igual que en la ruta del celular. Se
  * manda así y no como formulario porque el almacén guarda bytes y convertir a
@@ -51,11 +51,6 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       return errorDePeticion('La imagen pesa más de 8 MB. Redúzcala antes de subirla.', 422);
     }
 
-    // El id de la fila de actividad, cuando la foto es de una actividad y no
-    // del día. Se guarda en `itemKey`, que es la misma columna con la que el
-    // preoperacional ata una foto a su ítem del checklist.
-    const item = new URL(peticion.url).searchParams.get('item');
-
     const mediaId = uuidv7();
     const clave = claveDeObjeto('bitacora', id, mediaId, mime);
     await guardar(clave, contenido, mime);
@@ -70,7 +65,7 @@ export async function POST(peticion: Request, { id }: { id: string }) {
         duenoTipo: 'bitacora',
         duenoId: id,
         proposito: 'evidencia',
-        itemKey: item,
+        itemKey: null,
         mime,
         bytes: contenido.byteLength,
         sha256: huella,
@@ -80,8 +75,20 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .returning({ id: media.id, itemKey: media.itemKey });
 
     // La foto del día entra a la sección como las de WhatsApp: así se ve, se cuenta y se
-    // quita igual (spec 027, cambio del 2026-10-14, RF-34, RF-39). La de una actividad no.
-    if (item === null) await agregarSubidaALaLista({ parteId: id, mediaId, sha256: huella });
+    // quita igual (spec 027, cambio del 2026-10-14, RF-34, RF-39).
+    await agregarSubidaALaLista({ parteId: id, mediaId, sha256: huella });
+
+    // Con una foto, «No se tomaron fotos» deja de ser cierto: se quita la marca (039/RF-13).
+    await baseServidor()
+      .update(partesDeObra)
+      .set({ seccionesSinRegistro: sql`${partesDeObra.seccionesSinRegistro} - 'fotografia'` })
+      .where(
+        and(
+          eq(partesDeObra.id, id),
+          isNull(partesDeObra.cerradoEn),
+          sql`jsonb_exists(${partesDeObra.seccionesSinRegistro}, 'fotografia')`,
+        ),
+      );
 
     return ok(fila, 201);
   });

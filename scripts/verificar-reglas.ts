@@ -51,6 +51,7 @@ import {
   type FirmaDelDia,
 } from '../src/shared/rules/inspeccion';
 import { fusionarVehiculo, mayorMedidor, type VehiculoLocal } from '../src/shared/rules/fusion';
+import { leerLectura, mostrarLectura, tieneDecimalesDeLectura } from '../src/shared/rules/lecturas';
 import {
   alcanza,
   avisoDeModuloAjeno,
@@ -102,11 +103,8 @@ import {
 } from '../src/shared/rules/festivos';
 import {
   cubrenLaJornada,
-  describirHorarioDelDia,
-  desglosarJornada,
   HORARIO_ANTERIOR,
   HORARIO_PROPUESTO,
-  horarioEfectivo,
   HORAS_DEL_DIA,
   MAXIMO_MINUTOS_SEMANALES,
   mensajeDeHorarioDeObra,
@@ -116,7 +114,6 @@ import {
   minutosSemanales,
   partirHora,
   unirHora,
-  tramosDelDia,
   validarFranjas,
   validarHorario,
   validarHorarioDeObra,
@@ -126,7 +123,6 @@ import { MENSAJES_DE_RANGO, rangoDeFechas } from '../src/shared/rules/rango';
 import { POR_PAGINA, recortarPagina } from '../src/features/panel/paginas';
 import {
   horasDeLaPersona,
-  horasNoCuadran,
   mensajeDePersona,
   validarPersonaDelParte,
 } from '../src/shared/rules/horas';
@@ -240,6 +236,7 @@ import {
 } from '../src/shared/rules/bitacora-occ';
 import {
   completarIniciales,
+  respetarInicialesEscritas,
   completarViaje,
   decisionDePersona,
   diaCompleto,
@@ -272,6 +269,7 @@ import {
   cantidadesPorItem,
   climaDelPeriodo,
   horasDelPersonal,
+  sinHorasEnElPeriodo,
   usoDeMaquinas,
   viajesAgrupados,
   type ParteConPersonal,
@@ -565,8 +563,8 @@ import {
   sumarDias,
   validarHorometros,
   faltaContraElVehiculo,
-  lecturaSugerida,
   lecturaAnterior,
+  cambiosDeFinales,
   avisoDeLecturaInicial,
   diaCorto,
 } from '../src/shared/rules/jornada';
@@ -582,7 +580,11 @@ import {
   mensajeDelRechazoDeCierre,
   resolverDiaSinTrabajo,
   resolverSeccionSinRegistro,
+  conMarcaDeSeccion,
+  marcaDeSeccion,
+  mensajeDeSeccionConRegistros,
   seccionesDelParte,
+  textosSinRegistro,
   validarDiaSinTrabajo,
   type ConteosDelParte,
   type FotosDelParte,
@@ -1412,7 +1414,11 @@ prueba('un formato sin revisión periódica no inventa una', () => {
 prueba('un medidor no puede retroceder', () => {
   const v = validarMedidor('horometro', 1180, 1240);
   assert.equal(v.estado, 'retrocede');
-  assert.match(v.mensaje, /1.240/);
+  // Con punto decimal y sin miles desde la 039 (RF-17): «1240 h», «812.5 h».
+  assert.match(v.mensaje, /fue 1240 h y usted escribió 1180 h/);
+  const conDecimales = validarMedidor('horometro', 812.5, 812.75);
+  assert.ok(conDecimales.estado === 'retrocede');
+  assert.match(conDecimales.mensaje, /fue 812\.75 h y usted escribió 812\.5 h/);
 });
 
 prueba('un salto anormal pide confirmación en vez de rechazar', () => {
@@ -1689,10 +1695,10 @@ const PARTE_COMPLETO: ParteEvaluable = {
   notas: 'Sin novedad.',
 };
 
-/** Foto del día subida y una de las dos actividades con la suya. */
-const FOTOS_COMPLETAS: FotosDelParte = { delDia: 1, itemsConFoto: ['act-2'] };
+/** Foto del día subida (desde la 039 las actividades no llevan foto propia). */
+const FOTOS_COMPLETAS: FotosDelParte = { delDia: 1 };
 
-const SIN_FOTOS: FotosDelParte = { delDia: 0, itemsConFoto: [] };
+const SIN_FOTOS: FotosDelParte = { delDia: 0 };
 
 prueba('un parte completo no tiene ningún bloqueo', () => {
   assert.deepEqual(bloqueosDelCierre(PARTE_COMPLETO, FOTOS_COMPLETAS), []);
@@ -1751,26 +1757,10 @@ prueba('una persona sin hora de salida no deja cerrar, y se nombra', () => {
   assert.deepEqual(bloqueos, ['A Pedro Cartagena le falta la hora de entrada o de salida.']);
 });
 
-prueba('basta con que una actividad tenga foto', () => {
-  // Spec 004 / RF-52, corregido el 2026-09-15: una, no todas.
-  assert.deepEqual(
-    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: [] }),
-    ['Falta la fotografía de al menos una actividad.'],
-  );
-  assert.deepEqual(
-    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: ['act-1'] }),
-    [],
-  );
-});
-
-prueba('la foto de una actividad que no se guardó no cuenta', () => {
-  // Spec 004 / RF-48. La foto se sube mientras se llena la actividad; si esa
-  // actividad se quita sin guardar, su foto queda en el almacén pero no es de
-  // ninguna actividad del parte.
-  assert.deepEqual(
-    bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1, itemsConFoto: ['act-descartada'] }),
-    ['Falta la fotografía de al menos una actividad.'],
-  );
+prueba('039/RF-1, RF-2: las actividades ya no piden foto; basta la fotografía del día', () => {
+  // Hasta la 039 se pedía la foto de al menos una actividad (004/RF-52).
+  assert.deepEqual(bloqueosDelCierre(PARTE_COMPLETO, { delDia: 1 }), []);
+  assert.deepEqual(bloqueosDelCierre(PARTE_COMPLETO, { delDia: 0 }), ['Falta llenar: Fotografía del día.']);
 });
 
 prueba('los bloqueos salen agrupados: secciones, máquinas, personas y fotos', () => {
@@ -1789,13 +1779,12 @@ prueba('los bloqueos salen agrupados: secciones, máquinas, personas y fotos', (
       personal: [{ nombre: 'Ana Ruiz', entrada: null, salida: '17:00' }],
       clima: [],
     },
-    { delDia: 1, itemsConFoto: [] },
+    { delDia: 1 },
   );
   assert.deepEqual(bloqueos, [
     'Falta llenar: Clima.',
     'RET-02: Falta la lectura inicial (h).',
     'A Ana Ruiz le falta la hora de entrada o de salida.',
-    'Falta la fotografía de al menos una actividad.',
   ]);
 });
 
@@ -1813,12 +1802,12 @@ const DIA_SIN_TRABAJO: ParteEvaluable = {
 
 prueba('un día sin trabajo se cierra con clima, notas y foto del día', () => {
   // Spec 004 / RF-54.
-  assert.deepEqual(bloqueosDelCierre(DIA_SIN_TRABAJO, { delDia: 1, itemsConFoto: [] }), []);
+  assert.deepEqual(bloqueosDelCierre(DIA_SIN_TRABAJO, { delDia: 1 }), []);
   assert.deepEqual(bloqueosDelCierre(DIA_SIN_TRABAJO, SIN_FOTOS), [
     'Falta llenar: Fotografía del día.',
   ]);
   assert.deepEqual(
-    bloqueosDelCierre({ ...DIA_SIN_TRABAJO, clima: [], notas: '' }, { delDia: 1, itemsConFoto: [] }),
+    bloqueosDelCierre({ ...DIA_SIN_TRABAJO, clima: [], notas: '' }, { delDia: 1 }),
     ['Falta llenar: Clima y Notas.'],
   );
 });
@@ -1828,7 +1817,7 @@ prueba('un día sin trabajo exige el motivo', () => {
   const sinMotivo = { ...DIA_SIN_TRABAJO, motivoSinTrabajo: '  ' };
   assert.equal(validarDiaSinTrabajo(sinMotivo), 'sin_motivo');
   assert.equal(validarDiaSinTrabajo({ ...DIA_SIN_TRABAJO, motivoSinTrabajo: null }), 'sin_motivo');
-  assert.deepEqual(bloqueosDelCierre(sinMotivo, { delDia: 1, itemsConFoto: [] }), [
+  assert.deepEqual(bloqueosDelCierre(sinMotivo, { delDia: 1 }), [
     mensajeDeDiaSinTrabajo('sin_motivo'),
   ]);
 });
@@ -1846,7 +1835,7 @@ prueba('un día con trabajo registrado no se marca como día sin trabajo', () =>
     validarDiaSinTrabajo({ ...DIA_SIN_TRABAJO, actividades: PARTE_COMPLETO.actividades }),
     'con_trabajo',
   );
-  assert.deepEqual(bloqueosDelCierre(conMaquina, { delDia: 1, itemsConFoto: [] })[0],
+  assert.deepEqual(bloqueosDelCierre(conMaquina, { delDia: 1 })[0],
     mensajeDeDiaSinTrabajo('con_trabajo'));
   // Sin la marca, no hay nada que validar.
   assert.equal(validarDiaSinTrabajo(PARTE_COMPLETO), null);
@@ -3569,62 +3558,11 @@ prueba('domingos y festivos se tratan igual', () => {
   assert.equal(esDominicalOFestivo('2026-09-09'), false); // miércoles cualquiera
 });
 
-prueba('la jornada completa son ocho horas y ninguna extra', () => {
-  const d = desglosarJornada('2026-09-09', '07:30', '17:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.trabajados, 480);
-  assert.equal(d.ordinarios, 480);
-  assert.equal(d.extra, 0);
-  assert.equal(d.nocturnos, 0);
-  assert.equal(d.dominicalOFestivo, false);
-});
-
-prueba('el almuerzo no se cuenta como trabajado', () => {
-  // Quien entra a las 13:30 no almorzó dentro de su jornada: sus tres horas y
-  // media son tres horas y media, no cinco.
-  const d = desglosarJornada('2026-09-09', '13:30', '17:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.trabajados, 210);
-  assert.equal(d.extra, 0);
-});
-
-prueba('lo que pasa de la jornada es hora extra', () => {
-  const d = desglosarJornada('2026-09-09', '07:30', '19:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.trabajados, 600); // 11 h y media menos hora y media de almuerzo
-  assert.equal(d.ordinarios, 480);
-  assert.equal(d.extra, 120);
-  assert.equal(d.nocturnos, 0, 'a las 19:00 en punto todavía no hay recargo');
-});
-
-prueba('el recargo nocturno empieza a las siete de la noche', () => {
-  // Ley 2466 de 2025: antes empezaba a las nueve. Si alguien vuelve a poner las
-  // 21:00, esto es lo que lo va a decir.
-  const d = desglosarJornada('2026-09-09', '13:30', '21:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.nocturnos, 120);
-});
-
-prueba('una jornada que cruza la medianoche se cuenta entera', () => {
-  const d = desglosarJornada('2026-09-09', '20:00', '02:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.trabajados, 360);
-  assert.equal(d.nocturnos, 360, 'de 20:00 a 02:00 todo es nocturno');
-  assert.equal(d.extra, 0, 'seis horas seguidas no llegan a la jornada ordinaria');
-});
-
-prueba('trabajar en domingo queda marcado', () => {
-  const d = desglosarJornada('2026-04-05', '07:30', '17:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.equal(d.dominicalOFestivo, true);
-});
-
-prueba('un horario imposible se rechaza y no se desglosa', () => {
+prueba('un horario imposible se rechaza', () => {
   assert.equal(validarHorario(null, '17:00'), 'falta_entrada');
   assert.equal(validarHorario('07:30', null), 'falta_salida');
   assert.equal(validarHorario('07:30', '07:30'), 'salida_antes');
   assert.equal(validarHorario('07:30', '01:00'), 'jornada_imposible');
-  assert.equal(desglosarJornada('2026-09-09', '07:30', '07:30', HORARIO_ANTERIOR), null);
   assert.equal(minutosDeHora('25:00'), null);
 });
 
@@ -3760,121 +3698,6 @@ prueba('un horario de obra mal escrito se rechaza diciendo qué día y qué tram
   assert.equal(mensajeDeHorarioDeObra(sinElegir!), 'Al tramo 1 de sábado le falta elegir una hora.');
 });
 
-prueba('cada día toma sus tramos: sábado el suyo, domingo y festivo los de semana', () => {
-  // Spec 016 / RF-11, RF-12 y RF-13.
-  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-22'), OBRA_DE_EJEMPLO.semana); // martes
-  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-26'), OBRA_DE_EJEMPLO.sabado); // sábado
-  assert.deepEqual(tramosDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2026-09-26'), []);
-  assert.deepEqual(tramosDelDia(OBRA_DE_EJEMPLO, '2026-09-27'), OBRA_DE_EJEMPLO.semana); // domingo
-  // El 1 de mayo de 2027 es sábado y festivo: manda el festivo.
-  assert.equal(diaDeLaSemana('2027-05-01'), 6);
-  assert.deepEqual(tramosDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2027-05-01'), OBRA_DE_EJEMPLO.semana);
-});
-
-prueba('con la jornada anterior las cifras de siempre no cambian', () => {
-  // Spec 016 / RF-25. Los casos de arriba ya pasan por `HORARIO_ANTERIOR`: esto
-  // añade lo que antes no se separaba. De 7:30 a 19:00 las dos horas extra son
-  // las últimas (17:00 a 19:00), y las dos son diurnas.
-  const d = desglosarJornada('2026-09-09', '07:30', '19:00', HORARIO_ANTERIOR);
-  assert.ok(d);
-  assert.deepEqual([d.extraDiurna, d.extraNocturna, d.masDeDosExtra], [120, 0, false]);
-  // El sábado seguía siendo de ocho horas: un parte cerrado de un sábado no cambia.
-  const sabado = desglosarJornada('2026-09-12', '07:30', '17:00', HORARIO_ANTERIOR);
-  assert.deepEqual([sabado?.ordinarios, sabado?.extra], [480, 0]);
-});
-
-prueba('las extra son lo que pasa de lo programado, y se separan en diurnas y nocturnas', () => {
-  // Spec 016 / RF-14 a RF-17 y RF-36. Martes, obra de 8 a 12 y de 2 a 6: de 7:00
-  // a 20:00 son 13 h de presencia menos las 2 de descanso. Las 3 extra son las
-  // últimas: de 5 a 7 de la tarde, diurnas; de 7 a 8, nocturna.
-  const d = desglosarJornada('2026-09-22', '07:00', '20:00', OBRA_DE_EJEMPLO);
-  assert.ok(d);
-  assert.equal(d.trabajados, 11 * 60);
-  assert.equal(d.ordinarios, 8 * 60);
-  assert.equal(d.extra, 3 * 60);
-  assert.equal(d.extraDiurna, 2 * 60);
-  assert.equal(d.extraNocturna, 60);
-  assert.equal(d.nocturnos, 60);
-  assert.equal(d.nocturnosOrdinarios, 0);
-  assert.equal(d.masDeDosExtra, true);
-  // Justo dos horas extra no avisan: el aviso es por pasar de dos.
-  assert.equal(desglosarJornada('2026-09-22', '07:00', '19:00', OBRA_DE_EJEMPLO)?.masDeDosExtra, false);
-});
-
-prueba('las extra son las últimas horas del día, aunque se haya llegado de noche', () => {
-  // Spec 016 / RF-18 y RF-41. De 4:00 a 15:00 la extra es la de 2 a 3 de la tarde,
-  // diurna; las dos de la madrugada son nocturnas pero ordinarias.
-  const d = desglosarJornada('2026-09-22', '04:00', '15:00', OBRA_DE_EJEMPLO);
-  assert.ok(d);
-  assert.equal(d.trabajados, 9 * 60);
-  assert.equal(d.extra, 60);
-  assert.equal(d.extraDiurna, 60);
-  assert.equal(d.extraNocturna, 0);
-  assert.equal(d.nocturnosOrdinarios, 2 * 60);
-});
-
-prueba('un sábado en que la obra no trabaja, todo lo trabajado es extra', () => {
-  // Spec 016 / RF-12.
-  const d = desglosarJornada('2026-09-26', '08:00', '12:00', { ...OBRA_DE_EJEMPLO, sabado: [] });
-  assert.ok(d);
-  assert.deepEqual([d.trabajados, d.ordinarios, d.extraDiurna], [240, 0, 240]);
-  // Con sábado de 8 a 12, esas mismas cuatro horas son ordinarias.
-  assert.equal(desglosarJornada('2026-09-26', '08:00', '12:00', OBRA_DE_EJEMPLO)?.extra, 0);
-});
-
-prueba('el domingo se mide contra la jornada de lunes a viernes, con su marca', () => {
-  // Spec 016 / RF-13 y RF-19.
-  const d = desglosarJornada('2026-09-27', '07:00', '17:00', OBRA_DE_EJEMPLO);
-  assert.ok(d);
-  assert.deepEqual([d.trabajados, d.ordinarios, d.extra], [480, 480, 0]);
-  assert.equal(d.dominicalOFestivo, true);
-});
-
-prueba('el descanso solo se descuenta a quien estuvo presente en él', () => {
-  // Spec 016 / RF-8 y RF-14. Quien entra a las 2 no almorzó dentro de su jornada.
-  assert.equal(desglosarJornada('2026-09-22', '14:00', '18:00', OBRA_DE_EJEMPLO)?.trabajados, 240);
-  // Con un solo tramo no hay descanso que descontar; y las 6:00 ya no son de noche.
-  const unTramo: HorarioDeObra = { semana: [{ desde: '06:00', hasta: '14:00' }], sabado: [] };
-  const d = desglosarJornada('2026-09-22', '06:00', '14:00', unTramo);
-  assert.deepEqual([d?.trabajados, d?.extra, d?.nocturnos], [480, 0, 0]);
-});
-
-prueba('una noche que no pasa de lo programado es ordinaria y nocturna', () => {
-  // Spec 016 / RF-16, RF-18 y RF-40: la regla es por cantidad. De 8 de la noche a
-  // 2 de la madrugada son 6 h, menos que las 8 programadas del martes.
-  const d = desglosarJornada('2026-09-22', '20:00', '02:00', OBRA_DE_EJEMPLO);
-  assert.ok(d);
-  assert.deepEqual([d.trabajados, d.ordinarios, d.extra], [360, 360, 0]);
-  assert.deepEqual([d.nocturnos, d.nocturnosOrdinarios], [360, 360]);
-});
-
-prueba('cada parte usa su horario: el guardado, el de siempre o el de la obra', () => {
-  // Spec 016 / RF-22, RF-24 y RF-25.
-  const cerrado = new Date('2026-09-20T22:00:00Z');
-  const sinSabado = { ...OBRA_DE_EJEMPLO, sabado: [] };
-  // Cerrado con el horario guardado: manda ese, aunque la obra haya cambiado.
-  assert.deepEqual(
-    horarioEfectivo({ horario: OBRA_DE_EJEMPLO, cerradoEn: cerrado, anuladoEn: null }, sinSabado),
-    OBRA_DE_EJEMPLO,
-  );
-  // Cerrado antes de la spec 016, sin horario guardado: la jornada de siempre.
-  assert.deepEqual(
-    horarioEfectivo({ horario: null, cerradoEn: cerrado, anuladoEn: null }, OBRA_DE_EJEMPLO),
-    HORARIO_ANTERIOR,
-  );
-  // Anulado sin cerrar y sin horario: solo pasa con los anulados antes de la spec,
-  // porque desde ella anular también congela. La jornada de siempre.
-  assert.deepEqual(
-    horarioEfectivo({ horario: null, cerradoEn: null, anuladoEn: cerrado }, OBRA_DE_EJEMPLO),
-    HORARIO_ANTERIOR,
-  );
-  // Abierto: el horario vigente de la obra.
-  assert.deepEqual(
-    horarioEfectivo({ horario: null, cerradoEn: null, anuladoEn: null }, OBRA_DE_EJEMPLO),
-    OBRA_DE_EJEMPLO,
-  );
-});
-
 prueba('una hora se elige en dos partes y solo vale con las dos', () => {
   // Spec 016 / RF-30, RF-33 y RF-34.
   assert.equal(HORAS_DEL_DIA.length, 24);
@@ -3947,23 +3770,6 @@ prueba('el parte guarda las observaciones de cada persona', () => {
     construirPersona({ usuarioId: 'u1', entrada: '07:00', salida: '17:00' }, 'Pedro', null)
       .observaciones,
     '',
-  );
-});
-
-prueba('el parte dice el horario de la obra para ese día', () => {
-  // Spec 016 / RF-10.
-  assert.equal(
-    describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-22'),
-    'De 08:00 a 12:00 y de 14:00 a 18:00.',
-  );
-  assert.equal(describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-26'), 'De 08:00 a 12:00.');
-  assert.equal(
-    describirHorarioDelDia({ ...OBRA_DE_EJEMPLO, sabado: [] }, '2026-09-26'),
-    'Los sábados no se trabaja en esta obra.',
-  );
-  assert.equal(
-    describirHorarioDelDia(OBRA_DE_EJEMPLO, '2026-09-27'),
-    'Domingo o festivo: se toma la jornada de lunes a viernes, de 08:00 a 12:00 y de 14:00 a 18:00.',
   );
 });
 
@@ -7223,6 +7029,70 @@ prueba('un reporte sin clima deja el clima que había, y en una bitácora vacía
   assert.equal(fusion.notas, 'Se varó la LLQ 376 a las 2 pm.');
 });
 
+prueba('039/RF-22: un reporte con solo la final conserva la inicial que ya tenía la máquina', () => {
+  type Maquina = { id: string; vehiculoId: string; medidorInicial: number | null; medidorFinal: number | null };
+  const parte = {
+    maquinaria: [{ id: 'm-1', vehiculoId: 'llq375', medidorInicial: 32600, medidorFinal: null }] as Maquina[],
+    personal: [],
+    actividades: [],
+    clima: [],
+    laboratorio: [],
+    notas: null,
+  };
+  const soloFinal = { ...parte, maquinaria: [{ id: 'm-2', vehiculoId: 'llq375', medidorInicial: null, medidorFinal: 32700 }] as Maquina[] };
+  assert.deepEqual(fusionarReporteEnParte(parte, soloFinal).maquinaria, [
+    { id: 'm-2', vehiculoId: 'llq375', medidorInicial: 32600, medidorFinal: 32700 },
+  ]);
+  // Si el reporte trae la inicial, manda la del reporte; y una final ya puesta no se borra.
+  const conInicial = { ...parte, maquinaria: [{ id: 'm-3', vehiculoId: 'llq375', medidorInicial: 32610, medidorFinal: null }] as Maquina[] };
+  const conFinal = { ...parte, maquinaria: [{ id: 'm-1', vehiculoId: 'llq375', medidorInicial: 32600, medidorFinal: 32700 }] as Maquina[] };
+  assert.equal(fusionarReporteEnParte(parte, conInicial).maquinaria[0].medidorInicial, 32610);
+  assert.equal(fusionarReporteEnParte(conFinal, conInicial).maquinaria[0].medidorFinal, 32700);
+});
+
+prueba('039/RF-22: la inicial que puso completarIniciales no pisa la que ya estaba escrita', () => {
+  const antes = [
+    { vehiculoId: 'llq375', medidorInicial: 32600 },
+    { vehiculoId: 'llq376', medidorInicial: null },
+  ];
+  const fusionadas = [
+    { vehiculoId: 'llq375', medidorInicial: 32590, medidorFinal: 32700 },
+    { vehiculoId: 'llq376', medidorInicial: 1000, medidorFinal: 1010 },
+    { vehiculoId: 'llq377', medidorInicial: 50, medidorFinal: 60 },
+  ];
+  const resultado = respetarInicialesEscritas(antes, fusionadas, new Set(['llq375', 'llq376', 'llq377']));
+  assert.deepEqual(resultado.map((m) => m.medidorInicial), [32600, 1000, 50]);
+  // Si la inicial vino escrita en el reporte (no completada), manda la del reporte.
+  assert.equal(respetarInicialesEscritas(antes, fusionadas, new Set())[0].medidorInicial, 32590);
+  // completarIniciales deja la marca.
+  const reporte = {
+    maquinaria: [{ vehiculoId: 'llq375', medidorInicial: null, medidorFinal: 32700 }],
+  } as unknown as ReporteDelDia;
+  const completado = completarIniciales(reporte, { llq375: { valor: 32590, fecha: '2026-10-18', origen: 'bitacora' } });
+  assert.deepEqual(
+    [completado.maquinaria[0].medidorInicial, completado.maquinaria[0].inicialCompletada],
+    [32590, true],
+  );
+});
+
+prueba('039/RF-21: cambiosDeFinales nombra las finales escritas o corregidas', () => {
+  const antes = [
+    { vehiculoId: 'a', medidorFinal: 100 },
+    { vehiculoId: 'b', medidorFinal: 200 },
+    { vehiculoId: 'c', medidorFinal: 300 },
+  ];
+  const despues = [
+    { vehiculoId: 'a', medidorFinal: 100 }, // igual: nada
+    { vehiculoId: 'b', medidorFinal: 205.5 }, // corregida
+    { vehiculoId: 'c', medidorFinal: null }, // borrada: no se propaga
+    { vehiculoId: 'd', medidorFinal: 40 }, // nueva
+  ];
+  assert.deepEqual(cambiosDeFinales(antes, despues), [
+    { vehiculoId: 'b', finalViejo: 200, finalNuevo: 205.5 },
+    { vehiculoId: 'd', finalViejo: null, finalNuevo: 40 },
+  ]);
+});
+
 prueba('fusionar dos veces el mismo reporte no duplica nada (reintento de la aprobación)', () => {
   const { parte, reporte } = dosReportesDelDia();
   const una = fusionarReporteEnParte(parte, reporte);
@@ -8137,7 +8007,7 @@ prueba('aprobar, corregir, descartar y devolver exigen la versión leída (RF-29
 
   const aprobada = aprobacion.parse({ version: 2, propuesta });
   assert.equal(aprobada.soloViajes, false);
-  assert.deepEqual(aprobada.fotos, { delDia: null, porActividad: {} });
+  assert.deepEqual(aprobada.fotos, { delDia: [] });
   // El reporte que la regla da por completo es también un cuerpo válido.
   assert.deepEqual(aprobada.propuesta, propuesta);
 });
@@ -8150,19 +8020,17 @@ prueba('una corrección a medias se puede guardar: lo que falta se exige al apro
   assert.equal(propuestaCorregida.safeParse({ version: 0, propuesta: aMedias }).success, true);
 });
 
-prueba('las fotos por actividad se eligen por renglón (RF-50)', () => {
+prueba('las fotos de WhatsApp se eligen solo para «Fotografía del día», sin actividad (039/RF-4)', () => {
   const propuesta = reporteCompleto();
   const conFotos = aprobacion.parse({
     version: 0,
     propuesta,
-    fotos: { delDia: 'foto-1', porActividad: { '0': 'foto-2' } },
+    fotos: { delDia: ['foto-1', 'foto-2'], porActividad: { '0': 'foto-3' } },
   });
-  assert.equal(conFotos.fotos.porActividad['0'], 'foto-2');
-  assert.equal(
-    aprobacion.safeParse({ version: 0, propuesta, fotos: { porActividad: { primera: 'foto-2' } } })
-      .success,
-    false,
-  );
+  // La foto por actividad ya no existe: el contrato la descarta.
+  assert.deepEqual(conFotos.fotos, { delDia: ['foto-1', 'foto-2'] });
+  assert.equal(aprobacion.safeParse({ version: 0, propuesta, fotos: { delDia: 'foto-1' } }).success, false);
+  assert.equal(aprobacion.safeParse({ version: 0, propuesta, fotos: { delDia: ['  '] } }).success, false);
 });
 
 prueba('asociar un grupo exige la obra o la empresa (021/RF-8, 038/RF-1)', () => {
@@ -8565,33 +8433,18 @@ prueba('025/RF-4: las horas van de media hora en media hora', () => {
   assert.equal(validarPersonaDelParte({ horasLaboradas: -1 }), 'horas_invalidas');
 });
 
-prueba('025/RF-14: con horas laboradas mandan las reportadas', () => {
-  const h = horasDeLaPersona(
-    '2026-10-08',
-    { horasLaboradas: 13, extraDiurnas: 3, extraNocturnas: 1, entrada: '07:30', salida: '17:00' },
-    HORARIO_PROPUESTO,
-  );
-  assert.ok(h);
-  assert.equal(h.fuente, 'reportadas');
-  assert.equal(h.trabajados, 13 * 60);
-  assert.equal(h.extraDiurna, 180);
-  assert.equal(h.extraNocturna, 60);
-  assert.equal(h.extra, 240);
+prueba('039/RF-6: horasDeLaPersona devuelve solo lo reportado', () => {
+  const h = horasDeLaPersona({ horasLaboradas: 13, extraDiurnas: 3, extraNocturnas: 1, entrada: '07:30', salida: '17:00' });
+  assert.deepEqual(h, { trabajados: 13 * 60, extraDiurna: 180, extraNocturna: 60, extra: 240 });
+  // Las extra que falten cuentan 0 (025/RF-12).
+  assert.deepEqual(horasDeLaPersona({ horasLaboradas: 8 }), { trabajados: 480, extraDiurna: 0, extraNocturna: 0, extra: 0 });
 });
 
-prueba('025/RF-15, RF-22: solo entrada y salida se calcula; una novedad sola no tiene horas', () => {
-  const h = horasDeLaPersona('2026-10-08', { entrada: '07:30', salida: '17:00' }, HORARIO_PROPUESTO);
-  assert.ok(h);
-  assert.equal(h.fuente, 'calculadas');
-  assert.equal(h.trabajados, 480);
-  assert.equal(horasDeLaPersona('2026-10-08', { novedad: 'incapacitado' }, HORARIO_PROPUESTO), null);
-});
-
-prueba('025/RF-16: avisa si lo reportado no cuadra con la entrada y la salida', () => {
-  const dia = { entrada: '07:30', salida: '17:00' };
-  assert.equal(horasNoCuadran('2026-10-08', { ...dia, horasLaboradas: 8 }, HORARIO_PROPUESTO), false);
-  assert.equal(horasNoCuadran('2026-10-08', { ...dia, horasLaboradas: 10 }, HORARIO_PROPUESTO), true);
-  assert.equal(horasNoCuadran('2026-10-08', { horasLaboradas: 10 }, HORARIO_PROPUESTO), false);
+prueba('039/RF-7, RF-8: con solo entrada y salida, o solo novedad, no hay horas', () => {
+  assert.equal(horasDeLaPersona({ entrada: '07:30', salida: '17:00' }), null);
+  assert.equal(horasDeLaPersona({ novedad: 'incapacitado' }), null);
+  // Se sigue pudiendo guardar: validarPersonaDelParte no cambia (RF-7).
+  assert.equal(validarPersonaDelParte({ entrada: '07:30', salida: '17:00' }), null);
 });
 
 prueba('025/RF-6, RF-19: una persona con solo horas, o incapacitada, deja cerrar', () => {
@@ -8603,7 +8456,7 @@ prueba('025/RF-6, RF-19: una persona con solo horas, o incapacitada, deja cerrar
         { nombre: 'Vicente Arias', entrada: null, salida: null, novedad: 'incapacitado' },
       ],
     },
-    { delDia: 1, itemsConFoto: ['act-1'] },
+    { delDia: 1 },
   );
   assert.deepEqual(bloqueos, []);
 });
@@ -8611,7 +8464,7 @@ prueba('025/RF-6, RF-19: una persona con solo horas, o incapacitada, deja cerrar
 prueba('025/RF-8: una persona sin nada no deja cerrar, con el mensaje de la regla', () => {
   const bloqueos = bloqueosDelCierre(
     { ...PARTE_COMPLETO, personal: [{ nombre: 'Ana Ruiz', entrada: null, salida: null }] },
-    { delDia: 1, itemsConFoto: ['act-1'] },
+    { delDia: 1 },
   );
   assert.deepEqual(bloqueos, [
     'Ana Ruiz: Escriba sus horas laboradas (L) o su novedad.',
@@ -8966,13 +8819,8 @@ prueba('026/RF-50: la GD 566 se reconoce por modelo y la alquilada queda para re
   assert.deepEqual(sinModelo.reporte.maquinaria.map((m) => m.conflicto ?? false), [true, true]);
 });
 
-prueba('026/RF-51: un punto de más en la lectura se sugiere, no se corrige', () => {
-  // TAY076: el 8-oct terminó «18740.7», el 9-oct inició «18740.7» (era 187407).
-  assert.equal(lecturaSugerida('odometro', 187202, 18740.7), 187407);
-  assert.equal(lecturaSugerida('odometro', 18740.7, 187489), 187407);
-  // TFO427: «16655.9» por 14655.9 es un dígito cambiado, no se adivina.
-  assert.equal(lecturaSugerida('horometro', 14647, 16655.9), null);
-  assert.equal(lecturaSugerida('odometro', 100, 90), null);
+prueba('039/RF-15: el punto es decimal y ya no se sugiere quitarlo', () => {
+  // TAY076: «18740.7» se lee tal cual; el aviso de que retrocede queda, sin «¿Quiso decir…?».
   const catalogos: CatalogosDeLaObra = {
     ...CATALOGOS_DE_PRUEBA,
     obraId: 'mag',
@@ -8984,8 +8832,19 @@ prueba('026/RF-51: un punto de más en la lectura se sugiere, no se corrige', ()
     { diaDelMensaje: '2026-10-08', destino: 'reporte' },
   );
   const [falta] = faltasDelReporte(reporte, { ...CONTEXTO_DEL_REPORTE, hoy: '2026-10-09' });
-  assert.match(falta.mensaje, /no puede ser menor que la inicial .* ¿Quiso decir 187407\?$/);
+  assert.match(falta.mensaje, /no puede ser menor que la inicial/);
+  assert.doesNotMatch(falta.mensaje, /Quiso decir/);
   assert.equal(reporte.maquinaria[0].medidorFinal, 18740.7, 'la lectura no se toca');
+  // Como texto, con coma o con los dos signos (RF-15).
+  const comoTexto = resolverPropuesta(
+    { fecha_evento: '2026-10-08', maquinaria: [{ equipo: 'Volqueta Kentworth TAY 076', unidad_medidor: 'km', medidor_inicial: '4.250,32', medidor_final: '4260,5 km' }] },
+    catalogos,
+    { diaDelMensaje: '2026-10-08', destino: 'reporte' },
+  );
+  assert.deepEqual(
+    [comoTexto.reporte.maquinaria[0].medidorInicial, comoTexto.reporte.maquinaria[0].medidorFinal],
+    [4250.32, 4260.5],
+  );
 });
 
 prueba('026/RF-53: «Humedad» está en la lista de ensayos', () => {
@@ -9156,14 +9015,14 @@ prueba('027/RF-39: las quitadas van aparte, y su copia principal tampoco vuelve'
 prueba('027/RF-41: con una foto de WhatsApp y sin principal, el cierre no pide fotografía', () => {
   const soloWhatsapp = unificarFotosDelDia([fotoDeSeccion({ mediaId: 'wa', sha256: 'a', horaMs: 1 })], []);
   assert.deepEqual(
-    bloqueosDelCierre(PARTE_COMPLETO, { delDia: soloWhatsapp.fotos.length, itemsConFoto: ['act-2'] }),
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: soloWhatsapp.fotos.length }),
     [],
   );
   // Todas quitadas: vuelve a faltar.
   const todasQuitadas = unificarFotosDelDia([fotoDeSeccion({ mediaId: 'wa', quitada: true })], []);
   assert.equal(todasQuitadas.fotos.length, 0);
   assert.ok(
-    bloqueosDelCierre(PARTE_COMPLETO, { delDia: todasQuitadas.fotos.length, itemsConFoto: ['act-2'] }).some((b) =>
+    bloqueosDelCierre(PARTE_COMPLETO, { delDia: todasQuitadas.fotos.length }).some((b) =>
       b.includes('Fotografía del día'),
     ),
   );
@@ -9173,9 +9032,25 @@ prueba('027/RF-41: con una foto de WhatsApp y sin principal, el cierre no pide f
 // Spec 029: medidores encadenados y día por venir
 // ---------------------------------------------------------------------------
 
-prueba('029/RF-1: la final de la bitácora anterior gana a la lectura del vehículo', () => {
+prueba('039/RF-19: gana la lectura anterior más reciente; si empatan, la de la bitácora', () => {
+  // La del vehículo es más nueva que la última bitácora: gana la del vehículo.
   assert.deepEqual(
     lecturaAnterior({ valor: 1250.5, fecha: '2026-10-16' }, { valor: 1300, fecha: '2026-10-18' }, '2026-10-19'),
+    { valor: 1300, fecha: '2026-10-18', origen: 'vehiculo' },
+  );
+  // La bitácora es más nueva: gana la bitácora.
+  assert.deepEqual(
+    lecturaAnterior({ valor: 1310, fecha: '2026-10-18' }, { valor: 1300, fecha: '2026-10-16' }, '2026-10-19'),
+    { valor: 1310, fecha: '2026-10-18', origen: 'bitacora' },
+  );
+  // Mismo día: la bitácora.
+  assert.deepEqual(
+    lecturaAnterior({ valor: 1310, fecha: '2026-10-18' }, { valor: 1300, fecha: '2026-10-18' }, '2026-10-19'),
+    { valor: 1310, fecha: '2026-10-18', origen: 'bitacora' },
+  );
+  // Una del vehículo de hoy no cuenta: vale la bitácora de antes.
+  assert.deepEqual(
+    lecturaAnterior({ valor: 1250.5, fecha: '2026-10-16' }, { valor: 1300, fecha: '2026-10-19' }, '2026-10-19'),
     { valor: 1250.5, fecha: '2026-10-16', origen: 'bitacora' },
   );
 });
@@ -9208,7 +9083,16 @@ prueba('029/RF-5, RF-9: avisa si la inicial no coincide y dice de dónde salió 
   assert.deepEqual(avisoDeLecturaInicial(187407, delVehiculo), {
     ayuda: 'Última lectura del vehículo (9-oct)',
   });
-  assert.ok(avisoDeLecturaInicial(187000, delVehiculo).aviso?.startsWith('No coincide con la última lectura del vehículo'));
+  assert.ok(avisoDeLecturaInicial(187500, delVehiculo).aviso?.startsWith('No coincide con la última lectura del vehículo'));
+  // 039/RF-18: por debajo de la anterior se avisa distinto, sin bloquear.
+  assert.equal(
+    avisoDeLecturaInicial(187000, delVehiculo).aviso,
+    'Queda por debajo de la última lectura del vehículo (187407, 9-oct). Revise la lectura; se puede guardar igual.',
+  );
+  assert.equal(
+    avisoDeLecturaInicial(4250.3, { valor: 4250.32, fecha: '2026-11-03', origen: 'bitacora' }).aviso,
+    'Queda por debajo de la final del día anterior (4250.32, 3-nov). Revise la lectura; se puede guardar igual.',
+  );
   // Inicial vacía o sin anterior: nada.
   assert.deepEqual(avisoDeLecturaInicial(null, deAyer), {});
   assert.deepEqual(avisoDeLecturaInicial(100, null), {});
@@ -9540,17 +9424,15 @@ const PERSONAL_DE_PRUEBA: ParteConPersonal[] = [
   {
     fecha: '2026-10-05',
     abierta: false,
-    horario: HORARIO_PROPUESTO,
     personal: [
       { usuarioId: 'ana', nombre: 'Ana Ruiz', cargo: 'operador', horasLaboradas: 11, extraDiurnas: 2.5, extraNocturnas: 0 },
-      // Una fila vieja: solo entrada y salida, con el horario del parte.
+      // Una fila vieja: solo entrada y salida. Desde la 039 no tiene horas.
       { usuarioId: 'luis', nombre: 'Luis Peña', cargo: 'ayudante', entrada: '07:00', salida: '18:00' },
     ],
   },
   {
     fecha: '2026-10-06',
     abierta: true,
-    horario: HORARIO_PROPUESTO,
     personal: [
       { usuarioId: 'ana', nombre: 'Ana Ruiz', cargo: 'conductor', horasLaboradas: 12, extraDiurnas: 2, extraNocturnas: 2 },
       { usuarioId: 'luis', nombre: 'Luis Peña', cargo: 'ayudante', novedad: 'incapacitado' },
@@ -9559,7 +9441,6 @@ const PERSONAL_DE_PRUEBA: ParteConPersonal[] = [
   {
     fecha: '2026-10-07',
     abierta: false,
-    horario: HORARIO_PROPUESTO,
     personal: [
       { usuarioId: 'ana', nombre: 'Ana Ruiz', cargo: 'conductor', horasLaboradas: 12, extraDiurnas: 4, extraNocturnas: 0 },
       { usuarioId: 'luis', nombre: 'Luis Peña', cargo: 'ayudante', novedad: 'incapacitado' },
@@ -9568,12 +9449,11 @@ const PERSONAL_DE_PRUEBA: ParteConPersonal[] = [
   {
     fecha: '2026-10-08',
     abierta: false,
-    horario: HORARIO_PROPUESTO,
     personal: [{ usuarioId: 'ana', nombre: 'Ana Ruiz', cargo: 'conductor', horasLaboradas: 12, extraDiurnas: 3, extraNocturnas: 0 }],
   },
 ];
 
-prueba('030/RF-44, RF-45: horas reportadas y calculadas, por persona y día', () => {
+prueba('030/RF-44, 039/RF-9: horas reportadas por persona y día; sin horas, en blanco', () => {
   const { personas } = horasDelPersonal({ dias: SEMANA_DE_PRUEBA, partes: PERSONAL_DE_PRUEBA });
   assert.deepEqual(personas.map((p) => p.nombre), ['Ana Ruiz', 'Luis Peña']);
   const [ana, luis] = personas;
@@ -9586,13 +9466,11 @@ prueba('030/RF-44, RF-45: horas reportadas y calculadas, por persona y día', ()
     extraDiurna: 150,
     extraNocturna: 0,
     novedad: null,
-    fuente: 'reportadas',
+    sinHoras: false,
     abierta: false,
   });
-  // La fila vieja, con la misma cuenta que la bitácora.
-  const calculadas = horasDeLaPersona('2026-10-05', { entrada: '07:00', salida: '18:00' }, HORARIO_PROPUESTO)!;
-  assert.equal(luis.dias[0].fuente, 'calculadas');
-  assert.equal(luis.dias[0].laboradas, calculadas.trabajados);
+  // La fila vieja, con solo entrada y salida: registrada, sin horas (039/D4).
+  assert.deepEqual([luis.dias[0].estado, luis.dias[0].sinHoras, luis.dias[0].laboradas], ['registrada', true, 0]);
   // Ausente el 8 (hay bitácora y no está), sin bitácora del 9 en adelante.
   assert.deepEqual(luis.dias.map((d) => d.estado), ['registrada', 'registrada', 'registrada', 'ausente', 'sin_bitacora', 'sin_bitacora', 'sin_bitacora']);
   assert.equal(ana.dias[1].abierta, true);
@@ -9607,7 +9485,7 @@ prueba('030/RF-46 a RF-48, RF-50: totales, novedades, avisos y cifras', () => {
   // 13,5 h extra en la semana del 5-oct: pasa de 12.
   assert.deepEqual(ana.semanasConExtraDeMas, [{ desde: '2026-10-05', extra: 13.5 * 60 }]);
   assert.deepEqual(luis.novedades, { incapacitado: 2 });
-  assert.equal(luis.diasTrabajados, 1);
+  assert.equal(luis.diasTrabajados, 0);
   assert.deepEqual(luis.semanasConExtraDeMas, []);
   assert.equal(cifras.personas, 2);
   assert.equal(cifras.conNovedad, 1);
@@ -9848,6 +9726,40 @@ prueba('030/RF-10: la página para imprimir, con título, periodo y sin «Por d�
   assert.match(mes, /<h2>Personal<\/h2>/);
 });
 
+prueba('039/RF-17, D4: las exportaciones con lecturas sin miles y las horas no reportadas en blanco', () => {
+  const dia = (fecha: string, sinHoras: boolean) => ({
+    fecha, estado: 'registrada' as const, laboradas: sinHoras ? 0 : 480, extraDiurna: 0, extraNocturna: 0, novedad: null, sinHoras, abierta: false,
+  });
+  const datos = {
+    obraId: 'obra',
+    periodo: { ...periodoDe('semana', '2026-10-07'), dias: SEMANA_DE_PRUEBA },
+    abiertas: [],
+    cifras: { laboradas: 480, extraDiurna: 0, extraNocturna: 0, personas: 1 },
+    obra: { codigo: 'PRUEBA', nombre: 'Obra de prueba' },
+    personas: [{
+      usuarioId: 'u1', nombre: 'Ana Ruiz', cargo: null, laboradas: 480, extraDiurna: 0, extraNocturna: 0, diasTrabajados: 1,
+      novedades: {}, diasConExtraDeMas: [], semanasConExtraDeMas: [],
+      dias: [dia('2026-10-05', false), dia('2026-10-06', true)],
+    }],
+  } as unknown as ReporteDe<'personal'>;
+  const [, porDia] = hojasDelReporte('personal', datos);
+  assert.deepEqual(porDia.filas[0].slice(2, 6), ['En la bitácora', 8, 0, 0]);
+  // Sin horas reportadas: en blanco, no en cero.
+  assert.deepEqual(porDia.filas[1].slice(2, 6), ['Horas no reportadas', '', '', '']);
+  // Con algún día con horas, el total es lo reportado; sin ninguno, en blanco.
+  assert.equal(sinHorasEnElPeriodo(datos.personas[0]), false);
+  const soloSinHoras = { ...datos.personas[0], laboradas: 0, dias: [dia('2026-10-06', true)] };
+  assert.equal(sinHorasEnElPeriodo(soloSinHoras), true);
+  assert.equal(sinHorasEnElPeriodo({ dias: [{ ...dia('2026-10-06', true), novedad: 'incapacidad' }] }), false);
+  const [resumenEnBlanco] = hojasDelReporte('personal', { ...datos, personas: [soloSinHoras] } as ReporteDe<'personal'>);
+  assert.deepEqual(resumenEnBlanco.filas[0].slice(2, 5), ['', '', '']);
+
+  const hojas = [{ nombre: 'Por día', encabezados: ['Máquina', 'Lectura final'], formatos: { 'Lectura final': 'lectura' as const }, filas: [['LLQ376', 43700.25], ['REC', 1234.5]] }];
+  const pagina = paginaParaImprimir({ titulo: 'Máquinas', subtitulo: '', hojas, esMes: false });
+  assert.match(pagina, /<td class="numero">43700\.25<\/td>/);
+  assert.match(pagina, /<td class="numero">1234\.5<\/td>/);
+});
+
 console.log('\nMantenimientos que llegan por WhatsApp (spec 030)\n');
 
 prueba('la clase de mantenimiento se entiende con las palabras de la obra (030/RF-36)', () => {
@@ -9903,6 +9815,23 @@ prueba('un cambio de aceite del mensaje reconoce la máquina y su clase (030/RF-
     faltasDelReporte(reporte, CONTEXTO_DEL_REPORTE).filter((f) => f.seccion === 'mantenimientos'),
     [],
   );
+});
+
+prueba('039/RF-15: la lectura del mantenimiento llega como texto y se lee con punto decimal', () => {
+  const propuesta = propuestaDeIa.parse({
+    categoria: 'reporte_diario',
+    fecha_evento: '2026-10-07',
+    mantenimientos: [
+      { equipo: 'TFO427', clase: 'aceite', lectura: '5.830 horas', descripcion: 'Aceite' },
+      { equipo: 'TFO420', clase: 'preventivo', lectura: '45.210,5', descripcion: 'Revisión' },
+      { equipo: 'TFO427', clase: 'correctivo', lectura: '', descripcion: 'Manguera' },
+    ],
+  });
+  const { reporte } = resolverPropuesta(propuesta, CATALOGOS_DEL_MANTENIMIENTO, {
+    diaDelMensaje: '2026-10-07',
+    destino: 'reporte',
+  });
+  assert.deepEqual(reporte.mantenimientos?.map((m) => m.lectura), [5.83, 45210.5, null]);
 });
 
 prueba('un mantenimiento sin máquina o sin clase va a «No se pudo guardar» (030/RF-40)', () => {
@@ -11093,7 +11022,7 @@ const PARTE_SIN_ACTIVIDADES_032 = {
   laboratorio: [],
   notas: 'Sin novedad.',
 };
-const FOTO_DEL_DIA_032 = { delDia: 1, itemsConFoto: [] };
+const FOTO_DEL_DIA_032 = { delDia: 1 };
 
 prueba('032/RF-24, RF-25, RF-32: con la marca y su motivo, la sección vacía deja cerrar', () => {
   // Sin marcas: faltan las dos secciones.
@@ -11156,7 +11085,7 @@ prueba('032/RF-37, RF-38: en día sin trabajo las marcas no cuentan; sin marcas,
   };
   assert.deepEqual(bloqueosDelCierre(domingo, FOTO_DEL_DIA_032), []);
   // Un parte de antes del cambio (sin las marcas) se evalúa como siempre.
-  assert.deepEqual(bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, actividades: [{ id: 'a' }] }, { delDia: 1, itemsConFoto: ['a'] }), [
+  assert.deepEqual(bloqueosDelCierre({ ...PARTE_SIN_ACTIVIDADES_032, actividades: [{ id: 'a' }] }, { delDia: 1 }), [
     'Falta llenar: Control Calidad de Obra.',
   ]);
 });
@@ -13933,6 +13862,118 @@ prueba('038/RF-9b: un bloque de lista vacío (como lo manda la IA) no borra la l
   assert.equal(foto.lista, null);
   const despues = llevarAlDia(dia, foto, { origen: ORIGEN_OCC, dudosa: false, ahora: 'x' });
   assert.deepEqual([despues.estadoEquipos.length, despues.lista?.mensajeId, despues.trabajos.length], [1, 'm-lista', 1]);
+});
+
+prueba('039/RF-15 a RF-17: las lecturas se leen con coma o punto y se muestran con punto', () => {
+  // RF-15: coma o punto decimal; el punto siempre es decimal; con los dos, el último manda.
+  assert.equal(leerLectura('4250,32'), 4250.32);
+  assert.equal(leerLectura('4250.32'), 4250.32);
+  assert.equal(leerLectura('5.830'), 5.83);
+  assert.equal(leerLectura('4.250,32'), 4250.32);
+  assert.equal(leerLectura('1,234.5'), 1234.5);
+  assert.equal(leerLectura(' 812 h '), 812);
+  assert.equal(leerLectura('4250,32 km'), 4250.32);
+  assert.equal(leerLectura('5828.4 hr'), 5828.4);
+  assert.equal(leerLectura('4250,325'), 4250.33);
+  assert.equal(leerLectura(4250.321), 4250.32);
+  for (const malo of ['abc', '-3', '', '.', '12a', null, undefined, Number.NaN, -1]) {
+    assert.equal(leerLectura(malo as string | number | null | undefined), null, String(malo));
+  }
+  // RF-17: punto decimal, sin miles ni ceros de más.
+  assert.equal(mostrarLectura(4250.32, 'km'), '4250.32 km');
+  assert.equal(mostrarLectura(812.5, 'h'), '812.5 h');
+  assert.equal(mostrarLectura(12000), '12000');
+  assert.equal(mostrarLectura(4250.3), '4250.3');
+  assert.equal(mostrarLectura(null), '');
+  // RF-16: hasta dos decimales.
+  assert.equal(tieneDecimalesDeLectura(4250.32), true);
+  assert.equal(tieneDecimalesDeLectura(0.1 + 0.2), true);
+  assert.equal(tieneDecimalesDeLectura(4250.321), false);
+});
+
+prueba('039/RF-16: Vehículos acepta lecturas con hasta dos decimales', () => {
+  const editado = vehiculoEditado.parse({ odometroKm: 4250.32, horometroH: 812.5 });
+  assert.equal(editado.odometroKm, 4250.32);
+  assert.equal(editado.horometroH, 812.5);
+  assert.equal(vehiculoEditado.safeParse({ odometroKm: 4250.321 }).success, false);
+  assert.equal(vehiculoEditado.safeParse({ horometroH: -1 }).success, false);
+  // Lo que escribe el formulario, con coma o con punto, llega al contrato ya leído.
+  assert.equal(vehiculoEditado.parse({ odometroKm: leerLectura('4250,32') }).odometroKm, 4250.32);
+});
+
+prueba('039/RF-11, RF-12: maquinaria, personal, notas y fotografía se marcan «no aplica»', () => {
+  const vacio: ParteEvaluable = { ...PARTE_COMPLETO, maquinaria: [], personal: [], notas: '' };
+  // Sin marcas, se piden como siempre.
+  assert.deepEqual(bloqueosDelCierre(vacio, SIN_FOTOS), [
+    'Falta llenar: Maquinaria, Personal, Notas y Fotografía del día.',
+  ]);
+  // Con su marca y su motivo cuentan como llenas.
+  const marcadas: ParteEvaluable = {
+    ...vacio,
+    seccionesSinRegistro: {
+      maquinaria: { motivo: 'Lluvia' },
+      personal: { motivo: 'Paro' },
+      notas: { motivo: 'sin novedad' },
+      fotografia: { motivo: 'Sin señal' },
+    },
+  };
+  assert.deepEqual(bloqueosDelCierre(marcadas, SIN_FOTOS), []);
+  // Marcadas sin motivo: se nombra el motivo, no la sección (RF-12).
+  const sinMotivo: ParteEvaluable = {
+    ...vacio,
+    seccionesSinRegistro: { maquinaria: { motivo: null }, notas: { motivo: '  ' } },
+  };
+  assert.deepEqual(bloqueosDelCierre(sinMotivo, { delDia: 1 }), [
+    'Falta llenar: Personal.',
+    'Maquinaria: falta el motivo de «Hoy no trabajó maquinaria».',
+    'Notas: falta el motivo de «Sin novedades».',
+  ]);
+  // Una marca con filas no estorba: la sección tiene lo suyo.
+  assert.deepEqual(
+    bloqueosDelCierre({ ...PARTE_COMPLETO, seccionesSinRegistro: { maquinaria: { motivo: null } } }, FOTOS_COMPLETAS),
+    [],
+  );
+});
+
+prueba('039/RF-13: no se marca una sección con filas; agregar filas quita la marca', () => {
+  const sin = marcaDeSeccion({}, 'personal');
+  assert.deepEqual(sin, { marcada: false, motivo: null });
+  assert.equal(resolverSeccionSinRegistro(sin, { marcada: true }, 2).error, 'con_registros');
+  assert.match(mensajeDeSeccionConRegistros('personal'), /personal registrado/);
+  const marcada = marcaDeSeccion({ notas: { motivo: 'sin novedad' } }, 'notas');
+  assert.deepEqual(resolverSeccionSinRegistro(marcada, {}, 1), { marcada: false, motivo: null, error: null });
+  // Ida y vuelta al conjunto guardado.
+  const conjunto = conMarcaDeSeccion({ maquinaria: { motivo: 'x' } }, 'fotografia', { marcada: true, motivo: 'Sin señal' });
+  assert.deepEqual(conjunto, { maquinaria: { motivo: 'x' }, fotografia: { motivo: 'Sin señal' } });
+  assert.deepEqual(conMarcaDeSeccion(conjunto, 'maquinaria', { marcada: false, motivo: null }), {
+    fotografia: { motivo: 'Sin señal' },
+  });
+});
+
+prueba('039/RF-14: la marca se lee en el índice y en la bitácora cerrada', () => {
+  const conMarcas = seccionesDelParte({
+    ...PARTE_VACIO,
+    fotos: 0,
+    noAplican: { maquinaria: true, personal: true, notas: true, fotografia: true },
+  });
+  for (const id of ['maquinaria', 'personal', 'notas', 'fotografia']) {
+    assert.equal(conMarcas.find((s) => s.id === id)?.estado, 'no_aplica', id);
+  }
+  // Con fotos, se cuentan aunque haya marca vieja.
+  assert.equal(
+    seccionesDelParte({ ...PARTE_VACIO, fotos: 2, noAplican: { fotografia: true } }).find((s) => s.id === 'fotografia')?.estado,
+    'lleno',
+  );
+  assert.deepEqual(
+    textosSinRegistro({
+      sinActividades: true,
+      motivoSinActividades: 'Lluvia',
+      seccionesSinRegistro: { notas: { motivo: 'sin novedad' }, maquinaria: { motivo: null } },
+    }),
+    ['No trabajó maquinaria — sin motivo escrito', 'No se realizaron actividades — Lluvia', 'Sin novedades — sin novedad'],
+  );
+  // En el día sin trabajo no se leen (como 032/RF-37).
+  assert.deepEqual(textosSinRegistro({ sinTrabajo: true, seccionesSinRegistro: { notas: { motivo: 'x' } } }), []);
 });
 
 verificarFirmaS3()

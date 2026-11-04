@@ -366,7 +366,7 @@ function VentanaAnularViaje({
   }
 
   return (
-    <Modal titulo="Anular un viaje" onCerrar={onCerrar}>
+    <Modal titulo="Anular un viaje" onCerrar={onCerrar} angosta>
       <Aviso tono="info">
         {`Va a anular el viaje de ${viaje.volqueta} del ${viaje.fecha} a las ${viaje.hora}, de ${viaje.origen} a ${destinoLegible(viaje)}. No se borra: queda en la lista, marcado, con su nombre y el motivo.`}
       </Aviso>

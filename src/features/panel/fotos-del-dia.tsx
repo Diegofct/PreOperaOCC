@@ -24,7 +24,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 
 import { api, mensajeDe } from './cliente-api';
-import { Acciones, Ayuda, Aviso, Boton, Campo, Modal } from './componentes';
+import { Acciones, AccionesFormulario, Aviso, Ayuda, Boton, Campo, Modal } from './componentes';
 import type { FotoDelDiaFila, FotosDelDiaFila } from '@/features/panel/contratos';
 import type { Listado } from './marco';
 
@@ -206,7 +206,7 @@ function VentanaQuitar({
   }
 
   return (
-    <Modal titulo="Quitar foto" onCerrar={alCerrar}>
+    <Modal titulo="Quitar foto" onCerrar={alCerrar} angosta>
       <Image source={{ uri: `/api/panel/media/${foto.mediaId}` }} style={estilos.enVentana} resizeMode="contain" />
       <Ayuda>
         {foto.origen === 'whatsapp'
@@ -215,10 +215,10 @@ function VentanaQuitar({
       </Ayuda>
       <Campo etiqueta="Motivo" valor={motivo} onChange={setMotivo} multilinea obligatorio />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
-      <Acciones>
+      <AccionesFormulario>
         <Boton titulo={enviando ? 'Quitando…' : 'Quitar'} tono="peligro" deshabilitado={enviando} onPress={quitar} />
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-      </Acciones>
+      </AccionesFormulario>
     </Modal>
   );
 }

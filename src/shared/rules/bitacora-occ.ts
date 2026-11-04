@@ -22,9 +22,9 @@
  * reglas de negocio y llevan sus casos en `scripts/verificar-reglas.ts`.
  */
 import { DESFASE_COLOMBIA_MS, esFechaReal, fechaDeJornada } from './jornada';
+import { leerLectura } from './lecturas';
 import { normalizar } from './texto';
 import {
-  numeroDeTexto,
   reconocerEquipoDeEmpresa,
   unidadDeMedidor,
   type MantenimientoDelReporte,
@@ -633,7 +633,7 @@ export function leerMensajeDeEmpresa(
   const lecturas: LecturaDelMensaje['lecturas'] = [];
   (propuesta.lecturas ?? []).forEach((l, n) => {
     const r = reconocer(l);
-    const valor = numeroDeTexto(l.valor ?? null);
+    const valor = leerLectura(l.valor ?? null);
     const clase = unidadDeMedidor(l.unidad, typeof l.valor === 'string' ? l.valor : null);
     const datos = { escrito: r.escrito, valor: l.valor ?? null, unidad: l.unidad ?? null, candidatos: r.candidatos };
     if (valor === null || valor <= 0) return;

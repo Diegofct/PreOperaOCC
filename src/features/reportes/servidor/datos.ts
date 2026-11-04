@@ -3,7 +3,7 @@
  *
  * Las reglas que arman cada reporte son puras (`shared/rules/reportes.ts`); aquí se
  * decide de qué obra y de qué periodo se habla, y se leen las filas: las bitácoras no
- * anuladas del periodo con el horario con que se cuentan sus horas, los vehículos de
+ * anuladas del periodo (con las horas tal como se reportaron, spec 039), los vehículos de
  * la obra y quién hizo el preoperacional de cada máquina cada día.
  */
 import { and, between, eq, isNull, lte, or, sql } from 'drizzle-orm';
@@ -27,7 +27,6 @@ import { veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
 import { errorDePeticion } from '@/features/servidor/respuestas';
-import { horarioEfectivo } from '@/shared/rules/horas';
 import { fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
 import { diasDe, esTipoDePeriodo, periodoDe, type PeriodoDeReporte } from '@/shared/rules/periodos';
 import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
@@ -64,7 +63,7 @@ export function pedidoDeReporte(sesion: PersonaEnSesion, url: URL): PedidoDeRepo
   return { obraId, periodo, dias: diasDe(periodo) };
 }
 
-/** Las bitácoras no anuladas del periodo, con el horario efectivo de cada una (RF-6, RF-56). */
+/** Las bitácoras no anuladas del periodo (RF-6, RF-56). */
 export async function partesDelPeriodo(pedido: PedidoDeReporte) {
   const filas = await baseServidor()
     .select({
@@ -84,8 +83,6 @@ export async function partesDelPeriodo(pedido: PedidoDeReporte) {
       sinEnsayos: partesDeObra.sinEnsayos,
       motivoSinEnsayos: partesDeObra.motivoSinEnsayos,
       notas: partesDeObra.notas,
-      horario: partesDeObra.horario,
-      horarioDeLaObra: obras.horario,
     })
     .from(partesDeObra)
     .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
@@ -96,11 +93,7 @@ export async function partesDelPeriodo(pedido: PedidoDeReporte) {
         between(partesDeObra.fecha, pedido.periodo.desde, pedido.periodo.hasta),
       ),
     );
-  return filas.map(({ horarioDeLaObra, ...fila }) => ({
-    ...fila,
-    abierta: fila.cerradoEn === null,
-    horario: horarioEfectivo(fila, horarioDeLaObra),
-  }));
+  return filas.map((fila) => ({ ...fila, abierta: fila.cerradoEn === null }));
 }
 
 export type ParteLeido = Awaited<ReturnType<typeof partesDelPeriodo>>[number];

@@ -14,6 +14,7 @@
 import { useCallback, useState } from 'react';
 
 import { formatoPendiente, formatoPrestadoDe } from '@/shared/catalogos/tipos-vehiculo';
+import { leerLectura, mostrarLectura } from '@/shared/rules/lecturas';
 import { AVISO_FALTA_PLACA, identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
 import { api } from './cliente-api';
@@ -47,18 +48,6 @@ import { SeccionLlantas } from './seccion-llantas';
 import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { VentanaCorregirVehiculo } from './ventana-vehiculo';
 
-/** Cadena de formulario → número, con lo vacío como ausencia y no como cero. */
-function aNumero(texto: string): number | null {
-  const limpio = texto.trim();
-  if (limpio === '') return null;
-  const valor = Number(limpio);
-  return Number.isFinite(valor) ? Math.trunc(valor) : null;
-}
-
-/** Una lectura con un decimal como mucho: «5836.6», «47283». */
-function lectura(valor: number): string {
-  return String(Math.round(valor * 10) / 10);
-}
 
 /** «8 oct.», el día en la obra. */
 function diaCorto(iso: string): string {
@@ -127,8 +116,9 @@ export default function PantallaVehiculos() {
         marca,
         modelo,
         obraId,
-        odometroKm: pideOdometro ? aNumero(odometro) : null,
-        horometroH: pideHorometro ? aNumero(horometro) : null,
+        // Con coma o con punto, hasta dos decimales (spec 039, RF-15, RF-16).
+        odometroKm: pideOdometro ? leerLectura(odometro) : null,
+        horometroH: pideHorometro ? leerLectura(horometro) : null,
         estado: 'operativo',
       }),
     );
@@ -174,8 +164,8 @@ export default function PantallaVehiculos() {
       pintar: (v) => (
         <>
           <Celda>
-            {v.odometroKm !== null ? `${lectura(v.odometroKm)} km` : '—'} ·{' '}
-            {v.horometroH !== null ? `${lectura(v.horometroH)} h` : '—'}
+            {v.odometroKm !== null ? mostrarLectura(v.odometroKm, 'km') : '—'} ·{' '}
+            {v.horometroH !== null ? mostrarLectura(v.horometroH, 'h') : '—'}
           </Celda>
           {v.medidorActualizadoEn ? <Celda>{`act. ${diaCorto(v.medidorActualizadoEn)}`}</Celda> : null}
         </>
@@ -277,8 +267,7 @@ export default function PantallaVehiculos() {
               etiqueta="Odómetro (km)"
               valor={odometro}
               onChange={setOdometro}
-              soloNumeros
-              ayuda="Lectura actual"
+              ayuda="Lectura actual, p. ej. 4250.32"
               ancho={160}
             />
           ) : null}
@@ -287,8 +276,7 @@ export default function PantallaVehiculos() {
               etiqueta="Horómetro (h)"
               valor={horometro}
               onChange={setHorometro}
-              soloNumeros
-              ayuda="Lectura actual"
+              ayuda="Lectura actual, p. ej. 812.5"
               ancho={160}
             />
           ) : null}

@@ -1,0 +1,1 @@
+ALTER TABLE "partes_de_obra" ADD COLUMN "secciones_sin_registro" jsonb DEFAULT '{}'::jsonb NOT NULL;

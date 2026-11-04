@@ -52,11 +52,8 @@ import {
   type NovedadDePersonal,
 } from "@/shared/catalogos/bitacora";
 import {
-  describirHorarioDelDia,
   horasDeLaPersona,
   horasLegibles,
-  horasNoCuadran,
-  MAXIMO_MINUTOS_EXTRA_POR_DIA,
   validarFranjas,
   mensajeDeFranja,
 } from "@/shared/rules/horas";
@@ -93,6 +90,7 @@ import {
   type CatalogoDeActividades,
 } from "@/shared/rules/actividades-de-obra";
 import { identificacionDeFila } from "@/shared/rules/vehiculos";
+import { leerLectura, mostrarLectura } from "@/shared/rules/lecturas";
 import { alcanza } from "@/shared/rules/permisos";
 import { seOfreceEnSelectores } from "@/shared/rules/ficha";
 import {
@@ -101,6 +99,7 @@ import {
   faltasDelEnsayo,
   LARGO_DEL_MOTIVO_SIN_REGISTRO,
   rotuloSinRegistro,
+  SECCIONES_CON_MARCA,
   seccionesDelParte,
   textoSinRegistro,
   TITULO_DE_SECCION,
@@ -468,26 +467,10 @@ export default function PantallaPartes() {
   const [historicoCerradas, setHistoricoCerradas] = useState(0);
 
   /**
-   * Las fotos del parte, pedidas aquí y no dentro de su sección.
-   *
-   * Se izaron para que el índice pueda decir si ya hay fotografía del día. La
-   * sección las recibe por props y sigue refrescándolas al subir una.
-   */
-  const fotos = useListado<{
-    id: string;
-    itemKey: string | null;
-    disponible: boolean;
-  }>(
-    useCallback(
-      () => (parte ? api.partes.fotos(parte.id) : Promise.resolve([])),
-      [parte],
-    ),
-  );
-  /**
    * La sección «Fotografía del día» (spec 027, cambio del 2026-10-14): las de WhatsApp, las
-   * subidas en el panel y las principales viejas, juntas y sin las quitadas. Se pide aquí y
-   * no dentro de la sección por lo mismo que las fotos de arriba: el índice y los bloqueos del
-   * cierre cuentan cuántas hay (RF-41).
+   * subidas en el panel y las principales viejas —también las que se subieron por actividad
+   * antes de la spec 039 (RF-5)—, juntas y sin las quitadas. Se pide aquí y no dentro de la
+   * sección porque el índice y los bloqueos del cierre cuentan cuántas hay (RF-41).
    */
   const seccionDeFotos = useListado<FotosDelDiaFila>(
     useCallback(
@@ -560,8 +543,11 @@ export default function PantallaPartes() {
     // Spec 032: la sección vacía a propósito, con su motivo guardado.
     actividadesNoAplican: Boolean(parte?.sinActividades && parte.motivoSinActividades),
     ensayosNoAplican: Boolean(parte?.sinEnsayos && parte.motivoSinEnsayos),
-    // Todavía no se iza el conteo de fotos: lo hace T17. Hasta entonces es
-    // `null`, que la regla traduce a «comprobando» y nunca a «sin registrar».
+    // Spec 039 (RF-14): Maquinaria, Personal, Notas y Fotografía, igual, con su motivo.
+    noAplican: Object.fromEntries(
+      SECCIONES_CON_MARCA.map((s) => [s, Boolean(parte?.seccionesSinRegistro?.[s]?.motivo?.trim())]),
+    ),
+    // Mientras cargan es `null`: «comprobando», nunca «sin registrar».
     fotos: seccionDeFotos.cargando ? null : fotosDelDia.length,
     historicoCerradas,
     cerrado,
@@ -583,10 +569,9 @@ export default function PantallaPartes() {
   // Mientras las fotos cargan no se evalúa: diría «falta la fotografía del día»
   // durante el segundo en que todavía no se sabe si la hay.
   const bloqueos =
-    parte && !cerrado && !anulado && !fotos.cargando && !seccionDeFotos.cargando && !granulometrias.cargando
+    parte && !cerrado && !anulado && !seccionDeFotos.cargando && !granulometrias.cargando
       ? bloqueosDelCierre({ ...parte, ensayosDelModulo }, {
           delDia: fotosDelDia.length,
-          itemsConFoto: fotos.datos.flatMap((f) => (f.itemKey ? [f.itemKey] : [])),
         })
       : [];
 
@@ -775,9 +760,11 @@ export default function PantallaPartes() {
             alMedir={salto.alMedirBanda}
             seccion={seccionDeFotos}
             alSubir={() => {
-              fotos.recargar();
               seccionDeFotos.recargar();
+              // La foto quita «No se tomaron fotos» (039/RF-13): la marca vive en la bitácora.
+              dia.recargar();
             }}
+            alGuardar={dia.recargar}
           />
           <Cierre
             // Lleva la marca de día sin trabajo en su estado: cambiar de día
@@ -1073,6 +1060,7 @@ function SeccionMaquinaria({
   alGuardar,
   alMedir,
 }: PropsSeccion & { vehiculos: VehiculoFila[]; personas: PersonaFila[] }) {
+  const sinMaquinaria = useMarcaSinRegistro(parte, "maquinaria");
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -1083,8 +1071,13 @@ function SeccionMaquinaria({
   const [filas, setFilas] = useState<FilaMaquina[]>(() =>
     parte.maquinaria.map((m) => ({
       vehiculoId: m.vehiculoId,
-      inicial: m.medidorInicial === null ? "" : String(m.medidorInicial),
-      final: m.medidorFinal === null ? "" : String(m.medidorFinal),
+      // Sin inicial, se propone la lectura anterior de la máquina (spec 039, RF-23); queda
+      // escrita al guardar. Con punto decimal y sin miles (RF-17).
+      inicial:
+        m.medidorInicial === null
+          ? mostrarLectura(parte.lecturasAnteriores[m.vehiculoId]?.valor)
+          : mostrarLectura(m.medidorInicial),
+      final: mostrarLectura(m.medidorFinal),
       // Los partes anteriores al 2026-09-14 no las traen.
       observaciones: m.observaciones ?? "",
       operadorId: m.operadorId ?? null,
@@ -1105,10 +1098,12 @@ function SeccionMaquinaria({
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
+        ...cambiosDeLaMarca(sinMaquinaria),
         maquinaria: filas.map((f) => ({
           vehiculoId: f.vehiculoId,
-          medidorInicial: aNumero(f.inicial),
-          medidorFinal: aNumero(f.final),
+          // Con coma o con punto, hasta dos decimales (spec 039, RF-15, RF-16).
+          medidorInicial: leerLectura(f.inicial),
+          medidorFinal: leerLectura(f.final),
           observaciones: f.observaciones,
           operadorId: f.operadorId,
         })),
@@ -1134,6 +1129,13 @@ function SeccionMaquinaria({
         ) : null
       }
     >
+      <SinRegistro
+        estado={sinMaquinaria}
+        parte={parte}
+        editable={editable}
+        hayFilas={filas.length > 0}
+        alGuardar={alGuardar}
+      />
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => {
@@ -1144,15 +1146,20 @@ function SeccionMaquinaria({
             const clase = medidorDeClase(equipo?.claseMedidor);
             const unidad = UNIDAD_DE_MEDIDOR[clase];
             const rotulo = ETIQUETA_MEDIDOR[clase];
-            const inicial = aNumero(fila.inicial);
-            const final = aNumero(fila.final);
+            const inicial = leerLectura(fila.inicial);
+            const final = leerLectura(fila.final);
             const error = validarAvance(clase, inicial, final);
             const avance = avanceDeMedidor(inicial, final);
             // De dónde salió la inicial, o que no coincide con la del día anterior
-            // (spec 029, RF-5, RF-9). Solo mientras se puede editar: cerrada, ya no importa.
-            const lectura = editable
-              ? avisoDeLecturaInicial(inicial, parte.lecturasAnteriores[fila.vehiculoId] ?? null)
-              : {};
+            // (spec 029, RF-5, RF-9; 039/RF-18). Solo mientras se puede editar.
+            const anterior = parte.lecturasAnteriores[fila.vehiculoId] ?? null;
+            const lectura = editable ? avisoDeLecturaInicial(inicial, anterior) : {};
+            // Propuesta y todavía sin guardar (039/RF-23): que se note que falta «Guardar».
+            const guardada = parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId);
+            const propuesta =
+              editable && guardada !== undefined && guardada.medidorInicial === null && inicial !== null;
+            const ayudaInicial =
+              propuesta && lectura.ayuda ? `${lectura.ayuda} (propuesta, falta guardar)` : lectura.ayuda;
 
             // Todo en un renglón a 1280 px (spec 032, RF-4): máquina | operador y
             // lecturas | observación con el «Quitar».
@@ -1172,6 +1179,7 @@ function SeccionMaquinaria({
                       onChange={() => {}}
                       // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
                       soloLectura
+                      envolver
                     />
                     <MarcaWhatsapp
                       origen={origenDe(parte.maquinaria.find((m) => m.vehiculoId === fila.vehiculoId))}
@@ -1229,15 +1237,13 @@ function SeccionMaquinaria({
                     etiqueta={`${rotulo} inicial (${unidad})`}
                     valor={fila.inicial}
                     onChange={(v) => cambiar(indice, "inicial", v)}
-                    soloNumeros
                     ancho={ANCHO_LECTURA}
-                    ayuda={lectura.ayuda}
+                    ayuda={ayudaInicial}
                   />
                   <Campo
                     etiqueta={`${rotulo} final (${unidad})`}
                     valor={fila.final}
                     onChange={(v) => cambiar(indice, "final", v)}
-                    soloNumeros
                     ancho={ANCHO_LECTURA}
                     // Mientras se llena, faltar una lectura no es un error: solo se
                     // marca lo imposible, que escrito se queda.
@@ -1250,8 +1256,8 @@ function SeccionMaquinaria({
                       avance === null
                         ? undefined
                         : clase === "odometro"
-                          ? `${avance} km recorridos`
-                          : `${avance} horas de máquina`
+                          ? `${mostrarLectura(avance)} km recorridos`
+                          : `${mostrarLectura(avance)} horas de máquina`
                     }
                   />
                 </RenglonDeCampos>
@@ -1261,7 +1267,8 @@ function SeccionMaquinaria({
         </>
       ) : null}
 
-      {editable ? (
+      {/* Con «Hoy no trabajó maquinaria» marcada no se añade (039/RF-12). */}
+      {editable && !sinMaquinaria.marcada ? (
         <PieDeSeccion>
           <Selector
             etiqueta="Añadir máquina"
@@ -1280,7 +1287,7 @@ function SeccionMaquinaria({
                 ...filas,
                 {
                   vehiculoId: v,
-                  inicial: anterior ? String(anterior.valor) : "",
+                  inicial: mostrarLectura(anterior?.valor),
                   final: "",
                   observaciones: "",
                   operadorId: null,
@@ -1293,7 +1300,7 @@ function SeccionMaquinaria({
         </PieDeSeccion>
       ) : null}
 
-      {filas.length === 0 && !editable ? (
+      {filas.length === 0 && !editable && !sinMaquinaria.guardada.marcada ? (
         <Aviso tono="info">Ese día no se registró ninguna máquina.</Aviso>
       ) : null}
     </SeccionEnMarco>
@@ -1311,6 +1318,7 @@ function SeccionPersonal({
   alGuardar,
   alMedir,
 }: PropsSeccion & { personas: PersonaFila[] }) {
+  const sinPersonal = useMarcaSinRegistro(parte, "personal");
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -1345,6 +1353,7 @@ function SeccionPersonal({
     setGuardando(true);
     try {
       await api.partes.guardar(parte.id, {
+        ...cambiosDeLaMarca(sinPersonal),
         personal: filas.map((f) => ({
           usuarioId: f.usuarioId,
           entrada: f.entrada,
@@ -1377,13 +1386,13 @@ function SeccionPersonal({
         ) : null
       }
     >
-      {/* Contra qué se cuentan las extras de ese día (spec 016, RF-10). El horario lo
-          decidió el servidor: el vigente de la obra si la bitácora sigue abierta, el
-          guardado al cerrarlo si no. */}
-      <Text style={estilos.apoyo}>
-        {`Horario de este día: ${describirHorarioDelDia(parte.horario, parte.fecha)}`}
-      </Text>
-
+      <SinRegistro
+        estado={sinPersonal}
+        parte={parte}
+        editable={editable}
+        hayFilas={filas.length > 0}
+        alGuardar={alGuardar}
+      />
       {filas.length > 0 ? (
         <>
           {filas.map((fila, indice) => {
@@ -1396,10 +1405,8 @@ function SeccionPersonal({
               extraNocturnas: horasDeCampo(fila.extraNocturnas),
               novedad: fila.novedad,
             };
-            // Lo reportado manda; si no hay, el cálculo con el horario (025/RF-14, RF-15).
-            const horas = horasDeLaPersona(parte.fecha, conHoras, parte.horario);
-            const desglose = horas?.fuente === "calculadas" ? horas : null;
-            const noCuadra = horasNoCuadran(parte.fecha, conHoras, parte.horario);
+            // Solo lo reportado (spec 039, RF-9).
+            const horas = horasDeLaPersona(conHoras);
             // Las casillas de la 025 solo se ven si se puede escribir o si traen algo:
             // una bitácora cerrada antes se ve como se guardó (RF-60).
             const verHoras =
@@ -1413,9 +1420,12 @@ function SeccionPersonal({
             // Lo que cuelga de las horas va en su propio renglón y solo si dice algo que
             // los campos no dicen ya: las extra o la novedad (spec 032, RF-5).
             const desgloseReportado =
-              horas?.fuente === "reportadas" && (horas.extraDiurna > 0 || horas.extraNocturna > 0);
-            const hayDebajo = desgloseReportado || Boolean(fila.novedad) || Boolean(desglose) || noCuadra ||
-              Boolean(horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA);
+              horas !== null && (horas.extraDiurna > 0 || horas.extraNocturna > 0);
+            // Sin horas y sin novedad: no se calculan de la entrada y la salida (039/RF-8).
+            // Mientras se llena una fila nueva no se dice: todavía se están escribiendo.
+            const sinHoras =
+              horas === null && !fila.novedad && (!editable || Boolean(fila.entrada || fila.salida));
+            const hayDebajo = desgloseReportado || Boolean(fila.novedad) || sinHoras;
 
             // Todo en un renglón a 1280 px (spec 032, RF-5): persona y cargo | horas y
             // novedad | observación con el «Quitar».
@@ -1431,6 +1441,7 @@ function SeccionPersonal({
                       onChange={() => {}}
                       // Ya está elegido: cambiarlo es quitar la fila y añadir otra.
                       soloLectura
+                      envolver
                       ayuda={cargo ?? undefined}
                     />
                     <MarcaWhatsapp
@@ -1485,49 +1496,10 @@ function SeccionPersonal({
                           <Etiqueta tono="atencion">{nombreDeNovedad(fila.novedad)}</Etiqueta>
                         </View>
                       ) : null}
-                      {desglose ? (
+                      {sinHoras ? (
                         <View style={estilos.desglose}>
-                          {/* Trabajadas y ordinarias siempre; las demás solo si hay:
-                              tres «0 min» por persona tapan la cifra que importa (RF-20). */}
-                          <Text style={estilos.apoyo}>
-                            {`${horasLegibles(desglose.trabajados)} trabajadas, ` +
-                              `${horasLegibles(desglose.ordinarios)} ordinarias`}
-                          </Text>
-                          {desglose.extraDiurna > 0 ? (
-                            <Etiqueta tono="atencion">
-                              {horasLegibles(desglose.extraDiurna)} extra diurnas
-                            </Etiqueta>
-                          ) : null}
-                          {desglose.extraNocturna > 0 ? (
-                            <Etiqueta tono="atencion">
-                              {horasLegibles(desglose.extraNocturna)} extra nocturnas
-                            </Etiqueta>
-                          ) : null}
-                          {desglose.nocturnosOrdinarios > 0 ? (
-                            <Etiqueta tono="neutro">
-                              {horasLegibles(desglose.nocturnosOrdinarios)} nocturnas
-                              ordinarias
-                            </Etiqueta>
-                          ) : null}
-                          {desglose.dominicalOFestivo ? (
-                            <Etiqueta tono="atencion">Domingo o festivo</Etiqueta>
-                          ) : null}
+                          <Etiqueta tono="atencion">Horas no reportadas</Etiqueta>
                         </View>
-                      ) : null}
-                      {/* Avisa y no impide (025/RF-16). */}
-                      {noCuadra ? (
-                        <Aviso tono="info">
-                          {"Las horas reportadas no cuadran con la entrada y la salida según el horario de la obra. " +
-                            "Mandan las reportadas; se puede guardar y cerrar igual."}
-                        </Aviso>
-                      ) : null}
-                      {/* Avisa y no impide: se guarda y se cierra igual (RF-36, RF-37). */}
-                      {horas && horas.extra > MAXIMO_MINUTOS_EXTRA_POR_DIA ? (
-                        <Aviso tono="info">
-                          {`${horasLegibles(horas.extra)} extra en el día: pasa de las ` +
-                            `${MAXIMO_MINUTOS_EXTRA_POR_DIA / 60} que permite la ley. ` +
-                            "Se puede guardar igual."}
-                        </Aviso>
                       ) : null}
                     </>
                   ) : null
@@ -1535,8 +1507,8 @@ function SeccionPersonal({
               >
                 <RenglonDeCampos>
                   {/* La obra reporta horas, no la hora de entrada y de salida: ya no se
-                      piden (spec 029, RF-19, RF-20). Una fila de antes que las trae las
-                      conserva y las muestra tal cual, con su cálculo debajo (RF-22). */}
+                      piden (spec 029, RF-19, RF-20). Una fila que las trae las conserva y
+                      las muestra tal cual, sin calcular horas con ellas (spec 039, RF-8). */}
                   {fila.entrada || fila.salida ? (
                     <Campo
                       etiqueta="Entrada y salida (registro anterior)"
@@ -1591,7 +1563,8 @@ function SeccionPersonal({
         </>
       ) : null}
 
-      {editable ? (
+      {/* Con «Hoy no se reportó personal» marcada no se añade (039/RF-12). */}
+      {editable && !sinPersonal.marcada ? (
         <PieDeSeccion>
           <Selector
             etiqueta="Añadir persona"
@@ -1615,7 +1588,7 @@ function SeccionPersonal({
         </PieDeSeccion>
       ) : null}
 
-      {filas.length === 0 && !editable ? (
+      {filas.length === 0 && !editable && !sinPersonal.guardada.marcada ? (
         <Aviso tono="info">Ese día no se registró personal.</Aviso>
       ) : null}
     </SeccionEnMarco>
@@ -1652,12 +1625,6 @@ function SeccionActividades({
   // Guardar: marcar en rojo una fila recién añadida, antes de escribir nada, es
   // regañar por adelantado.
   const [intentoGuardar, setIntentoGuardar] = useState(false);
-  // Las fotos del parte, para repartirlas entre las actividades que las tienen.
-  const fotos = useListado<{
-    id: string;
-    itemKey: string | null;
-    disponible: boolean;
-  }>(useCallback(() => api.partes.fotos(parte.id), [parte.id]));
 
   const [filas, setFilas] = useState<FilaActividad[]>(() =>
     parte.actividades.map((a) => ({
@@ -1840,26 +1807,6 @@ function SeccionActividades({
         <>
           {filas.map((fila, indice) => {
             const ultima = indice === filas.length - 1;
-            const fotoDeLaFila = (
-              // Toda fila tiene id desde que se añade, así que la foto se sube sin
-              // guardar antes (RF-47). Si la actividad se quita sin guardar, su
-              // foto no es de ninguna actividad de la bitácora y no se pinta (RF-48).
-              <SubirFoto
-                titulo="Foto de la actividad"
-                rutaDeSubida={`/api/panel/partes/${parte.id}/foto?item=${fila.id}`}
-                fotos={fotos.datos
-                  .filter((f) => f.itemKey === fila.id)
-                  .map((f) => f.id)}
-                editable={editable}
-                alSubir={() => {
-                  fotos.recargar();
-                  // El índice cuenta las fotos por su cuenta para saber si ya hay
-                  // una actividad con foto; recargar el día se lo avisa. No
-                  // desmonta la sección, así que lo escrito sin guardar sigue.
-                  alGuardar();
-                }}
-              />
-            );
             const quitar = editable ? (
               <Boton
                 titulo="Quitar"
@@ -1884,9 +1831,9 @@ function SeccionActividades({
                         valor={h.nombre}
                         onChange={sinEscribir}
                         soloLectura
+                        envolver
                         ayuda="De la lista anterior: se conserva como se guardó."
                       />
-                      {fotoDeLaFila}
                     </>
                   }
                   final={
@@ -1924,7 +1871,7 @@ function SeccionActividades({
             const unidad = unidadDe(fila, catalogo);
             const cantidad = cantidadDe(fila, catalogo);
             const faltas = intentoGuardar ? faltasDe(fila) : {};
-            // Dos renglones a 1280 px (spec 032, RF-6): la actividad, «¿Cuál?» y la foto en
+            // Dos renglones a 1280 px (spec 032, RF-6): la actividad y «¿Cuál?» en
             // la columna del nombre | unidad, descripción y cantidad, y debajo las medidas |
             // observación con el «Quitar».
             return (
@@ -1952,7 +1899,6 @@ function SeccionActividades({
                       />
                     ) : null}
                     <MarcaWhatsapp origen={origenDe(parte.actividades.find((a) => a.id === fila.id))} />
-                    {fotoDeLaFila}
                   </>
                 }
                 final={
@@ -2107,11 +2053,18 @@ function SeccionActividades({
  * sin trabajo. Vive en la sección y no en la casilla porque la sección la necesita
  * para esconder su botón de añadir (RF-26, RF-33).
  */
+function marcaGuardada(parte: ParteFila, seccion: SeccionSinRegistro) {
+  if (seccion === "actividades") {
+    return { marcada: parte.sinActividades, motivo: parte.motivoSinActividades ?? "" };
+  }
+  if (seccion === "ensayos") return { marcada: parte.sinEnsayos, motivo: parte.motivoSinEnsayos ?? "" };
+  // Las cuatro de la spec 039 viven juntas en `seccionesSinRegistro` (RF-11).
+  const marca = parte.seccionesSinRegistro?.[seccion];
+  return { marcada: marca !== undefined, motivo: marca?.motivo ?? "" };
+}
+
 function useMarcaSinRegistro(parte: ParteFila, seccion: SeccionSinRegistro) {
-  const guardada =
-    seccion === "actividades"
-      ? { marcada: parte.sinActividades, motivo: parte.motivoSinActividades ?? "" }
-      : { marcada: parte.sinEnsayos, motivo: parte.motivoSinEnsayos ?? "" };
+  const guardada = marcaGuardada(parte, seccion);
   const [marcada, setMarcada] = useState(guardada.marcada);
   const [motivo, setMotivo] = useState(guardada.motivo);
   const cambiada =
@@ -2123,9 +2076,9 @@ function useMarcaSinRegistro(parte: ParteFila, seccion: SeccionSinRegistro) {
 function cambiosDeLaMarca(estado: ReturnType<typeof useMarcaSinRegistro>): ParteEditado {
   if (!estado.cambiada) return {};
   const motivo = estado.marcada ? estado.motivo : null;
-  return estado.seccion === "actividades"
-    ? { sinActividades: estado.marcada, motivoSinActividades: motivo }
-    : { sinEnsayos: estado.marcada, motivoSinEnsayos: motivo };
+  if (estado.seccion === "actividades") return { sinActividades: estado.marcada, motivoSinActividades: motivo };
+  if (estado.seccion === "ensayos") return { sinEnsayos: estado.marcada, motivoSinEnsayos: motivo };
+  return { seccionesSinRegistro: { [estado.seccion]: { marcada: estado.marcada, motivo } } };
 }
 
 /**
@@ -2651,6 +2604,7 @@ function SeccionLaboratorio({
                       valor={fila.heredado.nombre}
                       onChange={sinEscribir}
                       soloLectura
+                      envolver
                       ayuda="De la lista anterior: se conserva como se guardó."
                     />
                   }
@@ -2971,6 +2925,7 @@ function SeccionNotas({
   alGuardar,
   alMedir,
 }: PropsSeccion) {
+  const sinNovedades = useMarcaSinRegistro(parte, "notas");
   // El error de guardar se pinta dentro de esta sección y no arriba de la
   // página, que es donde no lo ve quien acaba de pulsar Guardar (spec 007, RF-28).
   const [error, alFallar] = useState<string | null>(null);
@@ -2980,7 +2935,7 @@ function SeccionNotas({
   async function guardar() {
     setGuardando(true);
     try {
-      await api.partes.guardar(parte.id, { notas });
+      await api.partes.guardar(parte.id, { ...cambiosDeLaMarca(sinNovedades), notas });
       alFallar(null);
       alGuardar();
     } catch (fallo) {
@@ -3002,15 +2957,25 @@ function SeccionNotas({
         ) : null
       }
     >
+      <SinRegistro
+        estado={sinNovedades}
+        parte={parte}
+        editable={editable}
+        hayFilas={notas.trim() !== ""}
+        alGuardar={alGuardar}
+      />
+      {/* Con «Sin novedades» marcada no se escribe (039/RF-12). */}
       {editable ? (
-        <Campo
-          etiqueta="Del día"
-          valor={notas}
-          onChange={setNotas}
-          multilinea
-          ayuda="Lo que haya que dejar dicho y no quepa en las secciones de arriba."
-        />
-      ) : (
+        sinNovedades.marcada ? null : (
+          <Campo
+            etiqueta="Del día"
+            valor={notas}
+            onChange={setNotas}
+            multilinea
+            ayuda="Lo que haya que dejar dicho y no quepa en las secciones de arriba."
+          />
+        )
+      ) : sinNovedades.guardada.marcada ? null : (
         <Aviso tono="info">{parte.notas ?? "Sin notas ese día."}</Aviso>
       )}
     </SeccionEnMarco>
@@ -3037,6 +3002,7 @@ function SeccionFotoDelDia({
   alMedir,
   seccion,
   alSubir,
+  alGuardar,
 }: {
   parte: ParteFila;
   editable: boolean;
@@ -3048,18 +3014,37 @@ function SeccionFotoDelDia({
    */
   seccion: Listado<FotosDelDiaFila>;
   alSubir: () => void;
+  alGuardar: () => void;
 }) {
+  const sinFotos = useMarcaSinRegistro(parte, "fotografia");
+  const hayFotos = (seccion.datos[0]?.fotos.length ?? 0) > 0;
   return (
     <SeccionEnMarco id="fotografia" titulo="Fotografía del día" alMedir={alMedir}>
-      <FotosDelDia parteId={parte.id} editable={editable} seccion={seccion} />
-      <SubirFoto
-        titulo="Añadir fotografía"
-        rutaDeSubida={`/api/panel/partes/${parte.id}/foto`}
-        fotos={[]}
-        sinMiniaturas
-        editable={editable}
-        alSubir={alSubir}
-      />
+      {/* Mientras cargan no se ofrece la marca: diría que no hay fotos sin saberlo. */}
+      {seccion.cargando ? null : (
+        <SinRegistro
+          estado={sinFotos}
+          parte={parte}
+          editable={editable}
+          hayFilas={hayFotos}
+          alGuardar={alGuardar}
+        />
+      )}
+      {/* Con «No se tomaron fotos» marcada y sin fotos, la lista vacía no dice nada nuevo. */}
+      {sinFotos.marcada && !hayFotos ? null : (
+        <FotosDelDia parteId={parte.id} editable={editable} seccion={seccion} />
+      )}
+      {/* Con «No se tomaron fotos» marcada no se sube (039/RF-12). */}
+      {sinFotos.marcada ? null : (
+        <SubirFoto
+          titulo="Añadir fotografía"
+          rutaDeSubida={`/api/panel/partes/${parte.id}/foto`}
+          fotos={[]}
+          sinMiniaturas
+          editable={editable}
+          alSubir={alSubir}
+        />
+      )}
     </SeccionEnMarco>
   );
 }

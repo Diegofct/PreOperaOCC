@@ -1,41 +1,17 @@
 /**
- * Cuántas horas trabajó una persona y de qué clase fueron.
+ * Las horas de una persona y el horario de cada obra.
  *
- * La bitácora registra una entrada y una salida por persona y día. De ahí sale
- * lo que la obra necesita saber: cuánto se trabajó, cuánto se pasó de la jornada
- * y qué parte de eso cae en horario nocturno o en domingo o festivo.
+ * Desde la spec 039 las horas son **las que reporta la obra**: laboradas (L),
+ * extra diurnas (HED) y extra nocturnas (HEN). Ya no se calculan con la entrada,
+ * la salida y el horario: una fila que solo trae entrada y salida queda «Horas no
+ * reportadas» (RF-6 a RF-9).
  *
- * **Aquí no se calcula dinero.** Se clasifican minutos, y con eso basta para
- * llevar el control de la obra. Convertirlos a pesos exige el salario de cada
- * persona, el tope semanal y las reglas de liquidación, y eso es una nómina —
- * que está explícitamente fuera del alcance de la spec 004.
+ * **Aquí no se calcula dinero.** Convertir horas a pesos exige el salario, el
+ * tope semanal y las reglas de liquidación, y eso es una nómina.
  *
- * ── Las reglas que se aplican, y de dónde salen ──
- *
- * Cada obra tiene su horario (spec 016): uno o dos tramos de lunes a viernes y el
- * sábado aparte. Hasta esa spec la jornada era una sola y fija, de 7:30 a 12:00
- * y de 13:30 a 17:00 todos los días; sigue aquí como `HORARIO_ANTERIOR`, porque es
- * con la que se leen los partes cerrados antes del cambio.
- *
- * Las extra se cuentan **por cantidad**: lo trabajado por encima de lo que el
- * horario programa ese día. No por estar fuera de los tramos: quien llega tarde y
- * compensa al salir no hace extras. Para saber si una extra es diurna o nocturna
- * hace falta decidir cuáles son, y se decidió con OCC que son **las últimas**
- * horas trabajadas del día (spec 016, RF-41).
- *
- * El recargo nocturno corre **de 7:00 p.m. a 6:00 a.m.** desde la Ley 2466 de
- * 2025, que adelantó el inicio dos horas: antes empezaba a las 9:00 p.m.
- *
- * Domingos y festivos se tratan igual entre sí. Los festivos se calculan en
- * `festivos.ts`; no hay lista escrita a mano que caduque.
- *
- * Nota que no cabe en el código pero conviene tener presente: desde el 15 de
- * julio de 2026 la jornada máxima legal en Colombia es de **42 horas
- * semanales**. Ocho horas diarias de lunes a sábado son cuarenta y ocho. Esta
- * función clasifica el día, no la semana; el tope semanal es cosa de quien
- * liquida la nómina.
+ * El horario de la obra (spec 016) se conserva: lo usan los avisos de WhatsApp
+ * (qué días se esperan reportes) y la configuración de la obra.
  */
-import { diaDeLaSemana, esDominicalOFestivo } from './festivos';
 
 /** Minutos desde la medianoche. */
 const HORA = 60;
@@ -51,34 +27,10 @@ export const JORNADA = {
   tardeHasta: 17 * HORA,
 } as const;
 
-/** El recargo nocturno corre de 7:00 p.m. a 6:00 a.m. (Ley 2466 de 2025). */
-export const NOCTURNO = { desde: 19 * HORA, hasta: 6 * HORA } as const;
-
 export type ErrorHorario = 'falta_entrada' | 'falta_salida' | 'salida_antes' | 'jornada_imposible';
 
 /** Nadie trabaja más de esto seguido; por encima es un dedazo al teclear. */
 export const MAXIMO_MINUTOS_POR_DIA = 16 * HORA;
-
-export interface DesgloseDeHoras {
-  /** Minutos efectivamente trabajados, ya descontado el descanso entre tramos. */
-  trabajados: number;
-  /** Los que caben dentro de lo que el horario programa ese día. */
-  ordinarios: number;
-  /** Los que lo pasan. Trabajo suplementario: `extraDiurna + extraNocturna`. */
-  extra: number;
-  /** Las extra que no caen entre las 7:00 p.m. y las 6:00 a.m. */
-  extraDiurna: number;
-  /** Las extra entre las 7:00 p.m. y las 6:00 a.m. */
-  extraNocturna: number;
-  /** Todos los trabajados entre las 7:00 p.m. y las 6:00 a.m., ordinarios o extra. */
-  nocturnos: number;
-  /** Los nocturnos que son ordinarios: llevan recargo nocturno, no de hora extra. */
-  nocturnosOrdinarios: number;
-  /** Si el día es domingo o festivo, todo lo trabajado lleva recargo. */
-  dominicalOFestivo: boolean;
-  /** Más de dos horas extra en el día: se avisa, no se impide (spec 016, RF-36). */
-  masDeDosExtra: boolean;
-}
 
 /** Dos horas extra al día: lo que permite la ley. Pasarlo se avisa (RF-36). */
 export const MAXIMO_MINUTOS_EXTRA_POR_DIA = 2 * HORA;
@@ -99,11 +51,6 @@ export function horaDeMinutos(minutos: number): string {
   const h = Math.floor(minutos / HORA) % 24;
   const m = minutos % HORA;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-}
-
-/** Cuántos minutos comparten dos intervalos. */
-function solape(desdeA: number, hastaA: number, desdeB: number, hastaB: number): number {
-  return Math.max(0, Math.min(hastaA, hastaB) - Math.max(desdeA, desdeB));
 }
 
 /**
@@ -145,113 +92,6 @@ export function mensajeDeHorario(error: ErrorHorario): string {
     case 'jornada_imposible':
       return `Son más de ${MAXIMO_MINUTOS_POR_DIA / HORA} horas seguidas. Revise las horas.`;
   }
-}
-
-type Intervalo = [number, number];
-
-/**
- * Las noches que puede tocar una jornada, en minutos desde la medianoche del día
- * del parte: la madrugada de ese día y la noche que sigue, hasta las 6:00 del día
- * siguiente. Una jornada no pasa de 16 h, así que no llega a otra noche.
- */
-const NOCHES: Intervalo[] = [
-  [0, NOCTURNO.hasta],
-  [NOCTURNO.desde, 24 * HORA + NOCTURNO.hasta],
-];
-
-function nocturnosEn(intervalos: Intervalo[]): number {
-  return intervalos.reduce(
-    (suma, [desde, hasta]) =>
-      suma + NOCHES.reduce((s, [nd, nh]) => s + solape(desde, hasta, nd, nh), 0),
-    0,
-  );
-}
-
-/** Los descansos del día: los huecos entre tramos consecutivos del horario (RF-8). */
-function descansosDe(tramos: Tramo[]): Intervalo[] {
-  const minutos = tramos
-    .map((t) => [minutosDeHora(t.desde), minutosDeHora(t.hasta)] as const)
-    .filter((t): t is readonly [number, number] => t[0] !== null && t[1] !== null)
-    .sort((a, b) => a[0] - b[0]);
-  const huecos: Intervalo[] = [];
-  for (let i = 1; i < minutos.length; i++) {
-    if (minutos[i][0] > minutos[i - 1][1]) huecos.push([minutos[i - 1][1], minutos[i][0]]);
-  }
-  return huecos;
-}
-
-/** La presencia menos los descansos: lo que de verdad se trabajó, en orden (RF-14). */
-function restarDescansos(presencia: Intervalo, descansos: Intervalo[]): Intervalo[] {
-  let trozos: Intervalo[] = [presencia];
-  for (const [dd, dh] of descansos) {
-    trozos = trozos.flatMap(([desde, hasta]): Intervalo[] => {
-      if (dh <= desde || dd >= hasta) return [[desde, hasta]];
-      const quedan: Intervalo[] = [];
-      if (dd > desde) quedan.push([desde, dd]);
-      if (dh < hasta) quedan.push([dh, hasta]);
-      return quedan;
-    });
-  }
-  return trozos;
-}
-
-/** Los últimos `minutos` de lo trabajado, recorriendo de atrás hacia adelante (RF-41). */
-function ultimos(trabajado: Intervalo[], minutos: number): Intervalo[] {
-  const tomados: Intervalo[] = [];
-  let faltan = minutos;
-  for (let i = trabajado.length - 1; i >= 0 && faltan > 0; i--) {
-    const [desde, hasta] = trabajado[i];
-    const inicio = Math.max(desde, hasta - faltan);
-    tomados.push([inicio, hasta]);
-    faltan -= hasta - inicio;
-  }
-  return tomados;
-}
-
-/**
- * Clasifica lo que trabajó una persona ese día, contra el horario de su obra.
- *
- * `fecha` es la del día del parte, en `YYYY-MM-DD`: decide qué tramos rigen
- * (sábado, domingo o festivo) y si hay recargo dominical. `horario` es el que le
- * toca al parte: el de la obra si está abierto, el guardado si se cerró, o
- * `HORARIO_ANTERIOR` si se cerró antes de la spec 016 (`horarioEfectivo`).
- */
-export function desglosarJornada(
-  fecha: string,
-  entrada: string | null,
-  salida: string | null,
-  horario: HorarioDeObra,
-): DesgloseDeHoras | null {
-  if (validarHorario(entrada, salida) !== null) return null;
-
-  const desde = minutosDeHora(entrada)!;
-  const hastaCrudo = minutosDeHora(salida)!;
-  const hasta = hastaCrudo < desde ? hastaCrudo + 24 * HORA : hastaCrudo;
-
-  const tramos = tramosDelDia(horario, fecha);
-  // El descanso se descuenta solo por lo que la persona estuvo presente en él.
-  // Quien entra después del almuerzo no almorzó dentro de su jornada.
-  const trabajado = restarDescansos([desde, hasta], descansosDe(tramos));
-  const trabajados = trabajado.reduce((suma, [d, h]) => suma + (h - d), 0);
-
-  // Por cantidad: lo que pasa de lo programado ese día es extra (RF-15, RF-16).
-  const ordinarios = Math.min(trabajados, minutosDeTramos(tramos));
-  const extra = trabajados - ordinarios;
-
-  const nocturnos = nocturnosEn(trabajado);
-  const extraNocturna = nocturnosEn(ultimos(trabajado, extra));
-
-  return {
-    trabajados,
-    ordinarios,
-    extra,
-    extraDiurna: extra - extraNocturna,
-    extraNocturna,
-    nocturnos,
-    nocturnosOrdinarios: nocturnos - extraNocturna,
-    dominicalOFestivo: esDominicalOFestivo(fecha),
-    masDeDosExtra: extra > MAXIMO_MINUTOS_EXTRA_POR_DIA,
-  };
 }
 
 /** Minutos → "8 h 30 min", que es como se lee una jornada. */
@@ -333,53 +173,30 @@ export function mensajeDePersona(error: ErrorPersona): string {
   }
 }
 
-/** Las horas de una persona, en minutos, con su fuente (RF-14, RF-15). */
-export type HorasDeLaPersona =
-  | { fuente: 'reportadas'; trabajados: number; extraDiurna: number; extraNocturna: number; extra: number }
-  | ({ fuente: 'calculadas' } & DesgloseDeHoras);
+/** Las horas reportadas de una persona, en minutos (spec 039, RF-6). */
+export interface HorasDeLaPersona {
+  trabajados: number;
+  extraDiurna: number;
+  extraNocturna: number;
+  extra: number;
+}
 
 /**
  * Lo que se muestra y se suma de una persona: lo reportado si tiene horas
- * laboradas (RF-14), lo calculado con el horario si solo tiene entrada y salida
- * (RF-15), o `null` si no tiene ninguna de las dos (una novedad sola cuenta 0, RF-22).
+ * laboradas, o `null` si no las tiene, que se lee «Horas no reportadas»
+ * (spec 039, RF-6 a RF-8). La entrada y la salida ya no se convierten en horas.
+ * Una novedad sola cuenta 0 (025/RF-22).
  */
-export function horasDeLaPersona(
-  fecha: string,
-  persona: PersonaConHoras,
-  horario: HorarioDeObra,
-): HorasDeLaPersona | null {
-  if (hay(persona.horasLaboradas)) {
-    const extraDiurna = Math.round((persona.extraDiurnas ?? 0) * HORA);
-    const extraNocturna = Math.round((persona.extraNocturnas ?? 0) * HORA);
-    return {
-      fuente: 'reportadas',
-      trabajados: Math.round(persona.horasLaboradas * HORA),
-      extraDiurna,
-      extraNocturna,
-      extra: extraDiurna + extraNocturna,
-    };
-  }
-  const desglose = desglosarJornada(fecha, persona.entrada ?? null, persona.salida ?? null, horario);
-  return desglose ? { fuente: 'calculadas', ...desglose } : null;
-}
-
-/** Cuánto pueden diferir lo reportado y lo calculado sin avisar: un cuarto de hora. */
-export const TOLERANCIA_MINUTOS = 15;
-
-/**
- * ¿Lo reportado no cuadra con la entrada y la salida? (RF-16). Solo avisa: no
- * impide guardar ni cerrar. `false` si no hay las dos cosas que comparar.
- */
-export function horasNoCuadran(fecha: string, persona: PersonaConHoras, horario: HorarioDeObra): boolean {
-  if (!hay(persona.horasLaboradas)) return false;
-  const calculado = desglosarJornada(fecha, persona.entrada ?? null, persona.salida ?? null, horario);
-  if (!calculado) return false;
-  const reportado = horasDeLaPersona(fecha, persona, horario)!;
-  return (
-    Math.abs(reportado.trabajados - calculado.trabajados) > TOLERANCIA_MINUTOS ||
-    Math.abs(reportado.extraDiurna - calculado.extraDiurna) > TOLERANCIA_MINUTOS ||
-    Math.abs(reportado.extraNocturna - calculado.extraNocturna) > TOLERANCIA_MINUTOS
-  );
+export function horasDeLaPersona(persona: PersonaConHoras): HorasDeLaPersona | null {
+  if (!hay(persona.horasLaboradas)) return null;
+  const extraDiurna = Math.round((persona.extraDiurnas ?? 0) * HORA);
+  const extraNocturna = Math.round((persona.extraNocturnas ?? 0) * HORA);
+  return {
+    trabajados: Math.round(persona.horasLaboradas * HORA),
+    extraDiurna,
+    extraNocturna,
+    extra: extraDiurna + extraNocturna,
+  };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -514,57 +331,6 @@ function minutosDeTramos(tramos: Tramo[]): number {
 /** Cuántos minutos programa el horario en una semana: cinco días más el sábado (RF-35). */
 export function minutosSemanales(horario: HorarioDeObra): number {
   return 5 * minutosDeTramos(horario.semana) + minutosDeTramos(horario.sabado);
-}
-
-const SABADO = 6;
-
-/**
- * Los tramos programados de un día (RF-11 a RF-13).
- *
- * El festivo manda sobre el sábado: un 1 de mayo que cae en sábado se trata como
- * festivo, con la jornada de lunes a viernes como referencia y su recargo.
- */
-export function tramosDelDia(horario: HorarioDeObra, fecha: string): Tramo[] {
-  if (esDominicalOFestivo(fecha)) return horario.semana;
-  if (diaDeLaSemana(fecha) === SABADO) return horario.sabado;
-  return horario.semana;
-}
-
-function tramosLegibles(tramos: Tramo[]): string {
-  return tramos.map((t) => `de ${t.desde} a ${t.hasta}`).join(' y ');
-}
-
-/** Lo que el parte enseña encima del personal: el horario de la obra ese día (RF-10). */
-export function describirHorarioDelDia(horario: HorarioDeObra, fecha: string): string {
-  if (esDominicalOFestivo(fecha)) {
-    return `Domingo o festivo: se toma la jornada de lunes a viernes, ${tramosLegibles(horario.semana)}.`;
-  }
-  const tramos = tramosDelDia(horario, fecha);
-  if (tramos.length === 0) return 'Los sábados no se trabaja en esta obra.';
-  const texto = tramosLegibles(tramos);
-  return `${texto.charAt(0).toUpperCase()}${texto.slice(1)}.`;
-}
-
-/**
- * El horario con que se calculan las horas de un parte (RF-22, RF-24, RF-25).
- *
- * Un parte cerrado es evidencia: sus cifras no pueden cambiar porque la gerencia
- * corrija después el horario de la obra. Por eso al cerrarlo —o al anularlo— se
- * guarda el horario de ese momento, y aquí manda ese. Uno cerrado o anulado **sin**
- * horario guardado es de antes de la spec 016, y se lee con la jornada de
- * entonces. Solo un parte abierto sigue el horario vigente de su obra.
- */
-export function horarioEfectivo(
-  parte: {
-    horario: HorarioDeObra | null;
-    cerradoEn: Date | string | null;
-    anuladoEn: Date | string | null;
-  },
-  horarioDeLaObra: HorarioDeObra,
-): HorarioDeObra {
-  if (parte.horario) return parte.horario;
-  if (parte.cerradoEn || parte.anuladoEn) return HORARIO_ANTERIOR;
-  return horarioDeLaObra;
 }
 
 /* ------------------------------------------------------------------------ */
