@@ -13,7 +13,7 @@
  * El valor estimado y el de las compras salen solo para quien `veLosValores` (RF-31). Para
  * el almacenista el campo no se manda: ni en `null`.
  */
-import { and, asc, eq, gte, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -53,6 +53,7 @@ import {
   puedeDar,
   resumenDeLaBandeja,
   veLosValores,
+  yaLaDecidioOtro,
   type DatosDeLaSolicitud,
   type EstadoDeSolicitud,
   type FiltrosDeLaBandeja,
@@ -326,7 +327,7 @@ type FilaDeSolicitud = typeof solicitudesCompra.$inferSelect;
 
 /**
  * La solicitud, si quien pregunta la alcanza (RF-28, RF-29): Compras de Elemental ve las de
- * todo el grupo (gerencia y, de consulta, la auxiliar de RR. HH., RF-3, RF-4); los demás,
+ * todo el grupo (gerencia y Auxiliar Administrativa, RF-3, RF-4; 040/RF-4); los demás,
  * las de su lugar, con las mismas reglas que la lista. `null` si no existe o no le toca: no
  * alcanzarla es «no existe».
  */
@@ -589,6 +590,21 @@ const ESTADO_TRAS_EL_PASO = {
  * qué estado lo dice `porQueNoPuedeDar`; el motivo, `faltaDelMotivo`; al aprobar, las
  * cantidades las revisa `aprobacionDeLaSolicitud` y la historia guarda qué se bajó.
  */
+/**
+ * El 409 de un paso que llegó tarde (spec 040, RF-9): si otra persona ya decidió la solicitud,
+ * quién fue; si no, el mensaje de siempre. Solo se consulta cuando ya hay conflicto.
+ */
+async function conflictoDeSolicitud(id: string, paso: string, yo: string, mensaje: string): Promise<Response> {
+  const [ultimo] = await baseServidor()
+    .select({ paso: solicitudCompraEventos.paso, porId: solicitudCompraEventos.por, nombre: usuarios.nombreCompleto })
+    .from(solicitudCompraEventos)
+    .innerJoin(usuarios, eq(usuarios.id, solicitudCompraEventos.por))
+    .where(eq(solicitudCompraEventos.solicitudId, id))
+    .orderBy(desc(solicitudCompraEventos.en))
+    .limit(1);
+  return errorDePeticion(yaLaDecidioOtro(paso, ultimo ?? null, yo) ?? mensaje, 409);
+}
+
 export async function darPaso(
   sesion: PersonaEnSesion,
   id: string,
@@ -600,8 +616,9 @@ export async function darPaso(
     ...fila,
     tieneCompraVigente: await tieneCompraVigente(id),
   });
+  if (rechazo?.estado === 409) return conflictoDeSolicitud(id, pedido.paso, sesion.id, rechazo.mensaje);
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
-  if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_SOLICITUD_CAMBIADA, 409);
+  if (fila.version !== pedido.version) return conflictoDeSolicitud(id, pedido.paso, sesion.id, MENSAJE_DE_SOLICITUD_CAMBIADA);
   const faltaMotivo = faltaDelMotivo(pedido.paso, pedido.motivo);
   if (faltaMotivo) return errorDePeticion(faltaMotivo, 422);
 
@@ -623,7 +640,7 @@ export async function darPaso(
 
   const estado = ESTADO_TRAS_EL_PASO[pedido.paso];
   if (!(await tomarLaVersion(id, pedido.version, { estado }))) {
-    return errorDePeticion(MENSAJE_DE_SOLICITUD_CAMBIADA, 409);
+    return conflictoDeSolicitud(id, pedido.paso, sesion.id, MENSAJE_DE_SOLICITUD_CAMBIADA);
   }
 
   const evento = db.insert(solicitudCompraEventos).values({

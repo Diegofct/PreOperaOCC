@@ -2,6 +2,7 @@ import { cortesDe, obraVigente, registrarCorte } from '@/features/empresas/servi
 import { corteNuevo } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { porQueNoPuedeTocarElCorte } from '@/shared/rules/cortes';
 import { EMPRESAS_CON_CORTE, type EmpresaId } from '@/shared/rules/empresas';
 
 /**
@@ -33,7 +34,8 @@ export async function GET(peticion: Request) {
 
 /**
  * Registrar un corte (RF-34 a RF-36). `POST /api/panel/cortes`. 201 con el id; 400 si
- * la fecha es futura o un valor no vale; 409 si ya hay uno vigente con esa fecha.
+ * la fecha es futura o un valor no vale; 409 si ya hay uno vigente con esa fecha; 403 si
+ * es la Auxiliar Administrativa y el corte no es de Elemental (spec 040, RF-7, D3).
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
@@ -41,6 +43,9 @@ export async function POST(peticion: Request) {
     if (sesion instanceof Response) return sesion;
 
     const corte = await cuerpoJson(peticion, corteNuevo);
+    const lugar = corte.obraId ? { obraId: corte.obraId } : { empresaId: corte.empresaId! };
+    const fueraDeSuLugar = porQueNoPuedeTocarElCorte(sesion.rol, lugar);
+    if (fueraDeSuLugar) return errorDePeticion(fueraDeSuLugar, 403);
     if (corte.obraId && !(await obraVigente(corte.obraId))) return noEncontrado('esa obra');
 
     const resultado = await registrarCorte(corte, sesion.id);

@@ -11,7 +11,7 @@
  * menos el almacenista en las que no pidió él (RF-5a, D1). Para él, en las ajenas, los
  * campos no se mandan: ni en `null`.
  */
-import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
@@ -24,6 +24,7 @@ import type {
 } from '@/features/panel/contratos';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
+import { yaLaDecidioOtro } from '@/shared/rules/compras';
 import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, nombreDeEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
@@ -182,7 +183,7 @@ type FilaDeSolicitudDePago = typeof solicitudesPago.$inferSelect;
 
 /**
  * La solicitud, si quien pregunta la alcanza (RF-27, RF-28): Tesorería de Elemental ve las
- * de todo el grupo (gerencia y, de consulta, la auxiliar); los demás, las de su lugar. No
+ * de todo el grupo (gerencia y Auxiliar Administrativa, 040/RF-6); los demás, las de su lugar. No
  * alcanzarla es «no existe».
  */
 export async function solicitudDePagoAlAlcance(sesion: PersonaEnSesion, id: string): Promise<FilaDeSolicitudDePago | null> {
@@ -329,6 +330,18 @@ const ESTADO_TRAS_EL_PASO = {
  * Cancela, aprueba (por lo pedido o por menos), rechaza o devuelve (RF-9, RF-11, RF-12).
  * Quién y desde qué estado lo dice `porQueNoPuedeDarPaso`; el motivo, `faltaDelMotivoDePago`.
  */
+/** El 409 de un paso que llegó tarde (spec 040, RF-9), como en las solicitudes de compra. */
+async function conflictoDePago(id: string, paso: string, yo: string, mensaje: string): Promise<Response> {
+  const [ultimo] = await baseServidor()
+    .select({ paso: solicitudPagoEventos.paso, porId: solicitudPagoEventos.por, nombre: usuarios.nombreCompleto })
+    .from(solicitudPagoEventos)
+    .innerJoin(usuarios, eq(usuarios.id, solicitudPagoEventos.por))
+    .where(eq(solicitudPagoEventos.solicitudPagoId, id))
+    .orderBy(desc(solicitudPagoEventos.en))
+    .limit(1);
+  return errorDePeticion(yaLaDecidioOtro(paso, ultimo ?? null, yo) ?? mensaje, 409);
+}
+
 export async function darPasoDePago(
   sesion: PersonaEnSesion,
   id: string,
@@ -337,8 +350,9 @@ export async function darPasoDePago(
   const fila = await solicitudDePagoAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
   const rechazo = porQueNoPuedeDarPaso(pedido.paso, sesion, fila);
+  if (rechazo?.estado === 409) return conflictoDePago(id, pedido.paso, sesion.id, rechazo.mensaje);
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
-  if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
+  if (fila.version !== pedido.version) return conflictoDePago(id, pedido.paso, sesion.id, MENSAJE_DE_PAGO_CAMBIADO);
   const faltaMotivo = faltaDelMotivoDePago(pedido.paso, pedido.motivo);
   if (faltaMotivo) return errorDePeticion(faltaMotivo, 422);
 
@@ -352,7 +366,7 @@ export async function darPasoDePago(
     if (valorAprobado !== fila.valor) cambios = [{ antes: fila.valor, despues: valorAprobado }];
   }
   if (!(await tomarLaVersionDelPago(id, pedido.version, { estado, ...(valorAprobado ? { valorAprobado } : {}) }))) {
-    return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
+    return conflictoDePago(id, pedido.paso, sesion.id, MENSAJE_DE_PAGO_CAMBIADO);
   }
   await baseServidor()
     .insert(solicitudPagoEventos)

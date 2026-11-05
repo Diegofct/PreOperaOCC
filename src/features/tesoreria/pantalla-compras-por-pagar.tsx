@@ -3,7 +3,8 @@
  * están pagadas del todo, la más antigua primero. Cada compra se paga aquí mismo, sin pedir una
  * solicitud de pago aparte; el comprobante queda en los soportes de su solicitud de compra.
  *
- * La gerencia paga; la auxiliar de RR. HH. consulta la misma lista sin el botón (D9).
+ * Pagan la gerencia y, desde la spec 040 (RF-6), la Auxiliar Administrativa; quien solo
+ * consulta ve la misma lista sin el botón.
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';

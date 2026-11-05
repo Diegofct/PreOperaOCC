@@ -1,7 +1,7 @@
 /**
  * Los pagos del grupo (spec 037, RF-23, D9): los vigentes entre dos fechas de pago, de
  * solicitudes y de compras, con el total por lugar y el del rango. Solo la gerencia
- * (`veLosPagos`); la auxiliar de RR. HH. no tiene esta pestaña.
+ * y, desde la spec 040 (RF-6), la Auxiliar Administrativa (`veLosPagos`).
  *
  * Abre con el mes en curso, como el Gasto de Compras. Un pago de una solicitud se anula en su
  * detalle (lleva la versión de la solicitud): aquí se abre. Uno de una compra se anula aquí

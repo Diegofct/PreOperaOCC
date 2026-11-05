@@ -174,7 +174,7 @@ export function menuDeObra(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MODULOS)
 /**
  * A qué empresas entra cada rol (RF-12). Gerencia a todas; quien trabaja en una obra, a
  * Proyectos (y ahí solo a su obra: `alcanzaLaObraDeLaRuta`); el laboratorista, a Geolab;
- * el Encargado de OCC, a OCC (spec 034, RF-14); la auxiliar de RR. HH., a Elemental (035).
+ * el Encargado de OCC, a OCC (spec 034, RF-14); la Auxiliar Administrativa, a Elemental (035, 040).
  */
 const EMPRESAS_DEL_ROL: Record<Rol, readonly EmpresaId[]> = {
   admin: IDS_DE_EMPRESA,
@@ -183,7 +183,7 @@ const EMPRESAS_DEL_ROL: Record<Rol, readonly EmpresaId[]> = {
   encargado_planta: ['proyectos'],
   laboratorista: ['geolab'],
   encargado_occ: ['occ'],
-  auxiliar_rrhh: ['elemental'],
+  auxiliar_administrativa: ['elemental'],
   operador: [],
 };
 
@@ -214,7 +214,7 @@ const EMPRESA_DEL_ROL: Record<Rol, EmpresaId> = {
   operador: 'occ',
   laboratorista: 'geolab',
   encargado_occ: 'occ',
-  auxiliar_rrhh: 'elemental',
+  auxiliar_administrativa: 'elemental',
   supervisor: 'proyectos',
   almacenista: 'proyectos',
   encargado_planta: 'proyectos',
@@ -226,16 +226,16 @@ export function empresaDeLaPersona(empresa: string | null | undefined, rol: Rol)
 
 /**
  * Los accesos que son de una empresa y no llevan obra, porque ven lo de todas: el
- * Encargado de OCC (spec 034, RF-13, RF-14) y la auxiliar de Recursos Humanos, de
- * Elemental (spec 035, RF-8).
+ * Encargado de OCC (spec 034, RF-13, RF-14) y la Auxiliar Administrativa, de
+ * Elemental (spec 035, RF-8; spec 040).
  */
 const ACCESOS_SIN_OBRA: Partial<Record<Rol, { empresa: EmpresaId; deEmpresa: string; quien: string; porque: string }>> = {
   encargado_occ: { empresa: 'occ', deEmpresa: 'OCC', quien: 'El Encargado de OCC', porque: 'en OCC ve las de todas' },
-  auxiliar_rrhh: {
+  auxiliar_administrativa: {
     empresa: 'elemental',
     deEmpresa: 'Elemental',
-    quien: 'La auxiliar de Recursos Humanos',
-    porque: 'en Elemental lleva el personal de todas',
+    quien: 'La Auxiliar Administrativa',
+    porque: 'en Elemental lleva lo administrativo de todas',
   },
 };
 
@@ -299,9 +299,10 @@ export function destinoAlEntrar(persona: { rol: Rol; obras: readonly string[] })
     case 'encargado_occ':
       // Spec 034, RF-14: sin tarjetas; su lugar es OCC, que abre en su primera página.
       return rutaDeEmpresa('occ');
-    case 'auxiliar_rrhh':
-      // Spec 035, RF-9: directo a Recursos Humanos de Elemental, sin tarjetas.
-      return rutaDeEmpresa('elemental', 'recursos-humanos');
+    case 'auxiliar_administrativa':
+      // Spec 035, RF-9: sin tarjetas. Desde la 040 entra a Compras de Elemental y no a Recursos
+      // Humanos: ahí está lo pendiente de aprobar (040, caso límite «Primer arranque»).
+      return rutaDeEmpresa('elemental', 'compras');
     case 'supervisor':
       // La portada de la obra es el resumen del día, el Inicio de antes.
       return unaObra ? rutaDeObra(unaObra) : rutaDeProyectos();
@@ -411,8 +412,11 @@ export function rutaNueva(direccion: string, persona: { rol: Rol; obraId: string
   }
   // El Encargado de OCC no entra a las obras: lo de antes que era de una obra lo lleva a
   // OCC, a la misma página si OCC la tiene.
-  // La auxiliar de RR. HH. tampoco entra a las obras: lo de antes la lleva a su Recursos Humanos.
-  if (persona.rol === 'auxiliar_rrhh') return conParametros(rutaDeEmpresa('elemental', 'recursos-humanos'));
+  // La Auxiliar Administrativa tampoco entra a las obras: lo de antes la lleva a su entrada,
+  // Compras de Elemental (spec 040).
+  if (persona.rol === 'auxiliar_administrativa') {
+    return conParametros(rutaDeEmpresa('elemental', pagina === 'asistente' ? 'asistente' : 'compras'));
+  }
   if (persona.rol === 'encargado_occ') {
     const enOcc = pagina === 'preoperacionales' || pagina === 'asignaciones';
     return conParametros(rutaDeEmpresa('occ', enOcc ? pagina : undefined));

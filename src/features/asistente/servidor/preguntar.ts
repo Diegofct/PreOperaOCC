@@ -59,7 +59,7 @@ export async function preguntar(sesion: PersonaEnSesion, recibida: PreguntaRecib
   if (conversacionId) {
     const c = await suConversacion(sesion.id, conversacionId);
     if (!c) return errorDePeticion('No existe esa conversación.', 404);
-    if (!conversacionVisible({ obras: c.obras, modulos: c.modulos }, alcance)) {
+    if (!conversacionVisible({ obras: c.obras, modulos: c.modulos, empresas: c.empresas }, alcance)) {
       return errorDePeticion('Esa conversación consultó información que ya no está a su alcance. Empiece una nueva.', 409);
     }
     titulo = c.titulo;
@@ -95,6 +95,8 @@ export async function preguntar(sesion: PersonaEnSesion, recibida: PreguntaRecib
       const r = await responderPregunta(
         {
           alcance,
+          sesion,
+          conversacionId: id,
           quien: `${sesion.nombreCompleto}, ${ETIQUETA_ROL[sesion.rol].toLowerCase()}`,
           hoy: fechaDeJornada(),
           historial,
@@ -105,7 +107,9 @@ export async function preguntar(sesion: PersonaEnSesion, recibida: PreguntaRecib
         (e) => {
           if (e.tipo === 'texto') mandar({ evento: 'texto', texto: e.texto });
           else if (e.tipo === 'borrar') mandar({ evento: 'borrar' });
-          else if (e.tipo === 'consultando') mandar({ evento: 'consultando', consulta: e.consulta });
+          else if (e.tipo === 'consultando') mandar({ evento: 'consultando', consulta: e.consulta, descripcion: e.descripcion });
+          else if (e.tipo === 'archivo') mandar({ evento: 'archivo', archivo: e.archivo });
+          else if (e.tipo === 'aclaracion') mandar({ evento: 'aclaracion', aclaracion: e.aclaracion });
           else mandar({ evento: 'fuente', fuente: e.fuente });
         },
         senal,

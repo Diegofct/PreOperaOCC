@@ -4,8 +4,8 @@ import { comprasPorPagar } from '@/features/tesoreria/servidor/pagos';
 
 /**
  * Compras por pagar (spec 037, RF-17): las compras vigentes de la 036 que no están pagadas
- * del todo. `GET /api/panel/tesoreria/compras-por-pagar`. La gerencia y, de consulta, la
- * auxiliar de RR. HH. (D9).
+ * del todo. `GET /api/panel/tesoreria/compras-por-pagar`. La gerencia y la Auxiliar
+ * Administrativa, que desde la spec 040 (RF-6) también paga.
  */
 export async function GET(peticion: Request) {
   return responder(async () => {

@@ -78,7 +78,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
     const motivo = cambios.rol ? motivoParaNoDarRol(sesion.rol, cambios.rol) : null;
     if (motivo) return errorDePeticion(motivo, 403);
 
-    // Spec 035, RF-11: la auxiliar de RR. HH. escribe en Personas pero no toca accesos. Solo
+    // Spec 035, RF-11: la Auxiliar Administrativa escribe en Personas pero no toca accesos. Solo
     // corrige a quien podría haber registrado —personas sin acceso al panel— y no activa
     // ni desactiva cuentas, que es dar o quitar un acceso. Para la gerencia no cambia nada.
     if (cambios.activo !== undefined && !alcanza(sesion.rol, 'personas', 'activar')) {
@@ -113,7 +113,7 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
         return Response.json({ error: sinModulo, campos: { rol: sinModulo } }, { status: 400 });
       }
 
-      // Spec 034, RF-13; spec 035, RF-8: el Encargado de OCC y la auxiliar de RR. HH., como
+      // Spec 034, RF-13; spec 035, RF-8: el Encargado de OCC y la Auxiliar Administrativa, como
       // quedarían, son de su empresa y sin obra.
       const reparo = reparoDelAccesoSinObra({
         rol: cambios.rol ?? actual.rol,
@@ -168,7 +168,7 @@ export async function DELETE(peticion: Request, { id }: { id: string }) {
     const sesion = await requerirPermiso(peticion, 'personas', 'escribir');
     if (sesion instanceof Response) return sesion;
     // Dar de baja quita el acceso y la saca de la lista: es de quien da los accesos, la
-    // gerencia (`activar`). La auxiliar de RR. HH. no borra: retira (spec 035, RF-11, RF-22).
+    // gerencia (`activar`). La Auxiliar Administrativa no borra: retira (spec 035, RF-11, RF-22).
     if (!alcanza(sesion.rol, 'personas', 'activar')) {
       return errorDePeticion(
         'Solo la gerencia da de baja. Si la persona dejó de trabajar, retírela desde su ficha en Recursos Humanos.',

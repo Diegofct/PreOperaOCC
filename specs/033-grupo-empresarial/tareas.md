@@ -67,6 +67,7 @@ en verde.
       Hecho cuando: cada RF tiene su comprobación con resultado, los tres comandos en verde y la spec queda Cumplida en desarrollo.
 - [ ] T23. Despliegue junto con la 032 (cuando el usuario lo pida): migraciones 0031 y 0032 → imagen → script de placas (con permiso) → 401 e inicio de sesión real. (Todos)
       Hecho cuando: en producción gerencia ve las cuatro tarjetas y la placa en Vehículos.
+      Spec 040 (anotado el 2026-11-05): también la **0039** (`0039_deep_stardust`, escrita a mano: `RENAME VALUE` de `auxiliar_rrhh`, `archivo_generado` y tres columnas del asistente), después de la 0038. Antes de la imagen; después, comprobar que las auxiliares de producción conservan su acceso. Detalle en `specs/040-auxiliar-administrativa-y-asistente/validacion.md`, «Para desplegar».
 
 ## Notas de ejecución
 - 2026-10-27 (plan aprobado): el usuario aprobó el plan y las cuatro decisiones (Reportes de OCC y Geolab con el selector de obra; WhatsApp de OCC = «Vehículo o maquinaria» + «Suministro o cantera»; el residente sigue con una obra; **Proyectos sin corte propio**). Spec y plan anotados como cambio del 2026-10-27: RF-2 (la tarjeta de Proyectos suma el saldo del último corte de cada obra, con la fecha del más antiguo), RF-3, RF-34 y RF-41 (sin fila propia de Proyectos).

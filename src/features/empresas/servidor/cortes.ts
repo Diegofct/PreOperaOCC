@@ -12,7 +12,7 @@ import { uuidv7 } from 'uuidv7';
 import { baseServidor } from '@/db/servidor/cliente';
 import { cortesFinancieros, obras, usuarios } from '@/db/servidor/esquema';
 import type { ConsolidadoDelGrupo, CorteFila, CorteNuevo, CortesDe } from '@/features/panel/contratos';
-import { consolidado, diferenciaConElAnterior, validarCorte } from '@/shared/rules/cortes';
+import { consolidado, diferenciaConElAnterior, validarCorte, type LugarDelCorte } from '@/shared/rules/cortes';
 import { EMPRESAS_CON_CORTE, nombreDeEmpresa, type EmpresaId } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 
@@ -111,6 +111,21 @@ export async function registrarCorte(corte: CorteNuevo & { notas: string }, regi
  * Anula un corte vigente con su motivo (RF-39). `false` si no existe o ya estaba
  * anulado: anular dos veces no reescribe el primer motivo.
  */
+/**
+ * De qué lugar es un corte vigente, o `null` si no existe o ya está anulado. Lo usa la ruta de
+ * anular antes de la regla del lugar (spec 040, RF-7): la auxiliar solo anula los de Elemental.
+ */
+export async function lugarDelCorte(id: string): Promise<LugarDelCorte | null> {
+  const [fila] = await baseServidor()
+    .select({ empresaId: cortesFinancieros.empresaId, obraId: cortesFinancieros.obraId })
+    .from(cortesFinancieros)
+    .where(and(eq(cortesFinancieros.id, id), isNull(cortesFinancieros.anuladoEn)))
+    .limit(1);
+  if (!fila) return null;
+  if (fila.obraId) return { obraId: fila.obraId };
+  return fila.empresaId ? { empresaId: fila.empresaId as EmpresaId } : null;
+}
+
 export async function anularCorte(id: string, motivo: string, anuladoPor: string): Promise<boolean> {
   const filas = await baseServidor()
     .update(cortesFinancieros)

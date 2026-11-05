@@ -274,6 +274,13 @@
       "when": 1793811045245,
       "tag": "0038_stiff_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793886904731,
+      "tag": "0039_deep_stardust",
+      "breakpoints": true
     }
   ]
 }

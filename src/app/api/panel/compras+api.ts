@@ -9,7 +9,7 @@ import { MENSAJES_DE_RANGO, rangoDeFechas } from '@/shared/rules/rango';
  * Compras de Elemental (spec 036, RF-3, RF-4, RF-12, RF-26): las solicitudes de todo el
  * grupo. `GET /api/panel/compras?lugar=&estado=&urgentes=1&desde=&hasta=&texto=`, todos
  * opcionales; `lugar` es `occ`, `geolab` o el id de una obra, y las fechas, las del día en
- * que se pidió. La gerencia y, de consulta, la auxiliar de RR. HH.
+ * que se pidió. La gerencia y la Auxiliar Administrativa (spec 040, RF-4).
  */
 export async function GET(peticion: Request) {
   return responder(async () => {

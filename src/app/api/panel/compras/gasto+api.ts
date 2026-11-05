@@ -8,7 +8,7 @@ import { MENSAJES_DE_RANGO, rangoDeFechas } from '@/shared/rules/rango';
 /**
  * Lo comprado por lugar entre dos fechas de compra (spec 036, RF-27), sin las anuladas.
  * `GET /api/panel/compras/gasto?desde=&hasta=`; sin fechas, la última semana. Solo la
- * gerencia (`veElGasto`): la auxiliar de RR. HH. consulta Compras, pero no el gasto.
+ * gerencia y, desde la spec 040, la Auxiliar Administrativa (`veElGasto`).
  */
 export async function GET(peticion: Request) {
   return responder(async () => {

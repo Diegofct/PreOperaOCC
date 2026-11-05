@@ -6,8 +6,10 @@
  * corrige: se anula con motivo y se registra otro (RF-40).
  *
  * Spec 037 (RF-24, D9): el contenido (`InformacionFinanciera`) va también en la pestaña Cortes
- * de Tesorería, bajo el consolidado y dentro de su marco. La auxiliar de RR. HH. consulta: sin
- * `finanzas/escribir` no ve el formulario, y sin `finanzas/anular`, el botón de anular.
+ * de Tesorería, bajo el consolidado y dentro de su marco. Sin `finanzas/escribir` no se ve el
+ * formulario, y sin `finanzas/anular`, el botón de anular. Spec 040 (RF-7, D3): la Auxiliar
+ * Administrativa tiene los dos, pero solo en Elemental (`porQueNoPuedeTocarElCorte`); en OCC,
+ * Geolab y las obras consulta, sin formulario ni botón.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -36,6 +38,7 @@ import { usePersona } from '@/features/panel/sesion';
 import {
   fechaDelCorte,
   pesosDeTexto,
+  porQueNoPuedeTocarElCorte,
   SIN_INFORMACION_FINANCIERA,
   textoDeDiferencia,
   ultimoCorte,
@@ -61,7 +64,7 @@ export function PantallaInformacionFinanciera({
   return (
     <MarcoPantalla
       titulo="Información financiera"
-      descripcion={`${nombre}: los cortes que registra la gerencia. Un corte no se corrige: se anula con su motivo y se registra otro.`}
+      descripcion={`${nombre}: sus cortes financieros. Un corte no se corrige: se anula con su motivo y se registra otro.`}
     >
       <InformacionFinanciera empresa={empresa} obraId={obraId} />
     </MarcoPantalla>
@@ -79,8 +82,9 @@ export function InformacionFinanciera({
   alCambiar?: () => void;
 }) {
   const persona = usePersona();
-  const registra = alcanza(persona.rol, 'finanzas', 'escribir');
-  const anula = alcanza(persona.rol, 'finanzas', 'anular');
+  const enSuLugar = porQueNoPuedeTocarElCorte(persona.rol, empresa ? { empresaId: empresa } : { obraId: obraId ?? '' }) === null;
+  const registra = enSuLugar && alcanza(persona.rol, 'finanzas', 'escribir');
+  const anula = enSuLugar && alcanza(persona.rol, 'finanzas', 'anular');
   // Con `useMemo` sobre los dos valores: un objeto nuevo en cada pintada haría que el
   // listado se pidiera una y otra vez.
   const dueno = useMemo<DuenoDeLaPantalla>(() => (empresa ? { empresa } : { obraId: obraId ?? '' }), [empresa, obraId]);

@@ -10,10 +10,12 @@
  *  · la leyenda de RF-26.
  */
 import type { MensajeDelAsistente } from '@/features/panel/contratos';
+import { LEYENDA_DEL_ARCHIVO } from '@/shared/rules/archivos-del-asistente';
 
 import { bloquesDe } from './markdown';
 
-export const LEYENDA_DEL_PDF = 'Generado por el asistente a partir de los registros del sistema. No es evidencia firmada.';
+/** La misma de los archivos del asistente (spec 040): vive en las reglas, para que no se separen. */
+export const LEYENDA_DEL_PDF = LEYENDA_DEL_ARCHIVO;
 
 function escapar(texto: string): string {
   return texto.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

@@ -7,7 +7,8 @@
  * selector o con «Ver» en su fila—: el último corte, registrar uno y el historial, la misma de
  * la 033. Al registrar o anular un corte, el consolidado se vuelve a pedir.
  *
- * La auxiliar de RR. HH. consulta todo esto, sin registrar ni anular (D9).
+ * La Auxiliar Administrativa consulta todo esto y, desde la spec 040 (D3), registra y anula
+ * solo los cortes de Elemental (`porQueNoPuedeTocarElCorte`).
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';

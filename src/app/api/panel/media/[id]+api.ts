@@ -2,11 +2,12 @@ import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import { archivoGeneradoAlAlcance } from '@/features/asistente/servidor/conversaciones';
 import { disposicionDelArchivo, documentoAlAlcance } from '@/features/documentos/servidor/documentos';
 import { leer } from '@/features/media/servidor/almacen';
 import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
-import { noEncontrado, responder } from '@/features/servidor/respuestas';
+import { errorDePeticion, noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
 import { alcanza, type ModuloConPermiso } from '@/shared/rules/permisos';
 
@@ -45,6 +46,7 @@ export async function GET(peticion: Request, { id }: { id: string }) {
         duenoId: media.duenoId,
         claveR2: media.claveR2,
         mime: media.mime,
+        proposito: media.proposito,
       })
       .from(media)
       .where(eq(media.id, id))
@@ -56,12 +58,20 @@ export async function GET(peticion: Request, { id }: { id: string }) {
 
     /** Solo los documentos (spec 034) llevan nombre: lo demás son fotos sin él. */
     let nombreArchivo: string | null = null;
+    /** Spec 040: un archivo del asistente se descarga siempre, y no se guarda en caché (vence). */
+    let generado = false;
 
     // "No existe" y no "no puede", igual que en el resto del panel: confirmar
     // que el id es real ya le diría a un residente qué se registra en las obras
     // que no le tocan.
     if (fila.duenoTipo === 'whatsapp') {
       if (!(await alcanzaElMensaje(sesion, fila.duenoId))) return noEncontrado('esa imagen');
+    } else if (fila.duenoTipo === 'asistente' && fila.proposito === 'archivo_generado') {
+      // Spec 040, RF-24, D7: quien lo pidió, si sigue alcanzando la conversación y antes de 30 días.
+      const archivo = await archivoGeneradoAlAlcance(sesion, id, fila.duenoId);
+      if (!archivo) return errorDePeticion('Ese archivo ya no está disponible.', 404);
+      nombreArchivo = archivo.nombre;
+      generado = true;
     } else if (fila.duenoTipo === 'asistente') {
       // Spec 028, RF-40 y RF-71: un adjunto al asistente lo ve solo quien hizo la pregunta.
       if (!(await esSuConversacion(sesion, fila.duenoId))) return noEncontrado('esa imagen');
@@ -86,12 +96,12 @@ export async function GET(peticion: Request, { id }: { id: string }) {
         // La imagen no cambia nunca: su clave sale de un id que no se reutiliza.
         // `private` importa tanto como el tiempo — sin él, un proxy compartido
         // podría guardar el acta de un operador y servírsela a otro.
-        'Cache-Control': 'private, max-age=86400',
+        'Cache-Control': generado ? 'private, no-store' : 'private, max-age=86400',
         ...(nombreArchivo
           ? {
               'Content-Disposition': disposicionDelArchivo(
                 nombreArchivo,
-                new URL(peticion.url).searchParams.get('descargar') === '1',
+                generado || new URL(peticion.url).searchParams.get('descargar') === '1',
               ),
             }
           : {}),

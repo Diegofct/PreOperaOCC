@@ -135,7 +135,7 @@ const ORDEN_INICIAL: Orden = { clave: 'nombre', sentido: 'asc' };
 export default function PantallaPersonas() {
   const { persona: yo, pedirCambioDeClave } = useSesionPanel();
   const esGerencia = yo?.rol === 'admin';
-  // Spec 035, RF-11: el selector ofrece solo lo que se puede dar (a la auxiliar de RR. HH.,
+  // Spec 035, RF-11: el selector ofrece solo lo que se puede dar (a la Auxiliar Administrativa,
   // «Operador»); corregir, a quien se podría haber registrado; dar de baja, la gerencia.
   const rolesQueDa = yo ? rolesQuePuedeDar(yo.rol) : [];
   const puedeDarDeBaja = yo ? alcanza(yo.rol, 'personas', 'activar') : false;
@@ -201,7 +201,7 @@ export default function PantallaPersonas() {
   }
 
   /**
-   * El Encargado de OCC y la auxiliar de RR. HH. son de su empresa y sin obra (spec 034,
+   * El Encargado de OCC y la Auxiliar Administrativa son de su empresa y sin obra (spec 034,
    * RF-13; spec 035, RF-8): se les ponen solos.
    */
   function elegirAcceso(nuevo: Rol) {
