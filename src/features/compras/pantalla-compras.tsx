@@ -1,16 +1,16 @@
 /**
  * Compras de Elemental (spec 036, RF-3, RF-4, RF-12, RF-26): las solicitudes de compra de
  * todo el grupo, para que la gerencia las apruebe, las rechace o las devuelva, registre las
- * compras y las anule. La auxiliar de RR. HH. consulta lo mismo, sin botones (el servidor
- * no le manda `pasos`).
+ * compras y las anule. Desde la spec 040 (RF-4, RF-5) la Auxiliar Administrativa hace lo
+ * mismo: los botones salen de `pasos`, que manda el servidor con la tabla de permisos.
  *
  * Llega la bandeja entera, ya en su orden —primero lo que espera aprobación, las urgentes
  * arriba—, con el resumen de todo el grupo; aquí se filtra y se busca con las mismas reglas
  * del servidor (`pasaLosFiltros`), para que responda mientras se escribe. Las cifras de arriba
  * no cambian al filtrar: lo que espera a la gerencia no desaparece por mirar otra obra.
  *
- * La gerencia tiene además la pestaña «Gasto» (RF-27, `?pestana=gasto`, como en Recursos
- * Humanos); la auxiliar no la ve.
+ * La gerencia y la auxiliar tienen además la pestaña «Gasto» (RF-27, `?pestana=gasto`, como en
+ * Recursos Humanos; `veElGasto`).
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -59,7 +59,7 @@ export default function PantallaCompras() {
   // La abierta se lleva aquí: el parámetro de la dirección es estado de quien lo usa, y si lo
   // cambiara la bandeja, las pestañas seguirían encima del detalle.
   const [abierta, setAbierta] = useParametroDeDireccion('solicitud', '');
-  // Sin el gasto (la auxiliar) o con una solicitud abierta, no hay pestañas que elegir.
+  // Sin el gasto (`veElGasto`) o con una solicitud abierta, no hay pestañas que elegir.
   if (!veElGasto(persona.rol) || abierta) return <BandejaDelGrupo abierta={abierta} setAbierta={setAbierta} />;
   return (
     <View style={estilos.pantalla}>

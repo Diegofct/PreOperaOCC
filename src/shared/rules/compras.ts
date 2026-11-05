@@ -175,6 +175,16 @@ const PERMISO: Record<PasoDeSolicitud, [ModuloConPermiso, Accion]> = {
   recibir: ['solicitudes', 'escribir'],
 };
 
+/**
+ * Un segundo permiso que también deja dar el paso. Recibir es de quien pidió la compra
+ * (`solicitudes·escribir`), y desde la spec 040 (RF-5) también de Compras de Elemental: la
+ * Auxiliar Administrativa marca lo recibido sin poder **pedir** compras, que es lo que le
+ * daría `solicitudes·escribir`.
+ */
+const TAMBIEN_CON: Partial<Record<PasoDeSolicitud, [ModuloConPermiso, Accion]>> = {
+  recibir: ['compras', 'escribir'],
+};
+
 const SOLO_QUIEN_PIDIO: Partial<Record<PasoDeSolicitud, string>> = {
   corregir: 'Solo quien pidió la solicitud puede corregirla.',
   cancelar: 'Solo quien pidió la solicitud puede cancelarla.',
@@ -215,7 +225,9 @@ export function porQueNoPuedeDar(
   solicitud: SolicitudParaPaso,
 ): { estado: 403 | 409; mensaje: string } | null {
   const [modulo, accion] = PERMISO[paso];
-  if (!alcanza(persona.rol, modulo, accion)) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
+  const otro = TAMBIEN_CON[paso];
+  const tienePermiso = alcanza(persona.rol, modulo, accion) || (otro !== undefined && alcanza(persona.rol, otro[0], otro[1]));
+  if (!tienePermiso) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
   const soloQuienPidio = SOLO_QUIEN_PIDIO[paso];
   if (soloQuienPidio && solicitud.pedidaPor !== persona.id) return { estado: 403, mensaje: soloQuienPidio };
   if (!DESDE[paso].includes(solicitud.estado)) {
@@ -226,6 +238,34 @@ export function porQueNoPuedeDar(
     return { estado: 409, mensaje: 'Esta solicitud no tiene compras registradas.' };
   }
   return null;
+}
+
+/** Los pasos que deciden una solicitud, de compra o de pago: los dan Compras y Tesorería. */
+const DECISIONES = ['aprobar', 'rechazar', 'devolver'] as const;
+const DECIDIDA: Record<(typeof DECISIONES)[number], string> = {
+  aprobar: 'aprobada',
+  rechazar: 'rechazada',
+  devolver: 'devuelta',
+};
+
+/** El último paso que se dio sobre una solicitud, y quién lo dio. */
+export interface UltimoPaso {
+  paso: string;
+  porId: string;
+  nombre: string;
+}
+
+/**
+ * Qué decirle a quien llega tarde a decidir una solicitud que otra persona ya decidió, o
+ * `null` (spec 040, RF-9 y caso límite). Desde la 040 deciden dos personas —la gerencia y la
+ * Auxiliar Administrativa—, y el «ya está aprobada» o el «cambió mientras tanto» de siempre
+ * no dicen lo que hace falta saber: quién fue, para preguntarle. Vale para las solicitudes
+ * de compra y para las de pago: los tres pasos se llaman igual.
+ */
+export function yaLaDecidioOtro(pasoPedido: string, ultimo: UltimoPaso | null, yo: string): string | null {
+  const esDecision = (paso: string): paso is (typeof DECISIONES)[number] => (DECISIONES as readonly string[]).includes(paso);
+  if (!esDecision(pasoPedido) || !ultimo || !esDecision(ultimo.paso) || ultimo.porId === yo) return null;
+  return `Esta solicitud ya fue ${DECIDIDA[ultimo.paso]} por ${ultimo.nombre}.`;
 }
 
 /** Para la pantalla: el botón de un paso que no se puede dar no se muestra. */
@@ -579,7 +619,7 @@ export function pasaLosFiltros(
   return coincideLaSolicitud(solicitud, filtros.texto);
 }
 
-/** ¿Este rol ve el gasto por lugar? (RF-27): solo la gerencia. La auxiliar consulta, sin él. */
+/** ¿Este rol ve el gasto por lugar? (RF-27): la gerencia y, desde la spec 040, la Auxiliar Administrativa. */
 export function veElGasto(rol: Rol): boolean {
-  return rol === 'admin';
+  return rol === 'admin' || rol === 'auxiliar_administrativa';
 }

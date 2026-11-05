@@ -63,6 +63,7 @@ import {
   type Columna,
 } from './componentes';
 import type { MaterialDeAlmacenFila, ObraFila } from './contratos';
+import { guardarArchivo } from './guardar-archivo';
 import { HistorialAlmacen } from './historial-almacen';
 import { MarcoPantalla, useListado } from './marco';
 import { usePersona } from './sesion';
@@ -86,24 +87,6 @@ const OPCIONES_DE_MATERIAL = [
   { valor: CLAVE_OTRO_MATERIAL, etiqueta: 'Otro' },
   ...MATERIALES_DE_OCC.map((m) => ({ valor: m, etiqueta: m })),
 ];
-
-/**
- * Guarda un archivo en el equipo de quien lo pidió, con un enlace temporal.
- *
- * El panel es de navegador, y así es como un navegador guarda lo que ya tiene en
- * memoria. El enlace se libera un momento después y no en el acto: revocarlo en el
- * mismo instante cancela la descarga en algunos navegadores.
- */
-function guardarArchivo(contenido: Blob, nombre: string) {
-  const url = URL.createObjectURL(contenido);
-  const enlace = document.createElement('a');
-  enlace.href = url;
-  enlace.download = nombre;
-  document.body.appendChild(enlace);
-  enlace.click();
-  enlace.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export default function PantallaAlmacen() {
   const { rol } = usePersona();

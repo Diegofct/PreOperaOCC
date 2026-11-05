@@ -27,7 +27,7 @@
  *
  * Tercer dueño: `?personaId=`. Son los papeles de Recursos Humanos, así que los mueve el
  * permiso `rrhh` y no el de Documentos (`moduloDelDueno`): suben y anulan la gerencia y
- * la auxiliar (RF-6) —anular en Documentos es solo de la gerencia—, y consulta quien
+ * la auxiliar (RF-6) —desde la 040 también anula en Documentos—, y consulta quien
  * alcanza a la persona (`alcanzaLaPersona`, RF-32). Una persona que no se alcanza es
  * «no existe», también al pedir su lista (RF-33).
  *
@@ -114,7 +114,7 @@ export function lugarDeLaPeticion(peticion: Request): LugarPedido {
 /**
  * Qué fila de permisos manda sobre los documentos de ese lugar: los de una persona son
  * de Recursos Humanos (spec 035, RF-6); los de una solicitud de compra, de Compras de
- * Elemental para quien la tiene (gerencia y, de consulta, la auxiliar) y de Solicitudes
+ * Elemental para quien la tiene (gerencia y Auxiliar Administrativa) y de Solicitudes
  * de compra para los demás (spec 036); los de una empresa o una obra, de Documentos.
  */
 export function moduloDelDueno(
@@ -399,8 +399,9 @@ export async function documentoAlAlcance(
 
 /**
  * Anular un documento, con motivo (RF-43, RF-44). Exige `anular` en la fila que manda
- * sobre él: en Documentos, solo la gerencia; los de una persona, también la auxiliar
- * (035/RF-6). Sigue en la lista, marcado (RF-46). Si otra persona lo anuló primero, se
+ * sobre él: en Documentos, la gerencia y, desde la 040 (RF-8), la Auxiliar Administrativa en
+ * lo que alcanza (Elemental, las personas y las solicitudes); los de una persona, también
+ * ella (035/RF-6). Sigue en la lista, marcado (RF-46). Si otra persona lo anuló primero, se
  * dice (409) en vez de pisar su motivo.
  */
 export async function anularDocumento(

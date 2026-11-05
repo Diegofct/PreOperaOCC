@@ -305,9 +305,12 @@ export function veElValorDelPago(rol: Rol, pedidaPor: string, yo: string): boole
   return rol !== 'almacenista' || pedidaPor === yo;
 }
 
-/** ¿Ve la pestaña Pagos de Tesorería? (RF-23, D9): solo la gerencia, como el gasto de Compras. */
+/**
+ * ¿Ve la pestaña Pagos de Tesorería? (RF-23, D9): la gerencia y, desde la spec 040 (RF-6), la
+ * Auxiliar Administrativa, que registra y anula pagos: sin la pestaña no tendría dónde anularlos.
+ */
 export function veLosPagos(rol: Rol): boolean {
-  return rol === 'admin';
+  return rol === 'admin' || rol === 'auxiliar_administrativa';
 }
 
 /** Lo que hace falta de una solicitud de pago para ordenarla y marcarla en una lista. */

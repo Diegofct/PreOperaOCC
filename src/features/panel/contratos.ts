@@ -3013,12 +3013,26 @@ export interface ConversacionDelAsistente {
   visible: boolean;
 }
 
+/** Un archivo generado por el asistente (spec 040), como lo ve la pantalla. */
+export interface ArchivoDelAsistenteEnPantalla {
+  mediaId: string;
+  nombre: string;
+  formato: 'pdf' | 'xlsx' | 'docx';
+  filas: number;
+  /** ISO 8601: de aquí salen los 30 días (D7). */
+  creadoEn: string;
+}
+
 export interface MensajeDelAsistente {
   id: string;
   rol: 'persona' | 'asistente';
   texto: string;
   fuentes: { modulo: string; etiqueta: string; fecha: string | null; ruta: string; obra?: string; desde?: string; hasta?: string }[];
   adjuntos: { mediaId: string; nombre: string; clase: 'imagen' | 'pdf' | 'excel' | 'word'; bytes: number }[];
+  /** Spec 040, RF-19, RF-24: los archivos que generó la respuesta. */
+  archivos: ArchivoDelAsistenteEnPantalla[];
+  /** Spec 040, RF-27: la pregunta con opciones para tocar, si la respuesta fue una aclaración. */
+  aclaracion: { pregunta: string; opciones: string[] } | null;
   estado: 'respondido' | 'fallido';
   /** ISO 8601. */
   creadoEn: string;
@@ -3034,8 +3048,13 @@ export type EventoDelAsistente =
   | { evento: 'texto'; texto: string }
   /** Lo que llegó era el camino de la IA antes de consultar, no la respuesta: se borra. */
   | { evento: 'borrar' }
-  | { evento: 'consultando'; consulta: string }
+  /** Spec 040, RF-29: `descripcion`, lo que se muestra mientras trabaja («Leyendo …»). */
+  | { evento: 'consultando'; consulta: string; descripcion: string }
   | { evento: 'fuente'; fuente: MensajeDelAsistente['fuentes'][number] }
+  /** Spec 040, RF-19: un archivo listo para descargar. */
+  | { evento: 'archivo'; archivo: ArchivoDelAsistenteEnPantalla }
+  /** Spec 040, RF-27: le falta un dato; la respuesta es esta pregunta con sus opciones. */
+  | { evento: 'aclaracion'; aclaracion: NonNullable<MensajeDelAsistente['aclaracion']> }
   | { evento: 'fin'; mensajeId: string; cupo: CupoDelAsistente }
   | { evento: 'error'; mensaje: string; cupo: CupoDelAsistente };
 

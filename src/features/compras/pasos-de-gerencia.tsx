@@ -4,7 +4,8 @@
  * registrar la compra con sus soportes y anular una compra.
  *
  * Los botones salen de `pasos`, que manda el servidor con la misma regla que lo revisa
- * (`puedeDar`): la auxiliar de RR. HH. consulta la misma solicitud y no ve ninguno.
+ * (`puedeDar`): la gerencia y, desde la spec 040, la Auxiliar Administrativa los ven todos; quien
+ * solo consulta no ve ninguno.
  * Lo que impide cada paso lo dicen las reglas de `rules/compras` antes de enviarlo.
  */
 import { useState } from 'react';

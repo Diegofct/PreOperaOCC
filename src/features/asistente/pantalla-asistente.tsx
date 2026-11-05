@@ -38,7 +38,13 @@ import { usePersona } from '@/features/panel/sesion';
 import { useEsAngosto } from '@/features/panel/usar-ancho';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 
-import { alcanceDelAsistente, ejemplosDePregunta, faltasDeLosAdjuntos } from '@/shared/rules/asistente';
+import {
+  alcanceDelAsistente,
+  ambitoDelAsistente,
+  ejemplosDePregunta,
+  faltasDeLosAdjuntos,
+  loQueConsulta,
+} from '@/shared/rules/asistente';
 import { alcanza } from '@/shared/rules/permisos';
 
 import { AccionesDeRespuesta } from './acciones-de-respuesta';
@@ -48,22 +54,7 @@ import { elegirArchivos, TIPOS_DEL_ASISTENTE } from './elegir-archivos';
 import { paginaDeLaRespuesta } from './imprimir';
 import { UsoDelAsistentePanel } from './uso-del-asistente';
 import { Markdown } from './markdown';
-
-/** Lo que se muestra mientras la IA consulta un módulo. */
-const NOMBRE_DE_CONSULTA: Record<string, string> = {
-  obras_a_mi_alcance: 'sus obras',
-  reporte: 'Reportes',
-  bitacora_del_dia: 'la bitácora',
-  viajes_de_cantera: 'Control Cantera',
-  ensayos: 'Laboratorio',
-  almacen: 'Almacén',
-  preoperacionales: 'Preoperacionales',
-  vehiculos_y_medidores: 'Vehículos',
-  personas_de_la_obra: 'Personas',
-  contrato_y_presupuesto: 'Contrato y Presupuesto',
-  anulados: 'lo anulado',
-  mensajes_de_whatsapp: 'Reportes de WhatsApp',
-};
+import { ArchivosDeLaRespuesta } from './tarjeta-de-archivo';
 
 /** Con una ventana muy baja, la conversación no se encoge de aquí: se desplaza la página. */
 const ALTO_MINIMO_DE_LA_CONVERSACION = 360;
@@ -81,6 +72,8 @@ interface EnCurso {
   texto: string;
   consultando: string | null;
   fuentes: MensajeDelAsistente['fuentes'];
+  /** Spec 040, RF-19: los archivos que ya generó, mientras termina de responder. */
+  archivos: MensajeDelAsistente['archivos'];
 }
 
 export default function PantallaAsistente() {
@@ -131,7 +124,7 @@ export default function PantallaAsistente() {
     setBorrador('');
     setArchivos([]);
     ultimosArchivos.current = { pregunta, archivos: conArchivos };
-    setEnCurso({ pregunta, adjuntos: conArchivos.map((a) => a.name), texto: '', consultando: null, fuentes: [] });
+    setEnCurso({ pregunta, adjuntos: conArchivos.map((a) => a.name), texto: '', consultando: null, fuentes: [], archivos: [] });
     const control = new AbortController();
     cancelar.current = control;
     let idFinal = id;
@@ -142,8 +135,13 @@ export default function PantallaAsistente() {
           if (e.evento === 'conversacion') idFinal = e.id;
           else if (e.evento === 'texto') setEnCurso((c) => c && { ...c, texto: c.texto + e.texto, consultando: null });
           else if (e.evento === 'borrar') setEnCurso((c) => c && { ...c, texto: '' });
-          else if (e.evento === 'consultando') setEnCurso((c) => c && { ...c, consultando: NOMBRE_DE_CONSULTA[e.consulta] ?? e.consulta });
+          // Spec 040, RF-29: la descripción viene armada del servidor («Leyendo …»).
+          else if (e.evento === 'consultando') setEnCurso((c) => c && { ...c, consultando: e.descripcion });
           else if (e.evento === 'fuente') setEnCurso((c) => c && { ...c, fuentes: [...c.fuentes, e.fuente] });
+          // Spec 040, RF-19: la tarjeta sale en cuanto el archivo está listo.
+          else if (e.evento === 'archivo') setEnCurso((c) => c && { ...c, archivos: [...c.archivos, e.archivo] });
+          // Spec 040, RF-27: la respuesta es la pregunta; las opciones salen al guardarse.
+          else if (e.evento === 'aclaracion') setEnCurso((c) => c && { ...c, texto: e.aclaracion.pregunta, consultando: null });
           else setCupoNuevo(e.cupo);
         },
         control.signal,
@@ -217,7 +215,11 @@ export default function PantallaAsistente() {
   const [barraAbierta, setBarraAbierta] = useState(false);
   // RF-74: sin conversación abierta, el saludo con el campo en el centro y los ejemplos.
   const bienvenida = !conversacionId && !abierta && !enCurso;
-  const ejemplos = ejemplosDePregunta(alcanceDelAsistente(persona).modulos);
+  const alcance = alcanceDelAsistente(persona);
+  const ejemplos = ejemplosDePregunta(alcance);
+  // Spec 040, RF-25: qué puede consultar y de qué responde, según su cargo.
+  const puedeConsultar = loQueConsulta(alcance);
+  const ambito = ambitoDelAsistente(alcance);
 
   // RF-76: la barra y la conversación ocupan lo que queda de la ventana, para que el campo quede
   // fijo al pie y solo se desplacen los mensajes. Se mide dónde empieza el cuerpo en la página
@@ -304,7 +306,7 @@ export default function PantallaAsistente() {
     <MarcoPantalla
       modulo="asistente"
       titulo="Asistente"
-      descripcion="Pregunte en español sobre la información de su obra. Cada respuesta dice de dónde sale cada cifra, y el registro se abre con un toque."
+      descripcion={`Pregunte en español sobre la información ${ambito || 'a su alcance'}. Cada respuesta dice de dónde sale cada cifra, y el registro se abre con un toque.`}
       cargando={cargando}
     >
       <View ref={cuerpo} style={[estilos.cuerpo, { height: altoDelCuerpo }]}>
@@ -351,7 +353,7 @@ export default function PantallaAsistente() {
                 <ScrollView style={estilos.mensajes} contentContainerStyle={estilos.centrado}>
                   <View style={estilos.bienvenida}>
                     <Text style={estilos.saludo} accessibilityRole="header">
-                      {`¿Qué quiere saber de su obra, ${primerNombre(persona.nombreCompleto)}?`}
+                      {`¿Qué quiere saber${ambito ? ` ${ambito}` : ''}, ${primerNombre(persona.nombreCompleto)}?`}
                     </Text>
                     {campo}
                     {ejemplos.length > 0 ? (
@@ -367,6 +369,15 @@ export default function PantallaAsistente() {
                             <Text style={estilos.textoEjemplo}>{ejemplo}</Text>
                           </Pressable>
                         ))}
+                      </View>
+                    ) : null}
+                    {puedeConsultar.length > 0 ? (
+                      <View style={estilos.puedeConsultar} accessibilityLabel="Lo que puede consultar">
+                        <Text style={estilos.tituloPuedeConsultar}>Puede consultar…</Text>
+                        {puedeConsultar.map((frase) => (
+                          <Text key={frase} style={estilos.frasePuedeConsultar}>{`· ${frase}`}</Text>
+                        ))}
+                        <Text style={estilos.frasePuedeConsultar}>Y pedir lo consultado en PDF, Excel o Word.</Text>
                       </View>
                     ) : null}
                     {(error ?? listado.error) ? <Aviso tono="error">{error ?? listado.error}</Aviso> : null}
@@ -404,11 +415,33 @@ export default function PantallaAsistente() {
                           ) : (
                             <Markdown texto={m.texto} />
                           )}
+                          {/* Spec 040, RF-27: solo en la última respuesta; tocar una opción la envía. */}
+                          {m.aclaracion && m.estado === 'respondido' && i === abierta.mensajes.length - 1 ? (
+                            <View style={estilos.opciones} accessibilityRole="radiogroup" accessibilityLabel={m.aclaracion.pregunta}>
+                              {m.aclaracion.opciones.map((opcion) => (
+                                <Pressable
+                                  key={opcion}
+                                  accessibilityRole="button"
+                                  accessibilityHint="Envía esta respuesta"
+                                  disabled={Boolean(enCurso) || sinCupo}
+                                  onPress={() => void preguntar(opcion, abierta.conversacion.id, [])}
+                                  style={({ hovered }) => [
+                                    estilos.ejemplo,
+                                    hovered && estilos.encima,
+                                    (Boolean(enCurso) || sinCupo) && estilos.opcionApagada,
+                                  ]}
+                                >
+                                  <Text style={estilos.textoEjemplo}>{opcion}</Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          ) : null}
+                          <ArchivosDeLaRespuesta archivos={m.archivos ?? []} />
                           <Fuentes fuentes={m.fuentes} />
                           <AccionesDeRespuesta
                             cuando={cuando(m.creadoEn)}
                             texto={m.estado === 'respondido' ? m.texto : undefined}
-                            onPdf={m.estado === 'respondido' ? () => imprimir(abierta.mensajes[i - 1]?.texto ?? '', m) : undefined}
+                            onPdf={m.estado === 'respondido' && !m.aclaracion ? () => imprimir(abierta.mensajes[i - 1]?.texto ?? '', m) : undefined}
                             onReintentar={
                               m.estado === 'fallido' && i === abierta.mensajes.length - 1 && abierta.mensajes[i - 1]?.rol === 'persona'
                                 ? () => {
@@ -435,8 +468,9 @@ export default function PantallaAsistente() {
                         <View style={estilos.respuesta}>
                           {enCurso.texto ? <Markdown texto={enCurso.texto} /> : null}
                           <Text style={estilos.nota} accessibilityLiveRegion="polite">
-                            {enCurso.consultando ? `Consultando ${enCurso.consultando}…` : enCurso.texto ? '' : 'Pensando…'}
+                            {enCurso.consultando ?? (enCurso.texto ? '' : 'Pensando…')}
                           </Text>
+                          <ArchivosDeLaRespuesta archivos={enCurso.archivos} />
                           <Fuentes fuentes={enCurso.fuentes} />
                         </View>
                       </>
@@ -585,8 +619,13 @@ const estilos = StyleSheet.create({
     textAlign: 'center',
   },
   ejemplos: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  // Spec 040, RF-25: lo que puede consultar, bajo el campo, como texto de apoyo.
+  puedeConsultar: { alignSelf: 'stretch', gap: 2, paddingHorizontal: Spacing.two },
+  tituloPuedeConsultar: { fontFamily: FuentePanel.texto, fontWeight: '600', fontSize: TextoPanel.apoyo, color: Panel.texto },
+  frasePuedeConsultar: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, lineHeight: 19, color: Panel.textoApoyo },
   ejemplo: {
-    maxWidth: 360,
+    // Spec 040, T17: a 390 px un ejemplo largo (la auxiliar) pasaba del ancho útil y se cortaba.
+    maxWidth: '100%',
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
     borderRadius: Radio.pastilla,
@@ -595,6 +634,9 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.superficie,
   },
   textoEjemplo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.texto },
+  // Spec 040, RF-27: las opciones de una aclaración, como los ejemplos, alineadas con la respuesta.
+  opciones: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  opcionApagada: { opacity: 0.5 },
   burbujaPersona: {
     alignSelf: 'flex-end',
     maxWidth: '85%',

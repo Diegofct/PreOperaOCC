@@ -116,11 +116,12 @@ export const CARGOS = [
   // Spec 034, RF-12. Maneja los equipos y vehículos de OCC desde el panel; no recibe
   // celular (RF-17): si además opera, es otra persona con su acceso de operador.
   { id: 'encargado_occ', nombre: 'Encargado de OCC', rolSugerido: 'encargado_occ', operaVehiculos: false },
-  // Spec 035, RF-8. Las auxiliares administrativas de Elemental que llevan Recursos Humanos.
+  // Spec 035, RF-8, renombrado en la 040 (RF-1): las auxiliares administrativas de Elemental.
+  // El id cambió con el rol; la migración 0039 actualiza `usuarios.cargo`.
   {
-    id: 'auxiliar_rrhh',
-    nombre: 'Auxiliar de Recursos Humanos',
-    rolSugerido: 'auxiliar_rrhh',
+    id: 'auxiliar_administrativa',
+    nombre: 'Auxiliar Administrativa',
+    rolSugerido: 'auxiliar_administrativa',
     operaVehiculos: false,
   },
 ] as const satisfies readonly DefinicionCargo[];

@@ -987,6 +987,12 @@ reportes: {
 
   /** El asistente (spec 028). Preguntar va aparte: `preguntarAlAsistente`, porque responde a medida que redacta. */
   asistente: {
+    /**
+     * Spec 040, RF-19, RF-24: un archivo que generó el asistente. Con `fetch`, como las otras
+     * descargas: si ya venció o no se alcanza, el panel muestra el motivo en vez de guardar un
+     * archivo roto.
+     */
+    descargarArchivo: (mediaId: string) => descargar(`/api/panel/media/${encodeURIComponent(mediaId)}`),
     conversaciones: (archivadas = false) =>
       panel<{ conversaciones: ConversacionDelAsistente[]; cupo: CupoDelAsistente }>(
         `/asistente/conversaciones${archivadas ? '?archivadas=1' : ''}`,

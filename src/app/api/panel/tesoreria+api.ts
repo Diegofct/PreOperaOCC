@@ -8,7 +8,7 @@ import { MENSAJES_DE_RANGO, rangoDeFechas } from '@/shared/rules/rango';
 /**
  * Tesorería de Elemental (spec 037, RF-3, RF-4, RF-10, RF-22): las solicitudes de pago de
  * todo el grupo. `GET /api/panel/tesoreria?lugar=&estado=&urgentes=1&desde=&hasta=&texto=`,
- * todos opcionales. La gerencia y, de consulta, la auxiliar de RR. HH.
+ * todos opcionales. La gerencia y la Auxiliar Administrativa (spec 040, RF-6).
  */
 export async function GET(peticion: Request) {
   return responder(async () => {

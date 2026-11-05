@@ -124,7 +124,7 @@ export async function POST(peticion: Request) {
       datos.obraId ??= sesion.obraId;
     }
 
-    // El Encargado de OCC es de OCC y la auxiliar de RR. HH. de Elemental, los dos sin obra
+    // El Encargado de OCC es de OCC y la Auxiliar Administrativa de Elemental, los dos sin obra
     // (spec 034, RF-13; spec 035, RF-8): sin empresa, la suya; con obra o con otra empresa,
     // se les dice por qué no.
     datos.empresa ??= empresaDelAccesoSinObra(datos.rol);

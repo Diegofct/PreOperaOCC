@@ -3,8 +3,8 @@
  * 037, RF-11 a RF-16): aprobar (por lo pedido o por menos), rechazar, devolver, registrar un
  * pago con su comprobante y anular un pago.
  *
- * Los botones salen de `pasos`, como en Compras: la auxiliar de RR. HH. consulta la misma
- * solicitud y no ve ninguno. Lo que impide cada paso lo dicen las reglas de `rules/pagos`
+ * Los botones salen de `pasos`, como en Compras: la gerencia y, desde la spec 040, la
+ * Auxiliar Administrativa los ven; quien solo consulta, ninguno. Lo que impide cada paso lo dicen las reglas de `rules/pagos`
  * antes de enviarlo.
  */
 import { useState } from 'react';

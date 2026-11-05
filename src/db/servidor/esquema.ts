@@ -72,7 +72,13 @@ import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/r
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
 import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
 import { IDS_DE_ESTADOS_DE_PAGO } from '../../shared/rules/pagos';
-import type { AdjuntoGuardado, FuenteDeRespuesta, ModuloConsultable } from '../../shared/rules/asistente';
+import type {
+  AclaracionDelAsistente,
+  AdjuntoGuardado,
+  ArchivoDelAsistente,
+  FuenteDeRespuesta,
+  ModuloConsultable,
+} from '../../shared/rules/asistente';
 import type { LecturaDeIa } from '../../shared/rules/formulario-presupuesto-ia';
 import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
 import type { EmpresaId } from '../../shared/rules/empresas';
@@ -149,6 +155,10 @@ export const propositoMedia = pgEnum('proposito_media', [
   'firma_operador',
   'foto_horometro',
   'evidencia',
+  // Spec 040, RF-18 a RF-24: un PDF, Excel o Word que generó el asistente. Va aparte de los
+  // adjuntos (`evidencia`) porque vence a los 30 días (D7) y solo se entrega mientras la
+  // conversación siga al alcance de quien lo pidió.
+  'archivo_generado',
 ]);
 export const operacionSync = pgEnum('operacion_sync', ['upsert', 'delete']);
 
@@ -1980,6 +1990,8 @@ export const asistenteConversaciones = pgTable(
     titulo: text('titulo').notNull(),
     obras: jsonb('obras').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     modulos: jsonb('modulos').$type<ModuloConsultable[]>().notNull().default(sql`'[]'::jsonb`),
+    // Spec 040, RF-16: las empresas que consultó (Elemental, OCC, Geolab), para RF-49 como las obras.
+    empresas: jsonb('empresas').$type<EmpresaId[]>().notNull().default(sql`'[]'::jsonb`),
     archivada: boolean('archivada').notNull().default(false),
     creadoEn: creadoEn(),
     actualizadoEn: actualizadoEn(),
@@ -2003,6 +2015,10 @@ export const asistenteMensajes = pgTable(
     texto: text('texto').notNull(),
     fuentes: jsonb('fuentes').$type<FuenteDeRespuesta[]>().notNull().default(sql`'[]'::jsonb`),
     adjuntos: jsonb('adjuntos').$type<AdjuntoGuardado[]>().notNull().default(sql`'[]'::jsonb`),
+    // Spec 040, RF-19, RF-24: los archivos que generó esta respuesta.
+    archivos: jsonb('archivos').$type<ArchivoDelAsistente[]>().notNull().default(sql`'[]'::jsonb`),
+    // Spec 040, RF-27: si la respuesta fue una pregunta con opciones, cuáles.
+    aclaracion: jsonb('aclaracion').$type<AclaracionDelAsistente>(),
     estado: estadoMensajeAsistente('estado').notNull().default('respondido'),
     modelo: text('modelo'),
     tokensEntrada: integer('tokens_entrada').notNull().default(0),

@@ -122,9 +122,9 @@ export function faltasDeFichaCompleta(
   return CAMPOS_DE_LA_FICHA_COMPLETA.filter(([campo]) => !ficha?.[campo]?.trim()).map(([, nombre]) => nombre);
 }
 
-/** ¿Este rol ve y cambia el salario? (RF-13): la gerencia y la auxiliar de RR. HH. */
+/** ¿Este rol ve y cambia el salario? (RF-13; 040/D4): la gerencia y la Auxiliar Administrativa. */
 export function veElSalario(rol: Rol): boolean {
-  return rol === 'admin' || rol === 'auxiliar_rrhh';
+  return rol === 'admin' || rol === 'auxiliar_administrativa';
 }
 
 /**

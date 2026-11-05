@@ -1,7 +1,7 @@
 /**
  * Lo comprado por lugar (spec 036, RF-27): el total de las compras —sin las anuladas— de
  * cada obra, de OCC y de Geolab entre dos fechas de compra, de mayor a menor. Solo la
- * gerencia (`veElGasto`); la auxiliar de RR. HH. consulta Compras, pero no esto.
+ * gerencia y, desde la spec 040, la Auxiliar Administrativa (`veElGasto`).
  *
  * Abre con el mes en curso: es la pregunta de siempre («¿cuánto llevamos este mes?»). Las
  * fechas se revisan con la misma regla del servidor (`rangoDeFechas`) antes de pedir.

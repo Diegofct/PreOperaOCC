@@ -13,11 +13,17 @@ import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { asistenteConversaciones, asistenteMensajes } from '@/db/servidor/esquema';
+import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { vigente } from '@/shared/rules/archivos-del-asistente';
 import {
+  aclaracionEnElHistorial,
+  alcanceDelAsistente,
   conversacionVisible,
   tituloDeConversacion,
+  type AclaracionDelAsistente,
   type AdjuntoGuardado,
   type AlcanceDelAsistente,
+  type ArchivoDelAsistente,
   type FuenteDeRespuesta,
   type LoQueConsulto,
   type TokensUsados,
@@ -41,6 +47,10 @@ export interface MensajeFila {
   texto: string;
   fuentes: FuenteDeRespuesta[];
   adjuntos: AdjuntoGuardado[];
+  /** Spec 040: los archivos que generó la respuesta. */
+  archivos: ArchivoDelAsistente[];
+  /** Spec 040, RF-27: la pregunta con opciones, si la respuesta fue una aclaración. */
+  aclaracion: AclaracionDelAsistente | null;
   estado: 'respondido' | 'fallido';
   /** ISO 8601 (RF-42). */
   creadoEn: string;
@@ -54,7 +64,7 @@ function aFila(c: FilaDeConversacion, alcance: AlcanceDelAsistente): Conversacio
     titulo: c.titulo,
     archivada: c.archivada,
     actualizadaEn: c.actualizadoEn.toISOString(),
-    visible: conversacionVisible({ obras: c.obras, modulos: c.modulos }, alcance),
+    visible: conversacionVisible({ obras: c.obras, modulos: c.modulos, empresas: c.empresas }, alcance),
   };
 }
 
@@ -104,6 +114,8 @@ export async function abrirConversacion(
       texto: m.texto,
       fuentes: m.fuentes,
       adjuntos: m.adjuntos,
+      archivos: m.archivos,
+      aclaracion: m.aclaracion ?? null,
       estado: m.estado,
       creadoEn: m.creadoEn.toISOString(),
     })),
@@ -133,7 +145,12 @@ export async function crearConversacion(usuarioId: string, pregunta: string, con
  */
 export async function historialDe(conversacionId: string): Promise<MensajeDelHistorial[]> {
   const mensajes = await baseServidor()
-    .select({ rol: asistenteMensajes.rol, texto: asistenteMensajes.texto, estado: asistenteMensajes.estado })
+    .select({
+      rol: asistenteMensajes.rol,
+      texto: asistenteMensajes.texto,
+      estado: asistenteMensajes.estado,
+      aclaracion: asistenteMensajes.aclaracion,
+    })
     .from(asistenteMensajes)
     .where(eq(asistenteMensajes.conversacionId, conversacionId))
     .orderBy(asc(asistenteMensajes.creadoEn), asc(asistenteMensajes.id));
@@ -142,7 +159,11 @@ export async function historialDe(conversacionId: string): Promise<MensajeDelHis
     const m = mensajes[i];
     const siguiente = mensajes[i + 1];
     if (m.rol === 'persona' && siguiente?.rol === 'asistente' && siguiente.estado === 'respondido') {
-      historial.push({ rol: 'persona', texto: m.texto }, { rol: 'asistente', texto: siguiente.texto });
+      // Spec 040, RF-27: con sus opciones, para que la IA entienda la que se tocó.
+      historial.push(
+        { rol: 'persona', texto: m.texto },
+        { rol: 'asistente', texto: aclaracionEnElHistorial(siguiente.texto, siguiente.aclaracion ?? null) },
+      );
       i++;
     }
   }
@@ -159,7 +180,16 @@ export async function guardarPregunta(conversacionId: string, texto: string, adj
 }
 
 export type RespuestaParaGuardar =
-  | { ok: true; texto: string; fuentes: FuenteDeRespuesta[]; consulto: LoQueConsulto; modelo: string; tokens: TokensUsados }
+  | {
+      ok: true;
+      texto: string;
+      fuentes: FuenteDeRespuesta[];
+      consulto: LoQueConsulto;
+      archivos?: ArchivoDelAsistente[];
+      aclaracion?: AclaracionDelAsistente | null;
+      modelo: string;
+      tokens: TokensUsados;
+    }
   | { ok: false; error: string; tokens: TokensUsados };
 
 /**
@@ -177,6 +207,10 @@ export async function guardarRespuesta(conversacionId: string, r: RespuestaParaG
       rol: 'asistente',
       texto: r.ok ? r.texto : r.error,
       fuentes: r.ok ? r.fuentes : [],
+      // Spec 040, RF-19, RF-24.
+      archivos: r.ok ? (r.archivos ?? []) : [],
+      // Spec 040, RF-27.
+      aclaracion: r.ok ? (r.aclaracion ?? null) : null,
       estado: r.ok ? 'respondido' : 'fallido',
       modelo: r.ok ? r.modelo : null,
       tokensEntrada,
@@ -184,13 +218,43 @@ export async function guardarRespuesta(conversacionId: string, r: RespuestaParaG
     });
   const obras = r.ok ? r.consulto.obras : [];
   const modulos = r.ok ? r.consulto.modulos : [];
+  const empresas = r.ok ? (r.consulto.empresas ?? []) : [];
   // La unión, sin repetir, en una sola sentencia: dos respuestas seguidas no se pisan.
   await baseServidor()
     .update(asistenteConversaciones)
     .set({
       obras: sql`(select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from jsonb_array_elements_text(${asistenteConversaciones.obras} || ${JSON.stringify(obras)}::jsonb) x)`,
       modulos: sql`(select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from jsonb_array_elements_text(${asistenteConversaciones.modulos} || ${JSON.stringify(modulos)}::jsonb) x)`,
+      // Spec 040: las empresas, igual que las obras.
+      empresas: sql`(select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from jsonb_array_elements_text(${asistenteConversaciones.empresas} || ${JSON.stringify(empresas)}::jsonb) x)`,
     })
     .where(eq(asistenteConversaciones.id, conversacionId));
   return id;
+}
+
+/**
+ * Un archivo generado por el asistente, si quien lo pide todavía lo puede descargar (spec 040,
+ * RF-24, D7 y caso límite): es su conversación, la sigue alcanzando (RF-49) y no han pasado los
+ * 30 días. `null` en cualquier otro caso: la ruta responde que ya no está disponible.
+ */
+export async function archivoGeneradoAlAlcance(
+  sesion: PersonaEnSesion,
+  mediaId: string,
+  conversacionId: string,
+): Promise<{ nombre: string } | null> {
+  const c = await suConversacion(sesion.id, conversacionId);
+  if (!c || !conversacionVisible({ obras: c.obras, modulos: c.modulos, empresas: c.empresas }, alcanceDelAsistente(sesion))) return null;
+  const [mensaje] = await baseServidor()
+    .select({ archivos: asistenteMensajes.archivos })
+    .from(asistenteMensajes)
+    .where(
+      and(
+        eq(asistenteMensajes.conversacionId, conversacionId),
+        sql`${asistenteMensajes.archivos} @> ${JSON.stringify([{ mediaId }])}::jsonb`,
+      ),
+    )
+    .limit(1);
+  const archivo = mensaje?.archivos.find((a) => a.mediaId === mediaId);
+  if (!archivo || !vigente(archivo.creadoEn)) return null;
+  return { nombre: archivo.nombre };
 }

@@ -9,7 +9,9 @@
  */
 
 import { plazoEnDias } from './contrato';
+import { nombreDeEmpresa, type EmpresaId } from './empresas';
 import { diaCorto } from './jornada';
+import type { Rol } from './permisos';
 import { enPesos } from './pesos';
 
 /** Los tres valores del corte (RF-34; resuelto el 2026-10-27: no lleva más). */
@@ -24,6 +26,25 @@ export interface CorteParaRegla extends ValoresDelCorte {
   fechaCorte: string;
   /** Anulado = ya no cuenta para nada salvo el historial (RF-39). */
   anuladoEn: string | null;
+}
+
+/** De quién es un corte: de una empresa o de una obra, nunca de las dos. */
+export type LugarDelCorte = { empresaId: EmpresaId; obraId?: undefined } | { obraId: string; empresaId?: undefined };
+
+/**
+ * Por qué esta persona no puede registrar ni anular un corte de ese lugar, o `null` si puede
+ * (spec 040, RF-7, D3). Se pregunta **después** de la tabla de permisos (`finanzas`), que dice
+ * si registra o anula; esto dice dónde. La gerencia, en todos los lugares; la Auxiliar
+ * Administrativa, solo en Elemental: los de OCC, Geolab y las obras los consulta.
+ *
+ * No va en la tabla porque el permiso es el mismo y lo que cambia es el lugar, como pasa con
+ * `alcanzaLaEmpresa` en Documentos. Partir `finanzas` en dos módulos habría duplicado cada fila.
+ */
+export function porQueNoPuedeTocarElCorte(rol: Rol, lugar: LugarDelCorte): string | null {
+  if (rol !== 'auxiliar_administrativa') return null;
+  if (lugar.empresaId === 'elemental') return null;
+  const de = lugar.empresaId ? nombreDeEmpresa(lugar.empresaId) : 'las obras';
+  return `Solo la gerencia registra o anula los cortes de ${de}.`;
 }
 
 /** Más días que esto sin corte nuevo y el Consolidado lo marca (RF-43). */

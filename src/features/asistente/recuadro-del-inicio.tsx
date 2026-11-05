@@ -14,6 +14,8 @@ import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api } from '@/features/panel/cliente-api';
 import { Acciones, Boton, Campo, Seccion } from '@/features/panel/componentes';
 import { useListado } from '@/features/panel/marco';
+import { usePersona } from '@/features/panel/sesion';
+import { alcanceDelAsistente, resumenDeLoQueConsulta } from '@/shared/rules/asistente';
 import { rutaDeObra } from '@/shared/rules/empresas';
 
 const ULTIMAS = 3;
@@ -28,6 +30,8 @@ const cuando = (iso: string) =>
 export function RecuadroDelAsistente() {
   // Spec 033, RF-30: en la portada de una obra, al asistente de esa obra.
   const obraId = useObraDeLaRuta();
+  // Spec 040, RF-25: lo que consulta, en corto y según su cargo.
+  const resumen = resumenDeLoQueConsulta(alcanceDelAsistente(usePersona()));
   const asistente = obraId ? rutaDeObra(obraId, 'asistente') : '/panel/asistente';
   const [pregunta, setPregunta] = useState('');
   const lista = useListado(useCallback(async () => [await api.asistente.conversaciones()], []));
@@ -46,7 +50,7 @@ export function RecuadroDelAsistente() {
         <Text style={estilos.nota}>
           {sinCupo
             ? `Ya hizo sus ${datos?.cupo.limite} preguntas de hoy. Podrá preguntar de nuevo mañana.`
-            : 'Pregunte en español sobre su obra: viajes, máquinas, personal, ensayos, almacén… La respuesta dice de dónde sale cada cifra.'}
+            : resumen || 'Pregunte en español. La respuesta dice de dónde sale cada cifra.'}
         </Text>
         <Campo etiqueta="Su pregunta" valor={pregunta} onChange={setPregunta} multilinea compacto />
         <Acciones>
