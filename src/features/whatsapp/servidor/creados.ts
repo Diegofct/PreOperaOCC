@@ -37,7 +37,7 @@ import {
   whatsappMensajes,
 } from '@/db/servidor/esquema';
 import type { CreadoFila } from '@/features/panel/contratos';
-import { veTodasLasObras } from '@/features/servidor/alcance';
+import { esDeSusObras, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { columnasParaNombrar, nombrarVehiculo } from '@/features/servidor/placas';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
@@ -142,7 +142,8 @@ async function leerCreado(sesion: PersonaEnSesion, tipo: TipoCreado, registroId:
     .where(and(eq(whatsappCreados.tipo, tipo), eq(whatsappCreados.registroId, registroId)))
     .limit(1);
   if (!marca) return null;
-  if (!veTodasLasObras(sesion) && marca.obraId !== sesion.obraId) return null;
+  // 041/RF-19: una marca suelta, de cualquiera de sus obras; la lista, de la obra en uso.
+  if (!esDeSusObras(sesion, marca.obraId)) return null;
   return marca;
 }
 

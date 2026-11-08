@@ -6,10 +6,10 @@
  * pasen la misma comprobación. Ver el comentario de ese módulo.
  */
 import { asc, eq, sql } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/pg-core';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { almacenMovimientos, usuarios } from '@/db/servidor/esquema';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import type { MovimientoDeAlmacenFila } from '@/features/panel/contratos';
 import {
   aDecimal,
@@ -18,8 +18,6 @@ import {
 } from '@/shared/rules/almacen';
 
 import { cantidadDeLaBase, stockEnSql } from './materiales';
-
-const anulador = alias(usuarios, 'anulador');
 
 /**
  * El historial completo de un material, con nombres y con el stock que dejó cada
@@ -44,14 +42,16 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       registradoPorNombre: usuarios.nombreCompleto,
       mensajeWhatsappId: almacenMovimientos.mensajeWhatsappId,
       anuladoEn: almacenMovimientos.anuladoEn,
-      anuladoPorNombre: anulador.nombreCompleto,
+      anuladoPor: almacenMovimientos.anuladoPor,
       motivoAnulacion: almacenMovimientos.motivoAnulacion,
     })
     .from(almacenMovimientos)
     .leftJoin(usuarios, eq(usuarios.id, almacenMovimientos.registradoPor))
-    .leftJoin(anulador, eq(anulador.id, almacenMovimientos.anuladoPor))
     .where(eq(almacenMovimientos.materialId, materialId))
     .orderBy(asc(almacenMovimientos.creadoEn), asc(almacenMovimientos.id));
+
+  // Quién anuló, con el acceso que tenía ese día (041/RF-42, RF-52).
+  const firma = await firmasConAcceso(filas.map((f) => f.anuladoPor));
 
   return historialConSaldo(
     filas.map((f) => ({
@@ -70,7 +70,7 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       desdeWhatsapp: f.mensajeWhatsappId !== null,
       anulado: f.anuladoEn !== null,
       anuladoEn: f.anuladoEn?.toISOString() ?? null,
-      anuladoPorNombre: f.anuladoPorNombre,
+      anuladoPorNombre: firma(f.anuladoPor, f.anuladoEn),
       motivoAnulacion: f.motivoAnulacion,
     })),
   );

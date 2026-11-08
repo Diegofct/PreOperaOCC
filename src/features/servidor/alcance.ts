@@ -1,10 +1,20 @@
 /**
  * Qué le toca ver a cada quien, decidido en un solo sitio.
  *
- * `admin` —gerencia— ve todas las obras. `supervisor` —residente o director de
- * obra— ve la suya y nada más. El Encargado de OCC (spec 034) también ve todas, pero
- * solo dentro de los módulos que le da la tabla de permisos: cada ruta exige su
- * permiso antes de llegar aquí (`requerirPermiso`).
+ * `admin` —gerencia— ve todas las obras, y desde la spec 041 también el Director de
+ * Proyectos. El residente ve la suya y nada más; el Director de Obra, las suyas, una
+ * o varias. El Encargado de OCC (spec 034) también ve todas, pero solo dentro de los
+ * módulos que le da la tabla de permisos: cada ruta exige su permiso antes de llegar
+ * aquí (`requerirPermiso`).
+ *
+ * Desde la 041 hay dos preguntas distintas, y cada función responde una:
+ *
+ * - **Un listado** se filtra por la obra **en uso** (`persona.obraId`, la de la pestaña):
+ *   `filtroDeObra`, `filtroDeObraEstricto`, `filtroDeObraPedida`. Así el Director de Obra
+ *   no ve mezclados los partes de dos obras en la pantalla de una.
+ * - **Una fila concreta** que ya se leyó se compara contra **todas** sus obras
+ *   (`persona.obras`): `alcanzaLaObra`, `alcanzaLaImagen`. Un enlace a la foto de su otra
+ *   obra no tiene por qué fallar porque la pestaña esté en esta.
  *
  * Está aquí y no repartido por los endpoints a propósito. Un filtro de alcance
  * copiado en nueve rutas es un filtro que en la décima se olvida, y ese olvido
@@ -35,12 +45,12 @@ export function veTodasLasObras(persona: PersonaEnSesion): boolean {
  * Devuelve `undefined` cuando no hay que filtrar, que es lo que espera el
  * `and(...)` de Drizzle para omitir la condición.
  *
- * Las filas **sin obra** entran en el alcance del supervisor a propósito: una
+ * Las filas **sin obra** entran en el alcance de quien tiene obra a propósito: una
  * persona de gerencia no está adscrita a ninguna, y un vehículo recién dado de
  * alta puede estar todavía sin asignar. Ocultárselas al residente haría que la
  * máquina que acaba de registrar desapareciera de su pantalla.
  *
- * Un supervisor **sin obra asignada** no alcanza nada, y esto cambió con la
+ * Quien **no tiene obra en uso** no alcanza nada, y esto cambió con la
  * spec 001. Antes devolvía «sin filtro», que es lo mismo que decir «que lo vea
  * todo»: una cuenta a medio configurar tenía más alcance que una bien puesta, y
  * el fallo no se notaba porque todo funcionaba. Ahora el filtro no deja pasar
@@ -94,12 +104,40 @@ export function filtroDeObraEstricto(persona: PersonaEnSesion, obra: SQL): SQL {
  * ¿Puede tocar una fila que pertenece a esta obra?
  *
  * Para editar y dar de baja, donde no hay consulta que filtrar sino una fila
- * concreta que ya se leyó.
+ * concreta que ya se leyó. Desde la 041 se compara contra **todas** sus obras, no
+ * solo la que tiene en uso (RF-19); sin ninguna, no alcanza nada (RF-65).
  */
 export function alcanzaLaObra(persona: PersonaEnSesion, obraId: string | null): boolean {
   if (veTodasLasObras(persona)) return true;
-  if (!persona.obraId) return false;
-  return obraId === null || obraId === persona.obraId;
+  if (persona.obras.length === 0) return false;
+  return obraId === null || persona.obras.includes(obraId);
+}
+
+/**
+ * ¿Esta fila, que trae su obra, es de una de sus obras? (041/RF-19)
+ *
+ * Como `alcanzaLaObra`, pero una fila **sin obra no alcanza** a quien no ve todas. Es
+ * para los lectores que antes de la 041 comparaban `fila.obraId !== persona.obraId`:
+ * con esa comparación, lo que no tenía obra quedaba fuera, y cambiarla por
+ * `alcanzaLaObra` le habría abierto al residente las marcas y las máquinas sueltas.
+ */
+export function esDeSusObras(persona: PersonaEnSesion, obraId: string | null): boolean {
+  if (veTodasLasObras(persona)) return true;
+  return obraId !== null && persona.obras.includes(obraId);
+}
+
+/**
+ * La obra en la que se guarda lo que registra (041/RF-23).
+ *
+ * Quien ve todas escribe en la que pide, como hasta ahora la gerencia. Los demás, en la
+ * pedida si es una de las suyas —el Director de Obra que manda la obra en el cuerpo—, y si
+ * no, en su obra en uso. Una obra ajena no da error: se ignora, igual que en la lectura
+ * (RF-20). `null` es que no hay dónde, y la ruta lo rechaza.
+ */
+export function obraParaEscribir(persona: PersonaEnSesion, pedida: string | null | undefined): string | null {
+  if (veTodasLasObras(persona)) return pedida ?? null;
+  if (pedida && persona.obras.includes(pedida)) return pedida;
+  return persona.obraId;
 }
 
 /**
@@ -119,6 +157,11 @@ export function alcanzaLaObra(persona: PersonaEnSesion, obraId: string | null): 
  * así que el Encargado de OCC —que ve todas las obras sin ser gerencia— necesita además
  * el permiso de ese módulo: sin esto abriría, foto por foto, el contrato de cualquier
  * obra. Sin módulo, no la alcanza.
+ *
+ * Spec 041: el Director de Proyectos entra por `veTodasLasObras`, con el permiso del módulo
+ * como el Encargado de OCC. Lo huérfano sigue siendo **solo de la gerencia**: aquí
+ * `rol === 'admin'` quiere decir «es la gerencia», no «ve todas las obras», y revisar lo
+ * que quedó sin dueño es un trabajo suyo.
  */
 export function alcanzaLaImagen(
   persona: PersonaEnSesion,

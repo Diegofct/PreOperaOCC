@@ -662,7 +662,10 @@ export default function PantallaPartes() {
         )}
 
         {anulado && parte?.motivoAnulacion ? (
-          <Aviso tono="info">Anulado: {parte.motivoAnulacion}</Aviso>
+          <Aviso tono="info">
+            {parte.anuladoPorNombre ? `Anulado por ${parte.anuladoPorNombre}: ` : 'Anulado: '}
+            {parte.motivoAnulacion}
+          </Aviso>
         ) : null}
       </Seccion>
 

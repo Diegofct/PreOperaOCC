@@ -6,7 +6,7 @@ import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
 /** Anular una póliza, con motivo. `POST /api/panel/contrato/polizas/:id/anular` (spec 031, RF-26). */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirPermiso(peticion, 'contrato', 'escribir');
+    const sesion = await requerirPermiso(peticion, 'contrato', 'anular');
     if (sesion instanceof Response) return sesion;
 
     const { motivo } = await cuerpoJson(peticion, anulacionEnContrato);

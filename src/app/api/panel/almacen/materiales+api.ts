@@ -58,7 +58,7 @@ export async function POST(peticion: Request) {
       return Response.json(
         veTodasLasObras(sesion)
           ? { error: 'Elija la obra del almacén.', campos: { obraId: 'Elija la obra del almacén.' } }
-          : { error: 'Su cuenta no tiene obra asignada. Pídale a la gerencia que le asigne su obra.' },
+          : { error: 'Su cuenta no tiene obra asignada. Pídale a la Gerencia o al Director de Proyectos que le asignen su obra.' },
         { status: 400 },
       );
     }

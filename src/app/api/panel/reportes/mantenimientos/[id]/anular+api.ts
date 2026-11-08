@@ -6,7 +6,7 @@ import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
 /** Anular un mantenimiento con su motivo (spec 030, RF-35). 409 si ya estaba anulado. */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirPermiso(peticion, 'reportes', 'escribir');
+    const sesion = await requerirPermiso(peticion, 'reportes', 'anular');
     if (sesion instanceof Response) return sesion;
     const { motivo } = await cuerpoJson(peticion, anulacionDeMantenimiento);
     const hecho = await anularMantenimiento(sesion, id, motivo);

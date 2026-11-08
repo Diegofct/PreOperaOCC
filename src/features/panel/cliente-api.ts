@@ -13,11 +13,16 @@
  *
  * **Nada de este archivo toca `src/db/local`.** El panel es del navegador y su
  * única fuente es la API; la base del teléfono no existe para él.
+ *
+ * **Cada petición dice la obra de su pestaña** (spec 041, RF-22, RF-23), en la cabecera
+ * `x-obra-en-uso`, sacada de la dirección. Así un Director de Obra con la obra A abierta en
+ * una pestaña y la B en otra guarda cada cosa en la suya. No se guarda en ningún estado: la
+ * dirección ya es por pestaña, y un estado compartido movería las dos a la vez.
  */
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EstadoDeSolicitud } from '@/shared/rules/compras';
 import type { EstadoDePago, PagoDeLaCompra } from '@/shared/rules/pagos';
-import type { EmpresaId } from '@/shared/rules/empresas';
+import { lugarDeLaRuta, type EmpresaId } from '@/shared/rules/empresas';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -137,6 +142,7 @@ import type {
   PersonaEnSesionFila,
   PreoperacionalDetalle,
   PersonaFila,
+  PersonaEditada,
   PersonaNueva,
   TipoVehiculoFila,
   VehiculoFila,
@@ -193,6 +199,16 @@ export function mensajeDe(fallo: unknown): string {
   return 'Algo falló. Vuelve a intentarlo.';
 }
 
+/**
+ * La cabecera con la obra de la pestaña (spec 041), o ninguna fuera de una obra. El servidor
+ * la acepta solo si es una de las obras de la persona (`obraEnUso`); una ajena la ignora.
+ */
+export function cabeceraDeObraEnUso(): Record<string, string> {
+  if (typeof window === 'undefined' || !window.location) return {};
+  const lugar = lugarDeLaRuta(window.location.pathname);
+  return lugar?.tipo === 'obra' ? { 'x-obra-en-uso': lugar.obraId } : {};
+}
+
 async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
   let respuesta: Response;
   try {
@@ -202,8 +218,8 @@ async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
       // con su separador; cualquier otro cuerpo es JSON.
       headers:
         opciones?.body instanceof FormData
-          ? opciones.headers
-          : { 'Content-Type': 'application/json', ...opciones?.headers },
+          ? { ...cabeceraDeObraEnUso(), ...(opciones.headers as Record<string, string> | undefined) }
+          : { 'Content-Type': 'application/json', ...cabeceraDeObraEnUso(), ...opciones?.headers },
     });
   } catch {
     // El servidor de desarrollo caído es el caso más frecuente y el más
@@ -237,7 +253,7 @@ async function pedir<T>(ruta: string, opciones?: RequestInit): Promise<T> {
 async function descargar(ruta: string): Promise<{ contenido: Blob; nombre: string }> {
   let respuesta: Response;
   try {
-    respuesta = await fetch(ruta);
+    respuesta = await fetch(ruta, { headers: cabeceraDeObraEnUso() });
   } catch {
     throw new ErrorApi('No se pudo contactar al servidor. ¿Está corriendo `npm run web`?', 0);
   }
@@ -382,8 +398,11 @@ export const api = {
      * y mandarlo todo convertiría cada corrección en un riesgo de pisar un dato
      * que otro acaba de escribir desde el otro computador.
      */
-    editar: (id: string, cambios: Partial<PersonaNueva>) =>
+    editar: (id: string, cambios: PersonaEditada) =>
       panelEnviar<PersonaFila>(`/personas/${id}`, 'PATCH', cambios),
+    /** Apaga el aviso «Pasaron a Residente: revisar» (spec 041, RF-51). */
+    marcarRevisada: (id: string) =>
+      panelEnviar<{ id: string; revisar: boolean }>(`/personas/${id}/revisado`, 'POST'),
     darDeBaja: (id: string) => panelEnviar<PersonaFila>(`/personas/${id}`, 'DELETE'),
     /** Devuelve una contraseña temporal que **solo se puede leer esta vez**. */
     generarClave: (id: string) =>
@@ -1046,7 +1065,12 @@ export async function preguntarAlAsistente(
   let respuesta: Response;
   try {
     // Sin `Content-Type`: el navegador pone el de multipart con su separador.
-    respuesta = await fetch('/api/panel/asistente/preguntar', { method: 'POST', body: formulario as unknown as BodyInit, signal: senal });
+    respuesta = await fetch('/api/panel/asistente/preguntar', {
+      method: 'POST',
+      body: formulario as unknown as BodyInit,
+      signal: senal,
+      headers: cabeceraDeObraEnUso(),
+    });
   } catch (fallo) {
     if (senal?.aborted) return;
     throw new ErrorApi('No se pudo contactar al servidor. ¿Está corriendo `npm run web`?', 0, undefined, fallo);

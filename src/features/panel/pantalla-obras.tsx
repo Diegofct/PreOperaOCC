@@ -10,6 +10,7 @@
 import { useCallback, useState } from 'react';
 
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '@/shared/rules/horas';
+import { motivoParaNoDarDeBajaObra } from '@/shared/rules/permisos';
 
 import { api } from './cliente-api';
 import {
@@ -30,12 +31,14 @@ import {
 import { EditorDeHorario, horarioValido } from './editor-horario';
 import { MarcoPantalla, useListado } from './marco';
 import { MODULOS_DE_OBRA_NUEVA, ModulosDeLaObra } from './modulos-de-obra';
+import { usePersona } from './sesion';
 import { VentanaCorregirObra } from './ventana-obra';
 import type { ObraFila } from './contratos';
 import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 export default function PantallaObras() {
   const listado = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
+  const puedeDarDeBaja = motivoParaNoDarDeBajaObra(usePersona().rol) === null;
 
   const [codigo, setCodigo] = useState('');
   const [nombre, setNombre] = useState('');
@@ -97,14 +100,16 @@ export default function PantallaObras() {
       pintar: (o) => (
         <Acciones>
           <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(o)} />
-          <Boton
-            titulo="Dar de baja"
-            tono="peligro"
-            onPress={() => {
-              setHecho(null);
-              setPorDarDeBaja(o);
-            }}
-          />
+          {puedeDarDeBaja ? (
+            <Boton
+              titulo="Dar de baja"
+              tono="peligro"
+              onPress={() => {
+                setHecho(null);
+                setPorDarDeBaja(o);
+              }}
+            />
+          ) : null}
         </Acciones>
       ),
     },

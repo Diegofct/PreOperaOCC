@@ -25,6 +25,7 @@ import {
   avisoDeModuloApagado,
   moduloApagado,
   motivoDeRechazo,
+  motivoParaNoAprobar,
   type Accion,
   type ModuloConPermiso,
 } from '@/shared/rules/permisos';
@@ -101,8 +102,12 @@ export async function requerirPermiso(
   if (sesion instanceof Response) return sesion;
 
   if (!alcanza(sesion.rol, modulo, accion)) {
-    // Qué no se puede y quién sí, leído de la misma tabla que decide (008/RF-13).
-    return errorDePeticion(motivoDeRechazo(modulo, accion), 403);
+    // Qué no se puede y quién sí, leído de la misma tabla que decide (008/RF-13). Al
+    // residente que intenta aprobar o anular se le dice a quién acudir en su obra (041/RF-34,
+    // RF-35): ahí la acción existe y la hace otro cargo, no otro oficio. Llega aquí también
+    // con una pantalla abierta desde antes del cambio (RF-56): la cerradura es esta.
+    const motivo = motivoParaNoAprobar(sesion.rol, accion) ?? motivoDeRechazo(modulo, accion);
+    return errorDePeticion(motivo, 403);
   }
 
   // El cargo no basta: la obra tiene que llevar el módulo (spec 017, RF-9). Va aquí

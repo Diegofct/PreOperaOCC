@@ -49,9 +49,21 @@ export const CARGOS = [
    * o ponerle «Director», que dirige **una** obra y es otra cosa.
    */
   { id: 'gerente', nombre: 'Gerente', rolSugerido: 'admin', operaVehiculos: false },
-  { id: 'director', nombre: 'Director', rolSugerido: 'supervisor', operaVehiculos: false },
-  { id: 'residente_1', nombre: 'Residente 1', rolSugerido: 'supervisor', operaVehiculos: false },
-  { id: 'residente_2', nombre: 'Residente 2', rolSugerido: 'supervisor', operaVehiculos: false },
+  // Spec 041, RF-3: responde por todas las obras, sin que se le asigne ninguna.
+  {
+    id: 'director_proyectos',
+    nombre: 'Director de Proyectos',
+    rolSugerido: 'director_proyectos',
+    operaVehiculos: false,
+  },
+  /**
+   * Spec 041, RF-66: el rótulo dice «Director de Obra» y el slug sigue siendo `director`, porque
+   * ya hay personas apuntando a él y los slugs no se renombran (el mismo caso que `auxiliar`).
+   * Hasta la 041 sugería el acceso compartido «Residente / Director».
+   */
+  { id: 'director', nombre: 'Director de Obra', rolSugerido: 'director_obra', operaVehiculos: false },
+  { id: 'residente_1', nombre: 'Residente 1', rolSugerido: 'residente', operaVehiculos: false },
+  { id: 'residente_2', nombre: 'Residente 2', rolSugerido: 'residente', operaVehiculos: false },
   /**
    * El slug se queda en `auxiliar` aunque el rótulo diga «de obra»: ya hay
    * personas registradas apuntando a él y los slugs no se renombran. Que el

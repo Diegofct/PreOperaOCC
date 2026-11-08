@@ -21,6 +21,7 @@ import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { contratoDocumentos, contratoPolizas, contratos, media, obras, usuarios } from '@/db/servidor/esquema';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import { claveDeObjeto, guardar } from '@/features/media/servidor/almacen';
 import type {
   DocumentoDelContrato,
@@ -309,6 +310,8 @@ export async function documentosDelContrato(contratoId: string): Promise<Documen
         ).map((u) => [u.id, u.nombre])
       : [],
   );
+  // Quién anuló, con el acceso que tenía ese día (041/RF-42, RF-52).
+  const firma = await firmasConAcceso(filas.map((f) => f.anuladoPor));
   return filas.map((f) => ({
     id: f.id,
     clase: f.clase as ClaseDeDocumento,
@@ -319,7 +322,7 @@ export async function documentosDelContrato(contratoId: string): Promise<Documen
     subidoPor: nombres.get(f.subidoPor) ?? '',
     subidoEn: f.subidoEn.toISOString(),
     anulado: f.anuladoEn
-      ? { en: f.anuladoEn.toISOString(), por: nombres.get(f.anuladoPor ?? '') ?? '', motivo: f.motivoAnulacion ?? '' }
+      ? { en: f.anuladoEn.toISOString(), por: firma(f.anuladoPor, f.anuladoEn) ?? '', motivo: f.motivoAnulacion ?? '' }
       : null,
   }));
 }

@@ -18,7 +18,8 @@ import { and, desc, eq } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { contratoEventos, contratos, obras, presupuestos, usuarios } from '@/db/servidor/esquema';
+import { contratoEventos, contratos, obras, presupuestos } from '@/db/servidor/esquema';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import type { ContratoDeObra, ContratoEditado } from '@/features/panel/contratos';
 import { alcanzaLaObra, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
@@ -106,14 +107,15 @@ export async function leerContrato(obraId: string): Promise<ContratoDeObra> {
     .select({
       accion: contratoEventos.accion,
       motivo: contratoEventos.motivo,
-      quien: usuarios.nombreCompleto,
+      usuarioId: contratoEventos.usuarioId,
       en: contratoEventos.en,
     })
     .from(contratoEventos)
-    .innerJoin(usuarios, eq(usuarios.id, contratoEventos.usuarioId))
     .where(eq(contratoEventos.contratoId, fila.id))
     .orderBy(desc(contratoEventos.en))
     .limit(50);
+  // Quién, con el acceso que tenía ese día (041/RF-42, RF-52).
+  const firma = await firmasConAcceso(eventos.map((e) => e.usuarioId));
 
   return {
     obraId,
@@ -148,7 +150,11 @@ export async function leerContrato(obraId: string): Promise<ContratoDeObra> {
     valorDelPresupuesto,
     diferencia: diferenciaConPresupuesto(fila.valor, valorDelPresupuesto),
     faltasParaAprobar: fila.estado === 'aprobado' ? [] : faltasParaAprobarContrato(paraRevisar(fila)),
-    eventos: eventos.map((e) => ({ ...e, en: e.en.toISOString() })),
+    eventos: eventos.map(({ usuarioId, ...e }) => ({
+      ...e,
+      quien: firma(usuarioId, e.en) ?? '',
+      en: e.en.toISOString(),
+    })),
     polizas,
     documentos,
   };

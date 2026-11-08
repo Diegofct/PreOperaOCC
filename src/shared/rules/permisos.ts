@@ -36,7 +36,9 @@
  */
 export const ROLES = [
   'admin',
-  'supervisor',
+  // Spec 041: hasta aquí era `supervisor`, «Residente / Director». Se renombró (no se creó otro)
+  // porque el Residente se queda con casi todo lo de entonces y solo pierde aprobar y anular.
+  'residente',
   'operador',
   'almacenista',
   'encargado_planta',
@@ -50,6 +52,12 @@ export const ROLES = [
   // todo lo administrativo de Elemental —aprueba compras y pagos del grupo—, y sigue sin dar
   // accesos al panel. Se renombró el valor (migración 0039) y no se creó otro rol.
   'auxiliar_administrativa',
+  // Spec 041. Van al final porque el enum de la base solo sabe añadir al final (`ADD VALUE`), y
+  // el orden de esta lista es también el de los mensajes («lo hacen la gerencia, el director de
+  // proyectos y el director de obra»). El Director de Proyectos ve todas las obras, sin estar
+  // adscrito a ninguna; el Director de Obra, las que tiene asignadas, una o varias.
+  'director_proyectos',
+  'director_obra',
 ] as const;
 export type Rol = (typeof ROLES)[number];
 
@@ -62,13 +70,15 @@ export type Rol = (typeof ROLES)[number];
  */
 export const ETIQUETA_ROL: Record<Rol, string> = {
   admin: 'Gerencia',
-  supervisor: 'Residente / Director',
+  residente: 'Residente',
   operador: 'Operador',
   almacenista: 'Almacenista',
   encargado_planta: 'Encargado de Planta',
   laboratorista: 'Laboratorista',
   encargado_occ: 'Encargado de OCC',
   auxiliar_administrativa: 'Auxiliar Administrativa',
+  director_proyectos: 'Director de Proyectos',
+  director_obra: 'Director de Obra',
 };
 
 /** Los módulos del panel, en el orden en que se muestran. */
@@ -185,61 +195,86 @@ const NADA: readonly Accion[] = [];
  * Elemental: Recursos Humanos, Compras y Tesorería enteros —aprueba, registra y anula como
  * la gerencia, sin tope de valor (040/D2)—, Documentos y los cortes. Fuera de Elemental,
  * nada. Personas y Obras con `ver` porque son las pestañas de su Recursos Humanos.
+ *
+ * Los tres cargos de obra (spec 041), que hasta entonces eran uno, «Residente / Director»:
+ *
+ * - **Residente**: lo de entonces menos aprobar y anular (RF-33). Conserva aprobar en la bandeja
+ *   de WhatsApp, porque ahí aprobar es pasar al sistema lo reportado (RF-37). Entra a Personas
+ *   para dar acceso a operadores de su obra (RF-38); `PUEDE_DAR` no le deja dar otro.
+ * - **Director de Obra**: lo de entonces, más anular preoperacionales, almacén y cantera en sus
+ *   obras (RF-60) y dar accesos de obra con sus códigos del celular (RF-26, RF-72). El contrato
+ *   lo sigue registrando sin aprobarlo (RF-58).
+ * - **Director de Proyectos**: en los módulos de obra, lo que la gerencia (RF-6 a RF-11); en los
+ *   de empresa, lo de entonces del residente (RF-59) y nada de lo administrativo (RF-15, RF-68).
+ *   Los límites del asistente siguen siendo de la gerencia.
+ *
+ * Esto cambia, **dentro de las obras**, la regla de la spec 009 de que en el almacén solo anula
+ * la gerencia (041/RF-9, RF-60): ahora también los dos directores. El almacenista sigue sin anular.
  */
 const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   inicio: {
     admin: ['ver'],
-    supervisor: ['ver'],
+    residente: ['ver'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: ['ver'],
+    director_proyectos: ['ver'],
   },
   obras: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: ['listar'],
     auxiliar_administrativa: ['ver', 'listar'],
+    director_obra: NADA,
+    director_proyectos: ['ver', 'listar', 'escribir'],
   },
   personas: {
     admin: ['ver', 'listar', 'escribir', 'activar'],
-    supervisor: ['listar'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: ['listar'],
     auxiliar_administrativa: ['ver', 'listar', 'escribir'],
+    director_obra: ['ver', 'listar', 'escribir', 'activar'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'activar'],
   },
   vehiculos: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: ['listar'],
+    residente: ['listar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: ['ver', 'listar', 'escribir'],
     auxiliar_administrativa: NADA,
+    director_obra: ['listar'],
+    director_proyectos: ['ver', 'listar', 'escribir'],
   },
   asignaciones: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: ['ver', 'listar', 'escribir'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: ['ver', 'listar', 'escribir'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir'],
+    director_proyectos: ['ver', 'listar', 'escribir'],
   },
   bitacoras: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: ['ver', 'listar', 'escribir', 'anular'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -247,18 +282,23 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     // En OCC la bitácora se consulta (spec 033, RF-22): se llena y se corrige en la obra.
     encargado_occ: ['ver', 'listar'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
   },
   preoperacionales: {
-    // Anular es corregir evidencia firmada por otro: se queda en gerencia. La
-    // bitácora sí la anula el residente, porque la llena él mismo cada día.
+    // Anular es corregir evidencia firmada por otro: hasta la 041 era solo de la gerencia;
+    // desde la 041 también de los directores, que responden por la obra (RF-9, RF-60). El
+    // residente ya no anula nada, tampoco la bitácora (RF-33).
     admin: ['ver', 'listar', 'anular'],
-    supervisor: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: ['ver', 'listar', 'anular'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'anular'],
   },
   // El residente consulta el almacén y la cantera de su obra, pero no registra ni
   // anula (spec 008, RF-12 y RF-13): es el trabajo de otro oficio.
@@ -269,39 +309,49 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // almacenista sigue registrando; si hay un error, se lo pide a gerencia. En
   // cantera no se tocó: el encargado de planta sigue anulando sus viajes, que no
   // mueven inventario.
+  //
+  // Spec 041 (RF-9, RF-60): dentro de las obras anulan también los dos directores, que
+  // responden por ellas. El almacenista sigue sin anular.
   almacen: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: ['ver', 'listar', 'escribir'],
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
   },
   cantera: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: ['ver', 'listar', 'escribir', 'anular'],
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
   },
   // Spec 018. El laboratorista registra, envía y descarta —todo eso es escribir—,
   // pero no aprueba ni anula (RF-92): quien hace el ensayo no es quien lo da por
-  // bueno. El residente hace de coordinador de laboratorio: aprueba, devuelve y
-  // anula lo aprobado (RF-77, RF-78, RF-86), pero no registra ensayos.
+  // bueno. El residente hacía de coordinador de laboratorio: aprobaba, devolvía y
+  // anulaba lo aprobado (RF-77, RF-78, RF-86). Desde la spec 041 eso es del Director
+  // de Obra; el residente lo consulta (RF-33).
   laboratorio: {
     admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
-    supervisor: ['ver', 'listar', 'aprobar', 'anular'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar', 'escribir'],
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'aprobar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
   },
   // Spec 021. La bandeja de WhatsApp es del residente y de la gerencia (RF-14,
   // RF-15): corregir es escribir, y aprobar crea registros en la bitácora y en
@@ -310,7 +360,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // RF-85). Asociar un grupo a su obra es de la gerencia y lo exige su ruta.
   whatsapp: {
     admin: ['ver', 'listar', 'escribir', 'aprobar'],
-    supervisor: ['ver', 'listar', 'escribir', 'aprobar'],
+    residente: ['ver', 'listar', 'escribir', 'aprobar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -318,33 +368,41 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     // En OCC, WhatsApp es el historial y los grupos: aprobar se hace en la bandeja de la obra.
     encargado_occ: ['ver', 'listar'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'aprobar'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar'],
   },
   // Spec 030, RF-1 y RF-2. Los reportes son de la gerencia y del residente; escribir es
-  // registrar, anular o resolver un mantenimiento. Los intervalos por tipo de equipo
-  // y por máquina son solo de la gerencia, y eso lo exige su ruta (RF-24, RF-25).
+  // registrar o resolver un mantenimiento, y anularlo va aparte desde la 041: el residente
+  // ya no anula nada (RF-33, RF-35). Los intervalos por tipo de equipo y por máquina son
+  // solo de la gerencia, y eso lo exige su ruta (RF-24, RF-25).
   reportes: {
-    admin: ['ver', 'listar', 'escribir'],
-    supervisor: ['ver', 'listar', 'escribir'],
+    admin: ['ver', 'listar', 'escribir', 'anular'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
-    encargado_occ: ['ver', 'listar', 'escribir'],
+    encargado_occ: ['ver', 'listar', 'escribir', 'anular'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
   },
   // Spec 031, RF-2 y RF-3. El residente arma los borradores de su obra —contrato,
-  // pólizas, documentos, presupuesto y versiones—, pero **aprobar es de la gerencia**
-  // (D1): aprobar fija el valor contra el que se cobra. `aprobar` cubre también volver
-  // un contrato aprobado a borrador.
+  // pólizas, documentos, presupuesto y versiones—, pero **aprobar es de la gerencia y del
+  // Director de Proyectos** (D1, 041/RF-58): aprobar fija el valor contra el que se cobra.
+  // `aprobar` cubre también volver un contrato aprobado a borrador. `anular` es anular una
+  // póliza o un documento: desde la 041 no lo hace el residente (RF-33, RF-35).
   contrato: {
-    admin: ['ver', 'listar', 'escribir', 'aprobar'],
-    supervisor: ['ver', 'listar', 'escribir'],
+    admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
   },
   // Spec 028, RF-1, RF-2 y RF-59. Lo usan los roles del panel; lo que alcanza cada
   // uno lo decide `alcanceDelAsistente` (rules/asistente.ts) con sus módulos y su obra.
@@ -352,7 +410,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // no: el asistente no está en el celular.
   asistente: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: ['ver', 'listar'],
     encargado_planta: ['ver', 'listar'],
@@ -360,18 +418,22 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_occ: ['ver', 'listar'],
     // Spec 040, RF-12: la Auxiliar Administrativa también, con lo de Elemental.
     auxiliar_administrativa: ['ver', 'listar'],
+    director_obra: ['ver', 'listar'],
+    director_proyectos: ['ver', 'listar'],
   },
   // Spec 033, RF-32. Los datos de la empresa y de la obra: solo la gerencia, que es la que
   // los conoce y la única que ve las tarjetas. Los demás roles siguen con lo de hoy (RF-21).
   empresa: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
   // Spec 033, RF-34, RF-39 y RF-44. Los cortes financieros y el consolidado: solo la
   // gerencia. `anular` es anular un corte con su motivo; no hay corregir (RF-40).
@@ -380,13 +442,15 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // (rules/cortes.ts), porque esta tabla dice qué, no dónde.
   finanzas: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
   // Cambio del 2026-10-27 (menús definitivos). Recursos Humanos lo lleva Elemental; el
   // residente consulta el de su obra (spec 035).
@@ -395,19 +459,21 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // Qué personas ve cada uno lo decide el lugar (`alcanzaLaEmpresa`, la obra), no esta fila.
   rrhh: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar'],
     encargado_occ: ['ver', 'listar'],
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
+    director_obra: ['ver', 'listar'],
+    director_proyectos: ['ver', 'listar'],
   },
   // Compras y Tesorería de Elemental: donde se aprueban las solicitudes del grupo (RF-51).
   // Spec 036, RF-5: la gerencia además registra y anula las compras.
   compras: {
     admin: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -415,10 +481,12 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_occ: NADA,
     // Spec 040, RF-4, RF-5: aprueba, registra y anula como la gerencia (D2: sin tope).
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
   tesoreria: {
     admin: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -426,6 +494,8 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_occ: NADA,
     // Spec 040, RF-6.
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
   // Spec 034, RF-4 a RF-10. Cada quien ve y sube los de lo suyo —el residente, los de su
   // obra; el laboratorista, los de Geolab; el Encargado de OCC, los de OCC—, y la gerencia
@@ -434,7 +504,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // entra cada uno lo deciden `alcanzaLaEmpresa` y la obra de la persona, no esta fila.
   documentos: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: ['ver', 'listar', 'escribir'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
@@ -443,29 +513,35 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     // Spec 040, RF-8 y RF-10: también anula, con motivo. El lugar (solo Elemental y las
     // fichas que lleva) lo sigue decidiendo `alcanzaLaEmpresa`.
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
+    director_obra: ['ver', 'listar', 'escribir'],
+    director_proyectos: ['ver', 'listar', 'escribir'],
   },
   // El acceso directo a LicitApp (RF-49): el permiso es solo verlo en el menú.
   licitaciones: {
     admin: ['ver'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: ['ver'],
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
   // Pedir compras y pagos (RF-51): el residente y el almacenista en su obra, el
   // laboratorista en Geolab y la gerencia en nombre de OCC, Geolab o cualquier obra.
   solicitudes: {
     admin: ['ver', 'listar', 'escribir'],
-    supervisor: ['ver', 'listar', 'escribir'],
+    residente: ['ver', 'listar', 'escribir'],
     operador: NADA,
     almacenista: ['ver', 'listar', 'escribir'],
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar', 'escribir'],
     encargado_occ: ['ver', 'listar', 'escribir'],
     auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir'],
+    director_proyectos: ['ver', 'listar', 'escribir'],
   },
   /*
    * Spec 038 (RF-18, RF-20, RF-29). La Bitácora de una empresa, aparte de `bitacoras`:
@@ -476,13 +552,15 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
    */
   bitacora_empresa: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
-    supervisor: NADA,
+    residente: NADA,
     operador: NADA,
     almacenista: NADA,
     encargado_planta: NADA,
     laboratorista: ['ver', 'listar'],
     encargado_occ: ['ver', 'listar', 'escribir', 'anular'],
     auxiliar_administrativa: NADA,
+    director_obra: NADA,
+    director_proyectos: NADA,
   },
 };
 
@@ -503,7 +581,9 @@ export function alcanza(rol: Rol, modulo: ModuloConPermiso, accion: Accion): boo
  * dentro del módulo (RF-10).
  */
 export function modulosVisibles(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MODULOS): Modulo[] {
-  const deUnaObra = rol !== 'admin';
+  // Spec 041: el Director de Proyectos, como la gerencia, lleva todas las obras. Para el Encargado
+  // de OCC y la Auxiliar no cambia nada: sin obra, sus módulos de obra llegan todos encendidos.
+  const deUnaObra = !rolVeTodasLasObras(rol);
   return MODULOS.filter(
     (modulo) => alcanza(rol, modulo, 'ver') && !(deUnaObra && moduloApagado(modulo, modulos)),
   );
@@ -524,10 +604,17 @@ export function modulosVisibles(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MOD
  * explícito: los dos accesos nuevos, como la gerencia, solo los da la gerencia
  * (RF-17). El de laboratorista, igual (spec 018, RF-2), y el de Encargado de OCC
  * (spec 034).
+ *
+ * Spec 041: el personal de obra lo administran los directores. El Director de Proyectos da todo
+ * lo de obra salvo otro Director de Proyectos, que es de la gerencia (RF-12, RF-14); el Director
+ * de Obra, lo de obra salvo otro director (RF-26, RF-27), y solo en sus obras, que lo cierra la
+ * ruta; el Residente, solo operadores (RF-38).
  */
+const ACCESOS_DE_OBRA: readonly Rol[] = ['residente', 'operador', 'almacenista', 'encargado_planta', 'laboratorista'];
+
 const PUEDE_DAR: Record<Rol, readonly Rol[]> = {
   admin: ROLES,
-  supervisor: ['supervisor', 'operador'],
+  residente: ['operador'],
   operador: [],
   almacenista: [],
   encargado_planta: [],
@@ -536,11 +623,38 @@ const PUEDE_DAR: Record<Rol, readonly Rol[]> = {
   // Spec 035, RF-11, y 040, RF-11 (D5): registra personas sin acceso al panel; los accesos los
   // da la gerencia.
   auxiliar_administrativa: ['operador'],
+  director_proyectos: [...ACCESOS_DE_OBRA, 'director_obra'],
+  director_obra: ACCESOS_DE_OBRA,
 };
 
 /** ¿Puede dar este acceso a alguien? */
 export function puedeCambiarRol(rolDeQuienPide: Rol, rolDestino: Rol): boolean {
   return PUEDE_DAR[rolDeQuienPide].includes(rolDestino);
+}
+
+/**
+ * ¿Puede generarle la contraseña temporal del panel a alguien con este acceso? (041/RF-75, RF-76)
+ *
+ * Es dar acceso, así que sigue a `PUEDE_DAR`, y además pide `personas · activar`: la Auxiliar y
+ * el Residente registran personas, pero ninguno reparte entradas al panel. Solo hacia abajo,
+ * porque quien genera la contraseña la conoce hasta que la persona la cambia: generársela a un
+ * igual sería poder entrar con su cuenta. El operador no tiene contraseña: entra con su PIN.
+ */
+export function puedeGenerarClave(rolDeQuienPide: Rol, rolDeLaPersona: Rol): boolean {
+  return (
+    rolDeLaPersona !== 'operador' &&
+    alcanza(rolDeQuienPide, 'personas', 'activar') &&
+    puedeCambiarRol(rolDeQuienPide, rolDeLaPersona)
+  );
+}
+
+/**
+ * Por qué no puede dar de baja una obra, o `null` si puede (041/RF-77). Aparte de `obras · escribir`
+ * porque el Director de Proyectos registra y edita obras, pero sacar una del sistema es de la
+ * Gerencia: de una obra cuelga todo lo demás.
+ */
+export function motivoParaNoDarDeBajaObra(rol: Rol): string | null {
+  return rol === 'admin' ? null : 'Dar de baja una obra lo hace la Gerencia.';
 }
 
 /**
@@ -558,12 +672,35 @@ export function rolesQuePuedeDar(rolDeQuienPide: Rol): Rol[] {
  *
  * Lo usan el alta y la corrección de personas, que antes decían cosas distintas
  * —«Solo la gerencia puede registrar a otra gerencia» y «No puede dar más
- * permisos de los que usted tiene»—. Hoy todos los accesos que se reservan los da
- * solo la gerencia, así que el mensaje lo dice así: qué no se puede y quién sí.
+ * permisos de los que usted tiene»—. El mensaje dice qué no se puede y quién sí.
+ *
+ * Hasta la spec 041 «quién sí» era siempre la gerencia, y estaba escrito fijo. Desde la 041 los
+ * directores también dan accesos (RF-27, RF-39), así que sale de `PUEDE_DAR`, como el rechazo de
+ * la guardia sale de la tabla: un texto fijo se desalinea con la regla que dice.
  */
 export function motivoParaNoDarRol(rolDeQuienPide: Rol, rolDestino: Rol): string | null {
   if (puedeCambiarRol(rolDeQuienPide, rolDestino)) return null;
-  return `Solo la gerencia puede dar el acceso de ${ETIQUETA_ROL[rolDestino]}.`;
+  const quienes = ROLES.filter((rol) => puedeCambiarRol(rol, rolDestino)).map((rol) => QUIEN_ES[rol]);
+  const lista = quienes.length === 1 ? quienes[0] : `${quienes.slice(0, -1).join(', ')} o ${quienes[quienes.length - 1]}`;
+  return `Solo ${lista} ${quienes.length === 1 ? 'puede' : 'pueden'} dar el acceso de ${ETIQUETA_ROL[rolDestino]}.`;
+}
+
+/**
+ * Por qué el Residente no puede aprobar o anular, o `null` si no es ese caso (041/RF-34, RF-35).
+ *
+ * Aparte del rechazo general de la guardia porque a él hay que decirle **a quién acudir**: la
+ * acción existe en su obra y la hace otro cargo, no «otro oficio». La guardia lo usa cuando la
+ * tabla ya dijo que no; la excepción de la bandeja de WhatsApp (RF-37) la da la tabla.
+ */
+export function motivoParaNoAprobar(rol: Rol, accion: Accion): string | null {
+  if (rol !== 'residente') return null;
+  if (accion === 'aprobar') {
+    return 'El Residente no aprueba: lo aprueban el Director de Obra, el Director de Proyectos o la Gerencia.';
+  }
+  if (accion === 'anular') {
+    return 'El Residente no anula: pídaselo al Director de Obra, el Director de Proyectos o la Gerencia.';
+  }
+  return null;
 }
 
 /** Lo que se intentaba, para el rechazo. */
@@ -608,13 +745,15 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
 const QUIEN_ES: Record<Rol, string> = {
   admin: 'la gerencia',
-  supervisor: 'el residente o el director',
+  residente: 'el residente',
   operador: 'el operador',
   almacenista: 'el almacenista',
   encargado_planta: 'el encargado de planta',
   laboratorista: 'el laboratorista',
   encargado_occ: 'el encargado de OCC',
   auxiliar_administrativa: 'la auxiliar administrativa',
+  director_proyectos: 'el director de proyectos',
+  director_obra: 'el director de obra',
 };
 
 /**
@@ -647,7 +786,21 @@ export function motivoDeRechazo(modulo: ModuloConPermiso, accion: Accion): strin
  * pantalla; vive aquí para que las dos no se desalineen.
  */
 export function rolVeTodasLasObras(rol: Rol): boolean {
-  return rol === 'admin' || rol === 'encargado_occ' || rol === 'auxiliar_administrativa';
+  return (
+    rol === 'admin' ||
+    rol === 'encargado_occ' ||
+    rol === 'auxiliar_administrativa' ||
+    // Spec 041, RF-5: responde por todas las obras, sin que se le asigne ninguna.
+    rol === 'director_proyectos'
+  );
+}
+
+/**
+ * ¿Este rol puede tener varias obras a la vez? Solo el Director de Obra (041/RF-17). Los demás
+ * de obra tienen una —el Residente exactamente una (RF-32)— y los de `rolVeTodasLasObras`, todas.
+ */
+export function rolDeVariasObras(rol: Rol): boolean {
+  return rol === 'director_obra';
 }
 
 /**
@@ -725,7 +878,7 @@ export function moduloApagado(modulo: ModuloConPermiso, modulos: ModulosDeObra):
 /** El módulo para el que existe cada acceso de oficio; `null` los que no dependen de uno. */
 const MODULO_DEL_ROL: Record<Rol, Modulo | null> = {
   admin: null,
-  supervisor: null,
+  residente: null,
   operador: null,
   almacenista: 'almacen',
   encargado_planta: 'cantera',
@@ -733,6 +886,8 @@ const MODULO_DEL_ROL: Record<Rol, Modulo | null> = {
   // No depende de un interruptor de obra: no tiene obra.
   encargado_occ: null,
   auxiliar_administrativa: null,
+  director_proyectos: null,
+  director_obra: null,
 };
 
 /**

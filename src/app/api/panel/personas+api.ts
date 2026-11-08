@@ -1,17 +1,24 @@
-import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { dispositivos, fichasLaborales, obras, usuarios } from '@/db/servidor/esquema';
+import { dispositivos, fichasLaborales, obras, usuarios, usuariosAccesos, usuariosObras } from '@/db/servidor/esquema';
+import {
+  ejecutarLote,
+  obrasQueNoExisten,
+  sentenciasDeAcceso,
+  sentenciasDeObras,
+} from '@/features/auth/servidor/accesos';
 import { personaNueva } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { cuerpoJson, errorDePeticion, ok, responder } from '@/features/servidor/respuestas';
+import { cuerpoJson, errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
 import {
   empresaDelAccesoSinObra,
   empresaDeLaPersona,
   esEmpresa,
+  reparoDeObrasDelAcceso,
   reparoDelAccesoSinObra,
 } from '@/shared/rules/empresas';
 import { motivoParaNoDarRol, motivoParaNoDarRolEnObra } from '@/shared/rules/permisos';
@@ -25,6 +32,11 @@ import { USUARIO_IA_WHATSAPP } from '@/shared/rules/whatsapp-automatico';
  * entra al panel con contraseña. Partirla en dos tablas obligaría a mantener
  * sincronizadas dos identidades de la misma persona, que es como se acaban
  * teniendo bitácoras firmadas por alguien que ya no existe.
+ *
+ * Desde la spec 041 el Director de Obra lleva **varias** obras, y no en `usuarios.obra_id` sino en
+ * su historia de obras (`usuarios_obras`): su `obra_id` queda vacío. Por eso el listado le
+ * pregunta a esa tabla para saber en qué obras sale, y el alta escribe ahí sus obras y, para
+ * todos, la primera fila de su historia de accesos (RF-31, RF-42).
  *
  * Aquí no se crea ninguna credencial. El PIN lo elige el operador en su equipo
  * y nunca sale de él; la contraseña web y el código de activación llegan con el
@@ -43,6 +55,22 @@ export async function GET(peticion: Request) {
     const empresa = parametros.get('empresa');
     if (empresa !== null && !esEmpresa(empresa)) return errorDePeticion('Esa empresa no existe.');
     const obraId = parametros.get('obraId');
+
+    /**
+     * ¿Dirige esa obra? Un Director de Obra no tiene `obra_id`, así que sin esto saldría como
+     * el personal sin obra: en la lista de todas las obras, también de las que no son suyas
+     * (RF-20), y en ninguna al pedir las de una obra.
+     */
+    const dirige = (obra: string | null): SQL =>
+      obra
+        ? sql`exists (
+            select 1 from ${usuariosObras}
+            where ${usuariosObras.usuarioId} = ${usuarios.id}
+              and ${usuariosObras.hasta} is null
+              and ${usuariosObras.obraId} = ${obra}
+          )`
+        : sql`false`;
+    const esDirector = eq(usuarios.rol, 'director_obra');
 
     const filas = await baseServidor()
       .select({
@@ -78,6 +106,21 @@ export async function GET(peticion: Request) {
           select 1 from ${fichasLaborales}
           where ${fichasLaborales.usuarioId} = ${usuarios.id} and ${fichasLaborales.estado} = 'retirado'
         )`.mapWith(Boolean),
+        // Spec 041: las del Director de Obra, vigentes; para los demás, la suya o ninguna.
+        obras: sql<string[]>`case when ${usuarios.rol} = 'director_obra' then coalesce((
+            select json_agg(${usuariosObras.obraId} order by ${usuariosObras.desde})
+            from ${usuariosObras}
+            where ${usuariosObras.usuarioId} = ${usuarios.id} and ${usuariosObras.hasta} is null
+          ), '[]'::json)
+          when ${usuarios.obraId} is null then '[]'::json
+          else json_build_array(${usuarios.obraId}) end`,
+        // Spec 041, RF-51: pasó a Residente con la migración y está por revisar.
+        revisar: sql<boolean>`exists (
+          select 1 from ${usuariosAccesos}
+          where ${usuariosAccesos.usuarioId} = ${usuarios.id}
+            and ${usuariosAccesos.hasta} is null
+            and ${usuariosAccesos.revisar}
+        )`.mapWith(Boolean),
       })
       .from(usuarios)
       // `left` y no `inner`: el personal de gerencia no está adscrito a ninguna
@@ -86,10 +129,15 @@ export async function GET(peticion: Request) {
       .where(
         and(
           isNull(usuarios.eliminadoEn),
-          filtroDeObra(sesion, usuarios.obraId),
+          veTodasLasObras(sesion)
+            ? undefined
+            : or(
+                and(ne(usuarios.rol, 'director_obra'), filtroDeObra(sesion, usuarios.obraId)),
+                and(esDirector, dirige(sesion.obraId)),
+              ),
           // El usuario de sistema «IA WhatsApp» no es una persona de la obra (spec 024).
           ne(usuarios.id, USUARIO_IA_WHATSAPP.id),
-          obraId ? eq(usuarios.obraId, obraId) : undefined,
+          obraId ? or(eq(usuarios.obraId, obraId), and(esDirector, dirige(obraId))) : undefined,
         ),
       )
       .orderBy(asc(usuarios.nombreCompleto));
@@ -110,25 +158,53 @@ export async function POST(peticion: Request) {
     // encargado de planta solo los da la gerencia (001/RF-9, 008/RF-17). Antes
     // esta ruta solo miraba `admin`, y un residente habría podido registrar a un
     // almacenista si la tabla de permisos le abriera Personas.
+    // 422 desde la 041: el pedido llega bien formado y es la regla la que no lo deja (RF-14,
+    // RF-27, RF-39). El texto dice quién sí puede.
     const motivo = motivoParaNoDarRol(sesion.rol, datos.rol);
-    if (motivo) return errorDePeticion(motivo, 403);
+    if (motivo) return errorDePeticion(motivo, 422);
 
-    // Un residente registra gente para su obra y solo para su obra. Se
-    // rechaza en vez de corregirse en silencio: si escogió otra obra, o se
-    // equivocó o esperaba algo que este sistema no le permite, y en los dos
-    // casos conviene que se entere.
-    if (!veTodasLasObras(sesion)) {
-      if (datos.obraId && datos.obraId !== sesion.obraId) {
-        return errorDePeticion('Solo puede registrar personas en su propia obra.', 403);
+    const { obras: obrasPedidas, ...fila } = datos;
+    const todas = veTodasLasObras(sesion);
+
+    // Las obras como quedarían (041/RF-17, RF-32). El Director de Obra, en su lista y sin
+    // `obra_id`; los demás, en `obra_id`, y una lista de una sola se acepta como esa obra.
+    let suyas: string[];
+    if (fila.rol === 'director_obra') {
+      suyas = obrasPedidas ?? (fila.obraId ? [fila.obraId] : []);
+      fila.obraId = null;
+    } else {
+      if (obrasPedidas && obrasPedidas.length > 1) {
+        const mensaje = reparoDeObrasDelAcceso(fila.rol, obrasPedidas)?.mensaje ?? 'Este acceso lleva una sola obra.';
+        return Response.json({ error: mensaje, campos: { obras: mensaje } }, { status: 422 });
       }
-      datos.obraId ??= sesion.obraId;
+      fila.obraId ??= obrasPedidas?.[0] ?? null;
+      // Quien no ve todas registra en sus obras: si no dice cuál, en la que tiene en uso.
+      if (!todas) fila.obraId ??= sesion.obraId;
+      suyas = fila.obraId ? [fila.obraId] : [];
     }
+
+    // Una obra que no es suya «no existe» (RF-20, RF-26): un 404, como al pedirla por la
+    // dirección. Antes era un 403 que confirmaba que la obra existía.
+    if (!todas && suyas.some((o) => !sesion.obras.includes(o))) return noEncontrado('esa obra');
+    // Y quien no ve todas no deja a nadie sin obra: no lo vería después en su lista.
+    if (!todas && suyas.length === 0 && fila.rol !== 'director_proyectos') {
+      return Response.json({ error: 'Escoja la obra.', campos: { obraId: 'Escoja la obra.' } }, { status: 422 });
+    }
+
+    const reparoDeObras = reparoDeObrasDelAcceso(fila.rol, suyas);
+    if (reparoDeObras) {
+      return Response.json(
+        { error: reparoDeObras.mensaje, campos: { [reparoDeObras.campo]: reparoDeObras.mensaje } },
+        { status: 422 },
+      );
+    }
+    if ((await obrasQueNoExisten(suyas)).length > 0) return noEncontrado('esa obra');
 
     // El Encargado de OCC es de OCC y la Auxiliar Administrativa de Elemental, los dos sin obra
     // (spec 034, RF-13; spec 035, RF-8): sin empresa, la suya; con obra o con otra empresa,
     // se les dice por qué no.
-    datos.empresa ??= empresaDelAccesoSinObra(datos.rol);
-    const reparo = reparoDelAccesoSinObra({ rol: datos.rol, obraId: datos.obraId ?? null, empresa: datos.empresa ?? null });
+    fila.empresa ??= empresaDelAccesoSinObra(fila.rol);
+    const reparo = reparoDelAccesoSinObra({ rol: fila.rol, obraId: fila.obraId ?? null, empresa: fila.empresa ?? null });
     if (reparo) {
       return Response.json({ error: reparo.mensaje, campos: { [reparo.campo]: reparo.mensaje } }, { status: 400 });
     }
@@ -137,17 +213,24 @@ export async function POST(peticion: Request) {
     // almacenista en una obra sin almacén queda con una cuenta que solo sabe decirle
     // que no tiene dónde trabajar.
     const sinModulo = motivoParaNoDarRolEnObra(
-      datos.rol,
-      await modulosDeLaObra(datos.obraId ?? null),
+      fila.rol,
+      await modulosDeLaObra(fila.obraId ?? null),
     );
     if (sinModulo) {
       return Response.json({ error: sinModulo, campos: { rol: sinModulo } }, { status: 400 });
     }
 
-    const [creada] = await baseServidor()
-      .insert(usuarios)
-      .values({ id: uuidv7(), ...datos })
-      .returning({ id: usuarios.id, obraId: usuarios.obraId });
+    // La persona, sus obras de Director de Obra y la primera fila de su historia de accesos,
+    // en un solo lote: o queda todo, o nada (Neon ejecuta el `batch` como una transacción).
+    const db = baseServidor();
+    const id = uuidv7();
+    const ahora = new Date();
+    await ejecutarLote(db, [
+      db.insert(usuarios).values({ id, ...fila }),
+      ...sentenciasDeObras(db, id, { asignar: fila.rol === 'director_obra' ? suyas : [], retirar: [] }, sesion.id, ahora),
+      ...sentenciasDeAcceso(db, id, { rol: fila.rol, cargo: fila.cargo }, sesion.id, ahora),
+    ]);
+    const creada = { id, obraId: fila.obraId ?? null };
 
     // El nombre de la obra se resuelve aparte en vez de con un join en el
     // `returning`, que Postgres no admite. Son dos consultas solo al dar de
@@ -162,7 +245,14 @@ export async function POST(peticion: Request) {
       : null;
 
     return ok(
-      { ...datos, id: creada.id, obraNombre: nombreObra, empresa: empresaDeLaPersona(datos.empresa, datos.rol) },
+      {
+        ...fila,
+        id: creada.id,
+        obraNombre: nombreObra,
+        empresa: empresaDeLaPersona(fila.empresa, fila.rol),
+        obras: suyas,
+        revisar: false,
+      },
       201,
     );
   });

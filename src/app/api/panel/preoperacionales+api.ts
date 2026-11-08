@@ -193,8 +193,10 @@ export async function GET(peticion: Request) {
        */
       motivoVacio:
         // «Sin obra» es de cualquiera que no sea gerencia, no solo del residente:
-        // desde la spec 008 hay más roles que dependen de su obra.
-        filas.length > 0 ? null : !veTodasLasObras(sesion) && !sesion.obraId
+        // desde la spec 008 hay más roles que dependen de su obra. Desde la 041 se
+        // mira si tiene alguna, no si tiene una en uso: el Director de Obra con
+        // varias y ninguna abierta no es alguien «sin obra».
+        filas.length > 0 ? null : !veTodasLasObras(sesion) && sesion.obras.length === 0
           ? 'sin_obra'
           : 'sin_datos',
     });

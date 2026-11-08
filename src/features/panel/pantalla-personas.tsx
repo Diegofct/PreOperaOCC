@@ -8,9 +8,9 @@
  *    ninguna clave, y por eso no le sale el botón.
  *  · El **residente, el director, la gerencia, el almacenista y el encargado de
  *    planta** entran al panel con contraseña.
- *    Gerencia les genera una temporal desde aquí, se la entrega, y ellos la
- *    cambian al entrar. Así nadie acaba conociendo la contraseña definitiva de
- *    otro.
+ *    Gerencia o un director (spec 041, RF-75) les genera una temporal desde
+ *    aquí, se la entrega, y ellos la cambian al entrar. Así nadie acaba
+ *    conociendo la contraseña definitiva de otro.
  *
  * **Cargo y acceso son dos campos distintos**, y antes eran uno solo. El cargo es
  * el oficio en la obra —topógrafo, cadenero, maestro—; el acceso es lo que puede
@@ -36,8 +36,20 @@
  * Para el resto de las filas, reponer una contraseña pide confirmación antes: el
  * aviso dice **qué se rompe**, porque un "¿está seguro?" pelado se contesta que
  * sí por reflejo.
+ *
+ * ── Las obras de cada acceso (spec 041) ──
+ *
+ * Qué se pregunta sobre las obras lo decide `campoDeObras`, no esta pantalla: varias para el
+ * Director de Obra, una obligatoria para el Residente, ninguna para el Director de Proyectos y,
+ * al bajar a un Director de Obra, cuál conserva. El Residente y el Director de Obra no pueden
+ * pedir la lista de obras, así que sus opciones salen de las obras de su sesión.
+ *
+ * Quien revisa la lista «Pasaron a Residente» (gerencia y Director de Proyectos) carga a todas
+ * las personas también dentro de una obra, y la pantalla recorta a las de esa obra. Si se
+ * pidieran solo las de la obra, quien quedó **sin obra** con la migración no saldría nunca, y es
+ * justo a quien más hay que revisar (RF-65).
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
   CARGOS,
@@ -49,8 +61,9 @@ import {
 } from '@/shared/catalogos/cargos';
 
 import { useLugarDelPanel, useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+import { campoDeObras, puedeMarcarRevisado } from '@/shared/rules/cargos-de-obra';
 import { EMPRESAS, empresaDelAccesoSinObra, esEmpresa, type EmpresaId } from '@/shared/rules/empresas';
-import { alcanza, puedeCambiarRol, rolesQuePuedeDar } from '@/shared/rules/permisos';
+import { alcanza, puedeCambiarRol, puedeGenerarClave, rolesQuePuedeDar } from '@/shared/rules/permisos';
 
 
 import { api } from './cliente-api';
@@ -61,6 +74,7 @@ import {
   BarraDeListado,
   Boton,
   Campo,
+  Casilla,
   Celda,
   Confirmacion,
   Confirmado,
@@ -70,8 +84,10 @@ import {
   Paginacion,
   Seccion,
   Selector,
+  SelectorDeVarios,
   Tabla,
   type Columna,
+  type Opcion,
 } from './componentes';
 import {
   ETIQUETA_ROL,
@@ -79,8 +95,8 @@ import {
   type ClaveTemporalFila,
   type CodigosFila,
   type ObraFila,
+  type PersonaEditada,
   type PersonaFila,
-  type PersonaNueva,
   type Rol,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
@@ -129,16 +145,42 @@ const ORDEN_DE_COLUMNA: Record<string, (p: PersonaFila) => string | null> = {
 
 const COLUMNAS_ORDENABLES = Object.keys(ORDEN_DE_COLUMNA);
 
+/** Las obras de una persona: la lista del listado o, si no vino, la suya (spec 041). */
+function obrasDe(p: PersonaFila): string[] {
+  return p.obras ?? (p.obraId ? [p.obraId] : []);
+}
+
+/**
+ * Lo que dice la columna Obra. Un Director de Obra no tiene obra propia sino una lista, y quien
+ * mira puede no conocer todas: un Residente solo sabe el nombre de la suya. Las demás se cuentan
+ * sin nombrarlas, porque los nombres de obras ajenas no son de quien mira.
+ */
+function textoDeObras(p: PersonaFila, nombres: ReadonlyMap<string, string>): string | null {
+  if (p.rol !== 'director_obra') return p.obraNombre;
+  const suyas = obrasDe(p);
+  if (suyas.length === 0) return null;
+  const conocidas = suyas.flatMap((id) => nombres.get(id) ?? []);
+  const otras = suyas.length - conocidas.length;
+  if (conocidas.length === 0) return `${otras} ${otras === 1 ? 'obra' : 'obras'}`;
+  return otras > 0 ? `${conocidas.join(', ')} y ${otras} más` : conocidas.join(', ');
+}
+
+function mismasObras(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((o) => b.includes(o));
+}
+
 /** Sin orden elegido, por nombre como siempre (RF-17). */
 const ORDEN_INICIAL: Orden = { clave: 'nombre', sentido: 'asc' };
 
 export default function PantallaPersonas() {
   const { persona: yo, pedirCambioDeClave } = useSesionPanel();
-  const esGerencia = yo?.rol === 'admin';
   // Spec 035, RF-11: el selector ofrece solo lo que se puede dar (a la Auxiliar Administrativa,
-  // «Operador»); corregir, a quien se podría haber registrado; dar de baja, la gerencia.
+  // «Operador»); corregir, a quien se podría haber registrado. Dar de baja y emitir los códigos
+  // del celular van con `activar`: la gerencia y los dos directores (041/RF-72).
   const rolesQueDa = yo ? rolesQuePuedeDar(yo.rol) : [];
-  const puedeDarDeBaja = yo ? alcanza(yo.rol, 'personas', 'activar') : false;
+  const puedeActivar = yo ? alcanza(yo.rol, 'personas', 'activar') : false;
+  const puedeRevisar = yo ? puedeMarcarRevisado(yo.rol) : false;
+  const puedeListarObras = yo ? alcanza(yo.rol, 'obras', 'listar') : false;
 
   // Spec 033, RF-28: en una empresa, sus personas; dentro de una obra de Proyectos, las de
   // esa obra. En Elemental, que lleva los accesos de todo el grupo, todas, con un filtro
@@ -151,12 +193,51 @@ export default function PantallaPersonas() {
     useCallback(
       () =>
         api.personas.listar(
-          obraDeLaRuta ? { obraId: obraDeLaRuta } : empresaDelLugar ? { empresa: empresaDelLugar } : undefined,
+          // Quien revisa las carga todas: ver la cabecera del archivo.
+          obraDeLaRuta && !puedeRevisar
+            ? { obraId: obraDeLaRuta }
+            : empresaDelLugar
+              ? { empresa: empresaDelLugar }
+              : undefined,
         ),
-      [obraDeLaRuta, empresaDelLugar],
+      [obraDeLaRuta, empresaDelLugar, puedeRevisar],
     ),
   );
-  const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
+  const obras = useListado<ObraFila>(
+    useCallback(() => (puedeListarObras ? api.obras.listar() : Promise.resolve([])), [puedeListarObras]),
+  );
+
+  // Las obras que se pueden ofrecer: todas para quien las lista, las suyas para los demás.
+  const obrasDeLaSesion = yo?.obrasConNombre;
+  const opcionesDeObra = useMemo<Opcion[]>(
+    () =>
+      puedeListarObras
+        ? obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))
+        : (obrasDeLaSesion ?? []).map((o) => ({ valor: o.id, etiqueta: o.nombre })),
+    [puedeListarObras, obras.datos, obrasDeLaSesion],
+  );
+  const nombresDeObra = useMemo(
+    () => new Map(opcionesDeObra.map((o) => [o.valor, o.etiqueta])),
+    [opcionesDeObra],
+  );
+  const ordenDeColumna = useMemo<Record<string, (p: PersonaFila) => string | null>>(
+    () => ({ ...ORDEN_DE_COLUMNA, obra: (p) => textoDeObras(p, nombresDeObra) }),
+    [nombresDeObra],
+  );
+
+  // Spec 041, RF-51: quienes pasaron a Residente con la migración y falta revisar.
+  const porRevisar = useMemo(
+    () => (puedeRevisar ? personas.datos.filter((p) => p.revisar) : []),
+    [puedeRevisar, personas.datos],
+  );
+  const [soloRevisar, setSoloRevisar] = useState(false);
+  // Al revisar a la última, la casilla desaparece: no puede quedar filtrando una lista vacía.
+  const viendoPorRevisar = soloRevisar && porRevisar.length > 0;
+  const delLugar = useMemo(() => {
+    if (viendoPorRevisar) return porRevisar;
+    if (puedeRevisar && obraDeLaRuta) return personas.datos.filter((p) => obrasDe(p).includes(obraDeLaRuta));
+    return personas.datos;
+  }, [viendoPorRevisar, porRevisar, puedeRevisar, obraDeLaRuta, personas.datos]);
 
   /*
    * A quién se le está reponiendo la contraseña, y a quién se le están emitiendo
@@ -186,6 +267,9 @@ export default function PantallaPersonas() {
   const [obraDelSelector, setObraId] = useState<string | null>(null);
   // Registrada dentro de una obra, la persona queda en esa obra (RF-19).
   const obraId = obraDeLaRuta ?? obraDelSelector;
+  // Las de un Director de Obra (041/RF-17). Van aparte: los demás accesos llevan una sola.
+  const [obrasNuevas, setObrasNuevas] = useState<string[]>([]);
+  const campoNuevo = campoDeObras(rol);
 
   /**
    * Elegir el cargo propone el acceso que le corresponde, y ahí se acaba la
@@ -205,6 +289,8 @@ export default function PantallaPersonas() {
    * RF-13; spec 035, RF-8): se les ponen solos.
    */
   function elegirAcceso(nuevo: Rol) {
+    // Quien pasa a Director de Obra arranca con la obra que ya estaba escogida.
+    if (nuevo === 'director_obra' && rol !== 'director_obra') setObrasNuevas(obraId ? [obraId] : []);
     setRol(nuevo);
     const suEmpresa = empresaDelAccesoSinObra(nuevo);
     if (suEmpresa) {
@@ -224,11 +310,11 @@ export default function PantallaPersonas() {
   );
 
   const filtrado = useListadoFiltrado(
-    personas.datos,
-    (p) => [p.nombreCompleto, p.usuario, p.documento, nombreDeCargo(p.cargo), p.obraNombre],
+    delLugar,
+    (p) => [p.nombreCompleto, p.usuario, p.documento, nombreDeCargo(p.cargo), textoDeObras(p, nombresDeObra)],
     useCallback(
       (p: PersonaFila) =>
-        (obraFiltro === null || p.obraId === obraFiltro) &&
+        (obraFiltro === null || obrasDe(p).includes(obraFiltro)) &&
         (accesoFiltro === null || p.rol === accesoFiltro) &&
         // `empresa` ya viene resuelta: la suya o la de su rol (spec 033, RF-46).
         (empresaFiltro === null || p.empresa === empresaFiltro),
@@ -238,11 +324,11 @@ export default function PantallaPersonas() {
       (filas: PersonaFila[]) =>
         ordenarFilas(
           filas,
-          ORDEN_DE_COLUMNA[orden.clave] ?? ORDEN_DE_COLUMNA.nombre,
+          ordenDeColumna[orden.clave] ?? ordenDeColumna.nombre,
           orden.sentido,
           (p) => p.nombreCompleto,
         ),
-      [orden],
+      [orden, ordenDeColumna],
     ),
   );
 
@@ -257,7 +343,17 @@ export default function PantallaPersonas() {
 
   async function crear() {
     const creada = await personas.ejecutar(() =>
-      api.personas.crear({ usuario, nombreCompleto, documento, rol, cargo, obraId, empresa, activo: true }),
+      api.personas.crear({
+        usuario,
+        nombreCompleto,
+        documento,
+        rol,
+        cargo,
+        obraId: campoNuevo === 'varias' || campoNuevo === 'ninguna' ? null : obraId,
+        ...(campoNuevo === 'varias' ? { obras: obrasNuevas } : {}),
+        empresa,
+        activo: true,
+      }),
     );
     if (creada) {
       setHecho(`${nombreCompleto} quedó registrada.`);
@@ -270,8 +366,16 @@ export default function PantallaPersonas() {
       // almacenista, como almacenista— sin que nadie lo hubiera elegido.
       setRol('operador');
       setObraId(null);
+      setObrasNuevas([]);
       setEmpresa(empresaPropuesta);
     }
+  }
+
+  /** Residente estaba bien: se apaga el aviso sin cambiarle nada (041/RF-51). */
+  async function marcarRevisada(p: PersonaFila) {
+    setHecho(null);
+    const bien = await personas.ejecutar(() => api.personas.marcarRevisada(p.id));
+    if (bien) setHecho(`${p.nombreCompleto} quedó revisada.`);
   }
 
   const columnas: Columna<PersonaFila>[] = [
@@ -290,6 +394,7 @@ export default function PantallaPersonas() {
         <>
           <Celda>{p.nombreCompleto}</Celda>
           {p.desdeWhatsapp ? <Etiqueta tono="neutro">Creado desde WhatsApp</Etiqueta> : null}
+          {puedeRevisar && p.revisar ? <Etiqueta tono="atencion">Por revisar</Etiqueta> : null}
         </>
       ),
       ordenar: ORDEN_DE_COLUMNA.nombre,
@@ -325,8 +430,8 @@ export default function PantallaPersonas() {
       // La que cede cuando falta sitio (spec 022, RF-27): el nombre de una obra se
       // lee bien en dos renglones, y así la columna de botones conserva su ancho.
       anchoMinimo: 88,
-      pintar: (p) => <Celda>{p.obraNombre ?? '—'}</Celda>,
-      ordenar: ORDEN_DE_COLUMNA.obra,
+      pintar: (p) => <Celda>{textoDeObras(p, nombresDeObra) ?? '—'}</Celda>,
+      ordenar: ordenDeColumna.obra,
     },
     {
       clave: 'acciones',
@@ -354,19 +459,23 @@ export default function PantallaPersonas() {
 
         return (
           <Acciones>
-            {/* Repartir accesos al panel es de gerencia, y un operador no entra a
-                la web: su acceso es el celular con su PIN. */}
-            {esGerencia && p.rol !== 'operador' ? (
+            {/* La gerencia y los directores, a quienes pueden dar acceso (041/RF-75). Un
+                operador no entra a la web: su acceso es el celular con su PIN. */}
+            {yo && puedeGenerarClave(yo.rol, p.rol) ? (
               <Boton titulo="Dar acceso" tono="secundario" onPress={() => setAccesoDe(p)} />
             ) : null}
             {/* El operador no entra al panel: lo suyo es activar su celular. */}
-            {operaVehiculos(p.cargo) ? (
+            {puedeActivar && operaVehiculos(p.cargo) ? (
               <Boton titulo="Códigos" tono="secundario" onPress={() => setCodigosDe(p)} />
+            ) : null}
+            {puedeRevisar && p.revisar ? (
+              <Boton titulo="Revisado" tono="secundario" onPress={() => marcarRevisada(p)} />
             ) : null}
             {yo && puedeCambiarRol(yo.rol, p.rol) ? (
               <Boton titulo="Corregir" tono="secundario" onPress={() => setEditando(p)} />
             ) : null}
-            {puedeDarDeBaja ? (
+            {/* El servidor rechaza la baja de quien esta persona no podría registrar. */}
+            {puedeActivar && yo && puedeCambiarRol(yo.rol, p.rol) ? (
               <Boton
                 titulo="Dar de baja"
                 tono="peligro"
@@ -471,14 +580,25 @@ export default function PantallaPersonas() {
             onChange={(v) => elegirAcceso((v as Rol) ?? 'operador')}
             ancho={220}
           />
-          {obraDeLaRuta || empresaDelAccesoSinObra(rol) ? null : (
+          {campoNuevo === 'varias' ? (
+            <SelectorDeVarios
+              etiqueta="Obras"
+              obligatorio
+              valores={obrasNuevas}
+              opciones={opcionesDeObra}
+              onChange={setObrasNuevas}
+              error={personas.errorDe('obras')}
+            />
+          ) : obraDeLaRuta || campoNuevo === 'ninguna' ? null : (
             <Selector
               etiqueta="Obra"
+              obligatorio={campoNuevo === 'una-obligatoria'}
               valor={obraId}
-              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
+              opciones={opcionesDeObra}
               onChange={setObraId}
-              permiteVacio
-              vacio="Sin obra (gerencia)"
+              permiteVacio={campoNuevo === 'una'}
+              vacio={campoNuevo === 'una' ? 'Sin obra (gerencia)' : 'Escoja la obra'}
+              error={personas.errorDe('obras') ?? personas.errorDe('obraId')}
               ancho={240}
             />
           )}
@@ -533,7 +653,7 @@ export default function PantallaPersonas() {
       {editando ? (
         <VentanaCorregirPersona
           persona={editando}
-          obras={obras.datos}
+          opcionesDeObra={opcionesDeObra}
           rolesQueDa={rolesQueDa}
           onCerrar={() => setEditando(null)}
           onGuardado={(nombre) => {
@@ -545,6 +665,13 @@ export default function PantallaPersonas() {
       ) : null}
 
       <Seccion titulo="Personas registradas">
+        {porRevisar.length > 0 ? (
+          <Aviso tono="info">
+            {porRevisar.length === 1
+              ? '1 persona pasó a Residente con el cambio de accesos: falta revisar si le corresponde otro.'
+              : `${porRevisar.length} personas pasaron a Residente con el cambio de accesos: falta revisar si les corresponde otro.`}
+          </Aviso>
+        ) : null}
         <BarraDeListado
           busqueda={filtrado.busqueda}
           onBuscar={filtrado.buscar}
@@ -566,7 +693,7 @@ export default function PantallaPersonas() {
             <Selector
               etiqueta="Obra"
               valor={obraFiltro}
-              opciones={obras.datos.map((o) => ({ valor: o.id, etiqueta: o.nombre }))}
+              opciones={opcionesDeObra}
               onChange={setObraFiltro}
               permiteVacio
               vacio="Todas las obras"
@@ -582,6 +709,13 @@ export default function PantallaPersonas() {
             vacio="Cualquier acceso"
             ancho={210}
           />
+          {porRevisar.length > 0 ? (
+            <Casilla
+              etiqueta="Pasaron a Residente: revisar"
+              marcada={soloRevisar}
+              onChange={setSoloRevisar}
+            />
+          ) : null}
         </BarraDeListado>
 
         <Tabla
@@ -590,7 +724,7 @@ export default function PantallaPersonas() {
           orden={orden}
           alOrdenar={ordenarPor}
           vacio={
-            personas.datos.length === 0
+            delLugar.length === 0
               ? 'Aquí va quién trabaja en OCC, con su cargo y su nivel de acceso. Los operadores entran al celular con un PIN; el personal del panel, con contraseña. Registre a la primera persona en el formulario de arriba.'
               : 'Nadie coincide con lo que busca.'
           }
@@ -628,13 +762,13 @@ export default function PantallaPersonas() {
  */
 function VentanaCorregirPersona({
   persona,
-  obras,
+  opcionesDeObra,
   rolesQueDa,
   onCerrar,
   onGuardado,
 }: {
   persona: PersonaFila;
-  obras: ObraFila[];
+  opcionesDeObra: Opcion[];
   /** Lo que puede dar quien corrige (spec 035, RF-11). */
   rolesQueDa: readonly Rol[];
   onCerrar: () => void;
@@ -647,6 +781,16 @@ function VentanaCorregirPersona({
   const [obraId, setObraId] = useState<string | null>(persona.obraId);
   // La que se ve: la suya o la de su rol (RF-46). Elegir otra la guarda (RF-45).
   const [empresa, setEmpresa] = useState<EmpresaId>(persona.empresa);
+  // Spec 041. Quien sube a Director de Obra arranca con la obra que tenía (RF-71), y a quien
+  // tiene una sola obra se le muestra ya escogida: no hay nada que elegir (RF-70).
+  const obrasDeAntes = obrasDe(persona);
+  const [obrasElegidas, setObrasElegidas] = useState<string[]>(obrasDeAntes);
+  const [obraConservada, setObraConservada] = useState<string | null>(
+    obrasDeAntes.length === 1 ? obrasDeAntes[0] : null,
+  );
+  const campo = campoDeObras(rol, persona.rol);
+  // Un Director de Obra sin obras (la migración deja alguno) no tiene nada que conservar.
+  const directorSinObras = campo === 'conservada' && obrasDeAntes.length === 0;
 
   /** Los accesos sin obra van con su empresa (spec 034, RF-13; spec 035, RF-8). */
   function elegirAcceso(nuevo: Rol) {
@@ -673,12 +817,18 @@ function VentanaCorregirPersona({
     if (faltaNombre) return;
 
     // Solo los campos que de verdad cambiaron.
-    const cambios: Partial<PersonaNueva> = {};
+    const cambios: PersonaEditada = {};
     if (nombreCompleto !== persona.nombreCompleto) cambios.nombreCompleto = nombreCompleto;
     if (documento !== (persona.documento ?? '')) cambios.documento = documento;
     if (cargo !== persona.cargo) cambios.cargo = cargo;
     if (rol !== persona.rol) cambios.rol = rol;
-    if (obraId !== persona.obraId) cambios.obraId = obraId;
+    if (campo === 'varias') {
+      if (rol !== persona.rol || !mismasObras(obrasElegidas, obrasDeAntes)) cambios.obras = obrasElegidas;
+    } else if (campo === 'conservada') {
+      if (obraConservada) cambios.obraConservada = obraConservada;
+    } else if (campo !== 'ninguna' && obraId !== persona.obraId) {
+      cambios.obraId = obraId;
+    }
     if (empresa !== persona.empresa) cambios.empresa = empresa;
 
     if (Object.keys(cambios).length === 0) {
@@ -693,6 +843,11 @@ function VentanaCorregirPersona({
   return (
     <Modal titulo={`Corregir a ${persona.usuario}`} onCerrar={onCerrar}>
       {accion.error ? <Aviso tono="error">{accion.error}</Aviso> : null}
+      {directorSinObras ? (
+        <Aviso tono="info">
+          Este Director de Obra no tiene obras. Asígnele una, guarde, y después cámbiele el acceso.
+        </Aviso>
+      ) : null}
       <Formulario>
         <Campo
           etiqueta="Nombre completo"
@@ -724,18 +879,41 @@ function VentanaCorregirPersona({
           error={accion.campoConError('rol')}
           ancho={220}
         />
-        {empresaDelAccesoSinObra(rol) ? null : (
+        {campo === 'varias' ? (
+          <SelectorDeVarios
+            etiqueta="Obras"
+            obligatorio
+            valores={obrasElegidas}
+            opciones={opcionesDeObra}
+            onChange={setObrasElegidas}
+            error={accion.campoConError('obras')}
+          />
+        ) : null}
+        {campo === 'conservada' && !directorSinObras ? (
           <Selector
-            etiqueta="Obra"
-            valor={obraId}
-            opciones={obras.map((o) => ({ valor: o.id, etiqueta: o.nombre, detalle: o.codigo }))}
-            onChange={setObraId}
-            permiteVacio
-            vacio="Sin obra (gerencia)"
-            error={accion.campoConError('obraId')}
+            etiqueta="Obra que conserva"
+            obligatorio
+            valor={obraConservada}
+            opciones={opcionesDeObra.filter((o) => obrasDeAntes.includes(o.valor))}
+            onChange={setObraConservada}
+            vacio="Escoja la obra"
+            error={accion.campoConError('obraConservada') ?? accion.campoConError('obras')}
             ancho={240}
           />
-        )}
+        ) : null}
+        {campo === 'una' || campo === 'una-obligatoria' ? (
+          <Selector
+            etiqueta="Obra"
+            obligatorio={campo === 'una-obligatoria'}
+            valor={obraId}
+            opciones={opcionesDeObra}
+            onChange={setObraId}
+            permiteVacio={campo === 'una'}
+            vacio={campo === 'una' ? 'Sin obra (gerencia)' : 'Escoja la obra'}
+            error={accion.campoConError('obras') ?? accion.campoConError('obraId')}
+            ancho={240}
+          />
+        ) : null}
         <Selector
           etiqueta="Empresa"
           obligatorio

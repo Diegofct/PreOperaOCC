@@ -61,7 +61,16 @@ function numeroEscrito(texto: string): number | null | undefined {
   return leerLectura(limpio) ?? undefined;
 }
 
-export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: ConsultaDeReporte; esGerencia: boolean }) {
+export function PestanaMantenimiento({
+  consulta,
+  esGerencia,
+  puedeAnular,
+}: {
+  consulta: ConsultaDeReporte;
+  esGerencia: boolean;
+  /** El Residente registra y resuelve, pero no anula (041/RF-35, RF-36). */
+  puedeAnular: boolean;
+}) {
   const { obraId, tipo, fecha } = consulta;
   const reporte = useListado<Reporte>(
     useCallback(async () => [await api.reportes.de('mantenimiento', { obraId, tipo, fecha })], [obraId, tipo, fecha]),
@@ -208,7 +217,7 @@ export function PestanaMantenimiento({ consulta, esGerencia }: { consulta: Consu
       ancho: 110,
       anchoMinimo: 110,
       pintar: (r) =>
-        r.anuladoEn ? null : (
+        r.anuladoEn || !puedeAnular ? null : (
           <Acciones>
             <Boton titulo="Anular" tono="peligro" onPress={() => setVentana({ tipo: 'anular', registro: r })} />
           </Acciones>

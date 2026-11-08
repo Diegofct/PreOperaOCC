@@ -5,7 +5,7 @@ import { asistenteConversaciones, bitacoras, contratos, media, partesDeObra, pre
 import { archivoGeneradoAlAlcance } from '@/features/asistente/servidor/conversaciones';
 import { disposicionDelArchivo, documentoAlAlcance } from '@/features/documentos/servidor/documentos';
 import { leer } from '@/features/media/servidor/almacen';
-import { alcanzaLaImagen, veTodasLasObras } from '@/features/servidor/alcance';
+import { alcanzaLaImagen, esDeSusObras, veTodasLasObras } from '@/features/servidor/alcance';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
@@ -189,9 +189,11 @@ async function alcanzaElMensaje(sesion: PersonaEnSesion, mensajeId: string): Pro
   if (veTodasLasObras(sesion)) return true;
 
   // La misma regla que la bandeja (`whatsapp/servidor/obra.ts`): lo decidido, en
-  // la obra donde se decidió; lo demás, en la de su grupo.
+  // la obra donde se decidió; lo demás, en la de su grupo. Desde la 041, una foto
+  // suelta de cualquiera de sus obras, no solo de la que tiene en uso (RF-19); sin
+  // obra, de nadie más que de quien ve todas.
   const obraId = await obraDeUnMensaje(mensajeId);
-  return Boolean(obraId && sesion.obraId && obraId === sesion.obraId);
+  return esDeSusObras(sesion, obraId);
 }
 
 /** El adjunto cuelga de la conversación; solo su dueño lo ve, tampoco la gerencia (028/RF-40). */

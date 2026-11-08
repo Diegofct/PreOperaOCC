@@ -13,6 +13,7 @@
 import {
   alcanza,
   moduloApagado,
+  rolVeTodasLasObras,
   TODOS_LOS_MODULOS,
   type ModuloConPermiso,
   type ModulosDeObra,
@@ -178,7 +179,9 @@ export function menuDeObra(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MODULOS)
  */
 const EMPRESAS_DEL_ROL: Record<Rol, readonly EmpresaId[]> = {
   admin: IDS_DE_EMPRESA,
-  supervisor: ['proyectos'],
+  residente: ['proyectos'],
+  director_proyectos: ['proyectos'],
+  director_obra: ['proyectos'],
   almacenista: ['proyectos'],
   encargado_planta: ['proyectos'],
   laboratorista: ['geolab'],
@@ -194,11 +197,21 @@ export function alcanzaLaEmpresa(rol: Rol, empresa: EmpresaId): boolean {
 /**
  * ¿Puede abrir esta obra de Proyectos? (RF-12). Gerencia, cualquiera; los demás, solo la
  * suya. La API lo vuelve a comprobar con `alcance.ts`: esto decide qué se pinta.
+ *
+ * Spec 041: el Director de Proyectos abre cualquiera, como la gerencia (RF-5), y el Director
+ * de Obra cualquiera de **las suyas**, no solo la que tiene en uso (RF-19). Por eso se mira
+ * `obras`, la lista de asignadas, y no `obraId`. `obras` es opcional mientras haya quien
+ * llame sin ella (la sesión la lleva desde la T6 de la 041; el panel, desde la T12): sin ella
+ * vale la obra única, que es lo que había antes.
  */
-export function alcanzaLaObraDeLaRuta(persona: { rol: Rol; obraId: string | null }, obraId: string): boolean {
+export function alcanzaLaObraDeLaRuta(
+  persona: { rol: Rol; obraId: string | null; obras?: readonly string[] },
+  obraId: string,
+): boolean {
   if (!alcanzaLaEmpresa(persona.rol, 'proyectos')) return false;
-  if (persona.rol === 'admin') return true;
-  return persona.obraId === obraId;
+  if (rolVeTodasLasObras(persona.rol)) return true;
+  const suyas = persona.obras ?? (persona.obraId ? [persona.obraId] : []);
+  return suyas.includes(obraId);
 }
 
 /** Lo que se le dice a quien abre una empresa o una obra que no es suya (RF-12). */
@@ -215,7 +228,9 @@ const EMPRESA_DEL_ROL: Record<Rol, EmpresaId> = {
   laboratorista: 'geolab',
   encargado_occ: 'occ',
   auxiliar_administrativa: 'elemental',
-  supervisor: 'proyectos',
+  residente: 'proyectos',
+  director_proyectos: 'proyectos',
+  director_obra: 'proyectos',
   almacenista: 'proyectos',
   encargado_planta: 'proyectos',
 };
@@ -236,6 +251,13 @@ const ACCESOS_SIN_OBRA: Partial<Record<Rol, { empresa: EmpresaId; deEmpresa: str
     deEmpresa: 'Elemental',
     quien: 'La Auxiliar Administrativa',
     porque: 'en Elemental lleva lo administrativo de todas',
+  },
+  // Spec 041, RF-5 y RF-16: responde por todas las obras de Proyectos sin estar en ninguna.
+  director_proyectos: {
+    empresa: 'proyectos',
+    deEmpresa: 'Proyectos',
+    quien: 'El Director de Proyectos',
+    porque: 've todas las obras',
   },
 };
 
@@ -263,6 +285,35 @@ export function reparoDelAccesoSinObra(persona: {
   return null;
 }
 
+/**
+ * Por qué no puede quedar con esas obras, o `null` (spec 041, RF-16, RF-18, RF-32).
+ *
+ * Es la regla de **cuántas** obras lleva cada cargo de obra, aparte de `reparoDelAccesoSinObra`
+ * porque aquí el Director de Obra lleva una lista: el Director de Obra, una o varias; el
+ * Residente, exactamente una; el Director de Proyectos, ninguna, y su mensaje es el de los
+ * accesos sin obra, para que las dos reglas digan lo mismo. Los demás accesos no se miran aquí.
+ * Se evalúa la persona **como quedaría**, en el alta y en la corrección.
+ */
+export function reparoDeObrasDelAcceso(
+  rol: Rol,
+  obras: readonly string[],
+): { campo: 'obras'; mensaje: string } | null {
+  if (rol === 'director_obra' && obras.length === 0) {
+    return { campo: 'obras', mensaje: 'El Director de Obra necesita al menos una obra: escoja una.' };
+  }
+  if (rol === 'residente' && obras.length === 0) {
+    return { campo: 'obras', mensaje: 'El Residente necesita su obra: escoja una.' };
+  }
+  if (rol === 'residente' && obras.length > 1) {
+    return { campo: 'obras', mensaje: 'El Residente está en una sola obra.' };
+  }
+  const sinObra = rol === 'director_proyectos' ? ACCESOS_SIN_OBRA[rol] : undefined;
+  if (sinObra && obras.length > 0) {
+    return { campo: 'obras', mensaje: `${sinObra.quien} no lleva obra: ${sinObra.porque}.` };
+  }
+  return null;
+}
+
 /* ── Rutas ─────────────────────────────────────────────────────────────── */
 
 /** `/panel/<empresa>/<pagina>`, o la portada de la empresa sin página. */
@@ -284,10 +335,10 @@ export function rutaDeProyectos(ir?: string): string {
 /**
  * A dónde entra cada rol al iniciar sesión (RF-6 a RF-9).
  *
- * `obras` son las obras de la persona. Hoy es una o ninguna (`usuarios.obra_id`); con
- * varias se le muestra la lista (RF-7), y sin ninguna también: allí se le dice «No
- * tienes obras asignadas; pide acceso a gerencia». `null` es que no entra al panel (el
- * operador).
+ * `obras` son las obras de la persona: una o ninguna para casi todos (`usuarios.obra_id`),
+ * y una o varias para el Director de Obra desde la spec 041 (RF-24, RF-25). Con varias se le
+ * muestra la lista (RF-7), y sin ninguna también: allí se le dice «No tienes obras asignadas;
+ * pide acceso a gerencia». `null` es que no entra al panel (el operador).
  */
 export function destinoAlEntrar(persona: { rol: Rol; obras: readonly string[] }): string | null {
   const unaObra = persona.obras.length === 1 ? persona.obras[0] : null;
@@ -303,7 +354,11 @@ export function destinoAlEntrar(persona: { rol: Rol; obras: readonly string[] })
       // Spec 035, RF-9: sin tarjetas. Desde la 040 entra a Compras de Elemental y no a Recursos
       // Humanos: ahí está lo pendiente de aprobar (040, caso límite «Primer arranque»).
       return rutaDeEmpresa('elemental', 'compras');
-    case 'supervisor':
+    case 'director_proyectos':
+      // Spec 041, RF-5: ve todas las obras; entra a la lista, como la gerencia a Proyectos.
+      return rutaDeProyectos();
+    case 'residente':
+    case 'director_obra':
       // La portada de la obra es el resumen del día, el Inicio de antes.
       return unaObra ? rutaDeObra(unaObra) : rutaDeProyectos();
     case 'almacenista':
@@ -375,7 +430,10 @@ const PARAMETROS_DE_OBRA = ['obraId', 'obra'];
  * la empresa de quien los abre: Geolab para el laboratorista; Geolab o Elemental para
  * gerencia.
  */
-export function rutaNueva(direccion: string, persona: { rol: Rol; obraId: string | null }): string | null {
+export function rutaNueva(
+  direccion: string,
+  persona: { rol: Rol; obraId: string | null; obras?: readonly string[] },
+): string | null {
   const [camino, consulta = ''] = direccion.split('?');
   const partes = camino.replace(/\/+$/, '').split('/');
   // '', 'panel', '<pantalla>' y nada más: el ensayo (`/panel/laboratorio/<id>`) sigue igual.
@@ -428,7 +486,17 @@ export function rutaNueva(direccion: string, persona: { rol: Rol; obraId: string
     if (pagina === 'asistente') return conParametros(rutaDeEmpresa('elemental', 'asistente'));
     return conParametros(rutaDeProyectos(pagina));
   }
-  return conParametros(persona.obraId ? rutaDeObra(persona.obraId, pagina) : rutaDeProyectos());
+  // Spec 041: el Director de Proyectos va a la obra del enlace, como la gerencia, y sin ella a la
+  // lista, que lo lleva a esa página al escoger (RF-5). Los demás, a la del enlace solo si es
+  // suya —el Director de Obra tiene varias (RF-19)—; con una sola, a esa; con varias, a la
+  // lista de las suyas (RF-24). Una ajena se ignora, como al pedirla por la dirección (RF-20).
+  if (persona.rol === 'director_proyectos') {
+    return conParametros(pedida ? rutaDeObra(pedida, pagina) : rutaDeProyectos(pagina));
+  }
+  const suyas = persona.obras ?? (persona.obraId ? [persona.obraId] : []);
+  if (pedida && suyas.includes(pedida)) return conParametros(rutaDeObra(pedida, pagina));
+  if (suyas.length === 1) return conParametros(rutaDeObra(suyas[0], pagina));
+  return conParametros(suyas.length > 1 ? rutaDeProyectos(pagina) : rutaDeProyectos());
 }
 
 /* ── Reportes de WhatsApp por empresa ──────────────────────────────────── */
@@ -489,15 +557,17 @@ export interface EnlaceDelMenu {
 
 /**
  * El menú lateral de un lugar del panel (RF-10, RF-11, RF-13 a RF-18, RF-20):
- *  · `navegacion`: «← Empresas» dentro de una empresa y «Cambiar de obra» dentro de una
- *    obra, solo para gerencia, que es la que va y viene entre empresas y obras;
+ *  · `navegacion`: «← Empresas» dentro de una empresa, solo para gerencia, que es la que va
+ *    y viene entre empresas; y «Cambiar de obra» dentro de una obra, para quien tiene más de
+ *    una: la gerencia, el Director de Proyectos y el Director de Obra con varias (041/RF-67).
+ *    Lleva a la lista con la página de ahora, para abrir la misma en la otra obra;
  *  · `entradas`: las páginas del menú de la empresa o de la obra; en la portada de
  *    tarjetas, las cuatro empresas.
  * `modulosDeObra` son los de la obra del lugar (spec 017), para esconder los apagados.
  */
 export function menuDelLugar(
   lugar: LugarDelPanel | null,
-  quien: Rol | { rol: Rol; obraId: string | null },
+  quien: Rol | { rol: Rol; obraId: string | null; obras?: readonly string[] },
   modulosDeObra: ModulosDeObra = TODOS_LOS_MODULOS,
 ): { navegacion: EnlaceDelMenu[]; entradas: EnlaceDelMenu[] } {
   // Con la persona (y no solo el rol), el menú de un lugar al que no entra sale vacío: la
@@ -525,10 +595,14 @@ export function menuDelLugar(
     };
   }
   if (lugar.tipo === 'proyectos') return { navegacion: gerencia ? [aEmpresas] : [], entradas: [] };
+  const cambiaDeObra = gerencia || rol === 'director_proyectos' || (persona?.obras?.length ?? 0) > 1;
+  const cambiarDeObra: EnlaceDelMenu = {
+    clave: 'cambiar-obra',
+    titulo: 'Cambiar de obra',
+    ruta: rutaDeProyectos(lugar.pagina ?? undefined),
+  };
   return {
-    navegacion: gerencia
-      ? [aEmpresas, { clave: 'cambiar-obra', titulo: 'Cambiar de obra', ruta: rutaDeProyectos() }]
-      : [],
+    navegacion: [...(gerencia ? [aEmpresas] : []), ...(cambiaDeObra ? [cambiarDeObra] : [])],
     entradas: (!persona || alcanzaLaObraDeLaRuta(persona, lugar.obraId) ? menuDeObra(rol, modulosDeObra) : []).map((m) => ({
       clave: m.pagina,
       titulo: m.titulo,

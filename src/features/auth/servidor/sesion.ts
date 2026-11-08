@@ -15,14 +15,21 @@
  *     caduca sola tras medio día sin actividad. Un residente no debería tener
  *     que volver a entrar en mitad de una jornada, ni quedarse abierto para
  *     siempre en un computador compartido de obra.
+ *
+ *  4. **La obra en uso es de la petición, no de la sesión** (spec 041). El Director de
+ *     Obra lleva varias obras, y cada pestaña trabaja en la suya: la obra viaja en la
+ *     cabecera `x-obra-en-uso` (o en `?obraId=`, para los enlaces directos) y se acepta
+ *     solo si es de la persona. Guardarla en la fila de la sesión haría que cambiar de
+ *     obra en una pestaña moviera la otra, y un parte se guardaría en la obra equivocada.
  */
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { obras, sesionesWeb, usuarios } from '@/db/servidor/esquema';
+import { sesionesWeb, usuarios } from '@/db/servidor/esquema';
 
-import { TODOS_LOS_MODULOS, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
+import { obraEnUso } from '@/shared/rules/cargos-de-obra';
+import { rolDeVariasObras, TODOS_LOS_MODULOS, type ModulosDeObra, type Rol } from '@/shared/rules/permisos';
 
 import { hashDeToken, tokenAleatorio } from './cripto';
 
@@ -39,11 +46,33 @@ export interface PersonaEnSesion {
   usuario: string;
   nombreCompleto: string;
   rol: Rol;
+  /** El cargo (`shared/catalogos/cargos`), o `null` si se registró sin él. */
+  cargo: string | null;
+  /**
+   * La obra **en uso** de esta petición (spec 041, RF-22, RF-23): la de la pestaña si es de
+   * la persona; si no, la única que tenga; si tiene varias y no pidió ninguna, `null`. Para
+   * quien lleva una sola obra es siempre esa, como antes de la 041, y por eso los sitios que
+   * leen `obraId` siguen bien sin tocarlos.
+   */
   obraId: string | null;
-  /** El nombre de su obra, para la cabecera del menú (spec 033, RF-10). */
+  /**
+   * Todas sus obras (spec 041, RF-19): las asignadas al Director de Obra, o la única de los
+   * demás cargos de obra. Vacía para quien ve todas las obras sin estar en ninguna, y para
+   * quien todavía no tiene. Lo que pregunta por **una fila concreta** mira esta lista; lo que
+   * filtra un listado mira `obraId`.
+   */
+  obras: string[];
+  /**
+   * Sus obras con nombre y módulos (spec 041, RF-22, RF-24, RF-67), en el orden de `obras`. El
+   * panel arma con esto la lista de sus obras, el nombre de la obra en uso y su menú, sin
+   * pedir la lista de obras, que el Director de Obra no puede listar. Sale de la misma
+   * consulta que `obras`: no cuesta otra ida a la base.
+   */
+  obrasConNombre: { id: string; nombre: string; modulos: ModulosDeObra }[];
+  /** El nombre de la obra en uso, para la cabecera del menú (spec 033, RF-10). */
   obraNombre: string | null;
   /**
-   * Los módulos que lleva su obra (spec 017). Viajan con la sesión y no se
+   * Los módulos que lleva su obra en uso (spec 017). Viajan con la sesión y no se
    * consultan en cada ruta: la lectura de la sesión ya va a la base en cada
    * petición y los trae en el mismo `join`. Repartir esa consulta por veinte rutas
    * es la forma de que un día falte en una.
@@ -97,12 +126,38 @@ function leerCookie(peticion: Request, nombre: string): string | null {
   return null;
 }
 
+/** Una obra de la persona, como la trae la consulta de la sesión. */
+interface ObraDeLaPersona {
+  id: string;
+  nombre: string;
+  almacen: boolean | null;
+  cantera: boolean | null;
+  laboratorio: boolean | null;
+  /** Es su `usuarios.obra_id`: la obra de los cargos de una sola obra. */
+  propia: boolean;
+  /** Está vigente en `usuarios_obras`: las obras del Director de Obra. */
+  asignada: boolean;
+}
+
+/** La obra que pide la pestaña: la cabecera, o `?obraId=` en un enlace directo. */
+function obraPedida(peticion: Request): string | null {
+  const cabecera = peticion.headers.get('x-obra-en-uso');
+  if (cabecera) return cabecera;
+  try {
+    return new URL(peticion.url).searchParams.get('obraId');
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Quién está detrás de esta petición, o `null`.
  *
  * Devuelve los datos de la persona en el momento de preguntar, no los que tenía
  * al abrir sesión: si un administrador le cambia el cargo o la da de baja, el
- * efecto es inmediato y no espera a que caduque la cookie.
+ * efecto es inmediato y no espera a que caduque la cookie. Lo mismo con sus obras:
+ * retirarle una a un Director de Obra vale desde su siguiente petición, sin cerrarle
+ * la sesión (041/RF-29, RF-56).
  */
 export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnSesion | null> {
   const token = leerCookie(peticion, NOMBRE_COOKIE);
@@ -120,18 +175,32 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
       usuario: usuarios.usuario,
       nombreCompleto: usuarios.nombreCompleto,
       rol: usuarios.rol,
-      obraId: usuarios.obraId,
-      obraNombre: obras.nombre,
-      almacenActivo: obras.almacenActivo,
-      canteraActivo: obras.canteraActivo,
-      laboratorioActivo: obras.laboratorioActivo,
+      cargo: usuarios.cargo,
       activo: usuarios.activo,
       eliminadoEn: usuarios.eliminadoEn,
+      // Todas sus obras con lo que la sesión necesita de cada una, en la misma ida a la base:
+      // la de `obra_id` y las vigentes de `usuarios_obras`. Cuál de las dos fuentes vale lo
+      // decide el rol, abajo; aquí no se mezcla nada.
+      susObras: sql<ObraDeLaPersona[]>`coalesce((
+        select json_agg(json_build_object(
+          'id', o.id, 'nombre', o.nombre,
+          'almacen', o.almacen_activo, 'cantera', o.cantera_activo, 'laboratorio', o.laboratorio_activo,
+          'propia', o.id = ${usuarios.obraId},
+          'asignada', exists (
+            select 1 from usuarios_obras ua
+            where ua.usuario_id = ${usuarios.id} and ua.obra_id = o.id and ua.hasta is null
+          )
+        ) order by o.nombre)
+        from obras o
+        where o.id = ${usuarios.obraId}
+           or exists (
+             select 1 from usuarios_obras uo
+             where uo.usuario_id = ${usuarios.id} and uo.obra_id = o.id and uo.hasta is null
+           )
+      ), '[]'::json)`,
     })
     .from(sesionesWeb)
     .innerJoin(usuarios, eq(usuarios.id, sesionesWeb.usuarioId))
-    // `left`: la gerencia no está adscrita a ninguna obra.
-    .leftJoin(obras, eq(obras.id, usuarios.obraId))
     .where(
       and(
         eq(sesionesWeb.hashCookie, await hashDeToken(token)),
@@ -152,21 +221,29 @@ export async function personaDeLaPeticion(peticion: Request): Promise<PersonaEnS
       .where(eq(sesionesWeb.id, fila.sesionId));
   }
 
+  // El Director de Obra, las de `usuarios_obras`; los demás, la de `obra_id` (plan 041, Datos).
+  const varias = rolDeVariasObras(fila.rol);
+  const suyas = fila.susObras.filter((o) => (varias ? o.asignada : o.propia));
+  const obraId = obraEnUso(obraPedida(peticion), suyas.map((o) => o.id));
+  const enUso = suyas.find((o) => o.id === obraId) ?? null;
+  const modulosDe = (o: ObraDeLaPersona): ModulosDeObra => ({
+    almacen: o.almacen ?? true,
+    cantera: o.cantera ?? true,
+    // Apagado si no se sabe, como el default de la columna (018/RF-12).
+    laboratorio: o.laboratorio ?? false,
+  });
+
   return {
     id: fila.id,
     usuario: fila.usuario,
     nombreCompleto: fila.nombreCompleto,
     rol: fila.rol,
-    obraId: fila.obraId,
-    obraNombre: fila.obraNombre ?? null,
-    modulosDeObra: fila.obraId
-      ? {
-          almacen: fila.almacenActivo ?? true,
-          cantera: fila.canteraActivo ?? true,
-          // Apagado si no se sabe, como el default de la columna (018/RF-12).
-          laboratorio: fila.laboratorioActivo ?? false,
-        }
-      : TODOS_LOS_MODULOS,
+    cargo: fila.cargo ?? null,
+    obraId,
+    obras: suyas.map((o) => o.id),
+    obrasConNombre: suyas.map((o) => ({ id: o.id, nombre: o.nombre, modulos: modulosDe(o) })),
+    obraNombre: enUso?.nombre ?? null,
+    modulosDeObra: enUso ? modulosDe(enUso) : TODOS_LOS_MODULOS,
     // Lo rellena `guardia.ts`, que es quien consulta la credencial.
     debeCambiarClave: false,
   };
