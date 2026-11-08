@@ -1,11 +1,15 @@
 import { and, eq, isNull } from 'drizzle-orm';
+import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { credencialesWeb, usuarios } from '@/db/servidor/esquema';
+import { clavesGeneradas, credencialesWeb, usuarios } from '@/db/servidor/esquema';
+import { personaConObras } from '@/features/auth/servidor/accesos';
 import { generarClaveTemporal, hashDeClave } from '@/features/auth/servidor/cripto';
 import { cerrarTodasLasSesiones } from '@/features/auth/servidor/sesion';
-import { requerirAdmin } from '@/features/servidor/guardia';
+import { alcanzaLaObra } from '@/features/servidor/alcance';
+import { requerirSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { alcanza as permite, motivoParaNoDarRol } from '@/shared/rules/permisos';
 
 /**
  * `POST /api/panel/personas/:id/clave` — dar acceso al panel a alguien.
@@ -18,8 +22,11 @@ import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servido
  * Quien la reciba está obligado a cambiarla al entrar (`debeCambiar`), de modo
  * que ni siquiera la gerencia acaba conociendo la contraseña definitiva de otro.
  *
- * **Solo `admin`.** Repartir accesos es de gerencia; un residente que pudiera
- * hacerlo podría darse a sí mismo una vía a otra obra.
+ * **La gerencia y los directores** (041/RF-75, RF-76), a quienes pueden dar acceso y dentro
+ * de sus obras. Un residente no: su único acceso es Operador, que no tiene contraseña. Lo
+ * de la obra se comprueba aquí porque un director que pudiera con cualquiera tendría una
+ * vía a otra obra. Y como quien genera la contraseña la conoce hasta que se cambie, queda
+ * escrito quién la generó (RF-78), en el mismo lote que la contraseña: o las dos, o ninguna.
  *
  * **Y sobre uno mismo, no.** Esto no es "ver mi acceso": borra la contraseña
  * anterior y cierra las sesiones de esa persona. Pedirlo para uno mismo es
@@ -30,8 +37,12 @@ import { errorDePeticion, noEncontrado, ok, responder } from '@/features/servido
  */
 export async function POST(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    const sesion = await requerirAdmin(peticion);
+    const sesion = await requerirSesion(peticion);
     if (sesion instanceof Response) return sesion;
+    // Con su propio mensaje: el general de `personas · activar` habla de códigos del celular.
+    if (!permite(sesion.rol, 'personas', 'activar')) {
+      return errorDePeticion('Generar contraseñas lo hacen la gerencia, el director de proyectos y el director de obra.', 403);
+    }
 
     const db = baseServidor();
 
@@ -48,6 +59,11 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       .limit(1);
 
     if (!persona) return noEncontrado('esa persona');
+
+    // Fuera de sus obras «no existe», como en el resto de las rutas de personas (041/RF-20).
+    const obras = (await personaConObras(id))?.obras ?? [];
+    const alcanza = obras.length === 0 ? alcanzaLaObra(sesion, null) : obras.some((o) => alcanzaLaObra(sesion, o));
+    if (!alcanza) return noEncontrado('esa persona');
 
     // La misma regla que la interfaz, aquí porque aquí es donde vale: un botón
     // escondido se salta con una petición a mano.
@@ -67,6 +83,10 @@ export async function POST(peticion: Request, { id }: { id: string }) {
       );
     }
 
+    // Solo a quien podría darle ese acceso (041/RF-76): el mensaje dice quién sí puede.
+    const motivo = motivoParaNoDarRol(sesion.rol, persona.rol);
+    if (motivo) return errorDePeticion(motivo, 403);
+
     if (!persona.activo) {
       return errorDePeticion('Esa persona está inactiva. Actívela antes de darle acceso.', 400);
     }
@@ -74,13 +94,16 @@ export async function POST(peticion: Request, { id }: { id: string }) {
     const temporal = generarClaveTemporal();
     const hash = await hashDeClave(temporal);
 
-    await db
-      .insert(credencialesWeb)
-      .values({ usuarioId: persona.id, hash, debeCambiar: true })
-      .onConflictDoUpdate({
-        target: credencialesWeb.usuarioId,
-        set: { hash, debeCambiar: true, ultimoIngresoEn: null },
-      });
+    await db.batch([
+      db
+        .insert(credencialesWeb)
+        .values({ usuarioId: persona.id, hash, debeCambiar: true })
+        .onConflictDoUpdate({
+          target: credencialesWeb.usuarioId,
+          set: { hash, debeCambiar: true, ultimoIngresoEn: null },
+        }),
+      db.insert(clavesGeneradas).values({ id: uuidv7(), usuarioId: persona.id, generadaPor: sesion.id }),
+    ]);
 
     // Reponer la contraseña invalida lo anterior: si se repone porque se
     // sospecha de un acceso ajeno, dejar la sesión de ese acceso abierta haría

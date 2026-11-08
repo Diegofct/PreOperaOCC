@@ -19,7 +19,7 @@ import {
   usuarios,
   vehiculos,
 } from '@/db/servidor/esquema';
-import { veTodasLasObras } from '@/features/servidor/alcance';
+import { esDeSusObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { fechaDeJornada, medidorDeClase } from '@/shared/rules/jornada';
@@ -182,7 +182,7 @@ export async function resumenDeMantenimiento(obraId: string) {
   };
 }
 
-/** La máquina, si está en el alcance de quien pide: el residente, solo las de su obra. */
+/** La máquina, si está en el alcance de quien pide: el residente, solo las de su obra; el Director de Obra, las de cualquiera de las suyas (041/RF-19). */
 async function vehiculoDelAlcance(sesion: PersonaEnSesion, vehiculoId: string) {
   const [v] = await baseServidor()
     .select({
@@ -197,7 +197,7 @@ async function vehiculoDelAlcance(sesion: PersonaEnSesion, vehiculoId: string) {
     .where(and(eq(vehiculos.id, vehiculoId), isNull(vehiculos.eliminadoEn)))
     .limit(1);
   if (!v) return null;
-  if (!veTodasLasObras(sesion) && v.obraId !== sesion.obraId) return null;
+  if (!esDeSusObras(sesion, v.obraId)) return null;
   const claseMedidor = medidorDeClase(v.clase);
   return { ...v, claseMedidor, lectura: (claseMedidor === 'odometro' ? v.odometroKm : v.horometroH) ?? null };
 }

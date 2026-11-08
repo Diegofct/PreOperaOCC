@@ -30,6 +30,7 @@ import {
 
 import { ErrorApi, mensajeDe } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
+import { useObraEnUso } from './obra-en-uso';
 import { usePersona } from './sesion';
 
 export interface Listado<T> {
@@ -165,14 +166,17 @@ export function MarcoPantalla({
   children: ReactNode;
 }) {
   const persona = usePersona();
+  // Spec 041: la obra de esta pestaña, no la que la sesión tenía al cargar. Para quien lleva
+  // una sola obra es la misma; para el Director de Obra, la de la dirección.
+  const enUso = useObraEnUso();
   const avisoAjeno = modulo && persona ? avisoDeModuloAjeno(persona.rol, modulo) : null;
-  const sinObra = Boolean(exigeObra && persona && sinObraAsignada(persona.rol, persona.obraId));
+  // «Sin obra» es no tener ninguna, no tener ninguna abierta: el Director de Obra con varias
+  // que todavía no escogió no es alguien sin obra (041/RF-24).
+  const sinObra = Boolean(exigeObra && persona && sinObraAsignada(persona.rol, persona.obras[0] ?? null));
   // Su cargo le abre el módulo, pero su obra no lo lleva (spec 017, RF-8). Va
   // después del aviso de cargo: si tampoco es de su cargo, eso es lo que hay que
   // decirle.
-  const apagado = Boolean(
-    modulo && persona && persona.obraId && moduloApagado(modulo, persona.modulosDeObra),
-  );
+  const apagado = Boolean(modulo && enUso && moduloApagado(modulo, enUso.modulos));
 
   return (
     <ScrollView
@@ -195,7 +199,7 @@ export function MarcoPantalla({
         ) : sinObra ? (
           <Aviso tono="info">
             Su cuenta no tiene obra asignada, así que aquí no hay nada que mostrarle. Pídale a la
-            gerencia que le asigne su obra.
+            Gerencia o al Director de Proyectos que le asignen su obra.
           </Aviso>
         ) : (
           <>

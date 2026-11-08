@@ -2,6 +2,7 @@ import { aliasedTable, and, eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { media, obras, plantillas, preoperacionales, tiposVehiculo, usuarios, vehiculos } from '@/db/servidor/esquema';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import { alcanzaLaObra } from '@/features/servidor/alcance';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { columnasParaNombrar, conNombreDelVehiculo } from '@/features/servidor/placas';
@@ -65,15 +66,8 @@ export async function GET(peticion: Request, { id }: { id: string }) {
     // residente qué se registra en las obras que no le tocan.
     if (!fila || !alcanzaLaObra(sesion, fila.obraId)) return noEncontrado('ese preoperacional');
 
-    const anuladoPorNombre = fila.anuladoPor
-      ? ((
-          await db
-            .select({ nombre: usuarios.nombreCompleto })
-            .from(usuarios)
-            .where(eq(usuarios.id, fila.anuladoPor))
-            .limit(1)
-        )[0]?.nombre ?? null)
-      : null;
+    // Quién anuló, con el acceso que tenía ese día (041/RF-42, RF-52).
+    const anuladoPorNombre = (await firmasConAcceso([fila.anuladoPor]))(fila.anuladoPor, fila.anuladoEn);
 
     const [plantilla] = await db
       .select({ esquema: plantillas.esquema })

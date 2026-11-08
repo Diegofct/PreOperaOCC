@@ -44,7 +44,7 @@ import { TODOS_LOS_MODULOS } from '@/shared/rules/permisos';
 import { useObraDelLugar } from './contexto-empresa';
 import { PantallaBitacoraDeOcc } from './pantalla-bitacora-occ';
 import { PantallaLaboratorioDeLasObras } from './pantalla-laboratorio-de-obras';
-import { PantallaRecursosHumanos } from './pantalla-recursos-humanos';
+import { PantallaRecursosHumanos, PantallaRecursosHumanosDeObra } from './pantalla-recursos-humanos';
 import { PantallaQueNoExiste, PantallaSinAcceso } from './pantallas-de-aviso';
 
 type EmpresaConMenu = Exclude<EmpresaId, 'proyectos'>;
@@ -97,8 +97,9 @@ const PANTALLAS_DE_OBRA: Record<string, ComponentType> = {
   bitacoras: PantallaPartes,
   whatsapp: PantallaBandeja,
   reportes: PantallaReportes,
-  // Spec 035, RF-5: el personal de la obra, de consulta para el residente.
-  'recursos-humanos': PantallaPersonal,
+  // Spec 035, RF-5: el personal de la obra, de consulta para el residente. Desde la 041, con la
+  // pestaña Accesos para quien los da.
+  'recursos-humanos': PantallaRecursosHumanosDeObra,
   calidad: PantallaLaboratorio,
   almacen: PantallaAlmacen,
   preoperacionales: PantallaPreoperacionales,

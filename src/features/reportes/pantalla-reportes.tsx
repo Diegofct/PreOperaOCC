@@ -202,7 +202,7 @@ export default function PantallaReportes() {
       ) : pestana === 'maquinas' ? (
         <PestanaMaquinas consulta={consulta} alVerMantenimiento={() => setPestana('mantenimiento')} />
       ) : pestana === 'mantenimiento' ? (
-        <PestanaMantenimiento consulta={consulta} esGerencia={esGerencia} />
+        <PestanaMantenimiento consulta={consulta} esGerencia={esGerencia} puedeAnular={alcanza(rol, 'reportes', 'anular')} />
       ) : pestana === 'personal' ? (
         <PestanaPersonal consulta={consulta} />
       ) : pestana === 'actividades' ? (

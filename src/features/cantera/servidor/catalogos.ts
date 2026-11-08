@@ -54,7 +54,7 @@ export async function obraParaRegistrar(
   if (!veTodasLasObras(sesion)) {
     if (sesion.obraId) return sesion.obraId;
     return Response.json(
-      { error: 'Su cuenta no tiene obra asignada. Pídale a la gerencia que le asigne su obra.' },
+      { error: 'Su cuenta no tiene obra asignada. Pídale a la Gerencia o al Director de Proyectos que le asignen su obra.' },
       { status: 400 },
     );
   }

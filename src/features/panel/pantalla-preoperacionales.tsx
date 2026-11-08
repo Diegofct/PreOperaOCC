@@ -109,7 +109,7 @@ function textoDelVacio(
     return (
       'Su cuenta no tiene ninguna obra asignada, así que no alcanza ningún registro. ' +
       'No es que no haya preoperacionales: es que no hay ninguno que le corresponda ver. ' +
-      'Pídale a la gerencia que le asigne su obra.'
+      'Pídale a la Gerencia o al Director de Proyectos que le asignen su obra.'
     );
   }
 

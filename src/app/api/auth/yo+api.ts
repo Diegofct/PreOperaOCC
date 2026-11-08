@@ -23,6 +23,11 @@ export async function GET(peticion: Request) {
       nombreCompleto: sesion.nombreCompleto,
       rol: sesion.rol,
       obraId: sesion.obraId,
+      // Spec 041: todas sus obras, con nombre y módulos. El panel decide la obra en uso de cada
+      // pestaña con la dirección (RF-22, RF-67): `obraId` es la de esta petición, que no lleva
+      // ninguna, y con varias obras viene vacía.
+      obras: sesion.obras,
+      obrasConNombre: sesion.obrasConNombre,
       // La cabecera del menú dice el nombre de la obra (spec 033, RF-10).
       obraNombre: sesion.obraNombre,
       // El panel arma su menú con esto (spec 017, RF-7).

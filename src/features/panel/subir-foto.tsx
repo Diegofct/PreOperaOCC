@@ -17,7 +17,7 @@ import { Image, Platform, StyleSheet, View } from 'react-native';
 import { Panel, Radio, Spacing } from '@/constants/theme';
 
 import { Acciones, Ayuda, Aviso, Boton } from './componentes';
-import { mensajeDe } from './cliente-api';
+import { cabeceraDeObraEnUso, mensajeDe } from './cliente-api';
 
 /** Lo que el servidor admite. Se comprueba aquí para no subir en balde. */
 const TIPOS = 'image/jpeg,image/png,image/webp';
@@ -67,7 +67,7 @@ export function SubirFoto({
       try {
         const respuesta = await fetch(rutaDeSubida, {
           method: 'POST',
-          headers: { 'content-type': archivo.type },
+          headers: { 'content-type': archivo.type, ...cabeceraDeObraEnUso() },
           body: await archivo.arrayBuffer(),
           credentials: 'include',
         });

@@ -57,7 +57,7 @@ import {
   type DatosDeLaFicha,
 } from '@/shared/rules/ficha';
 import { fechaDeJornada } from '@/shared/rules/jornada';
-import { alcanza } from '@/shared/rules/permisos';
+import { alcanza, puedeGenerarClave } from '@/shared/rules/permisos';
 import { enPesos } from '@/shared/rules/pesos';
 
 /** Los campos de texto del formulario: todo es texto mientras se escribe. */
@@ -282,11 +282,11 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
           <Campo etiqueta="Empresa y obra" valor={dondeTrabaja || '—'} onChange={() => {}} soloLectura ancho={280} />
           <Campo etiqueta="Usuario" valor={persona.usuario} onChange={() => {}} soloLectura ancho={200} />
         </Formulario>
-        {/* Repartir accesos al panel es de gerencia, y un operador no entra a la web; los
-            códigos son de quien opera vehículos (spec 039, RF-28). */}
-        {(rol === 'admin' && persona.rol !== 'operador') || (puedeEditar && operaVehiculos(persona.cargo)) ? (
+        {/* La contraseña, la gerencia y los directores (041/RF-75); un operador no entra a la
+            web. Los códigos son de quien opera vehículos (spec 039, RF-28). */}
+        {puedeGenerarClave(rol, persona.rol) || (puedeEditar && operaVehiculos(persona.cargo)) ? (
           <Acciones>
-            {rol === 'admin' && persona.rol !== 'operador' ? (
+            {puedeGenerarClave(rol, persona.rol) ? (
               <Boton titulo="Dar acceso" tono="secundario" onPress={() => setVentana('acceso')} />
             ) : null}
             {puedeEditar && operaVehiculos(persona.cargo) ? (

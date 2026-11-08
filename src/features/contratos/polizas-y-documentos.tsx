@@ -31,6 +31,8 @@ import {
   type Columna,
 } from '@/features/panel/componentes';
 import type { ContratoDeObra, DocumentoDelContrato, PolizaDelContrato } from '@/features/panel/contratos';
+import { usePersona } from '@/features/panel/sesion';
+import { alcanza } from '@/shared/rules/permisos';
 import {
   CLASES_DE_DOCUMENTO,
   MIMES_DEL_CONTRATO,
@@ -224,6 +226,8 @@ export function VentanaDeAnular({
 }
 
 export function PolizasYDocumentos({ leido, recargar }: { leido: ContratoDeObra; recargar: () => void }) {
+  // Registrar y reemplazar son de quien escribe; anular, no del Residente (041/RF-35, RF-36).
+  const puedeAnular = alcanza(usePersona().rol, 'contrato', 'anular');
   const [aviso, setAviso] = useState<string | null>(null);
   const [ventana, setVentana] = useState<
     | { tipo: 'poliza'; reemplaza: PolizaDelContrato | null }
@@ -300,7 +304,9 @@ export function PolizasYDocumentos({ leido, recargar }: { leido: ContratoDeObra;
                 tono="secundario"
                 onPress={() => setVentana({ tipo: 'poliza', reemplaza: p })}
               />
-              <Boton titulo="Anular" tono="peligro" onPress={() => setVentana({ tipo: 'anular-poliza', poliza: p })} />
+              {puedeAnular ? (
+                <Boton titulo="Anular" tono="peligro" onPress={() => setVentana({ tipo: 'anular-poliza', poliza: p })} />
+              ) : null}
             </>
           ) : null}
         </Acciones>
@@ -341,7 +347,7 @@ export function PolizasYDocumentos({ leido, recargar }: { leido: ContratoDeObra;
       pintar: (d) => (
         <Acciones>
           <Boton titulo="Abrir" tono="secundario" onPress={() => abrirArchivo(d.mediaId)} />
-          {d.anulado ? null : (
+          {d.anulado || !puedeAnular ? null : (
             <Boton
               titulo="Anular"
               tono="peligro"

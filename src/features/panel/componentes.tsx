@@ -732,6 +732,48 @@ export interface Opcion {
 }
 
 /**
+ * Escoger varias opciones de una lista corta: las obras de un Director de Obra (spec 041,
+ * RF-17). Casillas a la vista y no un desplegable, para que se vea de un vistazo cuáles quedan
+ * marcadas. Quitarle una obra a alguien le quita el acceso a esa obra, y eso no debe quedar
+ * escondido dentro de una lista cerrada.
+ */
+export function SelectorDeVarios({
+  etiqueta,
+  valores,
+  opciones,
+  onChange,
+  error,
+  ancho = 260,
+  obligatorio,
+}: {
+  etiqueta: string;
+  valores: readonly string[];
+  opciones: Opcion[];
+  onChange: (valores: string[]) => void;
+  error?: string;
+  ancho?: number;
+  obligatorio?: boolean;
+}) {
+  const anchoDeCampo = useAnchoDeCampo(ancho);
+  return (
+    <View style={[estilos.campo, anchoDeCampo]}>
+      <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
+      {opciones.map((o) => (
+        <Casilla
+          key={o.valor}
+          etiqueta={o.etiqueta}
+          marcada={valores.includes(o.valor)}
+          onChange={(marcada) =>
+            onChange(marcada ? [...valores, o.valor] : valores.filter((v) => v !== o.valor))
+          }
+        />
+      ))}
+      {error ? <Text style={estilos.campoError}>{error}</Text> : null}
+    </View>
+  );
+}
+
+/**
  * Selector desplegable.
  *
  * No usa el `Picker` nativo a propósito: esta pantalla solo existe en el

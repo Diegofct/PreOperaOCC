@@ -27,13 +27,16 @@ import { normalizar } from './texto';
 /** RF-1: quiénes lo usan. El operador no (RF-2: el asistente no está en el celular). */
 export const ROLES_DEL_ASISTENTE: readonly Rol[] = [
   'admin',
-  'supervisor',
+  'residente',
   'almacenista',
   'encargado_planta',
   'laboratorista',
   'encargado_occ',
   // Spec 040, RF-12.
   'auxiliar_administrativa',
+  // Spec 041.
+  'director_proyectos',
+  'director_obra',
 ];
 
 /**
@@ -84,7 +87,10 @@ export type ModuloDeObraConsultable = Exclude<ModuloConsultable, ModuloDeEmpresa
 const DE_EMPRESA_DEL_ROL: Record<Rol, readonly ModuloDeEmpresaConsultable[]> = {
   admin: ['solicitudes', 'compras', 'tesoreria', 'finanzas', 'rrhh', 'documentos', 'bitacora_empresa'],
   auxiliar_administrativa: ['compras', 'tesoreria', 'finanzas', 'rrhh', 'documentos'],
-  supervisor: ['solicitudes'],
+  residente: ['solicitudes'],
+  // Spec 041: los directores, lo mismo que el residente (RF-59).
+  director_proyectos: ['solicitudes'],
+  director_obra: ['solicitudes'],
   almacenista: ['solicitudes'],
   encargado_planta: [],
   laboratorista: ['solicitudes', 'bitacora_empresa'],
@@ -103,15 +109,27 @@ const EMPRESAS_CON_BITACORA = ['occ', 'geolab'] as const satisfies readonly Empr
 /** Quién pregunta, como lo trae la sesión. */
 export interface QuienPregunta {
   rol: Rol;
+  /** La obra en uso (la de la pestaña). */
   obraId: string | null;
+  /**
+   * Spec 041: todas las obras de la persona. El asistente del Director de Obra responde solo de
+   * la que tiene en uso (RF-73), pero esta lista dice si tiene otras a las que cambiar. Sin ella
+   * vale la obra única, que es lo de antes.
+   */
+  obras?: readonly string[];
   modulosDeObra: ModulosDeObra;
 }
 
 export interface AlcanceDelAsistente {
   /** Si puede usar el asistente (RF-1, RF-2). */
   usa: boolean;
-  /** `'todas'` para la gerencia; si no, la obra de la persona, o ninguna (RF-4, RF-10). */
+  /** `'todas'` para la gerencia; si no, las obras de la persona, o ninguna (RF-4, RF-10). */
   obras: 'todas' | string[];
+  /**
+   * 041/RF-73: es un Director de Obra con varias obras, limitado a la que tiene en uso. Con
+   * `obras` vacía, no ha abierto ninguna. Con una sola obra no hace falta: no hay a cuál cambiar.
+   */
+  soloObraEnUso?: boolean;
   /** Los módulos que alcanza, en el orden del menú (RF-3, RF-5). */
   modulos: ModuloConsultable[];
   /**
@@ -161,7 +179,13 @@ export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
   }
   // RF-10: sin obra no hay nada de una obra a su alcance; lo de su empresa (el laboratorista
   // en Geolab) sí, porque no depende de la obra. El residente sin obra se queda sin nada.
-  if (!quien.obraId) {
+  const todasLasSuyas = quien.obras ?? (quien.obraId ? [quien.obraId] : []);
+  // 041/RF-73, RF-74: el Director de Obra pregunta desde una obra y se le responde de esa. Sus
+  // módulos son los de esa obra, así que responder de la otra daría módulos que no le tocan allí.
+  const esDirectorDeObra = quien.rol === 'director_obra';
+  const suyas = esDirectorDeObra ? (quien.obraId ? [quien.obraId] : []) : todasLasSuyas;
+  const limite = esDirectorDeObra && todasLasSuyas.length > 1 ? { soloObraEnUso: true } : {};
+  if (suyas.length === 0) {
     const conEmpresa = empresa.empresas.length > 0;
     return {
       usa: true,
@@ -169,18 +193,39 @@ export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
       modulos: conEmpresa ? consultables(empresa.modulos) : [],
       empresas: empresa.empresas,
       bitacorasDeEmpresa: empresa.bitacorasDeEmpresa,
+      ...limite,
     };
   }
   const visibles: ModuloConPermiso[] = [...modulosVisibles(quien.rol, quien.modulosDeObra), ...empresa.modulos];
-  // RF-65: el residente, también vehículos, máquinas y personas de su obra.
-  if (quien.rol === 'supervisor') visibles.push('vehiculos', 'personas');
+  // RF-65: el residente, también vehículos, máquinas y personas de su obra. Desde la 041, el
+  // Residente y el Director de Obra, que se repartieron el acceso de antes (RF-55, RF-73); el
+  // Director de Proyectos los tiene por la tabla, en la rama de quien ve todas.
+  if (quien.rol === 'residente' || esDirectorDeObra) visibles.push('vehiculos', 'personas');
   return {
     usa: true,
-    obras: [quien.obraId],
+    obras: [...suyas],
     modulos: consultables(visibles),
     empresas: empresa.empresas,
     bitacorasDeEmpresa: empresa.bitacorasDeEmpresa,
+    ...limite,
   };
+}
+
+/**
+ * Lo que se le dice al modelo sobre las obras que alcanza quien pregunta. Con el Director de Obra
+ * le da además la frase exacta (041/RF-74): la cerradura está en `obraAlAlcance`, y sin esto el
+ * modelo contestaba un seco «no está a su alcance» sobre una obra que sí es de la persona (visto
+ * en la demo de la T16). La frase vale para cualquier otra obra: no dice si existe ni si es suya.
+ */
+export function obrasAlcanzadasEnTexto(alcance: AlcanceDelAsistente): string {
+  if (alcance.soloObraEnUso) {
+    return alcance.obras === 'todas' || alcance.obras.length > 0
+      ? 'solo la obra desde la que pregunta. Si pregunta por otra obra, aunque también sea suya, no consulte nada y responda solo: «Desde aquí solo respondo de la obra en uso. Para consultar otra de sus obras, ábrala con “Cambiar de obra” y pregunte desde allá.»'
+      : 'ninguna obra por ahora: tiene varias y no ha abierto ninguna. Dígale que abra una con «Cambiar de obra» y pregunte desde allá';
+  }
+  if (alcance.obras === 'todas') return 'todas las obras';
+  if (alcance.obras.length === 0) return 'ninguna obra (no tiene obra asignada)';
+  return alcance.obras.length === 1 ? 'una sola obra' : `${alcance.obras.length} obras`;
 }
 
 function consultables(modulos: readonly ModuloConPermiso[]): ModuloConsultable[] {

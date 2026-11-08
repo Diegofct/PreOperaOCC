@@ -39,6 +39,17 @@ export async function GET(peticion: Request) {
         laboratorioActivo: obras.laboratorioActivo,
         // Spec 033, RF-16: el consorcio, que se escribe en el contrato (spec 031).
         consorcio: sql<string | null>`case when ${contratos.esConsorcio} and ${contratos.nombreConsorcio} <> '' then ${contratos.nombreConsorcio} end`,
+        // Spec 041, RF-44: cuántos Directores de Obra la tienen hoy. Con cero, la lista lo señala
+        // y lo de aprobar queda para el Director de Proyectos y la Gerencia (RF-43). Solo cuentan
+        // las filas vigentes de personas que siguen siendo Director de Obra y no están de baja:
+        // a quien bajaron a Residente se le cerraron sus obras, pero una fila suelta no debe
+        // contar como director. Los nombres van escritos con su tabla (ver `personaConObras`).
+        directoresDeObra: sql<number>`(
+          select count(*) from usuarios_obras uo
+          join usuarios u on u.id = uo.usuario_id
+          where uo.obra_id = "obras"."id" and uo.hasta is null
+            and u.rol = 'director_obra' and u.eliminado_en is null and u.activo
+        )`.mapWith(Number),
       })
       .from(obras)
       .leftJoin(contratos, eq(contratos.obraId, obras.id))
@@ -52,11 +63,13 @@ export async function GET(peticion: Request) {
 }
 
 /**
- * Dar de alta una obra es de gerencia.
+ * Dar de alta una obra es de la gerencia y, desde la spec 041, del Director de Proyectos
+ * (RF-7), que responde por todas. Lo dice la tabla de permisos (`obras · escribir`), no esta
+ * ruta.
  *
  * Un residente que pudiera crear obras podría crearse uno donde colocar
  * vehículos fuera del alcance de cualquier otro, y la separación por obra
- * dejaría de significar nada.
+ * dejaría de significar nada. Por lo mismo, el Director de Obra tampoco.
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
@@ -82,6 +95,7 @@ export async function POST(peticion: Request) {
         laboratorioActivo: obras.laboratorioActivo,
       });
 
-    return ok(fila, 201);
+    // Recién creada no la dirige nadie (RF-44): la lista la señala hasta que se le asigne uno.
+    return ok({ ...fila, directoresDeObra: 0 }, 201);
   });
 }

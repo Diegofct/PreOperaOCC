@@ -69,12 +69,12 @@ function VentanaDeTexto({
 
 export function AccionesDeVersion({
   presupuesto: p,
-  esGerencia,
+  puedeAprobar,
   alEditar,
   alHecho,
 }: {
   presupuesto: PresupuestoDetalle;
-  esGerencia: boolean;
+  puedeAprobar: boolean;
   alEditar: () => void;
   /** Tras una acción que salió bien: el mensaje y, si nació otra versión, cuál mirar. */
   alHecho: (mensaje: string, mirar?: string) => void;
@@ -113,7 +113,7 @@ export function AccionesDeVersion({
     <View style={estilos.columna}>
       <Acciones>
         {p.estado === 'borrador' ? <Boton titulo="Editar el borrador" onPress={alEditar} /> : null}
-        {p.estado === 'borrador' && esGerencia ? (
+        {p.estado === 'borrador' && puedeAprobar ? (
           <Boton
             titulo={aprobando ? 'Aprobando…' : 'Aprobar presupuesto'}
             tono="secundario"
@@ -129,8 +129,8 @@ export function AccionesDeVersion({
           <Boton titulo="Descartar" tono="peligro" onPress={() => setVentana({ tipo: 'descartar' })} />
         ) : null}
       </Acciones>
-      {p.estado === 'borrador' && !esGerencia ? (
-        <Text style={estilos.nota}>Aprobar el presupuesto le corresponde a la gerencia.</Text>
+      {p.estado === 'borrador' && !puedeAprobar ? (
+        <Text style={estilos.nota}>Aprobar el presupuesto les corresponde al Director de Proyectos y a la Gerencia.</Text>
       ) : null}
       {error ? (
         <Aviso tono="error">

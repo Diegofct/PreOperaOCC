@@ -261,6 +261,8 @@ export interface ObraFila {
   laboratorioActivo: boolean;
   /** El consorcio, si su contrato lo dice (spec 033, RF-16). Solo en el listado. */
   consorcio?: string | null;
+  /** Spec 041, RF-44: los Directores de Obra vigentes. Cero es «Sin Director de Obra». */
+  directoresDeObra?: number;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -268,9 +270,10 @@ export interface ObraFila {
 /* ------------------------------------------------------------------------ */
 
 /**
- * Los cargos reales de OCC se mapean sobre estos roles: residente y director de
- * obra son `supervisor`; gerencia es `admin`. Almacenista y Encargado de Planta
- * tienen el suyo desde la spec 008.
+ * Los cargos reales de OCC se mapean sobre estos roles: gerencia es `admin`.
+ * Almacenista y Encargado de Planta tienen el suyo desde la spec 008, y desde la
+ * 041 el residente, el director de obra y el director de proyectos tienen cada uno
+ * el suyo (antes los dos primeros eran `supervisor`).
  *
  * La lista vive con la tabla de permisos, no aquí: quien decide qué puede hacer
  * cada rol es quien debe decir cuáles hay.
@@ -281,6 +284,16 @@ export { ETIQUETA_ROL, ROLES, type Rol };
 const empresaDeLaPersonaZod = z.enum(['elemental', 'occ', 'geolab', 'proyectos'], {
   error: 'Esa empresa no existe.',
 });
+
+/**
+ * Las obras de un Director de Obra (041/RF-17). Una lista y no una columna: es el único acceso
+ * que lleva varias. Los demás siguen con `obraId`. Sin repetidos: la misma obra dos veces sería
+ * una fila vigente de más, y el índice parcial la rechazaría con un error que nadie entiende.
+ */
+const obrasDeLaPersona = z
+  .array(z.string().trim().min(1).max(64), { error: 'Las obras van en una lista.' })
+  .max(50, 'Son demasiadas obras.')
+  .transform((obras) => [...new Set(obras)]);
 
 export const personaNueva = z.object({
   /**
@@ -311,6 +324,8 @@ export const personaNueva = z.object({
    * pantalla la pide siempre, pero las altas de otros caminos (WhatsApp) no la traen.
    */
   empresa: empresaDeLaPersonaZod.nullish().transform((v) => v ?? null),
+  /** Solo para el Director de Obra (041/RF-17). Los demás accesos dicen su obra en `obraId`. */
+  obras: obrasDeLaPersona.optional(),
 });
 
 /**
@@ -336,9 +351,27 @@ export const personaEditada = z.object({
   obraId: idParcial,
   activo: z.boolean().optional(),
   empresa: empresaDeLaPersonaZod.nullable().optional(),
+  /** Las obras de un Director de Obra, enteras: las que no vengan se le retiran (041/RF-13). */
+  obras: obrasDeLaPersona.optional(),
+  /** Al pasar a un Director de Obra a un acceso de una sola obra, cuál conserva (041/RF-70). */
+  obraConservada: z.string().trim().min(1).max(64).optional(),
 });
 
+/**
+ * Asignar y retirar obras a un Director de Obra (041/RF-13). `POST /personas/:id/obras`.
+ * Las dos listas son por diferencia y no la lista entera: dos personas que asignan a la vez
+ * obras distintas no se pisan.
+ */
+export const obrasDelDirector = z
+  .object({
+    asignar: obrasDeLaPersona.default([]),
+    retirar: obrasDeLaPersona.default([]),
+  })
+  .refine((c) => c.asignar.length + c.retirar.length > 0, 'Diga qué obras asignar o retirar.')
+  .refine((c) => !c.asignar.some((o) => c.retirar.includes(o)), 'La misma obra no se asigna y se retira a la vez.');
+
 export type PersonaNueva = z.input<typeof personaNueva>;
+export type PersonaEditada = z.input<typeof personaEditada>;
 
 export interface PersonaFila {
   /** Spec 024, RF-32: lo registró el sistema desde un mensaje de WhatsApp. */
@@ -358,6 +391,13 @@ export interface PersonaFila {
   empresa: EmpresaId;
   /** Spec 035, RF-21: su ficha está retirada. Lo trae el listado; los selectores no la ofrecen. */
   retirado?: boolean;
+  /**
+   * Spec 041: las obras de la persona. Las del Director de Obra (vigentes en su historia de
+   * obras); para los demás, la suya o ninguna. Lo trae el listado.
+   */
+  obras?: string[];
+  /** Spec 041, RF-51: pasó a Residente con la migración y falta que alguien lo revise. */
+  revisar?: boolean;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -524,12 +564,28 @@ export interface PersonaEnSesionFila {
   usuario: string;
   nombreCompleto: string;
   rol: Rol;
+  /**
+   * La obra en uso **al cargar**, sin pestaña: la única si tiene una, `null` si tiene varias o
+   * ninguna. Desde la 041 la obra en uso de una pantalla la decide la dirección: ver
+   * `useObraEnUso` (`features/empresas/contexto-empresa`).
+   */
   obraId: string | null;
+  /** Spec 041: todas sus obras (las asignadas del Director de Obra, o la suya). */
+  obras: string[];
+  /** Las mismas, con nombre y módulos: la lista, el menú y el nombre de la obra en uso. */
+  obrasConNombre: ObraDeLaSesionFila[];
   /** El nombre de su obra, para la cabecera del menú (spec 033, RF-10). */
   obraNombre: string | null;
   /** Los módulos que lleva su obra (spec 017); los dos, si no tiene obra. */
   modulosDeObra: ModulosDeObra;
   debeCambiarClave: boolean;
+}
+
+/** Una obra de la persona en sesión (spec 041). */
+export interface ObraDeLaSesionFila {
+  id: string;
+  nombre: string;
+  modulos: ModulosDeObra;
 }
 
 export interface ClaveTemporalFila {
@@ -1198,6 +1254,8 @@ export interface ParteFila {
   cerradoEn: string | null;
   anuladoEn: string | null;
   motivoAnulacion: string | null;
+  /** Spec 041, RF-42: quién la anuló, con el acceso que tenía ese día. Lo trae el listado del día. */
+  anuladoPorNombre?: string | null;
   /**
    * La lectura con la que empieza el día cada máquina, por id de vehículo (spec 029,
    * RF-1 a RF-3, RF-9). Vacío en un parte cerrado o anulado.

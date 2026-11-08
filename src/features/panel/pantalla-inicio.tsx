@@ -86,7 +86,9 @@ interface FilaResumen {
 export default function PantallaInicioPanel() {
   const persona = usePersona();
   if (persona.rol === 'admin') return <PantallaEmpresas />;
-  const destino = destinoAlEntrar({ rol: persona.rol, obras: persona.obraId ? [persona.obraId] : [] });
+  // Spec 041: todas sus obras. Con varias, el Director de Obra va a la lista (RF-24); con una, a
+  // esa (RF-25).
+  const destino = destinoAlEntrar({ rol: persona.rol, obras: persona.obras });
   return destino ? <Redirect href={destino as Href} /> : <PantallaSinAcceso />;
 }
 

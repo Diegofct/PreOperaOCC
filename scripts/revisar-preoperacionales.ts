@@ -127,7 +127,9 @@ async function principal() {
   const supervisores = (await sql`
     SELECT usuario, nombre_completo, obra_id
     FROM usuarios
-    WHERE rol = 'supervisor' AND eliminado_en IS NULL AND activo = true
+    -- Spec 041: el rol se llama 'residente'. El director de obra lleva sus obras aparte
+    -- (usuarios_obras) y su obra_id va vacío a propósito, así que aquí no cuenta.
+    WHERE rol = 'residente' AND eliminado_en IS NULL AND activo = true
   `) as { usuario: string; nombre_completo: string; obra_id: string | null }[];
 
   const huerfanos = supervisores.filter((s) => s.obra_id === null);

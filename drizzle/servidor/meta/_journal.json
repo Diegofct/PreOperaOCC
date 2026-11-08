@@ -281,6 +281,20 @@
       "when": 1793886904731,
       "tag": "0039_deep_stardust",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794003545372,
+      "tag": "0040_curvy_smiling_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794169155450,
+      "tag": "0041_green_magdalene",
+      "breakpoints": true
     }
   ]
 }

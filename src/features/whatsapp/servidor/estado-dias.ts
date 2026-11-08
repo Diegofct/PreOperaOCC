@@ -29,7 +29,7 @@ import type {
   ReportesEsperadosDeLaObra,
   reportesEsperadosPedido,
 } from '@/features/panel/contratos';
-import { veTodasLasObras } from '@/features/servidor/alcance';
+import { esDeSusObras, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -43,15 +43,18 @@ import type { z } from 'zod';
 const DIAS_POR_DEFECTO = 7;
 
 /**
- * La obra que puede consultar la sesión: la pedida si es gerencia, la suya si es
- * residente. `Response` 404 si el residente pide otra; `null` si la gerencia no pidió
- * ninguna (todas).
+ * La obra que puede consultar la sesión: la pedida si ve todas; si no, la pedida si es
+ * una de las suyas, o la que tiene en uso si no pidió ninguna. `Response` 404 si pide
+ * una ajena; `null` si quien ve todas no pidió ninguna (todas).
+ *
+ * Desde la 041 la pedida se compara con **todas** sus obras (RF-19): armar a mano llega
+ * con la obra en la ruta (`/dias/[obra]/[fecha]`), y el Director de Obra arma el día de
+ * su obra B aunque la pestaña tenga la A. Sigue siendo una sola obra a la vez.
  */
 function obraAlAlcance(sesion: PersonaEnSesion, pedida: string | null): string | null | Response {
   if (veTodasLasObras(sesion)) return pedida;
-  if (!sesion.obraId) return noEncontrado('esa obra');
-  if (pedida && pedida !== sesion.obraId) return noEncontrado('esa obra');
-  return sesion.obraId;
+  if (pedida) return esDeSusObras(sesion, pedida) ? pedida : noEncontrado('esa obra');
+  return sesion.obraId ?? noEncontrado('esa obra');
 }
 
 /** «280036280139944@lid» y «280036280139944» son el mismo autor. */

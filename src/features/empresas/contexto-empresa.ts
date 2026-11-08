@@ -12,7 +12,7 @@ import type { ObraFila } from '@/features/panel/contratos';
 import { useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { lugarDeLaRuta, type LugarDelPanel } from '@/shared/rules/empresas';
-import type { ModulosDeObra } from '@/shared/rules/permisos';
+import { rolVeTodasLasObras, type ModulosDeObra } from '@/shared/rules/permisos';
 
 export function useLugarDelPanel(): LugarDelPanel | null {
   return lugarDeLaRuta(usePathname());
@@ -36,21 +36,24 @@ export interface ObraDelLugar {
 
 /**
  * Nombre y módulos de la obra de la dirección (RF-10, RF-18). Quien está adscrito a ella
- * los trae en la sesión; la gerencia los lee de la lista de obras. `null` fuera de una
- * obra, mientras carga o si la obra no es de quien entra.
+ * los trae en la sesión; quien ve todas —la gerencia y, desde la 041, el Director de
+ * Proyectos— los lee de la lista de obras. `null` fuera de una obra, mientras carga o si la
+ * obra no es de quien entra.
+ *
+ * Spec 041: «adscrito» es estar entre **sus** obras, no ser la de la sesión al cargar. El
+ * Director de Obra con dos obras ve el nombre y el menú de la que tiene abierta (RF-22).
  */
 export function useObraDelLugar(): ObraDelLugar | null {
   const persona = usePersona();
   const obraId = useObraDeLaRuta();
-  const gerencia = persona.rol === 'admin';
+  const todas = rolVeTodasLasObras(persona.rol);
   const obras = useListado<ObraFila>(
-    useCallback(() => (gerencia && obraId ? api.obras.listar() : Promise.resolve([])), [gerencia, obraId]),
+    useCallback(() => (todas && obraId ? api.obras.listar() : Promise.resolve([])), [todas, obraId]),
   );
   if (!obraId) return null;
-  if (!gerencia) {
-    return persona.obraId === obraId
-      ? { id: obraId, nombre: persona.obraNombre ?? 'Su obra', modulos: persona.modulosDeObra }
-      : null;
+  if (!todas) {
+    const suya = persona.obrasConNombre.find((o) => o.id === obraId);
+    return suya ? { id: suya.id, nombre: suya.nombre, modulos: suya.modulos } : null;
   }
   const obra = obras.datos.find((o) => o.id === obraId);
   if (!obra) return null;

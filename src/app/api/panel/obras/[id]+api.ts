@@ -4,7 +4,8 @@ import { baseServidor } from '@/db/servidor/cliente';
 import { obras } from '@/db/servidor/esquema';
 import { obraEditada } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { cuerpoJson, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { cuerpoJson, errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
+import { motivoParaNoDarDeBajaObra } from '@/shared/rules/permisos';
 
 /** Editar y dar de baja una obra. `PATCH` y `DELETE /api/panel/obras/:id`. */
 
@@ -22,7 +23,8 @@ const COLUMNAS = {
 
 export async function PATCH(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    // Editar y dar de baja obras es de gerencia, igual que crearlas.
+    // Editar obras es de quien las crea: la gerencia y, desde la spec 041, el Director de
+    // Proyectos (RF-8). Lo dice la tabla (`obras · escribir`).
     const sesion = await requerirPermiso(peticion, 'obras', 'escribir');
     if (sesion instanceof Response) return sesion;
 
@@ -50,9 +52,11 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
  */
 export async function DELETE(peticion: Request, { id }: { id: string }) {
   return responder(async () => {
-    // Editar y dar de baja obras es de gerencia, igual que crearlas.
     const sesion = await requerirPermiso(peticion, 'obras', 'escribir');
     if (sesion instanceof Response) return sesion;
+    // El Director de Proyectos escribe obras, pero darlas de baja es de la gerencia (041/RF-77).
+    const motivo = motivoParaNoDarDeBajaObra(sesion.rol);
+    if (motivo) return errorDePeticion(motivo, 403);
 
     const [fila] = await baseServidor()
       .update(obras)

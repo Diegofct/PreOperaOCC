@@ -38,6 +38,7 @@ import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servid
 import {
   descripcionDeLaConsulta,
   indicacionDeObraPorDefecto,
+  obrasAlcanzadasEnTexto,
   type AclaracionDelAsistente,
   type AlcanceDelAsistente,
   type ArchivoDelAsistente,
@@ -73,7 +74,7 @@ Cómo trabaja:
 - Una solicitud de compra o de pago «por aprobar» o que «espera aprobación» es la que está en estado enviada. Las devueltas esperan a quien las pidió, no a quien aprueba.
 - Si una consulta no trae un valor (el de una compra, un pago o un salario), no está al alcance de quien pregunta: no lo deduzca ni lo calcule de otros datos.
 - Lo que llegó por WhatsApp y no quedó registrado márquelo como «reportado por WhatsApp, sin registrar» y nunca lo sume a las cifras registradas. Si le piden comparar, señale cada diferencia con la fecha del mensaje y la del registro.
-- Si preguntan por una obra o una empresa que no está entre las de la persona (obras_a_mi_alcance y las empresas que se le dicen abajo), o una consulta responde que la información no está a su alcance, responda solo «Esa información no está a su alcance.», sin decir si esa obra, esa empresa o sus registros existen, y sin dar en su lugar datos de otro lugar.
+- Si preguntan por una obra o una empresa que no está entre las de la persona (obras_a_mi_alcance y las empresas que se le dicen abajo), o una consulta responde que la información no está a su alcance, responda solo «Esa información no está a su alcance.», sin decir si esa obra, esa empresa o sus registros existen, y sin dar en su lugar datos de otro lugar. Si más abajo, en lo que alcanza quien pregunta, se le da otra frase para cuando preguntan por otra obra, responda esa.
 - No describa lo que no puede consultar ni ofrezca información de módulos para los que no tiene consulta: diga solo qué sí puede consultar.
 - Usted solo consulta: no puede crear, corregir, aprobar ni anular nada. Si se lo piden, explique que eso se hace en el módulo del panel o enviándolo por WhatsApp como siempre.
 - Solo responde sobre la información del grupo y sus obras. A cualquier otra cosa (redactar correos, noticias, temas generales), responda con amabilidad que solo responde sobre la información del grupo y sus obras.
@@ -137,7 +138,7 @@ export type RespuestaDelAsistente =
 
 /** Quién pregunta y la fecha: cambian, así que van después de lo que queda en caché. */
 function contexto(p: PreguntaAlAsistente): string {
-  const obras = p.alcance.obras === 'todas' ? 'todas las obras' : p.alcance.obras.length === 0 ? 'ninguna obra (no tiene obra asignada)' : 'una sola obra';
+  const obras = obrasAlcanzadasEnTexto(p.alcance);
   const desdeLaObra = indicacionDeObraPorDefecto(p.obraPorDefecto ?? null);
   // Spec 040: las empresas que alcanza, para que no pregunte por un lugar que no le toca.
   const empresas = p.alcance.empresas.length ? ` y de las empresas ${p.alcance.empresas.map(nombreDeEmpresa).join(', ')}` : '';
@@ -181,7 +182,12 @@ export async function responderPregunta(
     { type: 'text', text: contexto(p) },
   ];
   const messages: BetaMessageParam[] = [
-    ...p.historial.map((m): BetaMessageParam => ({ role: m.rol === 'persona' ? 'user' : 'assistant', content: m.texto })),
+    // Una pregunta que fue solo un adjunto se guardó sin texto, y el historial no lleva los
+    // adjuntos: vacía, la API rechaza toda la conversación con un 400.
+    ...p.historial.map((m): BetaMessageParam => ({
+      role: m.rol === 'persona' ? 'user' : 'assistant',
+      content: m.texto.trim() || (m.rol === 'persona' ? '(Envió archivos adjuntos, sin texto.)' : '(Sin respuesta.)'),
+    })),
     { role: 'user', content: contenidoDeLaPregunta(p) },
   ];
 

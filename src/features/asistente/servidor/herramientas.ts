@@ -1297,11 +1297,15 @@ const SOLICITUD = z.strictObject({
 });
 type PedidoDeSolicitudes = z.infer<typeof SOLICITUD>;
 
-/** Los lugares que pide por sí misma una persona sin bandeja del grupo, en orden. */
+/**
+ * Los lugares que pide por sí misma una persona sin bandeja del grupo, en orden. De sus
+ * obras, solo la que tiene en uso (041/RF-73): el Director de Obra no consulta su otra obra
+ * desde aquí.
+ */
 function lugaresPropios(alcance: AlcanceDelAsistente, sesion: PersonaEnSesion): string[] {
   const empresas = alcance.empresas.filter((e) => e === 'occ' || e === 'geolab');
-  const obra = sesion.obraId && alcanzaLaObraDeLaRuta(sesion, sesion.obraId) ? [sesion.obraId] : [];
-  return [...empresas, ...obra];
+  const obras = sesion.obras.filter((o) => o === sesion.obraId && alcanzaLaObraDeLaRuta(sesion, o));
+  return [...empresas, ...obras];
 }
 
 /** El lugar pedido —o el único de la persona— ya comprobado como en su pantalla. */
@@ -1319,6 +1323,9 @@ async function lugarPedido(
       : { error: `Diga de qué lugar son las solicitudes: ${propios.join(' o ')}.` };
   }
   const esEmpresa = lugar === 'occ' || lugar === 'geolab';
+  // `lugarDeLaSolicitud` mira todas las obras de la persona, como su pantalla; aquí vale el
+  // alcance del asistente: la otra obra del Director de Obra tampoco (041/RF-74).
+  if (!esEmpresa && !obraAlAlcance(alcance, lugar)) return { error: NO_ESTA_A_SU_ALCANCE };
   const resuelto = await lugarDeLaSolicitud(sesion, { empresa: esEmpresa ? lugar : null, obraId: esEmpresa ? null : lugar }, de);
   return resuelto instanceof Response ? { error: NO_ESTA_A_SU_ALCANCE } : resuelto;
 }

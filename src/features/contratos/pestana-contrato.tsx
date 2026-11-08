@@ -208,7 +208,7 @@ type AvisoDeContrato = {
   faltas?: string[];
 } | null;
 
-export function PestanaContrato({ obraId, esGerencia }: { obraId: string | null; esGerencia: boolean }) {
+export function PestanaContrato({ obraId, puedeAprobar }: { obraId: string | null; puedeAprobar: boolean }) {
   const lectura = useListado<ContratoDeObra>(useCallback(async () => [await api.contrato.de(obraId)], [obraId]));
   // El aviso vive aquí y no en el formulario: sobrevive a la recarga que sigue a guardar.
   const [aviso, setAviso] = useState<AvisoDeContrato>(null);
@@ -222,7 +222,7 @@ export function PestanaContrato({ obraId, esGerencia }: { obraId: string | null;
       // Cada versión arranca el formulario de lo guardado: tras guardar, aprobar o recargar.
       key={`${leido.obraId}-${leido.contrato?.version ?? 0}`}
       leido={leido}
-      esGerencia={esGerencia}
+      puedeAprobar={puedeAprobar}
       aviso={aviso}
       setAviso={setAviso}
       recargar={lectura.recargar}
@@ -232,13 +232,13 @@ export function PestanaContrato({ obraId, esGerencia }: { obraId: string | null;
 
 function FormularioDeContrato({
   leido,
-  esGerencia,
+  puedeAprobar,
   aviso,
   setAviso,
   recargar,
 }: {
   leido: ContratoDeObra;
-  esGerencia: boolean;
+  puedeAprobar: boolean;
   aviso: AvisoDeContrato;
   setAviso: (a: AvisoDeContrato) => void;
   recargar: () => void;
@@ -309,7 +309,9 @@ function FormularioDeContrato({
           {aprobado ? 'Aprobado' : contrato ? 'Borrador' : 'Sin registrar'}
         </Etiqueta>
         {aprobado ? (
-          <Text style={estilos.nota}>Aprobado: para cambiarlo, la gerencia lo vuelve a borrador con un motivo.</Text>
+          <Text style={estilos.nota}>
+            Aprobado: para cambiarlo, el Director de Proyectos o la Gerencia lo vuelven a borrador con un motivo.
+          </Text>
         ) : null}
       </View>
 
@@ -682,7 +684,7 @@ function FormularioDeContrato({
                 deshabilitado={enviando !== null || faltasDeGuardar.length > 0}
               />
             ) : null}
-            {esGerencia && contrato && !aprobado ? (
+            {puedeAprobar && contrato && !aprobado ? (
               <Boton
                 titulo={enviando === 'aprobar' ? 'Aprobando…' : 'Aprobar contrato'}
                 tono="secundario"
@@ -690,7 +692,7 @@ function FormularioDeContrato({
                 deshabilitado={enviando !== null}
               />
             ) : null}
-            {esGerencia && aprobado ? (
+            {puedeAprobar && aprobado ? (
               <Boton
                 titulo="Volver a borrador"
                 tono="peligro"
@@ -699,7 +701,7 @@ function FormularioDeContrato({
               />
             ) : null}
           </AccionesFormulario>
-          {contrato && !aprobado && esGerencia ? (
+          {contrato && !aprobado && puedeAprobar ? (
             <View style={estilos.renglon}>
               <Text style={estilos.nota}>Aprobar usa lo último guardado: guarde antes los cambios.</Text>
             </View>

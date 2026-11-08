@@ -3,6 +3,7 @@ import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras, partesDeObra, usuarios } from '@/db/servidor/esquema';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import { lecturasAnteriores } from '@/features/bitacoras/servidor/lecturas';
 import { fechaDeJornadaZod } from '@/features/panel/contratos';
 import { filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
@@ -63,16 +64,20 @@ export async function GET(peticion: Request) {
     const fecha = pedida ? fechaDeJornadaZod.parse(pedida) : fechaDeJornada();
 
     const filas = await baseServidor()
-      .select(COLUMNAS)
+      .select({ ...COLUMNAS, anuladoPor: partesDeObra.anuladoPor })
       .from(partesDeObra)
       .innerJoin(obras, eq(obras.id, partesDeObra.obraId))
       .leftJoin(usuarios, eq(usuarios.id, partesDeObra.usuarioId))
       .where(and(eq(partesDeObra.fecha, fecha), filtroDeObra(sesion, partesDeObra.obraId)))
       .orderBy(asc(obras.nombre));
 
+    // Quién anuló, con el acceso que tenía ese día (041/RF-42, RF-52).
+    const firma = await firmasConAcceso(filas.map((f) => f.anuladoPor));
+
     const partes = await Promise.all(
-      filas.map(async (fila) => ({
+      filas.map(async ({ anuladoPor, ...fila }) => ({
         ...fila,
+        anuladoPorNombre: firma(anuladoPor, fila.anuladoEn),
         lecturasAnteriores:
           fila.cerradoEn || fila.anuladoEn ? {} : await lecturasAnteriores(fila.obraId, fila.fecha),
       })),

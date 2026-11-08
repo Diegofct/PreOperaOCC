@@ -120,9 +120,10 @@ import type {
  *
  * Los roles salen de `shared/rules/permisos`, que es quien decide qué puede cada
  * uno: una lista escrita aquí y otra allá acabarían diciendo cosas distintas. Los
- * cargos reales de OCC se mapean —residente y director de obra son `supervisor`,
- * gerencia es `admin`— y el oficio va en su propia columna. La spec 008 añadió
- * `almacenista` y `encargado_planta`; ver el porqué en `permisos.ts`.
+ * cargos reales de OCC se mapean —gerencia es `admin`— y el oficio va en su propia
+ * columna. La spec 008 añadió `almacenista` y `encargado_planta`; ver el porqué en
+ * `permisos.ts`. La spec 041 renombró `supervisor` a `residente` y añadió
+ * `director_proyectos` y `director_obra` (migración 0040, escrita a mano).
  */
 export const rolUsuario = pgEnum('rol_usuario', ROLES);
 export const claseMedidor = pgEnum('clase_medidor', ['odometro', 'horometro', 'ambos']);
@@ -336,6 +337,85 @@ export const usuarios = pgTable(
       .on(t.usuario)
       .where(sql`eliminado_en is null`),
     index('ix_usuarios_obra').on(t.obraId),
+  ],
+);
+
+/**
+ * Las obras de un Director de Obra (spec 041, RF-17, RF-31).
+ *
+ * Aparte de `usuarios.obra_id` porque el Director de Obra lleva **varias**, y una columna lleva
+ * una. Para él, esta tabla es la única fuente de sus obras y su `obra_id` va vacío: si las dos
+ * dijeran algo, alguna vez dirían cosas distintas. El Residente y los demás cargos de obra
+ * siguen con `obra_id`.
+ *
+ * Nada se borra (principio 4): retirar una obra escribe `hasta` y quién la retiró, y la fila
+ * queda como el registro de desde cuándo y hasta cuándo respondió por esa obra. El índice
+ * único es **parcial** sobre las vigentes, por lo mismo que el del parte del día: sin ese
+ * predicado, retirar una obra impediría volver a asignarla.
+ *
+ * `asignado_por` es nulo en las filas que creó la migración 0040: venían de `obra_id`, y nadie
+ * las asignó en este sistema.
+ */
+export const usuariosObras = pgTable(
+  'usuarios_obras',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    desde: timestamp('desde', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    hasta: timestamp('hasta', { withTimezone: true, mode: 'date' }),
+    asignadoPor: text('asignado_por').references(() => usuarios.id),
+    retiradoPor: text('retirado_por').references(() => usuarios.id),
+  },
+  (t) => [
+    uniqueIndex('ux_usuarios_obras_vigente')
+      .on(t.usuarioId, t.obraId)
+      .where(sql`hasta is null`),
+    // Para contar los Directores de Obra vigentes de cada obra (RF-44).
+    index('ix_usuarios_obras_obra')
+      .on(t.obraId)
+      .where(sql`hasta is null`),
+  ],
+);
+
+/**
+ * El acceso que tuvo cada persona y desde cuándo (spec 041, RF-42, RF-52).
+ *
+ * Las historias del panel guardan **quién** aprobó o anuló (`aprobado_por`, `anulado_por`, en
+ * una quincena de tablas), no con qué acceso. Esta tabla responde lo segundo para cualquier
+ * fecha, sin tocar esas tablas: el acceso vigente en ese momento es la fila con `desde <= fecha`
+ * y `hasta` nulo o posterior. Añadir una columna de cargo a cada historia obligaría a tocar cada
+ * escritura, y bastaría una olvidada para que una historia saliera sin cargo.
+ *
+ * `rol` es **texto** y no el enum: guarda `supervisor` para lo de antes de la 041, que en el enum
+ * ya no existe, y una historia no se reescribe. `revisar` marca a quien la migración pasó a
+ * Residente sin ser residente (RF-48, RF-51); se apaga cuando la gerencia o el Director de
+ * Proyectos lo revisan.
+ */
+export const usuariosAccesos = pgTable(
+  'usuarios_accesos',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    rol: text('rol').notNull(),
+    cargo: text('cargo'),
+    desde: timestamp('desde', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    hasta: timestamp('hasta', { withTimezone: true, mode: 'date' }),
+    cambiadoPor: text('cambiado_por').references(() => usuarios.id),
+    revisar: boolean('revisar').notNull().default(false),
+  },
+  (t) => [
+    // Una sola fila vigente por persona: es la que dice su acceso de hoy.
+    uniqueIndex('ux_usuarios_accesos_vigente')
+      .on(t.usuarioId)
+      .where(sql`hasta is null`),
+    index('ix_usuarios_accesos_usuario').on(t.usuarioId, t.desde),
   ],
 );
 
@@ -2694,6 +2774,29 @@ export const credencialesWeb = pgTable('credenciales_web', {
   ultimoIngresoEn: timestamp('ultimo_ingreso_en', { withTimezone: true, mode: 'date' }),
   actualizadoEn: actualizadoEn(),
 });
+
+/**
+ * Quién generó cada contraseña temporal, para quién y cuándo (spec 041, RF-78).
+ *
+ * Desde la 041 también las generan los directores, y quien genera una la conoce hasta que la
+ * persona la cambia al entrar. Esta constancia es lo que permite responder quién pudo entrar con
+ * esa cuenta. Una fila por cada vez, y no una columna en `credenciales_web`: una columna se
+ * pisaría con la siguiente. La contraseña no se guarda aquí, ni temporal ni su hash.
+ */
+export const clavesGeneradas = pgTable(
+  'claves_generadas',
+  {
+    id: text('id').primaryKey(),
+    usuarioId: text('usuario_id')
+      .notNull()
+      .references(() => usuarios.id),
+    generadaPor: text('generada_por')
+      .notNull()
+      .references(() => usuarios.id),
+    generadaEn: timestamp('generada_en', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (t) => [index('ix_claves_generadas_usuario').on(t.usuarioId, t.generadaEn)],
+);
 
 export const codigosActivacion = pgTable(
   'codigos_activacion',

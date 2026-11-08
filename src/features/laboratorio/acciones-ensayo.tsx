@@ -190,7 +190,7 @@ const TEXTO_DE_PASO: Record<
   enviar: {
     titulo: 'Enviar a aprobación',
     aviso: () =>
-      'Queda enviado al residente para que lo apruebe o lo devuelva. Desde ahora no se corrige, y usted figura como «Revisó».',
+      'Queda enviado para que el Director de Obra lo apruebe o lo devuelva. Desde ahora no se corrige, y usted figura como «Revisó».',
     confirmar: 'Enviar',
     tono: 'primario',
   },

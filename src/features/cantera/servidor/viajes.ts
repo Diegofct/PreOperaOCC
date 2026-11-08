@@ -16,6 +16,7 @@ import { and, desc, eq, gte, isNull, lte, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 
 import { baseServidor } from '@/db/servidor/cliente';
+import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import { filtroDeModulo } from '@/features/servidor/alcance';
 import { columnasParaNombrar, conNombreDelVehiculo, nombrarVehiculo } from '@/features/servidor/placas';
 import {
@@ -38,7 +39,6 @@ import { leerMateriales, leerSitios } from './catalogos';
 
 const conductor = alias(usuarios, 'conductor');
 const registrador = alias(usuarios, 'registrador');
-const anulador = alias(usuarios, 'anulador');
 const origen = alias(canteraSitios, 'origen');
 const destino = alias(canteraSitios, 'destino');
 
@@ -76,7 +76,7 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
       creadoEn: canteraViajes.creadoEn,
       registradoPorNombre: registrador.nombreCompleto,
       anuladoEn: canteraViajes.anuladoEn,
-      anuladoPorNombre: anulador.nombreCompleto,
+      anuladoPor: canteraViajes.anuladoPor,
       motivoAnulacion: canteraViajes.motivoAnulacion,
       // Spec 021, RF-47: el viaje se aprobó desde un reporte de WhatsApp.
       mensajeWhatsappId: canteraViajes.mensajeWhatsappId,
@@ -88,14 +88,17 @@ export async function leerViajes(condicion: SQL | undefined): Promise<ViajeFila[
     .innerJoin(origen, eq(origen.id, canteraViajes.origenId))
     .leftJoin(destino, eq(destino.id, canteraViajes.destinoId))
     .leftJoin(registrador, eq(registrador.id, canteraViajes.registradoPor))
-    .leftJoin(anulador, eq(anulador.id, canteraViajes.anuladoPor))
     // Igual que los catálogos: una obra sin control de cantera no sale (RF-10).
     .where(and(filtroDeModulo('cantera', canteraViajes.obraId), condicion))
     .orderBy(desc(canteraViajes.fecha), desc(canteraViajes.hora), desc(canteraViajes.creadoEn));
 
-  return conNombreDelVehiculo(filas, 'volqueta').map(({ creadoEn, anuladoEn, ...fila }) => ({
+  // Quién anuló, con el acceso que tenía ese día (041/RF-42, RF-52).
+  const firma = await firmasConAcceso(filas.map((f) => f.anuladoPor));
+
+  return conNombreDelVehiculo(filas, 'volqueta').map(({ creadoEn, anuladoEn, anuladoPor, ...fila }) => ({
     ...fila,
     registradoEn: creadoEn.toISOString(),
+    anuladoPorNombre: firma(anuladoPor, anuladoEn),
     anulado: anuladoEn !== null,
     anuladoEn: anuladoEn?.toISOString() ?? null,
   }));

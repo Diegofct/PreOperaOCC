@@ -62,7 +62,7 @@ function porciento(n: number): string {
   return `${n.toLocaleString('es-CO', { maximumFractionDigits: 2 })} %`;
 }
 
-export function PestanaPresupuesto({ obraId, esGerencia }: { obraId: string | null; esGerencia: boolean }) {
+export function PestanaPresupuesto({ obraId, puedeAprobar }: { obraId: string | null; puedeAprobar: boolean }) {
   const lista = useListado<PresupuestoFila>(useCallback(() => api.presupuestos.listar(obraId), [obraId]));
   const [elegido, setElegido] = useParametroDeDireccion('presupuesto', '');
   const [importando, setImportando] = useState(false);
@@ -170,7 +170,7 @@ export function PestanaPresupuesto({ obraId, esGerencia }: { obraId: string | nu
         <DetalleDePresupuesto
           key={`${visible.id}-${lista.datos.length}-${visible.estado}`}
           id={visible.id}
-          esGerencia={esGerencia}
+          puedeAprobar={puedeAprobar}
           alCambiar={(mensaje, mirar) => {
             if (mensaje) setAviso({ tono: 'exito', texto: mensaje });
             if (mirar) setElegido(mirar);
@@ -491,11 +491,11 @@ const COLUMNAS_DE_ITEMS: Columna<ItemDelPresupuesto>[] = [
 
 function DetalleDePresupuesto({
   id,
-  esGerencia,
+  puedeAprobar,
   alCambiar,
 }: {
   id: string;
-  esGerencia: boolean;
+  puedeAprobar: boolean;
   /** Tras un cambio: el mensaje para la lista y, si nació otra versión, cuál mirar. */
   alCambiar: (mensaje?: string, mirar?: string) => void;
 }) {
@@ -557,7 +557,7 @@ function DetalleDePresupuesto({
       </View>
       <AccionesDeVersion
         presupuesto={p}
-        esGerencia={esGerencia}
+        puedeAprobar={puedeAprobar}
         alEditar={() => {
           setGuardado(false);
           setEditando(true);

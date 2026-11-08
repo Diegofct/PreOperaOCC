@@ -62,16 +62,34 @@ import {
   ROLES,
   moduloDeEntrada,
   MODULOS,
+  MODULOS_DE_EMPRESA,
   motivoDeRechazo,
+  motivoParaNoDarDeBajaObra,
   motivoParaNoDarRol,
+  motivoParaNoAprobar,
   sinObraAsignada,
   modulosVisibles,
   puedeCambiarRol,
+  puedeGenerarClave,
   rolesQuePuedeDar,
+  rolDeVariasObras,
+  rolVeTodasLasObras,
   type Modulo,
+  type ModuloConPermiso,
   type Rol,
   TODOS_LOS_MODULOS,
 } from '../src/shared/rules/permisos';
+import {
+  accesoTrasLaMigracion,
+  campoDeObras,
+  etiquetaDeAccesoHistorico,
+  etiquetaDelAccesoEn,
+  firmaConAcceso,
+  motivoParaNoAsignarObras,
+  obraEnUso,
+  obrasAlCambiarDeAcceso,
+  puedeMarcarRevisado,
+} from '../src/shared/rules/cargos-de-obra';
 import {
   CARGOS,
   cargoPorId,
@@ -307,6 +325,7 @@ import {
   empresaDeLaPersona,
   empresaDelAccesoSinObra,
   reparoDelAccesoSinObra,
+  reparoDeObrasDelAcceso,
   empresaDelLugar,
   lugarDeLaRuta,
   menuDeEmpresa,
@@ -475,6 +494,7 @@ import {
   modulosDeAnulados,
   indicacionDeObraPorDefecto,
   obraAlAlcance,
+  obrasAlcanzadasEnTexto,
   preguntasQueQuedan,
   resumenDeRegistrados,
   ROLES_DEL_ASISTENTE,
@@ -560,7 +580,7 @@ import {
   type RetenidosDelEnsayo,
 } from '../src/shared/rules/granulometria';
 import { vehiculos } from '../src/db/servidor/esquema';
-import { alcanzaLaImagen, alcanzaLaObra, filtroDeObra } from '../src/features/servidor/alcance';
+import { alcanzaLaImagen, alcanzaLaObra, esDeSusObras, filtroDeObra, obraParaEscribir } from '../src/features/servidor/alcance';
 import type { PersonaEnSesion } from '../src/features/auth/servidor/sesion';
 import {
   debeRendirse,
@@ -2651,9 +2671,11 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
   // Spec 001 / RF-1, ampliado por 008 / RF-12 (almacén y cantera, en consulta), por
   // 018 / RF-7 (laboratorio, donde además aprueba), por 021 / RF-14 (la bandeja), por
   // 030 / RF-1 (Reportes), por 031 / RF-2 (Contrato y Presupuesto) y por 028 / RF-1
-  // (el asistente).
-  assert.deepEqual(modulosVisibles('supervisor'), [
+  // (el asistente). Desde la 041 son dos accesos, residente y director de obra, y los dos
+  // entran además a Personas para dar accesos de obra (RF-26, RF-38).
+  for (const rol of ['residente', 'director_obra'] as const) assert.deepEqual(modulosVisibles(rol), [
     'inicio',
+    'personas',
     'asignaciones',
     'bitacoras',
     'preoperacionales',
@@ -2664,11 +2686,12 @@ prueba('el residente entra a inicio, asignaciones, bitácoras, preoperacionales,
     'reportes',
     'contrato',
     'asistente',
-  ]);
+  ], rol);
 });
 
 prueba('la bandeja de WhatsApp es de la gerencia y del residente, y nada más (021/RF-14, RF-15)', () => {
-  for (const rol of ['admin', 'supervisor'] as const) {
+  // Desde la 041, los tres cargos de obra: aprobar en la bandeja es registrar (041/RF-37).
+  for (const rol of ['admin', 'residente', 'director_obra', 'director_proyectos'] as const) {
     for (const accion of ['ver', 'listar', 'escribir', 'aprobar'] as const) {
       assert.ok(alcanza(rol, 'whatsapp', accion), `${rol} whatsapp/${accion}`);
     }
@@ -2688,50 +2711,62 @@ prueba('la bandeja de WhatsApp es de la gerencia y del residente, y nada más (0
   // El rechazo dice qué se intentaba en la bandeja, no lo del laboratorio.
   assert.equal(
     motivoDeRechazo('whatsapp', 'aprobar'),
-    'No puede aprobar ni descartar este reporte: lo hacen la gerencia y el residente o el director.',
+    'No puede aprobar ni descartar este reporte: lo hacen la gerencia, el residente, el director de proyectos y el director de obra.',
   );
   assert.equal(
     motivoDeRechazo('laboratorio', 'aprobar'),
-    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia y el residente o el director.',
+    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia, el director de proyectos y el director de obra.',
   );
 });
 
 prueba('aprobar viajes desde la bandeja no le da Control Cantera al residente (021/RF-84, RF-85)', () => {
-  assert.equal(alcanza('supervisor', 'cantera', 'escribir'), false);
-  assert.equal(alcanza('supervisor', 'cantera', 'anular'), false);
-  assert.ok(alcanza('supervisor', 'cantera', 'listar'));
+  // Ni al residente ni al director de obra: registrar viajes sigue siendo del encargado de planta.
+  // Anular sí lo puede el director de obra desde la 041 (RF-60); el residente no.
+  for (const rol of ['residente', 'director_obra'] as const) {
+    assert.equal(alcanza(rol, 'cantera', 'escribir'), false, rol);
+    assert.ok(alcanza(rol, 'cantera', 'listar'), rol);
+  }
+  assert.equal(alcanza('residente', 'cantera', 'anular'), false);
 });
 
 prueba('el residente no escribe en el maestro de la empresa', () => {
-  // Esto es lo que hoy sí puede hacer, y es el motivo de la spec 001.
-  for (const modulo of ['obras', 'personas', 'vehiculos'] as const) {
-    assert.equal(alcanza('supervisor', modulo, 'escribir'), false, modulo);
-    assert.equal(alcanza('supervisor', modulo, 'ver'), false, modulo);
+  // Esto es lo que hoy sí puede hacer, y es el motivo de la spec 001. Desde la 041 entra a
+  // Personas a dar accesos de obra (RF-26, RF-38), pero Obras y Vehículos siguen cerrados.
+  for (const rol of ['residente', 'director_obra'] as const) {
+    for (const modulo of ['obras', 'vehiculos'] as const) {
+      assert.equal(alcanza(rol, modulo, 'escribir'), false, `${rol} ${modulo}`);
+      assert.equal(alcanza(rol, modulo, 'ver'), false, `${rol} ${modulo}`);
+    }
   }
 });
 
 prueba('pero sí puede listar personas y vehículos', () => {
   // El caso que evita que alguien "arregle" el permiso de más y deje sin datos
   // a los selectores de Asignaciones y Bitácoras.
-  assert.ok(alcanza('supervisor', 'personas', 'listar'));
-  assert.ok(alcanza('supervisor', 'vehiculos', 'listar'));
+  assert.ok(alcanza('director_obra', 'personas', 'listar'));
+  assert.ok(alcanza('director_obra', 'vehiculos', 'listar'));
 });
 
-prueba('el residente trabaja en asignaciones y bitácoras, y anula bitácoras', () => {
-  assert.ok(alcanza('supervisor', 'asignaciones', 'escribir'));
-  assert.ok(alcanza('supervisor', 'bitacoras', 'escribir'));
-  assert.ok(alcanza('supervisor', 'bitacoras', 'anular'));
+prueba('el residente trabaja en asignaciones y bitácoras; desde la 041 la anula el director de obra', () => {
+  for (const rol of ['residente', 'director_obra'] as const) {
+    assert.ok(alcanza(rol, 'asignaciones', 'escribir'), rol);
+    assert.ok(alcanza(rol, 'bitacoras', 'escribir'), rol);
+  }
+  assert.ok(alcanza('director_obra', 'bitacoras', 'anular'));
+  assert.equal(alcanza('residente', 'bitacoras', 'anular'), false);
 });
 
-prueba('anular un preoperacional es solo de la gerencia', () => {
-  assert.ok(alcanza('supervisor', 'preoperacionales', 'ver'));
-  assert.equal(alcanza('supervisor', 'preoperacionales', 'anular'), false);
-  assert.ok(alcanza('admin', 'preoperacionales', 'anular'));
+prueba('anular un preoperacional: la gerencia, los directores y el encargado de OCC; el residente no (041/RF-9, RF-60)', () => {
+  assert.ok(alcanza('residente', 'preoperacionales', 'ver'));
+  assert.equal(alcanza('residente', 'preoperacionales', 'anular'), false);
+  for (const rol of ['admin', 'director_obra', 'director_proyectos', 'encargado_occ'] as const) {
+    assert.ok(alcanza(rol, 'preoperacionales', 'anular'), rol);
+  }
 });
 
-prueba('emitir códigos de activación es solo de la gerencia', () => {
+prueba('emitir códigos de activación: la gerencia y los directores, no el residente (041/RF-72)', () => {
   assert.ok(alcanza('admin', 'personas', 'activar'));
-  assert.equal(alcanza('supervisor', 'personas', 'activar'), false);
+  assert.equal(alcanza('residente', 'personas', 'activar'), false);
 });
 
 prueba('el operador no alcanza nada del panel', () => {
@@ -2744,9 +2779,12 @@ prueba('el operador no alcanza nada del panel', () => {
 });
 
 prueba('nadie reparte más permisos de los que tiene', () => {
-  assert.equal(puedeCambiarRol('supervisor', 'admin'), false);
-  assert.ok(puedeCambiarRol('supervisor', 'supervisor'));
-  assert.ok(puedeCambiarRol('supervisor', 'operador'));
+  assert.equal(puedeCambiarRol('director_obra', 'admin'), false);
+  // Desde la 041 el director de obra no da su propio acceso (RF-27), y el residente solo da operador (RF-38).
+  assert.equal(puedeCambiarRol('director_obra', 'director_obra'), false);
+  assert.ok(puedeCambiarRol('director_obra', 'operador'));
+  assert.equal(puedeCambiarRol('residente', 'residente'), false);
+  assert.ok(puedeCambiarRol('residente', 'operador'));
   assert.ok(puedeCambiarRol('admin', 'admin'));
 });
 
@@ -2789,16 +2827,17 @@ prueba('almacenista y encargado de planta llevan su módulo entero', () => {
   assert.equal(alcanza('almacenista', 'almacen', 'anular'), false);
 });
 
-prueba('en el almacén solo anula la gerencia', () => {
-  // Spec 009 / RF-38 y RF-39: lo pidió gerencia el 2026-09-17. Escribir no cambia.
+prueba('en el almacén anulan la gerencia y, desde la 041, los directores; el almacenista y el residente no', () => {
+  // Spec 009 / RF-38 y RF-39: lo pidió gerencia el 2026-09-17. Escribir no cambia. La 041
+  // (RF-9, RF-60) lo abrió a los directores, que responden por la obra.
   assert.ok(alcanza('almacenista', 'almacen', 'escribir'));
   assert.equal(alcanza('almacenista', 'almacen', 'anular'), false);
   assert.ok(alcanza('admin', 'almacen', 'anular'));
-  assert.equal(alcanza('supervisor', 'almacen', 'anular'), false);
+  assert.equal(alcanza('residente', 'almacen', 'anular'), false);
   // Y el 403 de la guardia nombra a quien sí puede (spec 008, RF-13).
   assert.equal(
     motivoDeRechazo('almacen', 'anular'),
-    'No puede anular este registro: lo hace la gerencia.',
+    'No puede anular este registro: lo hacen la gerencia, el director de proyectos y el director de obra.',
   );
 });
 
@@ -2808,13 +2847,14 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
     for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
       assert.ok(alcanza('admin', modulo, accion), `admin ${modulo}/${accion}`);
     }
-    assert.ok(alcanza('supervisor', modulo, 'ver'), `supervisor ${modulo}/ver`);
-    assert.ok(alcanza('supervisor', modulo, 'listar'), `supervisor ${modulo}/listar`);
-    assert.equal(alcanza('supervisor', modulo, 'escribir'), false, `supervisor ${modulo}/escribir`);
-    assert.equal(alcanza('supervisor', modulo, 'anular'), false, `supervisor ${modulo}/anular`);
+    assert.ok(alcanza('residente', modulo, 'ver'), `residente ${modulo}/ver`);
+    assert.ok(alcanza('residente', modulo, 'listar'), `residente ${modulo}/listar`);
+    assert.equal(alcanza('residente', modulo, 'escribir'), false, `residente ${modulo}/escribir`);
+    assert.equal(alcanza('residente', modulo, 'anular'), false, `residente ${modulo}/anular`);
   }
-  assert.deepEqual(modulosVisibles('supervisor'), [
+  assert.deepEqual(modulosVisibles('residente'), [
     'inicio',
+    'personas',
     'asignaciones',
     'bitacoras',
     'preoperacionales',
@@ -2830,34 +2870,37 @@ prueba('la gerencia registra en almacén y cantera; el residente solo consulta',
 
 prueba('solo la gerencia da los accesos de almacén y de planta', () => {
   // Spec 008 / RF-17. No están «por encima» del residente: son otros.
+  // Desde la 041 también los directores (RF-12, RF-26); el residente no (RF-39).
   for (const destino of ['almacenista', 'encargado_planta'] as const) {
     assert.ok(puedeCambiarRol('admin', destino), destino);
-    assert.equal(puedeCambiarRol('supervisor', destino), false, destino);
+    assert.equal(puedeCambiarRol('residente', destino), false, destino);
     assert.equal(puedeCambiarRol('almacenista', destino), false, destino);
     assert.equal(puedeCambiarRol('encargado_planta', destino), false, destino);
   }
   // Y ellos no reparten acceso a nadie.
   assert.equal(puedeCambiarRol('almacenista', 'operador'), false);
-  assert.equal(puedeCambiarRol('encargado_planta', 'supervisor'), false);
+  assert.equal(puedeCambiarRol('encargado_planta', 'director_obra'), false);
 });
 
 prueba('el rechazo de dar un acceso dice quién puede darlo', () => {
   // Spec 008 / RF-17 y el requisito no funcional de 001: qué no se puede y quién sí.
+  // Desde la 041 «quién sí» sale de la regla: también los directores (RF-27, RF-39).
   assert.equal(
-    motivoParaNoDarRol('supervisor', 'almacenista'),
-    'Solo la gerencia puede dar el acceso de Almacenista.',
+    motivoParaNoDarRol('residente', 'almacenista'),
+    'Solo la gerencia, el director de proyectos o el director de obra pueden dar el acceso de Almacenista.',
   );
   assert.equal(
-    motivoParaNoDarRol('supervisor', 'encargado_planta'),
-    'Solo la gerencia puede dar el acceso de Encargado de Planta.',
+    motivoParaNoDarRol('residente', 'encargado_planta'),
+    'Solo la gerencia, el director de proyectos o el director de obra pueden dar el acceso de Encargado de Planta.',
   );
   assert.equal(
-    motivoParaNoDarRol('supervisor', 'admin'),
+    motivoParaNoDarRol('director_obra', 'admin'),
     'Solo la gerencia puede dar el acceso de Gerencia.',
   );
   // Si se puede, no hay motivo.
   assert.equal(motivoParaNoDarRol('admin', 'almacenista'), null);
-  assert.equal(motivoParaNoDarRol('supervisor', 'operador'), null);
+  assert.equal(motivoParaNoDarRol('director_obra', 'almacenista'), null);
+  assert.equal(motivoParaNoDarRol('residente', 'operador'), null);
 });
 
 prueba('el rechazo del servidor dice quién sí puede hacerlo', () => {
@@ -2865,22 +2908,22 @@ prueba('el rechazo del servidor dice quién sí puede hacerlo', () => {
   // de la gerencia», porque también lo hace el almacenista.
   assert.equal(
     motivoDeRechazo('almacen', 'escribir'),
-    'No puede crear o modificar este registro: lo hacen la gerencia y el almacenista.',
+    'No puede crear o modificar este registro: lo hacen la gerencia, el almacenista y el director de proyectos.',
   );
   assert.equal(
     motivoDeRechazo('cantera', 'anular'),
-    'No puede anular este registro: lo hacen la gerencia y el encargado de planta.',
+    'No puede anular este registro: lo hacen la gerencia, el encargado de planta, el director de proyectos y el director de obra.',
   );
   // Donde solo escribe la gerencia, el texto dice lo mismo que antes, con otras palabras.
   assert.equal(
     motivoDeRechazo('obras', 'escribir'),
-    'No puede crear o modificar este registro: lo hace la gerencia.',
+    'No puede crear o modificar este registro: lo hacen la gerencia y el director de proyectos.',
   );
   // Al almacenista que abre Bitácoras se le dice quién la lleva. Desde la spec 034 el
   // Encargado de OCC también la consulta (la de maquinaria de OCC).
   assert.equal(
     motivoDeRechazo('bitacoras', 'listar'),
-    'No puede consultar este listado: lo hacen la gerencia, el residente o el director y el encargado de OCC.',
+    'No puede consultar este listado: lo hacen la gerencia, el residente, el encargado de OCC, el director de proyectos y el director de obra.',
   );
 });
 
@@ -2888,7 +2931,7 @@ prueba('una cuenta sin obra se detecta para todo el que no es gerencia', () => {
   // Spec 008 / RF-6: el almacenista sin obra no ve nada y se le dice por qué.
   assert.equal(sinObraAsignada('almacenista', null), true);
   assert.equal(sinObraAsignada('encargado_planta', null), true);
-  assert.equal(sinObraAsignada('supervisor', null), true);
+  assert.equal(sinObraAsignada('director_obra', null), true);
   assert.equal(sinObraAsignada('almacenista', 'obra-1'), false);
   // La gerencia no está adscrita a ninguna obra, y eso no es un fallo de su cuenta.
   assert.equal(sinObraAsignada('admin', null), false);
@@ -2966,7 +3009,7 @@ prueba('una foto solo la ve quien alcanza la obra de su registro (defecto de med
   // buscaba en la tabla vieja `bitacoras`: no las encontraba, quedaban «sin obra» y
   // `alcanzaLaObra` deja pasar lo que no tiene obra. Un residente podía ver la foto
   // del día de otra obra con solo tener su id.
-  const residenteA = sesionDe('supervisor', 'obra-a');
+  const residenteA = sesionDe('director_obra', 'obra-a');
   assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-a' }), true);
   assert.equal(alcanzaLaImagen(residenteA, { existe: true, obraId: 'obra-b' }), false);
   // El hueco: un dueño que no se encuentra **no** es «de todos».
@@ -3001,7 +3044,7 @@ prueba('la pestaña dice en qué pantalla se está (defecto de títulos, 2026-10
 prueba('cada rol entra por su módulo', () => {
   // Spec 008 / RF-4.
   assert.equal(moduloDeEntrada('admin'), 'inicio');
-  assert.equal(moduloDeEntrada('supervisor'), 'inicio');
+  assert.equal(moduloDeEntrada('director_obra'), 'inicio');
   assert.equal(moduloDeEntrada('almacenista'), 'almacen');
   assert.equal(moduloDeEntrada('encargado_planta'), 'cantera');
   assert.equal(moduloDeEntrada('operador'), null);
@@ -3042,9 +3085,9 @@ prueba('el laboratorista registra, pero no aprueba ni anula', () => {
 prueba('el residente aprueba y anula ensayos, pero no los registra', () => {
   // Spec 018 / RF-7, RF-77, RF-78 y RF-86: hace de coordinador de laboratorio.
   for (const accion of ['ver', 'listar', 'aprobar', 'anular'] as const) {
-    assert.ok(alcanza('supervisor', 'laboratorio', accion), accion);
+    assert.ok(alcanza('director_obra', 'laboratorio', accion), accion);
   }
-  assert.equal(alcanza('supervisor', 'laboratorio', 'escribir'), false);
+  assert.equal(alcanza('director_obra', 'laboratorio', 'escribir'), false);
   // La gerencia, todo (RF-9).
   for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
     assert.ok(alcanza('admin', 'laboratorio', accion), accion);
@@ -3062,13 +3105,14 @@ prueba('el residente aprueba y anula ensayos, pero no los registra', () => {
 prueba('solo la gerencia da el acceso de laboratorista', () => {
   // Spec 018 / RF-2.
   assert.ok(puedeCambiarRol('admin', 'laboratorista'));
-  for (const rol of ['supervisor', 'almacenista', 'encargado_planta', 'laboratorista', 'operador'] as const) {
+  // Desde la 041 también los directores (RF-12, RF-26); el residente sigue sin darlo.
+  for (const rol of ['residente', 'almacenista', 'encargado_planta', 'laboratorista', 'operador'] as const) {
     assert.equal(puedeCambiarRol(rol, 'laboratorista'), false, rol);
   }
   assert.equal(puedeCambiarRol('laboratorista', 'operador'), false);
   assert.equal(
-    motivoParaNoDarRol('supervisor', 'laboratorista'),
-    'Solo la gerencia puede dar el acceso de Laboratorista.',
+    motivoParaNoDarRol('residente', 'laboratorista'),
+    'Solo la gerencia, el director de proyectos o el director de obra pueden dar el acceso de Laboratorista.',
   );
 });
 
@@ -3076,15 +3120,15 @@ prueba('el rechazo en el laboratorio dice quién sí puede', () => {
   // Spec 018 / RF-10.
   assert.equal(
     motivoDeRechazo('laboratorio', 'aprobar'),
-    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia y el residente o el director.',
+    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia, el director de proyectos y el director de obra.',
   );
   assert.equal(
     motivoDeRechazo('laboratorio', 'escribir'),
-    'No puede crear o modificar este registro: lo hacen la gerencia y el laboratorista.',
+    'No puede crear o modificar este registro: lo hacen la gerencia, el laboratorista y el director de proyectos.',
   );
   assert.equal(
     motivoDeRechazo('laboratorio', 'anular'),
-    'No puede anular este registro: lo hacen la gerencia y el residente o el director.',
+    'No puede anular este registro: lo hacen la gerencia, el director de proyectos y el director de obra.',
   );
 });
 
@@ -3136,7 +3180,7 @@ prueba('el menú de cada quien depende de su cargo y de los módulos de su obra'
   assert.deepEqual(modulosVisibles('encargado_planta', sinCantera), ['asistente']);
 
   // El residente pierde lo que su obra no lleva y conserva lo suyo.
-  const residente = modulosVisibles('supervisor', sinNada);
+  const residente = modulosVisibles('director_obra', sinNada);
   assert.ok(residente.includes('bitacoras'), residente.join(','));
   assert.ok(!residente.includes('almacen') && !residente.includes('cantera'));
   assert.ok(!residente.includes('laboratorio'));
@@ -3198,8 +3242,8 @@ prueba('el laboratorio se enciende por obra, y apagado nadie de la obra lo ve', 
   // Y el asistente, que no depende de la obra (028/RF-1).
   assert.deepEqual(modulosVisibles('laboratorista', TODOS_LOS_MODULOS), ['laboratorio', 'asistente']);
   assert.deepEqual(modulosVisibles('laboratorista', sinLaboratorio), ['asistente']);
-  assert.ok(modulosVisibles('supervisor', TODOS_LOS_MODULOS).includes('laboratorio'));
-  assert.ok(!modulosVisibles('supervisor', sinLaboratorio).includes('laboratorio'));
+  assert.ok(modulosVisibles('director_obra', TODOS_LOS_MODULOS).includes('laboratorio'));
+  assert.ok(!modulosVisibles('director_obra', sinLaboratorio).includes('laboratorio'));
   // La gerencia lo ve siempre: a ella se le esconden las obras apagadas (RF-8).
   assert.ok(modulosVisibles('admin', sinLaboratorio).includes('laboratorio'));
 
@@ -3228,21 +3272,27 @@ prueba('el aviso de módulo ajeno dice dónde está el trabajo de cada quien', (
   );
   // Para el residente se conserva el texto de 001/RF-3.
   assert.equal(
-    avisoDeModuloAjeno('supervisor', 'obras'),
+    avisoDeModuloAjeno('director_obra', 'obras'),
     'Este módulo es de la gerencia. Si necesita registrar o corregir algo aquí, pídaselo a quien lleve la administración.',
   );
   // Si sí lo alcanza, no hay aviso.
   assert.equal(avisoDeModuloAjeno('almacenista', 'almacen'), null);
 });
 
-/** Una sesión de mentira, con lo justo para preguntarle al alcance. */
-function sesionDe(rol: Rol, obraId: string | null): PersonaEnSesion {
+/**
+ * Una sesión de mentira, con lo justo para preguntarle al alcance. Desde la 041 lleva también
+ * `obras`: por omisión, la única de `obraId`, que es lo que trae la sesión a quien tiene una.
+ */
+function sesionDe(rol: Rol, obraId: string | null, obras: string[] = obraId ? [obraId] : []): PersonaEnSesion {
   return {
     id: 'u1',
     usuario: 'prueba',
     nombreCompleto: 'Persona de prueba',
     rol,
+    cargo: null,
     obraId,
+    obras,
+    obrasConNombre: obras.map((id) => ({ id, nombre: `Obra ${id}`, modulos: TODOS_LOS_MODULOS })),
     obraNombre: obraId ? 'Obra de prueba' : null,
     // Los dos módulos encendidos salvo que la prueba diga otra cosa (spec 017).
     modulosDeObra: TODOS_LOS_MODULOS,
@@ -3258,7 +3308,7 @@ prueba('la gerencia alcanza cualquier obra y no filtra por ninguna', () => {
 });
 
 prueba('el residente alcanza su obra y las filas sin obra', () => {
-  const residente = sesionDe('supervisor', 'obra-a');
+  const residente = sesionDe('director_obra', 'obra-a');
   assert.notEqual(filtroDeObra(residente, vehiculos.obraId), undefined);
   assert.ok(alcanzaLaObra(residente, 'obra-a'));
   assert.ok(alcanzaLaObra(residente, null));
@@ -3269,7 +3319,7 @@ prueba('un residente sin obra asignada no alcanza nada', () => {
   // Antes de la spec 001 esto devolvía «sin filtro» y `true`: una cuenta a
   // medio configurar veía más que una bien puesta. Si alguien vuelve a
   // ponerlo así, esta comprobación es lo único que lo va a decir.
-  const suelto = sesionDe('supervisor', null);
+  const suelto = sesionDe('director_obra', null);
   assert.notEqual(filtroDeObra(suelto, vehiculos.obraId), undefined);
   assert.equal(alcanzaLaObra(suelto, 'obra-a'), false);
   assert.equal(alcanzaLaObra(suelto, null), false);
@@ -4533,15 +4583,15 @@ prueba('la paleta nueva del panel contrasta lo suficiente (022/RNF)', () => {
   assert.ok(contraste(Panel.acento, Panel.fondo) < 4.5);
 });
 
-prueba('están los veintitrés cargos, con slug y rótulo únicos', () => {
+prueba('están los veinticuatro cargos, con slug y rótulo únicos', () => {
   // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
   // más Gerente (002/RF-13, añadido el 2026-09-19), más Controlador(a) Vial y
   // Control de Calidad (pedidos por OCC el 2026-09-23), más Laboratorista
   // (018/RF-3), más Encargado de OCC (034/RF-12), más Auxiliar Administrativa
-  // (035/RF-8, renombrada en la 040).
-  assert.equal(CARGOS.length, 23);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 23);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 23);
+  // (035/RF-8, renombrada en la 040), más Director de Proyectos (041/RF-3).
+  assert.equal(CARGOS.length, 24);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 24);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 24);
 });
 
 prueba('los cargos nuevos de obra no reciben celular', () => {
@@ -4596,9 +4646,13 @@ prueba('almacenista y encargado de planta no reciben celular', () => {
   assert.equal(operaVehiculos('encargado_planta'), false);
 });
 
-prueba('solo la dirección y las residencias entran al panel como residente', () => {
-  const alPanel = CARGOS.filter((c) => c.rolSugerido === 'supervisor').map((c) => c.id);
-  assert.deepEqual(alPanel, ['director', 'residente_1', 'residente_2']);
+prueba('solo las residencias entran al panel como residente; la dirección, con su acceso (041/RF-3, RF-4)', () => {
+  const alPanel = CARGOS.filter((c) => c.rolSugerido === 'residente').map((c) => c.id);
+  assert.deepEqual(alPanel, ['residente_1', 'residente_2']);
+  assert.deepEqual(
+    CARGOS.filter((c) => c.rolSugerido === 'director_obra' || c.rolSugerido === 'director_proyectos').map((c) => c.id),
+    ['director_proyectos', 'director'],
+  );
 });
 
 prueba('solo el conductor y el operador llevan máquina', () => {
@@ -9646,11 +9700,12 @@ prueba('032/RF-36, RF-37: Reportes dice qué día no hubo actividades o ensayos,
 // ---------------------------------------------------------------------------
 
 prueba('030/RF-1: Reportes es de la gerencia y del residente, y nada más', () => {
-  for (const rol of ['admin', 'supervisor'] as const) {
+  for (const rol of ['admin', 'director_obra'] as const) {
     for (const accion of ['ver', 'listar', 'escribir'] as const) {
       assert.ok(alcanza(rol, 'reportes', accion), `${rol} reportes/${accion}`);
     }
-    assert.equal(alcanza(rol, 'reportes', 'anular'), false, `${rol} reportes/anular`);
+    // Desde la 041 anular va aparte de escribir, para que el Residente no anule (RF-33, RF-35).
+    assert.ok(alcanza(rol, 'reportes', 'anular'), `${rol} reportes/anular`);
     assert.ok(modulosVisibles(rol).includes('reportes'), rol);
   }
   for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista'] as const) {
@@ -9981,14 +10036,14 @@ prueba('la salida del clasificador con mantenimientos pasa por el contrato (030/
 });
 
 prueba('031/RF-1 a RF-3: Contrato y Presupuesto es de la gerencia y del residente, y solo la gerencia aprueba', () => {
-  for (const rol of ['admin', 'supervisor'] as const) {
+  for (const rol of ['admin', 'director_obra'] as const) {
     for (const accion of ['ver', 'listar', 'escribir'] as const) {
       assert.ok(alcanza(rol, 'contrato', accion), `${rol} contrato/${accion}`);
     }
     assert.ok(modulosVisibles(rol).includes('contrato'), rol);
   }
   assert.equal(alcanza('admin', 'contrato', 'aprobar'), true);
-  assert.equal(alcanza('supervisor', 'contrato', 'aprobar'), false);
+  assert.equal(alcanza('director_obra', 'contrato', 'aprobar'), false);
   for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista'] as const) {
     for (const accion of ['ver', 'listar', 'escribir', 'aprobar', 'anular'] as const) {
       assert.equal(alcanza(rol, 'contrato', accion), false, `${rol} contrato/${accion}`);
@@ -10530,7 +10585,7 @@ prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente ta
   assert.deepEqual(gerencia.modulos, [...MODULOS_CONSULTABLES]);
   // Desde la 040 (RF-15) el residente, el almacenista y el laboratorista también consultan las
   // solicitudes, y el laboratorista la Bitácora de Geolab: su prueba es la de 040/RF-15.
-  assert.deepEqual(de('supervisor'), {
+  assert.deepEqual(de('director_obra'), {
     usa: true,
     obras: ['obra-a'],
     modulos: [
@@ -10551,7 +10606,7 @@ prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente ta
 
 prueba('028/RF-5, RF-10: un módulo apagado en la obra queda fuera, y sin obra no hay nada', () => {
   const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
-  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: sinAlmacen });
+  const residente = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-a', modulosDeObra: sinAlmacen });
   assert.ok(!residente.modulos.includes('almacen'));
   assert.ok(residente.modulos.includes('cantera'));
   // El almacenista de una obra sin almacén no alcanza el almacén; desde la 040, sí sus solicitudes.
@@ -10559,7 +10614,7 @@ prueba('028/RF-5, RF-10: un módulo apagado en la obra queda fuera, y sin obra n
   // La gerencia no se filtra por los módulos de una obra (017/RF-10).
   assert.ok(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: sinAlmacen }).modulos.includes('almacen'));
   // RF-10: residente sin obra.
-  assert.deepEqual(alcanceDelAsistente({ rol: 'supervisor', obraId: null, modulosDeObra: TODOS_LOS_MODULOS }), {
+  assert.deepEqual(alcanceDelAsistente({ rol: 'director_obra', obraId: null, modulosDeObra: TODOS_LOS_MODULOS }), {
     usa: true,
     obras: [],
     modulos: [],
@@ -10569,21 +10624,21 @@ prueba('028/RF-5, RF-10: un módulo apagado en la obra queda fuera, y sin obra n
 });
 
 prueba('028/RF-4, RF-6: la obra se decide por quién pregunta', () => {
-  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
+  const residente = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
   assert.equal(obraAlAlcance(residente, 'obra-a'), true);
   assert.equal(obraAlAlcance(residente, 'obra-b'), false);
   assert.equal(obraAlAlcance(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: TODOS_LOS_MODULOS }), 'obra-b'), true);
 });
 
 prueba('028/RF-9, RF-49: una conversación se muestra entera solo si todavía se alcanza lo que consultó', () => {
-  const residenteA = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
+  const residenteA = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-a', modulosDeObra: TODOS_LOS_MODULOS });
   const deCantera = { obras: ['obra-a'], modulos: ['cantera' as const] };
   assert.equal(conversacionVisible(deCantera, residenteA), true);
   // Le cambiaron la obra: lo de la obra A ya no.
-  const residenteB = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-b', modulosDeObra: TODOS_LOS_MODULOS });
+  const residenteB = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-b', modulosDeObra: TODOS_LOS_MODULOS });
   assert.equal(conversacionVisible(deCantera, residenteB), false);
   // Le apagaron Cantera en su obra.
-  const sinCantera = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: { ...TODOS_LOS_MODULOS, cantera: false } });
+  const sinCantera = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-a', modulosDeObra: { ...TODOS_LOS_MODULOS, cantera: false } });
   assert.equal(conversacionVisible(deCantera, sinCantera), false);
   // Una conversación sin consultas (p. ej. «hola») se ve siempre que use el asistente.
   assert.equal(conversacionVisible({ obras: [], modulos: [] }, residenteB), true);
@@ -10671,7 +10726,7 @@ prueba('028/RF-57: el costo estimado, en microdólares', () => {
 
 prueba('028/RF-83: la consulta de anulados solo nombra los módulos que la persona alcanza', () => {
   const sinAlmacen = { ...TODOS_LOS_MODULOS, almacen: false };
-  const residente = alcanceDelAsistente({ rol: 'supervisor', obraId: 'obra-a', modulosDeObra: sinAlmacen });
+  const residente = alcanceDelAsistente({ rol: 'director_obra', obraId: 'obra-a', modulosDeObra: sinAlmacen });
   assert.deepEqual(modulosDeAnulados(residente.modulos), ['bitacoras', 'cantera', 'preoperacionales', 'laboratorio']);
   assert.deepEqual(modulosDeAnulados(alcanceDelAsistente({ rol: 'admin', obraId: null, modulosDeObra: sinAlmacen }).modulos), [
     'bitacoras',
@@ -10756,7 +10811,7 @@ prueba('028/RF-74: los ejemplos son solo de los módulos que la persona alcanza'
   assert.ok(ejemplosDePregunta(alcanceDe('laboratorista')).every((p) => /ensayo|granulometr/i.test(p)));
   // Módulo apagado: al almacenista le quedan solo sus solicitudes (040), y al residente ninguno de almacén.
   assert.ok(ejemplosDePregunta(alcanceDe('almacenista', sinAlmacen)).every((p) => /solicitudes/i.test(p)));
-  assert.ok(ejemplosDePregunta(alcanceDe('supervisor', sinAlmacen)).every((p) => !/almac|stock/i.test(p)));
+  assert.ok(ejemplosDePregunta(alcanceDe('director_obra', sinAlmacen)).every((p) => !/almac|stock/i.test(p)));
   // Sin nada a su alcance, ningún ejemplo.
   assert.deepEqual(ejemplosDePregunta(alcanceDe('encargado_planta', { ...TODOS_LOS_MODULOS, cantera: false })), []);
 });
@@ -11240,7 +11295,8 @@ prueba('033/RF-51: piden compras y pagos el residente, el almacenista, el labora
   // Más el Encargado de OCC, que pide en nombre de OCC (spec 034, RF-16).
   assert.deepEqual(
     ROLES.filter((r) => alcanza(r, 'solicitudes', 'escribir')),
-    ['admin', 'supervisor', 'almacenista', 'laboratorista', 'encargado_occ'],
+    // Desde la 041, los tres cargos de obra (RF-59).
+    ['admin', 'residente', 'almacenista', 'laboratorista', 'encargado_occ', 'director_proyectos', 'director_obra'],
   );
   // Documentos dejó de ser solo de la gerencia con la spec 034: su prueba es la de 034/RF-4.
   // La Auxiliar Administrativa ve todo lo de Elemental desde la spec 035 (RF-10).
@@ -11259,12 +11315,14 @@ prueba('033/RF-51: piden compras y pagos el residente, el almacenista, el labora
   // El Encargado de OCC y el laboratorista consultan el de su empresa (035/RF-4).
   assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'ver')), [
     'admin',
-    'supervisor',
+    'residente',
     'laboratorista',
     'encargado_occ',
     'auxiliar_administrativa',
+    'director_proyectos',
+    'director_obra',
   ]);
-  assert.equal(alcanza('supervisor', 'rrhh', 'escribir'), false);
+  assert.equal(alcanza('residente', 'rrhh', 'escribir'), false);
 });
 
 prueba('033/RF-52: las páginas que cambiaron de nombre llevan a la nueva', () => {
@@ -11297,7 +11355,7 @@ prueba('033/RF-52: las páginas que cambiaron de nombre llevan a la nueva', () =
   // Para quien entra (visto en la demo de la T22): la residente no va a Tesorería ni a
   // Recursos Humanos de Elemental, que le darían «Sin acceso», sino a su Inicio.
   const gerencia = { rol: 'admin' as const, obraId: null };
-  const residente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const residente = { rol: 'director_obra' as const, obraId: 'o1' };
   const laboratorista = { rol: 'laboratorista' as const, obraId: 'o9' };
   const occEmpresa = { tipo: 'empresa' as const, empresa: 'occ' as const, pagina: 'empresa' };
   assert.equal(rutaRenombradaPara(occEmpresa, gerencia), tesoreria);
@@ -11326,15 +11384,19 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   // Con los menús definitivos (cambio del 2026-10-27), el mismo menú de la obra: Recursos
   // Humanos en consulta y las solicitudes de compra y de pago. Y Documentos de su obra
   // (spec 034, RF-5).
-  assert.deepEqual(paginas(menuDeObra('supervisor')), [
+  assert.deepEqual(paginas(menuDeObra('director_obra')), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
     'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'solicitudes-compra',
     'solicitudes-pago', 'asistente',
   ]);
-  // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21).
-  const antes = modulosVisibles('supervisor').filter((m) => m !== 'inicio');
-  const ahora = new Set(menuDeObra('supervisor').map((m) => m.permiso));
-  assert.deepEqual(antes.filter((m) => !ahora.has(m)), []);
+  // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21). Personas, que la
+  // 041 le abrió para dar accesos de obra, no es una entrada del menú de la obra: es la pestaña
+  // Accesos de Recursos Humanos.
+  for (const rol of ['residente', 'director_obra'] as const) {
+    const antes = modulosVisibles(rol).filter((m) => m !== 'inicio' && m !== 'personas');
+    const ahora = new Set(menuDeObra(rol).map((m) => m.permiso));
+    assert.deepEqual(antes.filter((m) => !ahora.has(m)), [], rol);
+  }
   assert.deepEqual(paginas(menuDeObra('almacenista')), [
     'almacen', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
@@ -11368,7 +11430,7 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
 prueba('033/RF-12: cada rol entra a su empresa, y a Proyectos solo con su obra', () => {
   for (const e of EMPRESAS) assert.ok(alcanzaLaEmpresa('admin', e.id), e.id);
   assert.deepEqual(
-    EMPRESAS.filter((e) => alcanzaLaEmpresa('supervisor', e.id)).map((e) => e.id),
+    EMPRESAS.filter((e) => alcanzaLaEmpresa('director_obra', e.id)).map((e) => e.id),
     ['proyectos'],
   );
   assert.deepEqual(
@@ -11378,9 +11440,9 @@ prueba('033/RF-12: cada rol entra a su empresa, y a Proyectos solo con su obra',
   assert.deepEqual(EMPRESAS.filter((e) => alcanzaLaEmpresa('operador', e.id)), []);
 
   assert.ok(alcanzaLaObraDeLaRuta({ rol: 'admin', obraId: null }, 'cualquiera'));
-  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: 'o1' }, 'o1'));
-  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: 'o1' }, 'o2'), false);
-  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'supervisor', obraId: null }, 'o1'), false);
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'director_obra', obraId: 'o1' }, 'o1'));
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'director_obra', obraId: 'o1' }, 'o2'), false);
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'director_obra', obraId: null }, 'o1'), false);
   assert.ok(alcanzaLaObraDeLaRuta({ rol: 'almacenista', obraId: 'o1' }, 'o1'));
   // El laboratorista no entra a Proyectos aunque tenga obra: su lugar es Geolab.
   assert.equal(alcanzaLaObraDeLaRuta({ rol: 'laboratorista', obraId: 'o1' }, 'o1'), false);
@@ -11389,7 +11451,7 @@ prueba('033/RF-12: cada rol entra a su empresa, y a Proyectos solo con su obra',
 prueba('033/RF-45, RF-46: la empresa de la persona, o la de su rol si no tiene', () => {
   assert.equal(empresaDeLaPersona(null, 'operador'), 'occ');
   assert.equal(empresaDeLaPersona(null, 'laboratorista'), 'geolab');
-  assert.equal(empresaDeLaPersona(null, 'supervisor'), 'proyectos');
+  assert.equal(empresaDeLaPersona(null, 'director_obra'), 'proyectos');
   assert.equal(empresaDeLaPersona(null, 'almacenista'), 'proyectos');
   assert.equal(empresaDeLaPersona(null, 'encargado_planta'), 'proyectos');
   assert.equal(empresaDeLaPersona(null, 'admin'), 'elemental');
@@ -11401,10 +11463,10 @@ prueba('033/RF-45, RF-46: la empresa de la persona, o la de su rol si no tiene',
 prueba('033/RF-6 a RF-9: cada rol entra a lo suyo', () => {
   assert.equal(destinoAlEntrar({ rol: 'admin', obras: [] }), '/panel');
   // El residente, directo a su obra: la portada es el resumen del día.
-  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: ['o1'] }), '/panel/proyectos/o1');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1');
   // Con varias obras o sin ninguna, la lista de Proyectos (RF-7 y caso límite).
-  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: ['o1', 'o2'] }), '/panel/proyectos');
-  assert.equal(destinoAlEntrar({ rol: 'supervisor', obras: [] }), '/panel/proyectos');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1', 'o2'] }), '/panel/proyectos');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: [] }), '/panel/proyectos');
   assert.equal(destinoAlEntrar({ rol: 'laboratorista', obras: ['o1'] }), '/panel/geolab/laboratorio');
   // Almacenista y encargado de planta, a su módulo como hoy (008/RF-4).
   assert.equal(destinoAlEntrar({ rol: 'almacenista', obras: ['o1'] }), '/panel/proyectos/o1/almacen');
@@ -11414,7 +11476,7 @@ prueba('033/RF-6 a RF-9: cada rol entra a lo suyo', () => {
 
 prueba('033/RF-47: las direcciones de antes llevan a su pantalla dentro de la empresa', () => {
   const gerencia = { rol: 'admin' as const, obraId: null };
-  const residente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const residente = { rol: 'director_obra' as const, obraId: 'o1' };
   const laboratorista = { rol: 'laboratorista' as const, obraId: 'o1' };
 
   // Las de una empresa, con sus parámetros.
@@ -11621,7 +11683,7 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   assert.deepEqual(titulos(menuDelLugar(null, 'admin').entradas), [
     'Elemental Ingeniería y Arquitectura', 'OCC', 'Geolab', 'Proyectos',
   ]);
-  assert.deepEqual(menuDelLugar(null, 'supervisor'), { navegacion: [], entradas: [] });
+  assert.deepEqual(menuDelLugar(null, 'director_obra'), { navegacion: [], entradas: [] });
 
   // Dentro de una empresa: «← Empresas» y su menú, con sus rutas.
   const occ = menuDelLugar({ tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' }, 'admin');
@@ -11642,16 +11704,17 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
     almacen: false, cantera: true, laboratorio: false,
   });
   assert.deepEqual(titulos(obra.navegacion), ['← Empresas', 'Cambiar de obra']);
-  assert.equal(obra.navegacion[1].ruta, '/panel/proyectos');
+  // Desde la 041 (RF-67) la lista lleva la página de ahora, para abrir la misma en la otra obra.
+  assert.equal(obra.navegacion[1].ruta, '/panel/proyectos?ir=bitacoras');
   assert.ok(!obra.entradas.some((e) => e.clave === 'almacen' || e.clave === 'calidad'));
   assert.equal(obra.entradas.find((e) => e.clave === 'bitacoras')?.ruta, '/panel/proyectos/o1/bitacoras');
   // El residente en su obra: su menú, sin ir y venir.
-  assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, 'supervisor').navegacion, []);
+  assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, 'director_obra').navegacion, []);
   // La lista de obras: solo volver.
   assert.deepEqual(menuDelLugar({ tipo: 'proyectos' }, 'admin').entradas, []);
 
   // Con la persona, donde no entra el menú sale vacío (RF-12; visto en la demo de la T22).
-  const laResidente = { rol: 'supervisor' as const, obraId: 'o1' };
+  const laResidente = { rol: 'director_obra' as const, obraId: 'o1' };
   const enOcc = { tipo: 'empresa' as const, empresa: 'occ' as const, pagina: null };
   assert.deepEqual(menuDelLugar(enOcc, laResidente).entradas, []);
   assert.deepEqual(menuDelLugar({ tipo: 'obra', obraId: 'o9', pagina: null }, laResidente).entradas, []);
@@ -11896,7 +11959,7 @@ prueba('034/RF-12 a RF-17: el Encargado de OCC entra a OCC y solo a OCC', () => 
   assert.equal(cargoPorId('encargado_occ')?.operaVehiculos, false);
   assert.equal(empresaDeLaPersona(null, 'encargado_occ'), 'occ');
   assert.ok(puedeCambiarRol('admin', 'encargado_occ'));
-  assert.equal(puedeCambiarRol('supervisor', 'encargado_occ'), false);
+  assert.equal(puedeCambiarRol('director_obra', 'encargado_occ'), false);
   // El asistente: todas las obras, con los módulos de OCC que alcanza.
   const alcance = alcanceDelAsistente({ ...encargado, modulosDeObra: TODOS_LOS_MODULOS });
   assert.equal(alcance.obras, 'todas');
@@ -11913,29 +11976,30 @@ prueba('034/RF-2, RF-4 a RF-10: quién ve Documentos y dónde', () => {
   assert.equal(deObra.indexOf('documentos'), deObra.indexOf('contrato') + 1);
   // No tiene interruptor por obra: con todo apagado sigue.
   assert.ok(
-    menuDeObra('supervisor', { almacen: false, cantera: false, laboratorio: false }).some((m) => m.pagina === 'documentos'),
+    menuDeObra('director_obra', { almacen: false, cantera: false, laboratorio: false }).some((m) => m.pagina === 'documentos'),
   );
   // RF-4 a RF-8: ven y suben gerencia, residente, laboratorista y Encargado de OCC; desde la
   // spec 035, también la Auxiliar Administrativa en los de Elemental (035/RF-10). Nadie más.
   assert.deepEqual(
     ROLES.filter((r) => alcanza(r, 'documentos', 'ver')),
-    ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'],
+    // Desde la 041, los tres cargos de obra (RF-59).
+    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra'],
   );
   assert.deepEqual(
     ROLES.filter((r) => alcanza(r, 'documentos', 'escribir')),
-    ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'],
+    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra'],
   );
   // RF-10: anula la gerencia y, desde la spec 040 (RF-8), la Auxiliar Administrativa en lo
   // de Elemental (el lugar lo cierra `alcanzaLaEmpresa`).
   assert.deepEqual(ROLES.filter((r) => alcanza(r, 'documentos', 'anular')), ['admin', 'auxiliar_administrativa']);
   const tiene = (menu: { pagina: string }[]) => menu.some((m) => m.pagina === 'documentos');
   // RF-5: el residente, en su obra.
-  assert.ok(tiene(menuDeObra('supervisor')));
+  assert.ok(tiene(menuDeObra('director_obra')));
   // RF-6, RF-7: cada uno en su empresa, y a las demás no entra.
   assert.ok(tiene(menuDeEmpresa('geolab', 'laboratorista')));
   assert.ok(tiene(menuDeEmpresa('occ', 'encargado_occ')));
   assert.equal(alcanzaLaEmpresa('laboratorista', 'occ'), false);
-  assert.equal(alcanzaLaEmpresa('supervisor', 'occ'), false);
+  assert.equal(alcanzaLaEmpresa('director_obra', 'occ'), false);
   // RF-4: la gerencia, en las tres empresas y en la obra.
   for (const empresa of ['elemental', 'occ', 'geolab'] as const) assert.ok(tiene(menuDeEmpresa(empresa, 'admin')), empresa);
   // RF-8: operador, almacenista y encargado de planta, en ningún lado.
@@ -11962,7 +12026,7 @@ prueba('034/RF-16, RF-50, RF-51: el Encargado de OCC ve todas las obras, solo en
   assert.equal(alcanzaLaImagen(encargado, { existe: false, obraId: null }, 'bitacoras'), false);
   assert.ok(alcanzaLaImagen(sesionDe('admin', null), { existe: true, obraId: 'obra-b' }, 'contrato'));
   // Nada cambia para el residente: su obra, con o sin módulo.
-  const residente = sesionDe('supervisor', 'obra-a');
+  const residente = sesionDe('director_obra', 'obra-a');
   assert.ok(alcanzaLaImagen(residente, { existe: true, obraId: 'obra-a' }, 'contrato'));
   assert.equal(alcanzaLaImagen(residente, deObra, 'bitacoras'), false);
   // La cerradura de los módulos sigue en la tabla: fuera de OCC recibe 403.
@@ -11981,14 +12045,14 @@ prueba('034/RF-13, RF-14: el Encargado de OCC es de OCC y no lleva obra', () => 
   assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: 'o1', empresa: 'occ' })?.campo, 'obraId');
   assert.equal(reparoDelAccesoSinObra({ rol: 'encargado_occ', obraId: null, empresa: 'geolab' })?.campo, 'empresa');
   // Los demás roles, sin reparo: un residente con obra y de Proyectos sigue igual.
-  assert.equal(reparoDelAccesoSinObra({ rol: 'supervisor', obraId: 'o1', empresa: 'proyectos' }), null);
+  assert.equal(reparoDelAccesoSinObra({ rol: 'director_obra', obraId: 'o1', empresa: 'proyectos' }), null);
   assert.equal(reparoDelAccesoSinObra({ rol: 'operador', obraId: 'o1', empresa: 'occ' }), null);
 });
 
 prueba('035/RF-8: la Auxiliar Administrativa es de Elemental y no lleva obra', () => {
   assert.equal(empresaDelAccesoSinObra('auxiliar_administrativa'), 'elemental');
   assert.equal(empresaDelAccesoSinObra('encargado_occ'), 'occ');
-  assert.equal(empresaDelAccesoSinObra('supervisor'), null);
+  assert.equal(empresaDelAccesoSinObra('director_obra'), null);
   assert.equal(reparoDelAccesoSinObra({ rol: 'auxiliar_administrativa', obraId: null, empresa: 'elemental' }), null);
   assert.equal(reparoDelAccesoSinObra({ rol: 'auxiliar_administrativa', obraId: null, empresa: null }), null);
   const conObra = reparoDelAccesoSinObra({ rol: 'auxiliar_administrativa', obraId: 'o1', empresa: 'elemental' });
@@ -12003,7 +12067,9 @@ prueba('035/RF-8: la Auxiliar Administrativa es de Elemental y no lleva obra', (
 prueba('035/RF-11: el selector de Acceso ofrece solo lo que cada rol puede dar', () => {
   assert.deepEqual(rolesQuePuedeDar('auxiliar_administrativa'), ['operador']);
   assert.deepEqual(rolesQuePuedeDar('admin'), [...ROLES]);
-  assert.deepEqual(rolesQuePuedeDar('supervisor'), ['supervisor', 'operador']);
+  // Desde la 041 (RF-26, RF-38).
+  assert.deepEqual(rolesQuePuedeDar('residente'), ['operador']);
+  assert.deepEqual(rolesQuePuedeDar('director_obra'), ['residente', 'operador', 'almacenista', 'encargado_planta', 'laboratorista']);
   for (const rol of ['operador', 'almacenista', 'encargado_planta', 'laboratorista', 'encargado_occ'] as const) {
     assert.deepEqual(rolesQuePuedeDar(rol), [], rol);
   }
@@ -12038,7 +12104,7 @@ prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a 
   }
   // RF-11: solo da el acceso de operador (una persona sin panel); los demás, la gerencia.
   assert.ok(puedeCambiarRol('auxiliar_administrativa', 'operador'));
-  for (const rol of ['admin', 'supervisor', 'auxiliar_administrativa', 'encargado_occ', 'laboratorista'] as const) {
+  for (const rol of ['admin', 'director_obra', 'auxiliar_administrativa', 'encargado_occ', 'laboratorista'] as const) {
     assert.equal(puedeCambiarRol('auxiliar_administrativa', rol), false, rol);
   }
   assert.ok(puedeCambiarRol('admin', 'auxiliar_administrativa'));
@@ -12117,7 +12183,7 @@ prueba('040/RF-7, D3: registra y anula los cortes de Elemental; los demás, solo
     assert.equal(porQueNoPuedeTocarElCorte('admin', lugar), null);
   }
   // Quien no tiene el permiso tampoco pasa por aquí: lo dice la tabla.
-  assert.equal(alcanza('supervisor', 'finanzas', 'escribir'), false);
+  assert.equal(alcanza('director_obra', 'finanzas', 'escribir'), false);
 });
 
 prueba('040/RF-5, RF-6: recibe desde Compras sin poder pedir, y ve el gasto y los pagos', () => {
@@ -12177,9 +12243,9 @@ prueba('040/RF-12 a RF-15: lo que consulta cada cargo con el asistente, y de qu�
     assert.equal(auxiliar.modulos.includes(m), false, m);
   }
   // RF-15: cada cargo, lo de sus pantallas.
-  assert.ok(de('supervisor').modulos.includes('solicitudes'));
-  assert.equal(de('supervisor').modulos.includes('compras'), false);
-  assert.deepEqual(de('supervisor').empresas, []);
+  assert.ok(de('director_obra').modulos.includes('solicitudes'));
+  assert.equal(de('director_obra').modulos.includes('compras'), false);
+  assert.deepEqual(de('director_obra').empresas, []);
   assert.ok(de('almacenista').modulos.includes('solicitudes'));
   assert.deepEqual(de('encargado_planta').modulos, ['cantera']);
   const laboratorista = de('laboratorista');
@@ -12191,7 +12257,7 @@ prueba('040/RF-12 a RF-15: lo que consulta cada cargo con el asistente, y de qu�
   // El laboratorista sin obra sigue con lo de Geolab, que no depende de la obra; el residente
   // sin obra, con nada (028/RF-10).
   assert.deepEqual(de('laboratorista', null).modulos, ['solicitudes', 'bitacora_empresa']);
-  assert.deepEqual(de('supervisor', null).modulos, []);
+  assert.deepEqual(de('director_obra', null).modulos, []);
   // La tabla manda: lo que el asistente da de una empresa, el cargo lo lista en el panel.
   for (const rol of ROLES_DEL_ASISTENTE) {
     for (const m of de(rol).modulos.filter((x) => (deEmpresa as readonly string[]).includes(x))) {
@@ -12215,7 +12281,7 @@ prueba('040/RF-16: una empresa que no se alcanza queda fuera, también en una co
   // Una de compras de la auxiliar, si la pasan a residente, ya no se ve.
   const deCompras = { obras: [], modulos: ['compras' as const], empresas: ['elemental' as const] };
   assert.equal(conversacionVisible(deCompras, auxiliar), true);
-  assert.equal(conversacionVisible(deCompras, de('supervisor', 'o1')), false);
+  assert.equal(conversacionVisible(deCompras, de('director_obra', 'o1')), false);
 });
 
 prueba('040/RF-18, RF-23: lo que impide generar un archivo', () => {
@@ -12366,7 +12432,7 @@ prueba('040/RF-26: cada cargo tiene ejemplos de su trabajo, el último pide un a
   ]);
   assert.equal(ejemplosDePregunta(alcanceDe('admin'))[0], '¿Qué compras están por aprobar?');
   // El residente no lleva la bandeja de Compras: ni la nombra.
-  assert.ok(ejemplosDePregunta(alcanceDe('supervisor')).every((p) => !/compras por aprobar/i.test(p)));
+  assert.ok(ejemplosDePregunta(alcanceDe('director_obra')).every((p) => !/compras por aprobar/i.test(p)));
   // El Encargado de OCC sin módulos de obra: lo de su Bitácora y sus solicitudes.
   const occ = alcanceDelAsistente({ rol: 'encargado_occ', obraId: null, modulosDeObra: TODOS_LOS_MODULOS });
   const soloEmpresa = { ...occ, modulos: occ.modulos.filter((m) => m === 'bitacora_empresa' || m === 'solicitudes') };
@@ -12392,7 +12458,7 @@ prueba('040/RF-25: lo que puede consultar, en frases cortas y según su alcance'
     assert.ok(auxiliar.includes(frase), frase);
   }
   assert.ok(auxiliar.every((f) => !/Bitácora/.test(f)));
-  const residente = loQueConsulta(alcanceDe('supervisor', { ...TODOS_LOS_MODULOS, almacen: false }));
+  const residente = loQueConsulta(alcanceDe('director_obra', { ...TODOS_LOS_MODULOS, almacen: false }));
   assert.match(residente[0], /^De su obra: /);
   assert.ok(!residente[0].includes('almacén'));
   assert.ok(residente.includes('Sus solicitudes de compra y de pago, y en qué van.'));
@@ -12407,7 +12473,7 @@ prueba('040/RF-25: de qué responde cada cargo, en el saludo y en el recuadro de
     alcanceDelAsistente({ rol, obraId, modulosDeObra: TODOS_LOS_MODULOS });
   assert.equal(ambitoDelAsistente(alcanceDe('admin')), 'del grupo');
   assert.equal(ambitoDelAsistente(alcanceDe('auxiliar_administrativa')), 'del grupo');
-  assert.equal(ambitoDelAsistente(alcanceDe('supervisor')), 'de su obra');
+  assert.equal(ambitoDelAsistente(alcanceDe('director_obra')), 'de su obra');
   assert.equal(ambitoDelAsistente(alcanceDe('encargado_occ')), 'de OCC y las obras');
   assert.equal(ambitoDelAsistente(alcanceDe('laboratorista')), 'de Geolab y su obra');
   assert.equal(ambitoDelAsistente(alcanceDe('laboratorista', null)), 'de Geolab');
@@ -12425,7 +12491,7 @@ prueba('040/RF-25: de qué responde cada cargo, en el saludo y en el recuadro de
     resumenDeLoQueConsulta(alcanceDe('almacenista')),
     'Pregunte en español sobre su obra: almacén y solicitudes. La respuesta dice de dónde sale cada cifra.',
   );
-  assert.match(resumenDeLoQueConsulta(alcanceDe('supervisor')), /^Pregunte en español sobre su obra: bitácoras, preoperacionales, /);
+  assert.match(resumenDeLoQueConsulta(alcanceDe('director_obra')), /^Pregunte en español sobre su obra: bitácoras, preoperacionales, /);
   assert.equal(resumenDeLoQueConsulta(alcanceDe('operador')), '');
 });
 
@@ -12481,11 +12547,11 @@ prueba('040/RF-27: la aclaración trae de 2 a 6 opciones limpias', () => {
 prueba('040/RF-11, D5: sigue dando solo el acceso de operador', () => {
   assert.deepEqual(rolesQuePuedeDar('auxiliar_administrativa'), ['operador']);
   assert.equal(
-    motivoParaNoDarRol('auxiliar_administrativa', 'supervisor'),
-    'Solo la gerencia puede dar el acceso de Residente / Director.',
+    motivoParaNoDarRol('auxiliar_administrativa', 'residente'),
+    'Solo la gerencia, el director de proyectos o el director de obra pueden dar el acceso de Residente.',
   );
   assert.equal(
-    motivoParaNoDarRol('supervisor', 'auxiliar_administrativa'),
+    motivoParaNoDarRol('director_obra', 'auxiliar_administrativa'),
     'Solo la gerencia puede dar el acceso de Auxiliar Administrativa.',
   );
 });
@@ -12501,7 +12567,7 @@ prueba('035/RF-2 a RF-7: quién ve Recursos Humanos y dónde', () => {
   assert.ok(tiene(menuDeEmpresa('elemental', 'auxiliar_administrativa')));
   assert.ok(tiene(menuDeEmpresa('occ', 'encargado_occ')));
   assert.ok(tiene(menuDeEmpresa('geolab', 'laboratorista')));
-  assert.ok(tiene(menuDeObra('supervisor')));
+  assert.ok(tiene(menuDeObra('director_obra')));
   // Cada uno solo entra a lo suyo (lo decide el lugar, no la fila).
   assert.equal(alcanzaLaEmpresa('encargado_occ', 'geolab'), false);
   assert.equal(alcanzaLaEmpresa('laboratorista', 'occ'), false);
@@ -12509,7 +12575,7 @@ prueba('035/RF-2 a RF-7: quién ve Recursos Humanos y dónde', () => {
   assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'escribir')), ['admin', 'auxiliar_administrativa']);
   assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'anular')), ['admin', 'auxiliar_administrativa']);
   // RF-4, RF-5: los que consultan.
-  for (const rol of ['supervisor', 'encargado_occ', 'laboratorista'] as const) {
+  for (const rol of ['director_obra', 'encargado_occ', 'laboratorista'] as const) {
     assert.ok(alcanza(rol, 'rrhh', 'ver') && alcanza(rol, 'rrhh', 'listar') && !alcanza(rol, 'rrhh', 'escribir'), rol);
   }
   // RF-7: operador, almacenista y encargado de planta, en ningún lado.
@@ -12711,12 +12777,12 @@ prueba('035/RF-32, RF-33: a qué fichas llega cada quien', () => {
   // Su obra no le abre las fichas de OCC: lo suyo es Geolab.
   assert.equal(alcanzaLaPersona(laboratorista, operadorOcc), false);
 
-  const residente = { rol: 'supervisor' as const, obraId: obraA };
+  const residente = { rol: 'director_obra' as const, obraId: obraA };
   assert.equal(alcanzaLaPersona(residente, operadorOcc), true);
   assert.equal(alcanzaLaPersona(residente, deProyectos), true);
   assert.equal(alcanzaLaPersona(residente, operadorDeOtra), false);
   assert.equal(alcanzaLaPersona(residente, elemental), false);
-  assert.equal(alcanzaLaPersona({ rol: 'supervisor', obraId: null }, operadorOcc), false);
+  assert.equal(alcanzaLaPersona({ rol: 'director_obra', obraId: null }, operadorOcc), false);
 
   for (const rol of ['operador', 'almacenista', 'encargado_planta'] as const) {
     assert.equal(alcanzaLaPersona({ rol, obraId: obraA }, operadorOcc), false, rol);
@@ -12801,7 +12867,7 @@ prueba('036/RF-7 a RF-10: lo que impide enviar una solicitud', () => {
 });
 
 prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué estado', () => {
-  const residente = { id: 'r1', rol: 'supervisor' as const };
+  const residente = { id: 'r1', rol: 'director_obra' as const };
   const gerencia = { id: 'g1', rol: 'admin' as const };
   const almacenista = { id: 'a1', rol: 'almacenista' as const };
   const enviada: SolicitudParaPaso = { estado: 'enviada', pedidaPor: 'r1', tieneCompraVigente: false };
@@ -12811,7 +12877,7 @@ prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué 
   // RF-11: corregir y cancelar, solo quien la pidió y solo antes de aprobarla.
   assert.equal(porQueNoPuedeDar('corregir', residente, enviada), null);
   assert.equal(porQueNoPuedeDar('cancelar', residente, { ...enviada, estado: 'devuelta' }), null);
-  assert.deepEqual(porQueNoPuedeDar('corregir', { id: 'r2', rol: 'supervisor' }, enviada), {
+  assert.deepEqual(porQueNoPuedeDar('corregir', { id: 'r2', rol: 'director_obra' }, enviada), {
     estado: 403,
     mensaje: 'Solo quien pidió la solicitud puede corregirla.',
   });
@@ -12863,7 +12929,7 @@ prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué 
   });
   assert.ok(puedeDar('recibir', almacenista, { ...aprobada, tieneCompraVigente: true }));
   // Desde la 040 (RF-5) recibe también la Auxiliar Administrativa, desde Compras.
-  for (const rol of ['supervisor', 'laboratorista', 'encargado_occ', 'admin', 'auxiliar_administrativa'] as const) {
+  for (const rol of ['director_obra', 'laboratorista', 'encargado_occ', 'admin', 'auxiliar_administrativa'] as const) {
     assert.ok(puedeDar('recibir', { id: 'z', rol }, comprada), rol);
   }
   for (const rol of ['operador', 'encargado_planta'] as const) {
@@ -12952,7 +13018,7 @@ prueba('036/RF-19, RF-21: el estado después de comprar, anular y recibir', () =
 
 prueba('036/RF-31: el almacenista no ve los valores de compra', () => {
   assert.equal(veLosValores('almacenista'), false);
-  for (const rol of ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
+  for (const rol of ['admin', 'director_obra', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
     assert.ok(veLosValores(rol), rol);
   }
 });
@@ -13253,14 +13319,14 @@ prueba('037/RF-6, RF-8: lo que impide enviar una solicitud de pago', () => {
 });
 
 prueba('037/RF-5, RF-9, RF-11, RF-12, RF-16: quién da cada paso de un pago y desde qué estado', () => {
-  const residente = { id: 'r1', rol: 'supervisor' as const };
+  const residente = { id: 'r1', rol: 'director_obra' as const };
   const gerencia = { id: 'g1', rol: 'admin' as const };
   const enviada: SolicitudDePagoParaPaso = { estado: 'enviada', pedidaPor: 'r1' };
 
   // RF-9: corregir y cancelar, solo quien la pidió, enviada o devuelta.
   assert.equal(porQueNoPuedeDarPaso('corregir', residente, enviada), null);
   assert.ok(puedeDarPaso('cancelar', residente, { ...enviada, estado: 'devuelta' }));
-  assert.deepEqual(porQueNoPuedeDarPaso('cancelar', { id: 'r2', rol: 'supervisor' }, enviada), {
+  assert.deepEqual(porQueNoPuedeDarPaso('cancelar', { id: 'r2', rol: 'director_obra' }, enviada), {
     estado: 403,
     mensaje: 'Solo quien pidió la solicitud puede cancelarla.',
   });
@@ -13363,7 +13429,7 @@ prueba('037/RF-5a, RF-23: quién ve el valor de un pago y quién ve Pagos', () =
   // D1: el almacenista ve el valor solo de las que pidió él.
   assert.ok(veElValorDelPago('almacenista', 'a1', 'a1'));
   assert.equal(veElValorDelPago('almacenista', 'r1', 'a1'), false);
-  for (const rol of ['admin', 'supervisor', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
+  for (const rol of ['admin', 'director_obra', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
     assert.ok(veElValorDelPago(rol, 'otro', 'yo'), rol);
   }
   // D9: Pagos, la gerencia y, desde la 040 (RF-6), la Auxiliar Administrativa.
@@ -13941,7 +14007,7 @@ prueba('038/RF-22, RF-27, RF-29: pestañas de la Bitácora de OCC, y quién entr
     alcanzaLaEmpresa(rol, empresa) && menuDeEmpresa(empresa, rol).some((e) => e.pagina === 'bitacora');
   // RF-29: los permisos de hoy. Gerencia y el Encargado de OCC en OCC; gerencia y el laboratorista en Geolab.
   assert.ok(entraA('admin', 'occ') && entraA('encargado_occ', 'occ'));
-  assert.ok(!entraA('laboratorista', 'occ') && !entraA('supervisor', 'occ'));
+  assert.ok(!entraA('laboratorista', 'occ') && !entraA('director_obra', 'occ'));
   assert.ok(entraA('admin', 'geolab') && entraA('laboratorista', 'geolab'));
   assert.ok(!entraA('encargado_occ', 'geolab') && !entraA('operador', 'geolab'));
 });
@@ -13958,7 +14024,8 @@ prueba('038/D11: los nombres en WhatsApp de un equipo, limpios y sin repetir', (
   assert.equal(vehiculoEditado.safeParse({ nombresWhatsapp: ['x'.repeat(61)] }).success, false);
   assert.equal(vehiculoEditado.safeParse({ nombresWhatsapp: Array.from({ length: 11 }, (_, i) => `Equipo ${i}`) }).success, false);
   // Los escriben gerencia y el Encargado de OCC, con el permiso de Vehículos; el residente no.
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'vehiculos', 'escribir')), ['admin', 'encargado_occ']);
+  // Desde la 041 también el Director de Proyectos (RF-11).
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'vehiculos', 'escribir')), ['admin', 'encargado_occ', 'director_proyectos']);
   // Lo guardado es lo que reconoce el grupo de OCC (RF-12).
   const equipo: VehiculoConocido = {
     id: 'pajarita',
@@ -14318,7 +14385,7 @@ prueba('038/RF-28, RF-29, RF-31: Geolab sin bitácora propia; quién alcanza la 
   const deOcc = (rol: Rol, obraId: string | null = null) => alcanceDelAsistente(quien(rol, obraId)).bitacorasDeEmpresa.includes('occ');
   assert.equal(deOcc('admin'), true);
   assert.equal(deOcc('encargado_occ'), true);
-  assert.equal(deOcc('supervisor', 'o1'), false);
+  assert.equal(deOcc('director_obra', 'o1'), false);
   assert.equal(deOcc('laboratorista', 'o1'), false);
   // RF-28: el laboratorista ve los Reportes de WhatsApp de Geolab con el permiso de la Bitácora
   // de la empresa, y no el de WhatsApp, que le abriría las bandejas y el asistente de las obras.
@@ -14457,6 +14524,574 @@ prueba('039/RF-14: la marca se lee en el índice y en la bitácora cerrada', () 
   );
   // En el día sin trabajo no se leen (como 032/RF-37).
   assert.deepEqual(textosSinRegistro({ sinTrabajo: true, seccionesSinRegistro: { notas: { motivo: 'x' } } }), []);
+});
+
+/* ── Spec 041: Director de Proyectos, Director de Obra y Residente ── */
+
+console.log('\nCargos de obra (spec 041)\n');
+
+/** Lo que cada uno puede en cada módulo, escrito entero: la tabla es el contrato (RF-57). */
+const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos', Partial<Record<ModuloConPermiso, readonly string[]>>> = {
+  residente: {
+    inicio: ['ver'],
+    obras: [],
+    personas: ['ver', 'listar', 'escribir'],
+    vehiculos: ['listar'],
+    asignaciones: ['ver', 'listar', 'escribir'],
+    bitacoras: ['ver', 'listar', 'escribir'],
+    preoperacionales: ['ver', 'listar'],
+    almacen: ['ver', 'listar'],
+    cantera: ['ver', 'listar'],
+    laboratorio: ['ver', 'listar'],
+    whatsapp: ['ver', 'listar', 'escribir', 'aprobar'],
+    reportes: ['ver', 'listar', 'escribir'],
+    contrato: ['ver', 'listar', 'escribir'],
+    asistente: ['ver', 'listar'],
+    empresa: [],
+    finanzas: [],
+    rrhh: ['ver', 'listar'],
+    compras: [],
+    tesoreria: [],
+    documentos: ['ver', 'listar', 'escribir'],
+    licitaciones: [],
+    solicitudes: ['ver', 'listar', 'escribir'],
+    bitacora_empresa: [],
+  },
+  director_obra: {
+    inicio: ['ver'],
+    obras: [],
+    personas: ['ver', 'listar', 'escribir', 'activar'],
+    vehiculos: ['listar'],
+    asignaciones: ['ver', 'listar', 'escribir'],
+    bitacoras: ['ver', 'listar', 'escribir', 'anular'],
+    preoperacionales: ['ver', 'listar', 'anular'],
+    almacen: ['ver', 'listar', 'anular'],
+    cantera: ['ver', 'listar', 'anular'],
+    laboratorio: ['ver', 'listar', 'aprobar', 'anular'],
+    whatsapp: ['ver', 'listar', 'escribir', 'aprobar'],
+    reportes: ['ver', 'listar', 'escribir', 'anular'],
+    contrato: ['ver', 'listar', 'escribir', 'anular'],
+    asistente: ['ver', 'listar'],
+    empresa: [],
+    finanzas: [],
+    rrhh: ['ver', 'listar'],
+    compras: [],
+    tesoreria: [],
+    documentos: ['ver', 'listar', 'escribir'],
+    licitaciones: [],
+    solicitudes: ['ver', 'listar', 'escribir'],
+    bitacora_empresa: [],
+  },
+  director_proyectos: {
+    inicio: ['ver'],
+    obras: ['ver', 'listar', 'escribir'],
+    personas: ['ver', 'listar', 'escribir', 'activar'],
+    vehiculos: ['ver', 'listar', 'escribir'],
+    asignaciones: ['ver', 'listar', 'escribir'],
+    bitacoras: ['ver', 'listar', 'escribir', 'anular'],
+    preoperacionales: ['ver', 'listar', 'anular'],
+    almacen: ['ver', 'listar', 'escribir', 'anular'],
+    cantera: ['ver', 'listar', 'escribir', 'anular'],
+    laboratorio: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    whatsapp: ['ver', 'listar', 'escribir', 'aprobar'],
+    reportes: ['ver', 'listar', 'escribir', 'anular'],
+    contrato: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    asistente: ['ver', 'listar'],
+    empresa: [],
+    finanzas: [],
+    rrhh: ['ver', 'listar'],
+    compras: [],
+    tesoreria: [],
+    documentos: ['ver', 'listar', 'escribir'],
+    licitaciones: [],
+    solicitudes: ['ver', 'listar', 'escribir'],
+    bitacora_empresa: [],
+  },
+};
+
+prueba('041/RF-1, RF-2: los tres accesos existen y ninguno se llama «Residente / Director»', () => {
+  for (const rol of ['residente', 'director_obra', 'director_proyectos'] as const) assert.ok(ROLES.includes(rol), rol);
+  assert.equal((ROLES as readonly string[]).includes('supervisor'), false);
+  assert.deepEqual(
+    [ETIQUETA_ROL.director_proyectos, ETIQUETA_ROL.director_obra, ETIQUETA_ROL.residente],
+    ['Director de Proyectos', 'Director de Obra', 'Residente'],
+  );
+  assert.equal(Object.values(ETIQUETA_ROL).includes('Residente / Director'), false);
+});
+
+prueba('041/RF-57: la tabla completa de los tres accesos, módulo por módulo', () => {
+  const acciones = ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar'] as const;
+  for (const [rol, modulos] of Object.entries(ESPERADO_041) as [keyof typeof ESPERADO_041, Partial<Record<ModuloConPermiso, readonly string[]>>][]) {
+    for (const modulo of [...MODULOS, ...MODULOS_DE_EMPRESA]) {
+      const esperado = modulos[modulo];
+      assert.ok(esperado, `${rol}: falta ${modulo} en lo esperado`);
+      const real = acciones.filter((a) => alcanza(rol, modulo, a));
+      assert.deepEqual(real, acciones.filter((a) => esperado.includes(a)), `${rol} ${modulo}`);
+    }
+  }
+});
+
+prueba('041/RF-33 a RF-37, RF-61: el Residente registra y cierra el parte, no aprueba ni anula salvo la bandeja', () => {
+  for (const modulo of [...MODULOS, ...MODULOS_DE_EMPRESA]) {
+    assert.equal(alcanza('residente', modulo, 'anular'), false, modulo);
+    if (modulo !== 'whatsapp') assert.equal(alcanza('residente', modulo, 'aprobar'), false, modulo);
+  }
+  assert.ok(alcanza('residente', 'whatsapp', 'aprobar'));
+  // Cerrar el parte es escribir en bitácoras.
+  assert.ok(alcanza('residente', 'bitacoras', 'escribir'));
+  assert.match(motivoParaNoAprobar('residente', 'anular') ?? '', /Director de Obra, el Director de Proyectos o la Gerencia/);
+  assert.match(motivoParaNoAprobar('residente', 'aprobar') ?? '', /Director de Obra, el Director de Proyectos o la Gerencia/);
+  assert.equal(motivoParaNoAprobar('director_obra', 'anular'), null);
+  assert.equal(motivoParaNoAprobar('residente', 'escribir'), null);
+});
+
+prueba('041/RF-58, RF-10: el contrato lo aprueban el Director de Proyectos y la Gerencia, no el Director de Obra', () => {
+  assert.equal(alcanza('director_obra', 'contrato', 'aprobar'), false);
+  assert.ok(alcanza('director_obra', 'contrato', 'escribir'));
+  assert.ok(alcanza('director_proyectos', 'contrato', 'aprobar'));
+});
+
+prueba('041/RF-33, RF-35, RF-36: el Residente registra pólizas y mantenimientos, pero no los anula', () => {
+  for (const modulo of ['contrato', 'reportes'] as const) {
+    assert.ok(alcanza('residente', modulo, 'escribir'), modulo);
+    assert.equal(alcanza('residente', modulo, 'anular'), false, modulo);
+    assert.ok(alcanza('admin', modulo, 'anular'), modulo);
+    assert.ok(alcanza('director_obra', modulo, 'anular'), modulo);
+    assert.ok(alcanza('director_proyectos', modulo, 'anular'), modulo);
+  }
+  // RF-62: el Encargado de OCC conserva anular mantenimientos.
+  assert.ok(alcanza('encargado_occ', 'reportes', 'anular'));
+});
+
+prueba('041/RF-75, RF-76: quién genera la contraseña temporal de quién', () => {
+  // La gerencia, la de cualquiera que entre al panel.
+  for (const rol of ['admin', 'director_proyectos', 'director_obra', 'residente', 'almacenista'] as const) {
+    assert.ok(puedeGenerarClave('admin', rol), rol);
+  }
+  // Los directores, la de quienes pueden dar acceso.
+  assert.ok(puedeGenerarClave('director_proyectos', 'director_obra'));
+  assert.ok(puedeGenerarClave('director_proyectos', 'residente'));
+  assert.ok(puedeGenerarClave('director_obra', 'residente'));
+  assert.ok(puedeGenerarClave('director_obra', 'laboratorista'));
+  // Hacia arriba o entre iguales, no: es entrar con la cuenta de quien responde por lo mismo.
+  assert.equal(puedeGenerarClave('director_proyectos', 'director_proyectos'), false);
+  assert.equal(puedeGenerarClave('director_proyectos', 'admin'), false);
+  assert.equal(puedeGenerarClave('director_obra', 'director_obra'), false);
+  assert.equal(puedeGenerarClave('director_obra', 'director_proyectos'), false);
+  // El operador entra con su PIN; el Residente y la Auxiliar no generan contraseñas.
+  assert.equal(puedeGenerarClave('admin', 'operador'), false);
+  assert.equal(puedeGenerarClave('residente', 'operador'), false);
+  assert.equal(puedeGenerarClave('residente', 'almacenista'), false);
+  assert.equal(puedeGenerarClave('auxiliar_administrativa', 'almacenista'), false);
+});
+
+prueba('041/RF-7, RF-8, RF-77: el Director de Proyectos registra y edita obras, y solo la Gerencia las da de baja', () => {
+  assert.ok(alcanza('director_proyectos', 'obras', 'escribir'));
+  assert.equal(motivoParaNoDarDeBajaObra('admin'), null);
+  for (const rol of ['director_proyectos', 'director_obra', 'residente', 'auxiliar_administrativa'] as const) {
+    assert.equal(motivoParaNoDarDeBajaObra(rol), 'Dar de baja una obra lo hace la Gerencia.', rol);
+  }
+});
+
+prueba('041/RF-62 a RF-64, RF-68: los demás cargos conservan lo suyo y los directores no tocan lo de empresa', () => {
+  assert.ok(alcanza('encargado_occ', 'preoperacionales', 'anular'));
+  assert.ok(alcanza('encargado_occ', 'bitacora_empresa', 'anular'));
+  assert.ok(alcanza('encargado_planta', 'cantera', 'anular'));
+  for (const modulo of ['compras', 'tesoreria'] as const) {
+    assert.ok(alcanza('auxiliar_administrativa', modulo, 'aprobar'), modulo);
+    assert.ok(alcanza('auxiliar_administrativa', modulo, 'anular'), modulo);
+  }
+  for (const rol of ['director_obra', 'director_proyectos'] as const) {
+    for (const modulo of ['empresa', 'finanzas', 'compras', 'tesoreria', 'licitaciones', 'bitacora_empresa'] as const) {
+      assert.equal(alcanza(rol, modulo, 'ver'), false, `${rol} ${modulo}`);
+    }
+  }
+});
+
+prueba('041/RF-5, RF-15: el Director de Proyectos ve todas las obras; el Director de Obra y el Residente, no', () => {
+  assert.ok(rolVeTodasLasObras('director_proyectos'));
+  assert.equal(rolVeTodasLasObras('director_obra'), false);
+  assert.equal(rolVeTodasLasObras('residente'), false);
+  assert.ok(rolDeVariasObras('director_obra'));
+  assert.equal(rolDeVariasObras('residente'), false);
+  assert.equal(rolDeVariasObras('director_proyectos'), false);
+  // Sin obra no se le dice que le falta una: ve todas.
+  assert.equal(sinObraAsignada('director_proyectos', null), false);
+  assert.ok(sinObraAsignada('director_obra', null));
+});
+
+prueba('041/RF-12, RF-14, RF-26, RF-27, RF-38, RF-39: quién da cada acceso, y el mensaje dice quién puede', () => {
+  assert.deepEqual(rolesQuePuedeDar('director_proyectos'), [
+    'residente',
+    'operador',
+    'almacenista',
+    'encargado_planta',
+    'laboratorista',
+    'director_obra',
+  ]);
+  assert.deepEqual(rolesQuePuedeDar('director_obra'), ['residente', 'operador', 'almacenista', 'encargado_planta', 'laboratorista']);
+  assert.deepEqual(rolesQuePuedeDar('residente'), ['operador']);
+  // RF-14: solo la gerencia da el de Director de Proyectos.
+  for (const rol of ROLES) {
+    assert.equal(puedeCambiarRol(rol, 'director_proyectos'), rol === 'admin', rol);
+  }
+  assert.equal(motivoParaNoDarRol('director_proyectos', 'director_proyectos'), 'Solo la gerencia puede dar el acceso de Director de Proyectos.');
+  assert.equal(
+    motivoParaNoDarRol('director_obra', 'director_obra'),
+    'Solo la gerencia o el director de proyectos pueden dar el acceso de Director de Obra.',
+  );
+  assert.equal(
+    motivoParaNoDarRol('residente', 'almacenista'),
+    'Solo la gerencia, el director de proyectos o el director de obra pueden dar el acceso de Almacenista.',
+  );
+  assert.equal(motivoParaNoDarRol('residente', 'operador'), null);
+});
+
+prueba('041/RF-72: el Director de Proyectos y el Director de Obra emiten códigos del celular; el Residente no', () => {
+  assert.ok(alcanza('director_proyectos', 'personas', 'activar'));
+  assert.ok(alcanza('director_obra', 'personas', 'activar'));
+  assert.equal(alcanza('residente', 'personas', 'activar'), false);
+});
+
+prueba('041/RF-40, RF-41: el rechazo de aprobar y anular nombra a los directores', () => {
+  assert.equal(
+    motivoDeRechazo('laboratorio', 'aprobar'),
+    'No puede aprobar ni devolver este ensayo: lo hacen la gerencia, el director de proyectos y el director de obra.',
+  );
+  assert.equal(
+    motivoDeRechazo('bitacoras', 'anular'),
+    'No puede anular este registro: lo hacen la gerencia, el director de proyectos y el director de obra.',
+  );
+});
+
+prueba('041/RF-3, RF-4, RF-66: los cargos de dirección sugieren su acceso; «Director» se llama «Director de Obra»', () => {
+  assert.equal(nombreDeCargo('director_proyectos'), 'Director de Proyectos');
+  assert.equal(rolSugerido('director_proyectos'), 'director_proyectos');
+  // El slug `director` se conserva: ya hay personas apuntando a él.
+  assert.equal(nombreDeCargo('director'), 'Director de Obra');
+  assert.equal(rolSugerido('director'), 'director_obra');
+  assert.equal(rolSugerido('residente_1'), 'residente');
+  assert.equal(rolSugerido('residente_2'), 'residente');
+  assert.equal(operaVehiculos('director_proyectos'), false);
+});
+
+prueba('041/RF-5, RF-24, RF-25: a dónde entra cada cargo de obra', () => {
+  // El Director de Proyectos ve todas: la lista de Proyectos, tenga o no obra.
+  assert.equal(destinoAlEntrar({ rol: 'director_proyectos', obras: [] }), '/panel/proyectos');
+  // El Director de Obra: con una obra, directo a ella; con varias, la lista.
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1', 'o2'] }), '/panel/proyectos');
+  // El Residente, a su obra.
+  assert.equal(destinoAlEntrar({ rol: 'residente', obras: ['o1'] }), '/panel/proyectos/o1');
+});
+
+prueba('041/RF-5, RF-19: qué obras de Proyectos abre cada cargo por la ruta', () => {
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'director_proyectos', obraId: null, obras: [] }, 'cualquiera'));
+  const director = { rol: 'director_obra' as const, obraId: 'o1', obras: ['o1', 'o2'] };
+  assert.ok(alcanzaLaObraDeLaRuta(director, 'o1'));
+  // La otra suya también, aunque la obra en uso sea la primera.
+  assert.ok(alcanzaLaObraDeLaRuta(director, 'o2'));
+  assert.equal(alcanzaLaObraDeLaRuta(director, 'o3'), false);
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'residente', obraId: 'o1', obras: ['o1'] }, 'o2'), false);
+  // Quien ve todas sin entrar a Proyectos sigue sin abrir una obra (034, 035).
+  assert.equal(alcanzaLaObraDeLaRuta({ rol: 'encargado_occ', obraId: null, obras: [] }, 'o1'), false);
+});
+
+prueba('041/RF-22, RF-67: «Cambiar de obra» para quien tiene varias, y vuelve a la misma página', () => {
+  const enObra = { tipo: 'obra' as const, obraId: 'o1', pagina: 'almacen' };
+  const claves = (quien: Parameters<typeof menuDelLugar>[1]) => menuDelLugar(enObra, quien).navegacion.map((e) => e.clave);
+  // El Director de Obra con dos obras cambia de obra; con una sola no tiene a cuál.
+  assert.deepEqual(claves({ rol: 'director_obra', obraId: 'o1', obras: ['o1', 'o2'] }), ['cambiar-obra']);
+  assert.deepEqual(claves({ rol: 'director_obra', obraId: 'o1', obras: ['o1'] }), []);
+  assert.deepEqual(claves({ rol: 'residente', obraId: 'o1', obras: ['o1'] }), []);
+  // El Director de Proyectos también, sin «← Empresas»: no entra a las demás empresas.
+  assert.deepEqual(claves({ rol: 'director_proyectos', obraId: null, obras: [] }), ['cambiar-obra']);
+  assert.deepEqual(claves({ rol: 'admin', obraId: null, obras: [] }), ['empresas', 'cambiar-obra']);
+  // La lista abre la misma página en la obra que se escoja.
+  const cambiar = menuDelLugar(enObra, { rol: 'director_obra', obraId: 'o1', obras: ['o1', 'o2'] }).navegacion[0];
+  assert.equal(cambiar.ruta, '/panel/proyectos?ir=almacen');
+  // En la portada de la obra, sin página: la lista sin `ir`.
+  const enPortada = menuDelLugar({ tipo: 'obra', obraId: 'o1', pagina: null }, { rol: 'admin', obraId: null, obras: [] });
+  assert.equal(enPortada.navegacion[1].ruta, '/panel/proyectos');
+});
+
+prueba('041/RF-5, RF-19, RF-24: los enlaces de antes llevan a cada cargo de obra a su sitio', () => {
+  // El Director de Proyectos va a la obra del enlace, como la gerencia, y sin ella a la lista.
+  assert.equal(rutaNueva('/panel/almacen?obraId=o9', { rol: 'director_proyectos', obraId: null, obras: [] }), '/panel/proyectos/o9/almacen');
+  assert.equal(rutaNueva('/panel/almacen', { rol: 'director_proyectos', obraId: null, obras: [] }), '/panel/proyectos?ir=almacen');
+  // El Director de Obra, a la del enlace si es suya; si no, a la lista de las suyas.
+  const director = { rol: 'director_obra' as const, obraId: null, obras: ['o1', 'o2'] };
+  assert.equal(rutaNueva('/panel/almacen?obraId=o2', director), '/panel/proyectos/o2/almacen');
+  assert.equal(rutaNueva('/panel/almacen?obraId=o9', director), '/panel/proyectos?ir=almacen');
+  assert.equal(rutaNueva('/panel/almacen', director), '/panel/proyectos?ir=almacen');
+  // Con una sola obra, a esa, como antes.
+  assert.equal(rutaNueva('/panel/almacen', { rol: 'director_obra', obraId: 'o1', obras: ['o1'] }), '/panel/proyectos/o1/almacen');
+});
+
+prueba('041/RF-16, RF-18, RF-32: cuántas obras lleva cada acceso', () => {
+  assert.equal(reparoDeObrasDelAcceso('director_obra', [])?.mensaje, 'El Director de Obra necesita al menos una obra: escoja una.');
+  assert.equal(reparoDeObrasDelAcceso('director_obra', ['o1']), null);
+  assert.equal(reparoDeObrasDelAcceso('director_obra', ['o1', 'o2', 'o3']), null);
+  assert.equal(reparoDeObrasDelAcceso('residente', [])?.mensaje, 'El Residente necesita su obra: escoja una.');
+  assert.equal(reparoDeObrasDelAcceso('residente', ['o1']), null);
+  assert.equal(reparoDeObrasDelAcceso('residente', ['o1', 'o2'])?.mensaje, 'El Residente está en una sola obra.');
+  assert.equal(
+    reparoDeObrasDelAcceso('director_proyectos', ['o1'])?.mensaje,
+    'El Director de Proyectos no lleva obra: ve todas las obras.',
+  );
+  assert.equal(reparoDeObrasDelAcceso('director_proyectos', []), null);
+  // Los demás accesos no cambian con esta regla.
+  assert.equal(reparoDeObrasDelAcceso('almacenista', []), null);
+  assert.equal(reparoDeObrasDelAcceso('admin', []), null);
+  // Y el Director de Proyectos es un acceso sin obra, de Proyectos.
+  assert.equal(empresaDelAccesoSinObra('director_proyectos'), 'proyectos');
+  assert.equal(reparoDelAccesoSinObra({ rol: 'director_proyectos', obraId: 'o1', empresa: 'proyectos' })?.campo, 'obraId');
+  assert.equal(reparoDelAccesoSinObra({ rol: 'director_proyectos', obraId: null, empresa: null }), null);
+});
+
+prueba('041/RF-46 a RF-48: a qué acceso pasa cada persona que tenía «Residente / Director»', () => {
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'director'), { rol: 'director_obra', revisar: false });
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'residente_1'), { rol: 'residente', revisar: false });
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'residente_2'), { rol: 'residente', revisar: false });
+  // Otro cargo o ninguno: Residente, y a la lista de revisar (RF-48, RF-51).
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'topografo'), { rol: 'residente', revisar: true });
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', null), { rol: 'residente', revisar: true });
+  // RF-65: quien queda sin obra también va a la lista de revisar, sea cual sea su cargo.
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'director', false), { rol: 'director_obra', revisar: true });
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'residente_1', false), { rol: 'residente', revisar: true });
+  assert.deepEqual(accesoTrasLaMigracion('supervisor', 'residente_1', true), { rol: 'residente', revisar: false });
+  // A los demás accesos no los toca.
+  assert.equal(accesoTrasLaMigracion('admin', 'gerente'), null);
+  assert.equal(accesoTrasLaMigracion('almacenista', 'director'), null);
+});
+
+prueba('041/RF-70, RF-71: las obras al cambiar de acceso', () => {
+  const director = { rol: 'director_obra' as const, obras: ['o1', 'o2'] };
+  // Bajar a Residente exige escoger cuál conserva.
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'residente', null), {
+    ok: false,
+    mensaje: 'Escoja cuál de sus obras conserva como Residente.',
+  });
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'residente', 'o9'), {
+    ok: false,
+    mensaje: 'Esa obra no es de este Director de Obra.',
+  });
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'residente', 'o2'), { ok: true, obras: ['o2'] });
+  // Con una sola obra no hay qué escoger.
+  assert.deepEqual(obrasAlCambiarDeAcceso({ rol: 'director_obra', obras: ['o1'] }, 'residente', null), { ok: true, obras: ['o1'] });
+  // Subir a Director de Obra conserva la obra que tenía.
+  assert.deepEqual(obrasAlCambiarDeAcceso({ rol: 'residente', obras: ['o1'] }, 'director_obra', null), { ok: true, obras: ['o1'] });
+  // Al Director de Proyectos no le queda ninguna: ve todas.
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'director_proyectos', null), { ok: true, obras: [] });
+  // Sin cambio de acceso, sus obras siguen igual.
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'director_obra', null), { ok: true, obras: ['o1', 'o2'] });
+  // A cualquier acceso de una sola obra (T10): el almacenista también escoge cuál conserva.
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'almacenista', null), {
+    ok: false,
+    mensaje: 'Escoja cuál de sus obras conserva como Almacenista.',
+  });
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'operador', 'o1'), { ok: true, obras: ['o1'] });
+  // Entre accesos de una obra, la obra no cambia aquí.
+  assert.deepEqual(obrasAlCambiarDeAcceso({ rol: 'operador', obras: ['o1'] }, 'almacenista', null), { ok: true, obras: ['o1'] });
+  // A un acceso sin obra no se le pregunta cuál: no le queda ninguna.
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'admin', null), { ok: true, obras: [] });
+  assert.deepEqual(obrasAlCambiarDeAcceso(director, 'encargado_occ', null), { ok: true, obras: [] });
+});
+
+prueba('041/RF-17, RF-18, RF-32, RF-70: qué campo de obras pide el formulario de Personas', () => {
+  // RF-17: el Director de Obra, varias; también al subir a alguien a ese acceso.
+  assert.equal(campoDeObras('director_obra'), 'varias');
+  assert.equal(campoDeObras('director_obra', 'residente'), 'varias');
+  assert.equal(campoDeObras('director_obra', 'director_obra'), 'varias');
+  // RF-32: el Residente, una y obligatoria.
+  assert.equal(campoDeObras('residente'), 'una-obligatoria');
+  assert.equal(campoDeObras('residente', 'operador'), 'una-obligatoria');
+  // RF-16: el Director de Proyectos y los demás accesos sin obra, ninguna.
+  for (const rol of ['director_proyectos', 'encargado_occ', 'auxiliar_administrativa'] as const) {
+    assert.equal(campoDeObras(rol), 'ninguna', rol);
+  }
+  // RF-70: bajar a un Director de Obra pregunta cuál conserva, a cualquier acceso de una obra.
+  assert.equal(campoDeObras('residente', 'director_obra'), 'conservada');
+  assert.equal(campoDeObras('almacenista', 'director_obra'), 'conservada');
+  // Pero a un acceso que ve todas no le queda ninguna: no hay nada que preguntar.
+  assert.equal(campoDeObras('admin', 'director_obra'), 'ninguna');
+  assert.equal(campoDeObras('director_proyectos', 'director_obra'), 'ninguna');
+  // Los demás, como siempre: una obra, que puede quedar vacía.
+  assert.equal(campoDeObras('operador'), 'una');
+  assert.equal(campoDeObras('almacenista', 'operador'), 'una');
+  assert.equal(campoDeObras('admin'), 'una');
+});
+
+prueba('041/RF-51: apagar «revisar» es de la Gerencia y del Director de Proyectos', () => {
+  assert.ok(puedeMarcarRevisado('admin'));
+  assert.ok(puedeMarcarRevisado('director_proyectos'));
+  for (const rol of ['director_obra', 'residente', 'encargado_occ', 'auxiliar_administrativa', 'operador'] as const) {
+    assert.equal(puedeMarcarRevisado(rol), false, rol);
+  }
+});
+
+prueba('041/RF-13, RF-28: asignar obras a un Director de Obra es del Director de Proyectos y de la Gerencia', () => {
+  const directorDeObra = { id: 'd1', rol: 'director_obra' as const };
+  assert.equal(motivoParaNoAsignarObras({ id: 'g', rol: 'admin' }, directorDeObra), null);
+  assert.equal(motivoParaNoAsignarObras({ id: 'p', rol: 'director_proyectos' }, directorDeObra), null);
+  const noPuede = 'Asignar o retirar obras a un Director de Obra lo hacen el Director de Proyectos o la Gerencia.';
+  // Ni a otro director ni a sí mismo (RF-28).
+  assert.equal(motivoParaNoAsignarObras({ id: 'd2', rol: 'director_obra' }, directorDeObra), noPuede);
+  assert.equal(motivoParaNoAsignarObras({ id: 'd1', rol: 'director_obra' }, directorDeObra), noPuede);
+  assert.equal(motivoParaNoAsignarObras({ id: 'r', rol: 'residente' }, directorDeObra), noPuede);
+  // Varias obras solo las lleva el Director de Obra.
+  assert.equal(
+    motivoParaNoAsignarObras({ id: 'g', rol: 'admin' }, { id: 'r', rol: 'residente' }),
+    'Solo al Director de Obra se le asignan varias obras.',
+  );
+});
+
+prueba('041/RF-42, RF-52: quien anuló sale con el acceso de esa fecha, no con el de hoy', () => {
+  const cambio = new Date('2026-11-06T12:00:00Z');
+  const tramos = [
+    { rol: 'director_obra', desde: cambio, hasta: null },
+    { rol: 'supervisor', desde: new Date('2026-08-01T00:00:00Z'), hasta: cambio },
+  ];
+  assert.equal(etiquetaDelAccesoEn(tramos, new Date('2026-10-20T00:00:00Z')), 'Residente / Director');
+  assert.equal(etiquetaDelAccesoEn(tramos, new Date('2026-11-08T00:00:00Z')), 'Director de Obra');
+  // En el instante del cambio ya vale el acceso nuevo: `hasta` no cuenta y `desde` sí.
+  assert.equal(etiquetaDelAccesoEn(tramos, cambio), 'Director de Obra');
+  // Antes de su primer acceso, o sin historia (las altas por WhatsApp): no se inventa ninguno.
+  assert.equal(etiquetaDelAccesoEn(tramos, new Date('2026-07-01T00:00:00Z')), null);
+  assert.equal(etiquetaDelAccesoEn([], cambio), null);
+
+  assert.equal(firmaConAcceso('Ana Ruiz', 'Residente / Director'), 'Ana Ruiz (Residente / Director)');
+  assert.equal(firmaConAcceso('Ana Ruiz', null), 'Ana Ruiz');
+});
+
+prueba('041/RF-42, RF-52: el nombre de un acceso de la historia, también el de antes de la 041', () => {
+  assert.equal(etiquetaDeAccesoHistorico('supervisor'), 'Residente / Director');
+  assert.equal(etiquetaDeAccesoHistorico('director_obra'), 'Director de Obra');
+  assert.equal(etiquetaDeAccesoHistorico('residente'), 'Residente');
+  assert.equal(etiquetaDeAccesoHistorico('admin'), 'Gerencia');
+  // Un valor que no se conoce no se inventa: se muestra tal cual.
+  assert.equal(etiquetaDeAccesoHistorico('otro'), 'otro');
+});
+
+prueba('041/RF-19, RF-20: una fila o una imagen concreta, contra todas las obras de la persona', () => {
+  // El Director de Obra con la obra A en uso toca una fila de su obra B, no de una C.
+  const director = sesionDe('director_obra', 'o1', ['o1', 'o2']);
+  assert.ok(alcanzaLaObra(director, 'o1'));
+  assert.ok(alcanzaLaObra(director, 'o2'));
+  assert.equal(alcanzaLaObra(director, 'o3'), false);
+  assert.ok(alcanzaLaObra(director, null));
+  assert.ok(alcanzaLaImagen(director, { existe: true, obraId: 'o2' }, 'bitacoras'));
+  assert.equal(alcanzaLaImagen(director, { existe: true, obraId: 'o3' }, 'bitacoras'), false);
+  // Sin obra en uso (varias y ninguna pedida) sigue alcanzando las suyas, fila por fila.
+  const sinEnUso = sesionDe('director_obra', null, ['o1', 'o2']);
+  assert.ok(alcanzaLaObra(sinEnUso, 'o2'));
+  // El Director de Obra sin ninguna obra no alcanza nada (RF-65).
+  assert.equal(alcanzaLaObra(sesionDe('director_obra', null, []), 'o1'), false);
+  // El Director de Proyectos, cualquiera; una imagen, con el permiso de su módulo (034).
+  const proyectos = sesionDe('director_proyectos', null);
+  assert.ok(alcanzaLaObra(proyectos, 'o9'));
+  assert.ok(alcanzaLaImagen(proyectos, { existe: true, obraId: 'o9' }, 'bitacoras'));
+  assert.equal(alcanzaLaImagen(proyectos, { existe: true, obraId: 'o9' }, 'finanzas'), false);
+  // Una imagen huérfana sigue siendo solo de la gerencia, que revisa lo que quedó sin dueño.
+  assert.equal(alcanzaLaImagen(proyectos, { existe: false, obraId: null }, 'bitacoras'), false);
+});
+
+prueba('041/RF-19: una fila con obra, de cualquiera de las suyas y nunca una sin obra', () => {
+  // Los lectores que antes comparaban con `obraId` (la marca de lo creado por WhatsApp,
+  // la máquina de un reporte, el día de una obra): el Director de Obra alcanza la B
+  // aunque tenga la A en uso, y una fila sin obra sigue sin ser de nadie salvo de quien
+  // ve todas, como cuando la comparación era `!==`.
+  const director = sesionDe('director_obra', 'o1', ['o1', 'o2']);
+  assert.ok(esDeSusObras(director, 'o1'));
+  assert.ok(esDeSusObras(director, 'o2'));
+  assert.equal(esDeSusObras(director, 'o3'), false);
+  assert.equal(esDeSusObras(director, null), false);
+  assert.ok(esDeSusObras(sesionDe('residente', 'o1'), 'o1'));
+  assert.equal(esDeSusObras(sesionDe('residente', 'o1'), 'o2'), false);
+  assert.ok(esDeSusObras(sesionDe('director_proyectos', null), 'o9'));
+  assert.ok(esDeSusObras(sesionDe('admin', null), null));
+});
+
+prueba('041/RF-23: dónde se escribe lo que registra cada cargo', () => {
+  const director = sesionDe('director_obra', 'o1', ['o1', 'o2']);
+  // Por omisión, en la obra en uso; si el cuerpo pide otra de las suyas, en esa.
+  assert.equal(obraParaEscribir(director, null), 'o1');
+  assert.equal(obraParaEscribir(director, 'o2'), 'o2');
+  // Una ajena no: queda la obra en uso, como si no la hubiera pedido (RF-20).
+  assert.equal(obraParaEscribir(director, 'o3'), 'o1');
+  // El residente, siempre la suya.
+  assert.equal(obraParaEscribir(sesionDe('residente', 'o1'), 'o2'), 'o1');
+  // Quien ve todas escribe donde pide, como hoy la gerencia.
+  assert.equal(obraParaEscribir(sesionDe('director_proyectos', null), 'o9'), 'o9');
+  assert.equal(obraParaEscribir(sesionDe('admin', null), null), null);
+});
+
+prueba('041/RF-20, RF-22, RF-23: la obra en uso', () => {
+  assert.equal(obraEnUso('o2', ['o1', 'o2']), 'o2');
+  // Una obra ajena no se acepta ni da error: es como si no existiera.
+  assert.equal(obraEnUso('o9', ['o1', 'o2']), null);
+  assert.equal(obraEnUso('o9', ['o1']), 'o1');
+  // Sin pedir: la única, si hay una; con varias, ninguna (va a la lista).
+  assert.equal(obraEnUso(null, ['o1']), 'o1');
+  assert.equal(obraEnUso(undefined, ['o1', 'o2']), null);
+  assert.equal(obraEnUso('', ['o1', 'o2']), null);
+  assert.equal(obraEnUso('o1', []), null);
+});
+
+prueba('041/RF-53 a RF-55: lo que el asistente le responde a cada cargo de obra', () => {
+  const de = (rol: Rol, obras: string[]) =>
+    alcanceDelAsistente({ rol, obraId: obras[0] ?? null, obras, modulosDeObra: TODOS_LOS_MODULOS });
+
+  // RF-53: el Director de Proyectos, todas las obras y nada de lo administrativo de empresa.
+  const proyectos = de('director_proyectos', []);
+  assert.equal(proyectos.usa, true);
+  assert.equal(proyectos.obras, 'todas');
+  for (const modulo of ['compras', 'tesoreria', 'finanzas', 'bitacora_empresa'] as const) {
+    assert.equal(proyectos.modulos.includes(modulo), false, modulo);
+  }
+  assert.deepEqual(proyectos.empresas, []);
+  for (const modulo of ['bitacoras', 'almacen', 'laboratorio', 'contrato', 'vehiculos', 'personas', 'solicitudes'] as const) {
+    assert.ok(proyectos.modulos.includes(modulo), modulo);
+  }
+
+  // RF-73, RF-74: el Director de Obra, solo su obra en uso; ni siquiera su otra obra.
+  const director = de('director_obra', ['o1', 'o2']);
+  assert.deepEqual(director.obras, ['o1']);
+  assert.equal(obraAlAlcance(director, 'o1'), true);
+  assert.equal(obraAlAlcance(director, 'o2'), false);
+  assert.equal(obraAlAlcance(director, 'o3'), false);
+  assert.ok(director.modulos.includes('vehiculos') && director.modulos.includes('personas'));
+  assert.match(obrasAlcanzadasEnTexto(director), /Cambiar de obra/);
+  assert.match(obrasAlcanzadasEnTexto(director), /no consulte nada/);
+
+  // RF-73: los módulos son los de la obra en uso.
+  const sinAlmacen = alcanceDelAsistente({
+    rol: 'director_obra',
+    obraId: 'o1',
+    obras: ['o1', 'o2'],
+    modulosDeObra: { ...TODOS_LOS_MODULOS, almacen: false },
+  });
+  assert.equal(sinAlmacen.modulos.includes('almacen'), false);
+
+  // Con varias obras y ninguna en uso: nada de ninguna, y se le pide abrir una.
+  const sinEscoger = alcanceDelAsistente({ rol: 'director_obra', obraId: null, obras: ['o1', 'o2'], modulosDeObra: TODOS_LOS_MODULOS });
+  assert.deepEqual(sinEscoger.obras, []);
+  assert.deepEqual(sinEscoger.modulos, []);
+  assert.match(obrasAlcanzadasEnTexto(sinEscoger), /abra una/);
+
+  // Los demás siguen diciendo lo de siempre.
+  assert.equal(obrasAlcanzadasEnTexto(proyectos), 'todas las obras');
+  assert.equal(obrasAlcanzadasEnTexto(de('residente', ['o1'])), 'una sola obra');
+  assert.match(obrasAlcanzadasEnTexto(de('director_obra', [])), /no tiene obra asignada/);
+
+  // RF-55: el Residente, lo de antes del Residente / Director, de su obra.
+  const residente = de('residente', ['o1']);
+  assert.deepEqual(residente.obras, ['o1']);
+  assert.deepEqual(residente.modulos, director.modulos);
+
+  // Sin obras, nada de obra (como 028/RF-10).
+  assert.deepEqual(de('director_obra', []).obras, []);
+  assert.deepEqual(de('director_obra', []).modulos, []);
 });
 
 verificarFirmaS3()

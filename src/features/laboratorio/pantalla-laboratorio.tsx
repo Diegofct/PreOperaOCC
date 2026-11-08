@@ -257,7 +257,7 @@ export default function PantallaLaboratorio() {
       descripcion={
         puedeRegistrar
           ? 'Los ensayos de granulometría (INV E-123-13): se digitan las masas y el sistema calcula, dibuja la curva y dice si el material cumple. En «Ensayos de obra», los que se anotan en las bitácoras.'
-          : 'Los ensayos de granulometría de su obra, que registra el laboratorista y usted aprueba o devuelve, y en «Ensayos de obra» los que se anotan en las bitácoras.'
+          : `Los ensayos de granulometría de su obra, que registra el laboratorista y ${puedeAprobar ? 'usted aprueba o devuelve' : 'aprueba o devuelve el Director de Obra'}, y en «Ensayos de obra» los que se anotan en las bitácoras.`
       }
       error={obras.error}
       cargando={obras.cargando}
