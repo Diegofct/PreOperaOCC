@@ -79,8 +79,17 @@ import type {
   FuenteDeRespuesta,
   ModuloConsultable,
 } from '../../shared/rules/asistente';
-import type { LecturaDeIa } from '../../shared/rules/formulario-presupuesto-ia';
+import type { LecturaDeIa, RechazadoPorIa } from '../../shared/rules/formulario-presupuesto-ia';
 import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shared/rules/presupuesto';
+import {
+  ESTADOS_DE_LECTURA_DE_PLANIFICACION,
+  ESTADOS_DE_PLANIFICACION,
+  type EstructuraDePlanificacion,
+  type FrenteSinGrupo,
+  type HallazgoDePlanificacion,
+  type ResumenDeLaPlanificacion,
+} from '../../shared/rules/planificacion';
+import type { LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
 import type { EmpresaId } from '../../shared/rules/empresas';
 import type {
   ActividadDeMantenimiento,
@@ -150,6 +159,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'asistente',
   // Spec 034: los documentos de Elemental, OCC, Geolab y cada obra (`documentos_del_grupo`).
   'repositorio',
+  // Spec 043: el Excel original de una planificación.
+  'planificacion',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -160,6 +171,8 @@ export const propositoMedia = pgEnum('proposito_media', [
   // adjuntos (`evidencia`) porque vence a los 30 días (D7) y solo se entrega mientras la
   // conversación siga al alcance de quien lo pidió.
   'archivo_generado',
+  // Spec 043, RF-8: va aparte porque solo lo bajan la Gerencia y los directores (RF-50).
+  'planificacion_excel',
 ]);
 export const operacionSync = pgEnum('operacion_sync', ['upsert', 'delete']);
 
@@ -2037,6 +2050,147 @@ export const presupuestoLecturasIa = pgTable('presupuesto_lecturas_ia', {
   /** SHA-256 en hexadecimal del archivo tal como se subió. */
   huella: text('huella').primaryKey(),
   lectura: jsonb('lectura').$type<LecturaDeIa>().notNull(),
+  modelo: text('modelo').notNull(),
+  tokensEntrada: integer('tokens_entrada').notNull(),
+  tokensSalida: integer('tokens_salida').notNull(),
+  creadoPor: text('creado_por')
+    .notNull()
+    .references(() => usuarios.id),
+  creadoEn: creadoEn(),
+});
+
+/* ------------------------------------------------------------------------ */
+/* Spec 043: la planificación de la obra                                     */
+/* ------------------------------------------------------------------------ */
+
+export const estadoPlanificacion = pgEnum('estado_planificacion', ESTADOS_DE_PLANIFICACION);
+export const estadoLecturaPlanificacion = pgEnum('estado_lectura_planificacion', ESTADOS_DE_LECTURA_DE_PLANIFICACION);
+
+/**
+ * Las planificaciones de una obra, una fila por versión (RF-41 a RF-47). Como `presupuestos`, la
+ * estructura va entera en un jsonb: una versión aprobada no cambia, y Neon por HTTP no da
+ * transacciones interactivas.
+ *
+ * A lo sumo un borrador y una vigente por obra: lo garantizan los índices parciales, no la
+ * pantalla. El número de versión es único entre las que no se descartaron, para que un borrador
+ * sustituido devuelva su número: la primera planificación aprobada es la v1 (RF-44).
+ *
+ * `rige_desde` y `rige_hasta` son fechas de Colombia, resueltas al aprobar y al anular. Un rango
+ * invertido es una versión reemplazada el mismo día en que se aprobó (RF-52, RF-120, RF-138).
+ */
+export const planificaciones = pgTable(
+  'planificaciones',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    numeroVersion: integer('numero_version').notNull(),
+    estado: estadoPlanificacion('estado').notNull().default('borrador'),
+    estructura: jsonb('estructura').$type<EstructuraDePlanificacion>().notNull(),
+    hallazgos: jsonb('hallazgos').$type<HallazgoDePlanificacion[]>().notNull().default([]),
+    resumen: jsonb('resumen').$type<ResumenDeLaPlanificacion>().notNull(),
+    /** Las cifras que la IA leyó y no estaban en su celda (RF-21), para mostrarlas. */
+    rechazados: jsonb('rechazados').$type<RechazadoPorIa[]>().notNull().default([]),
+    /** SHA-256 del archivo tal como se subió. */
+    huella: text('huella').notNull(),
+    hojas: jsonb('hojas').$type<SeleccionDeHojas>().notNull(),
+    /** RF-8: el Excel original. */
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    /** RF-39: el presupuesto contra el que se cruzó, y su versión. */
+    presupuestoId: text('presupuesto_id')
+      .notNull()
+      .references(() => presupuestos.id),
+    presupuestoVersion: integer('presupuesto_version').notNull(),
+    rigeDesde: date('rige_desde', { mode: 'string' }),
+    rigeHasta: date('rige_hasta', { mode: 'string' }),
+    /** RF-121, RF-122: los meses anteriores que se marcaron como cumplidos, y quién. */
+    mesesCumplidos: jsonb('meses_cumplidos')
+      .$type<{ mes: string; marcadoPor: string; marcadoEn: string }[]>()
+      .notNull()
+      .default([]),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    /** RF-116: un borrador sustituido no se borra. */
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    descartadoPor: text('descartado_por').references(() => usuarios.id),
+    version: integer('version').notNull().default(0),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_planificacion_vigente')
+      .on(t.obraId)
+      .where(sql`estado = 'vigente'`),
+    uniqueIndex('ux_planificacion_borrador')
+      .on(t.obraId)
+      .where(sql`estado = 'borrador'`),
+    uniqueIndex('ux_planificacion_version')
+      .on(t.obraId, t.numeroVersion)
+      .where(sql`estado <> 'descartada'`),
+    check(
+      'ck_planificacion_anulada',
+      sql`(${t.estado} = 'anulada') = (${t.anuladoEn} is not null)
+       and (${t.anuladoEn} is null or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0))`,
+    ),
+    check('ck_planificacion_descartada', sql`(${t.estado} = 'descartada') = (${t.descartadoEn} is not null)`),
+    check(
+      'ck_planificacion_aprobada',
+      sql`${t.estado} not in ('vigente', 'reemplazada', 'anulada') or (${t.aprobadoEn} is not null and ${t.rigeDesde} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Cada lectura de un libro (RF-117). Corre por detrás porque el proxy del VPS corta las peticiones
+ * a los 120 segundos y la lectura puede tardar 3 minutos. A lo sumo una en curso por obra: lo
+ * garantiza el índice parcial. `vence_en` la libera si el servidor se reinicia a mitad de camino.
+ */
+export const planificacionLecturas = pgTable(
+  'planificacion_lecturas',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    /** La planificación que va a crear. Se reserva al empezar, porque el original cuelga de ella. */
+    planificacionId: text('planificacion_id').notNull(),
+    estado: estadoLecturaPlanificacion('estado').notNull().default('en_curso'),
+    error: text('error'),
+    /** RF-107: los frentes que hay que asociar a mano. */
+    candidatos: jsonb('candidatos').$type<FrenteSinGrupo[]>(),
+    venceEn: timestamp('vence_en', { withTimezone: true, mode: 'date' }).notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_planificacion_lectura_en_curso')
+      .on(t.obraId)
+      .where(sql`estado = 'en_curso'`),
+  ],
+);
+
+/**
+ * Lo que leyó la IA, por archivo y hojas confirmadas (RF-10), para no pagar dos veces la misma
+ * lectura. Se guarda lo que devolvió la IA y no la estructura: la comprobación contra las celdas
+ * se repite con el archivo cada vez, y es pura.
+ */
+export const planificacionLecturasIa = pgTable('planificacion_lecturas_ia', {
+  /** SHA-256 de la huella del archivo más las hojas confirmadas. */
+  llave: text('llave').primaryKey(),
+  lectura: jsonb('lectura').$type<LecturaDePlanificacion>().notNull(),
   modelo: text('modelo').notNull(),
   tokensEntrada: integer('tokens_entrada').notNull(),
   tokensSalida: integer('tokens_salida').notNull(),
