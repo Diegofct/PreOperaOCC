@@ -133,6 +133,10 @@ export const MODULOS_DE_EMPRESA = [
   'solicitudes',
   // Spec 038: la Bitácora de OCC y la de Geolab, aparte de `bitacoras`, que es la de las obras.
   'bitacora_empresa',
+  // Spec 043. Solo existen en el menú de una obra. Son dos porque el Residente entra al informe
+  // de cumplimiento y no a la planificación, que lleva los costos.
+  'planificacion',
+  'cumplimiento',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -562,6 +566,35 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     director_obra: NADA,
     director_proyectos: NADA,
   },
+  // Spec 043, RF-1, RF-36, RF-48, RF-86. La suben, la aprueban y la anulan el Director de
+  // Proyectos y la Gerencia; el Director de Obra la consulta en sus obras y baja su Excel (RF-50).
+  // El Residente no entra: lleva los precios de costo.
+  planificacion: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    residente: NADA,
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+  },
+  // Spec 043, RF-87, RF-88, RF-90. El informe es de consulta. Quién ve la plata no se decide
+  // aquí: al Residente el servidor le arma otro informe, solo con cantidades y porcentajes.
+  cumplimiento: {
+    admin: ['ver', 'listar'],
+    residente: ['ver', 'listar'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar'],
+    director_proyectos: ['ver', 'listar'],
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -691,9 +724,12 @@ export function motivoParaNoDarRol(rolDeQuienPide: Rol, rolDestino: Rol): string
  * Aparte del rechazo general de la guardia porque a él hay que decirle **a quién acudir**: la
  * acción existe en su obra y la hace otro cargo, no «otro oficio». La guardia lo usa cuando la
  * tabla ya dijo que no; la excepción de la bandeja de WhatsApp (RF-37) la da la tabla.
+ *
+ * Spec 043: en la planificación el Director de Obra no aprueba ni anula, así que esta frase sería
+ * falsa; ahí responde el rechazo general, que sale de la tabla y nombra a quien sí puede.
  */
-export function motivoParaNoAprobar(rol: Rol, accion: Accion): string | null {
-  if (rol !== 'residente') return null;
+export function motivoParaNoAprobar(rol: Rol, accion: Accion, modulo?: ModuloConPermiso): string | null {
+  if (rol !== 'residente' || modulo === 'planificacion') return null;
   if (accion === 'aprobar') {
     return 'El Residente no aprueba: lo aprueban el Director de Obra, el Director de Proyectos o la Gerencia.';
   }
@@ -739,6 +775,18 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
     aprobar: 'aprobar ni rechazar solicitudes de pago',
     escribir: 'registrar pagos',
     anular: 'anular pagos',
+  },
+  // Spec 043.
+  planificacion: {
+    ver: 'ver la planificación de la obra',
+    listar: 'ver la planificación de la obra',
+    escribir: 'subir una planificación',
+    aprobar: 'aprobar una planificación',
+    anular: 'anular una planificación',
+  },
+  cumplimiento: {
+    ver: 'ver el cumplimiento de la obra',
+    listar: 'ver el cumplimiento de la obra',
   },
 };
 
@@ -851,6 +899,8 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   licitaciones: 'Licitaciones',
   solicitudes: 'Solicitudes de compra y de pago',
   bitacora_empresa: 'Bitácora',
+  planificacion: 'Planificación',
+  cumplimiento: 'Cumplimiento de obra',
 };
 
 /**

@@ -80,6 +80,52 @@ import {
   TODOS_LOS_MODULOS,
 } from '../src/shared/rules/permisos';
 import {
+  diasDeReparto,
+  ejecucionDelPeriodo,
+  informeDeCumplimiento,
+  informeSegunRol,
+  llaveDeItemPlanificado,
+  periodoDelInforme,
+  sinPlata,
+  mesesAnterioresPorMarcar,
+  metaDelPeriodo,
+  tramosDelPeriodo,
+  valoresDelPeriodo,
+  versionMedible,
+  ultimoDiaQueRige,
+  versionQueRige,
+} from '../src/shared/rules/cumplimiento-de-obra';
+import {
+  armarItemDePlanificacion,
+  cantidadDelMes,
+  cruzarConPresupuesto,
+  ESTADOS_DE_LECTURA_DE_PLANIFICACION,
+  ESTADOS_DE_PLANIFICACION,
+  hallazgosDe,
+  llaveDelItem,
+  notasEnTexto,
+  sinPrecioDeCosto,
+  programacionDeRubros,
+  resumenDeLaPlanificacion,
+  rubrosDelMes,
+  valoresPorMes,
+} from '../src/shared/rules/planificacion';
+import {
+  anulacionDePlanificacion,
+  aprobacionDePlanificacion,
+  pedidoDeInformeDeCumplimiento,
+  seleccionDeHojasPedida,
+} from '../src/features/panel/planificacion';
+import {
+  estructuraDeLaLectura,
+  limpiarPropuesta,
+  muestraParaProponer,
+  observacionesValidas,
+  repasarSeleccion,
+  textoParaLeer,
+  type LecturaDePlanificacion,
+} from '../src/shared/rules/planificacion-ia';
+import {
   accesoTrasLaMigracion,
   campoDeObras,
   etiquetaDeAccesoHistorico,
@@ -14556,6 +14602,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     licitaciones: [],
     solicitudes: ['ver', 'listar', 'escribir'],
     bitacora_empresa: [],
+    planificacion: [],
+    cumplimiento: ['ver', 'listar'],
   },
   director_obra: {
     inicio: ['ver'],
@@ -14581,6 +14629,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     licitaciones: [],
     solicitudes: ['ver', 'listar', 'escribir'],
     bitacora_empresa: [],
+    planificacion: ['ver', 'listar'],
+    cumplimiento: ['ver', 'listar'],
   },
   director_proyectos: {
     inicio: ['ver'],
@@ -14606,6 +14656,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     licitaciones: [],
     solicitudes: ['ver', 'listar', 'escribir'],
     bitacora_empresa: [],
+    planificacion: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    cumplimiento: ['ver', 'listar'],
   },
 };
 
@@ -15092,6 +15144,1329 @@ prueba('041/RF-53 a RF-55: lo que el asistente le responde a cada cargo de obra'
   // Sin obras, nada de obra (como 028/RF-10).
   assert.deepEqual(de('director_obra', []).obras, []);
   assert.deepEqual(de('director_obra', []).modulos, []);
+});
+
+/* ------------------------------------------------------------------------ */
+/* Spec 043: planificación de obra y cumplimiento                            */
+/* ------------------------------------------------------------------------ */
+
+const ACCIONES_043 = ['ver', 'listar', 'escribir', 'aprobar', 'anular', 'activar'] as const;
+const QUE_PUEDE_043 = (rol: Rol, modulo: ModuloConPermiso) => ACCIONES_043.filter((accion) => alcanza(rol, modulo, accion));
+
+prueba('043/RF-1, RF-36, RF-48, RF-49, RF-50, RF-86 a RF-90: la tabla completa, rol por rol', () => {
+  const TODO = ['ver', 'listar', 'escribir', 'aprobar', 'anular'];
+  const CONSULTA = ['ver', 'listar'];
+  const planificacion: Partial<Record<Rol, readonly string[]>> = { admin: TODO, director_proyectos: TODO, director_obra: CONSULTA };
+  const cumplimiento: Partial<Record<Rol, readonly string[]>> = {
+    admin: CONSULTA,
+    director_proyectos: CONSULTA,
+    director_obra: CONSULTA,
+    residente: CONSULTA,
+  };
+  for (const rol of ROLES) {
+    assert.deepEqual(QUE_PUEDE_043(rol, 'planificacion'), planificacion[rol] ?? [], `planificacion · ${rol}`);
+    assert.deepEqual(QUE_PUEDE_043(rol, 'cumplimiento'), cumplimiento[rol] ?? [], `cumplimiento · ${rol}`);
+  }
+});
+
+prueba('043/RF-136: el Residente sigue viendo el contrato y el presupuesto, con lo que tenía', () => {
+  assert.deepEqual(QUE_PUEDE_043('residente', 'contrato'), ['ver', 'listar', 'escribir']);
+});
+
+prueba('043/RF-36, RF-48: el rechazo dice quién aprueba y quién anula, sin nombrar al Director de Obra', () => {
+  const ESPERADO = /la gerencia y el director de proyectos\.$/;
+  assert.match(motivoDeRechazo('planificacion', 'aprobar'), /^No puede aprobar una planificación:/);
+  assert.match(motivoDeRechazo('planificacion', 'aprobar'), ESPERADO);
+  assert.match(motivoDeRechazo('planificacion', 'anular'), /^No puede anular una planificación:/);
+  assert.match(motivoDeRechazo('planificacion', 'anular'), ESPERADO);
+  assert.match(motivoDeRechazo('planificacion', 'escribir'), /^No puede subir una planificación:/);
+  assert.match(motivoDeRechazo('cumplimiento', 'ver'), /^No puede ver el cumplimiento de la obra:/);
+
+  // La guardia prueba primero el motivo del Residente, que nombra al Director de Obra: en la
+  // planificación ese cargo no aprueba ni anula, así que aquí no aplica.
+  assert.equal(motivoParaNoAprobar('residente', 'aprobar', 'planificacion'), null);
+  assert.equal(motivoParaNoAprobar('residente', 'anular', 'planificacion'), null);
+  // En lo demás sigue diciendo lo de la 041.
+  assert.match(motivoParaNoAprobar('residente', 'aprobar', 'bitacoras') ?? '', /Director de Obra/);
+});
+
+prueba('043: los estados de una planificación y de su lectura', () => {
+  assert.deepEqual([...ESTADOS_DE_PLANIFICACION], ['borrador', 'vigente', 'reemplazada', 'anulada', 'descartada']);
+  assert.deepEqual([...ESTADOS_DE_LECTURA_DE_PLANIFICACION], ['en_curso', 'lista', 'falta_grupo', 'fallida']);
+});
+
+prueba('043/RF-16: la cantidad del mes es el valor programado entre el precio contractual', () => {
+  // Ítem 5.1.7 del V5, línea base de enero de 2027.
+  assert.equal(cantidadDelMes(18146151, 112153), 161.798);
+  assert.equal(cantidadDelMes(0, 112153), 0);
+  // Sin precio no se divide: no hay cantidad, ni cero ni infinito.
+  assert.equal(cantidadDelMes(18146151, 0), null);
+  assert.equal(cantidadDelMes(18146151, null), null);
+  assert.equal(cantidadDelMes(18146151, -5), null);
+  assert.equal(cantidadDelMes(Number.NaN, 112153), null);
+});
+
+prueba('043/RF-11 a RF-15: lo que se guarda de un ítem, con su programación en orden', () => {
+  const item = armarItemDePlanificacion({
+    renglon: 5,
+    item: ' 5.1.7 ',
+    descripcion: 'Suministro, colocación y compactación de sub-base',
+    unidad: 'm3',
+    grupo: 'Circuito Remedios',
+    capitulo: 'CONSTRUCCIÓN DE ALCANTARILLAS',
+    precioContractual: 112153,
+    precioCosto: 40690,
+    medidaReal: 2121.42,
+    medidaContractual: 236,
+    mesInicio: '2026-05',
+    tiempoEjecucion: 19,
+    programacion: [
+      { mes: '2027-01', valor: 18146151.485 },
+      { mes: '2026-11', valor: 0 },
+    ],
+  });
+  assert.equal(item.item, '5.1.7');
+  assert.equal(item.precioCosto, 40690);
+  assert.equal(item.medidaReal, 2121.42);
+  assert.equal(item.mesInicio, '2026-05');
+  assert.equal(item.tiempoEjecucion, 19);
+  assert.equal(item.revisar, false);
+  assert.deepEqual(item.programacion, [
+    { mes: '2026-11', valor: 0, cantidad: 0 },
+    { mes: '2027-01', valor: 18146151, cantidad: 161.798 },
+  ]);
+
+  // Un costo de relleno se guarda tal como vino: decidir que no es costo es de los hallazgos.
+  const relleno = armarItemDePlanificacion({ ...item, precioCosto: 0.000000001, programacion: [] });
+  assert.equal(relleno.precioCosto, 0.000000001);
+
+  // Sin precio contractual el mes conserva su valor y no tiene cantidad.
+  const sinPrecio = armarItemDePlanificacion({ ...item, precioContractual: 0, programacion: [{ mes: '2027-01', valor: 100 }] });
+  assert.deepEqual(sinPrecio.programacion, [{ mes: '2027-01', valor: 100, cantidad: null }]);
+});
+
+prueba('043/RF-17: los indirectos quedan por mes, en pesos y en orden', () => {
+  assert.deepEqual(
+    valoresPorMes([
+      { mes: '2026-03', valor: 244510539.4 },
+      { mes: '2026-02', valor: 221042440 },
+    ]),
+    [
+      { mes: '2026-02', valor: 221042440 },
+      { mes: '2026-03', valor: 244510539 },
+    ],
+  );
+});
+
+prueba('043/RF-18: supuestos y objetivos quedan como texto, sin renglones vacíos', () => {
+  assert.equal(notasEnTexto(['  Distancia vía 25000 m ', '', '   ', 'Viajes diarios 2']), 'Distancia vía 25000 m\nViajes diarios 2');
+  assert.equal(notasEnTexto([]), '');
+});
+
+prueba('043/RF-108, RF-109: los rubros por mes, y una sola línea cuando el libro los junta', () => {
+  const pma = { nombre: 'PMA', valor: 218336960, costo: 196503264, programacion: [{ mes: '2026-11', valor: 1000.4 }] };
+  const pmt = { nombre: 'PMT', valor: 223237641, costo: 156266348.7, programacion: [] };
+
+  // Rubro por rubro.
+  const separados = programacionDeRubros([pma, pmt], null);
+  assert.equal(separados.lineaDeRubros, null);
+  assert.deepEqual(separados.rubros[0].programacion, [{ mes: '2026-11', valor: 1000 }]);
+  assert.deepEqual(rubrosDelMes(separados, '2026-11'), [{ nombre: 'PMA', valor: 1000 }]);
+  assert.deepEqual(rubrosDelMes(separados, '2026-12'), []);
+
+  // En Magdalena la línea base trae una sola línea, «Componentes», con todos.
+  const juntos = programacionDeRubros([pma, pmt], {
+    nombre: 'Componentes (PMA, PMT, caracterización, primas)',
+    valores: [
+      { mes: '2026-11', valor: 29161401 },
+      { mes: '2026-10', valor: 29161401 },
+    ],
+  });
+  assert.deepEqual(rubrosDelMes(juntos, '2026-11'), [{ nombre: 'Componentes (PMA, PMT, caracterización, primas)', valor: 29161401 }]);
+  // Cada rubro conserva su valor total, pero no se cuenta dos veces por mes.
+  assert.equal(juntos.rubros.length, 2);
+  assert.equal(juntos.rubros[0].valor, 218336960);
+  assert.deepEqual(juntos.rubros[0].programacion, []);
+  assert.deepEqual(juntos.lineaDeRubros?.valores.map((v) => v.mes), ['2026-10', '2026-11']);
+});
+
+/** Un pedazo real del presupuesto de Magdalena: los mismos ítems y capítulos en los dos frentes. */
+type ItemDelPresupuesto043 = EstructuraDePresupuesto['grupos'][number]['capitulos'][number]['items'][number];
+const item043 = (renglon: number, item: string, cantidad: number, valorUnitario: number): ItemDelPresupuesto043 => ({
+  id: `i-${renglon}`,
+  renglon,
+  item,
+  icociv: '',
+  especificaciones: '',
+  descripcion: '',
+  unidad: null,
+  unidadEscrita: 'm3',
+  cantidad,
+  valorUnitario,
+  valorTotal: Math.round(cantidad * valorUnitario),
+});
+const ALCANTARILLAS_043 = 'CONSTRUCCIÓN DE ALCANTARILLAS';
+const CUNETA_043 = 'CONSTRUCCIÓN DE CUNETA';
+const rubro043 = (id: string, grupoId: string | null, nombre: string): EstructuraDePresupuesto['rubros'][number] => ({
+  id,
+  grupoId,
+  nombre,
+  unidad: 'estimado',
+  cantidad: null,
+  valorUnitario: null,
+  valor: 1000,
+});
+const MAGDALENA_043: EstructuraDePresupuesto = {
+  aiu: { administracion: 0, imprevistos: 0, utilidad: 0 },
+  grupos: [
+    {
+      id: 'g-berrio',
+      nombre: 'Circuito Remedios - La Y De La Virgen',
+      capitulos: [
+        { id: 'c-b1', codigo: '01', nombre: ALCANTARILLAS_043, items: [item043(1, '2.8', 42, 242062), item043(3, '4.1.8', 2006, 55525)] },
+        { id: 'c-b2', codigo: '02', nombre: CUNETA_043, items: [item043(12, '4.1.8', 4345, 55525)] },
+      ],
+    },
+    {
+      id: 'g-yondo',
+      nombre: 'VIA LA YE-YONDO',
+      capitulos: [
+        { id: 'c-y1', codigo: '01', nombre: ALCANTARILLAS_043, items: [item043(39, '2.8', 38, 242062), item043(41, '4.1.8', 4352, 55525)] },
+      ],
+    },
+  ],
+  rubros: [
+    rubro043('r-b', 'g-berrio', 'CARACTERIZACION VIAL'),
+    rubro043('r-y', 'g-yondo', 'CARACTERIZACION VIAL'),
+    rubro043('r-t', null, 'ACTUALIZACIÓN DE PRECIOS'),
+    rubro043('r-solo-y', 'g-yondo', 'PMA YONDO'),
+  ],
+};
+const planDe043 = (grupo: string, capitulo: string, item: string, medidaContractual: number, renglon: number | null = null) =>
+  armarItemDePlanificacion({
+    renglon,
+    item,
+    descripcion: '',
+    unidad: 'm3',
+    grupo,
+    capitulo,
+    precioContractual: 55525,
+    precioCosto: null,
+    medidaReal: medidaContractual,
+    medidaContractual,
+    mesInicio: null,
+    tiempoEjecucion: null,
+    programacion: [],
+  });
+const FRENTE_043 = 'BERRIO';
+
+prueba('043/RF-19, RF-105: Berrio cruza con su grupo, ítem por ítem y dentro de su capítulo', () => {
+  const cruce = cruzarConPresupuesto(
+    [
+      planDe043(FRENTE_043, 'Construcción de  alcantarillas', '2.8', 42),
+      planDe043(FRENTE_043, ALCANTARILLAS_043, '4.1.8', 2006),
+      planDe043(FRENTE_043, CUNETA_043, '4.1.8', 4345),
+    ],
+    [],
+    MAGDALENA_043,
+  );
+  assert.ok(cruce.ok);
+  assert.deepEqual(cruce.items.map((i) => i.delPresupuesto?.grupoId), ['g-berrio', 'g-berrio', 'g-berrio']);
+  assert.deepEqual(cruce.items.map((i) => i.delPresupuesto?.capituloId), ['c-b1', 'c-b1', 'c-b2']);
+  assert.equal(cruce.frentes[FRENTE_043], 'g-berrio');
+});
+
+prueba('043/RF-19: el mismo ítem y capítulo de Yondo no es el de Berrio', () => {
+  assert.notEqual(
+    llaveDelItem('Circuito Remedios - La Y De La Virgen', ALCANTARILLAS_043, '2.8'),
+    llaveDelItem('VIA LA YE-YONDO', ALCANTARILLAS_043, '2.8'),
+  );
+  // La llave no distingue tildes, mayúsculas ni espacios de sobra.
+  assert.equal(llaveDelItem(' Vía  Uno', 'ALCANTARILLAS', ' 2.8 '), llaveDelItem('via uno', 'Alcantarillas', '2.8'));
+  // Las cantidades de Yondo llevan a Yondo, sin tocar a Berrio.
+  const cruce = cruzarConPresupuesto([planDe043('YONDO', ALCANTARILLAS_043, '2.8', 38), planDe043('YONDO', ALCANTARILLAS_043, '4.1.8', 4352)], [], MAGDALENA_043);
+  assert.ok(cruce.ok);
+  assert.deepEqual(cruce.items.map((i) => i.delPresupuesto?.grupoId), ['g-yondo', 'g-yondo']);
+});
+
+prueba('043/RF-107: si el frente no se puede asociar a un único grupo, pide escogerlo', () => {
+  // Una cantidad que no está en ningún grupo: ninguna coincidencia.
+  const ninguna = cruzarConPresupuesto([planDe043(FRENTE_043, ALCANTARILLAS_043, '2.8', 999)], [], MAGDALENA_043);
+  assert.equal(ninguna.ok, false);
+  assert.ok(!ninguna.ok);
+  assert.deepEqual(ninguna.faltaGrupo.map((f) => f.frente), [FRENTE_043]);
+  assert.deepEqual(ninguna.faltaGrupo[0].candidatos.map((c) => c.id).sort(), ['g-berrio', 'g-yondo']);
+
+  // Empate: la misma cantidad en los dos grupos.
+  const igual: EstructuraDePresupuesto = {
+    ...MAGDALENA_043,
+    grupos: MAGDALENA_043.grupos.map((g) => ({
+      ...g,
+      capitulos: [{ id: `${g.id}-c`, codigo: '01', nombre: ALCANTARILLAS_043, items: [item043(1, '2.8', 42, 242062)] }],
+    })),
+  };
+  const empate = cruzarConPresupuesto([planDe043(FRENTE_043, ALCANTARILLAS_043, '2.8', 42)], [], igual);
+  assert.ok(!empate.ok);
+  assert.deepEqual(empate.faltaGrupo[0].candidatos.map((c) => c.coincidencias), [1, 1]);
+
+  // Con el grupo escogido, cruza contra ese.
+  const escogido = cruzarConPresupuesto([planDe043(FRENTE_043, ALCANTARILLAS_043, '2.8', 42)], [], igual, { [FRENTE_043]: 'g-yondo' });
+  assert.ok(escogido.ok);
+  assert.equal(escogido.items[0].delPresupuesto?.grupoId, 'g-yondo');
+
+  // Un grupo que no existe no vale como escogido.
+  assert.equal(cruzarConPresupuesto([planDe043(FRENTE_043, ALCANTARILLAS_043, '2.8', 42)], [], igual, { [FRENTE_043]: 'g-otra' }).ok, false);
+});
+
+prueba('043/RF-106: un presupuesto sin grupos cruza por capítulo e ítem', () => {
+  const sinGrupos: EstructuraDePresupuesto = {
+    ...MAGDALENA_043,
+    grupos: [{ id: 'g', nombre: '', capitulos: [{ id: 'c', codigo: '01', nombre: ALCANTARILLAS_043, items: [item043(1, '2.8', 42, 242062)] }] }],
+  };
+  // Ni la cantidad ni el título del frente hacen falta: no hay entre qué escoger.
+  const cruce = cruzarConPresupuesto([planDe043('CUALQUIERA', ALCANTARILLAS_043, '2.8', 7)], [], sinGrupos);
+  assert.ok(cruce.ok);
+  assert.equal(cruce.items[0].delPresupuesto?.capituloId, 'c');
+});
+
+prueba('043/RF-19: un libro con solo «Nº» resuelve el ítem por renglón, sin inventar el cruce', () => {
+  const cruce = cruzarConPresupuesto(
+    [
+      planDe043(FRENTE_043, 'EXPLANACIONES', '3', 2006, 3),
+      planDe043(FRENTE_043, 'EXPLANACIONES', '', 42, 1),
+      // Trae un ítem de pago propio que no existe: es un hallazgo, no otro ítem por casualidad de renglón.
+      planDe043(FRENTE_043, ALCANTARILLAS_043, '9.9.9', 4345, 12),
+    ],
+    [],
+    MAGDALENA_043,
+  );
+  assert.ok(cruce.ok);
+  assert.equal(cruce.items[0].delPresupuesto?.item, '4.1.8');
+  assert.equal(cruce.items[1].delPresupuesto?.item, '2.8');
+  assert.equal(cruce.items[2].delPresupuesto, null);
+});
+
+prueba('043/RF-110: los rubros se cruzan contra los rubros de su frente, no contra los ítems', () => {
+  const rubro = (nombre: string) => ({ nombre, valor: 1000, costo: null, programacion: [] });
+  const cruce = cruzarConPresupuesto(
+    [planDe043(FRENTE_043, ALCANTARILLAS_043, '2.8', 42)],
+    [rubro('Caracterización vial'), rubro('Actualización de precios'), rubro('PMA YONDO'), rubro('2.8')],
+    MAGDALENA_043,
+  );
+  assert.ok(cruce.ok);
+  assert.deepEqual(cruce.rubros.map((r) => r.delPresupuesto), ['r-b', 'r-t', null, null]);
+});
+
+/** Un ítem sin ningún hallazgo; cada prueba le cambia una sola cosa. */
+const ITEM_SANO_043 = {
+  ...planDe043(FRENTE_043, ALCANTARILLAS_043, '4.1.8', 2006),
+  precioContractual: 55525,
+  precioCosto: 20000,
+  medidaReal: 100,
+  programacion: [{ mes: '2026-11', valor: 5552500, cantidad: 100 }],
+  delPresupuesto: {
+    grupoId: 'g-berrio',
+    grupo: 'Circuito',
+    capituloId: 'c-b1',
+    capitulo: ALCANTARILLAS_043,
+    item: '4.1.8',
+    unidad: 'M3',
+    cantidad: 2006,
+    valorUnitario: 55525,
+  },
+};
+const tiposDe043 = (cambio: Partial<typeof ITEM_SANO_043> | object, fechaFin: string | null = null) =>
+  hallazgosDe({ items: [{ ...ITEM_SANO_043, ...cambio }], rubros: [] }, fechaFin).map((h) => h.tipo);
+
+prueba('043: un ítem que cuadra no tiene ningún hallazgo', () => {
+  assert.deepEqual(tiposDe043({}, '2027-06-30'), []);
+});
+
+prueba('043/RF-25: el ítem que no existe en el presupuesto', () => {
+  assert.deepEqual(tiposDe043({ delPresupuesto: null }), ['no_existe']);
+});
+
+prueba('043/RF-26: la unidad distinta, sin contar mayúsculas', () => {
+  const otra = { delPresupuesto: { ...ITEM_SANO_043.delPresupuesto, unidad: 'm2' } };
+  assert.deepEqual(tiposDe043(otra), ['unidad_distinta']);
+  assert.deepEqual(tiposDe043({ unidad: 'M3' }), []);
+});
+
+prueba('043/RF-27: la cantidad contractual distinta; la medida real distinta no lo es', () => {
+  assert.deepEqual(tiposDe043({ medidaContractual: 2007 }), ['cantidad_distinta']);
+  assert.deepEqual(tiposDe043({ medidaContractual: 2006.0001 }), []);
+  // La medida real de Magdalena suele ser otra: eso es normal.
+  assert.deepEqual(tiposDe043({ medidaReal: 5000 }), []);
+});
+
+prueba('043/RF-28: el costo por encima del precio contractual', () => {
+  assert.deepEqual(tiposDe043({ precioCosto: 55526 }), ['costo_mayor']);
+  assert.deepEqual(tiposDe043({ precioCosto: 55525 }), []);
+});
+
+prueba('043/RF-29: sin programación, solo si tiene medida real', () => {
+  assert.deepEqual(tiposDe043({ programacion: [] }), ['sin_programacion']);
+  assert.deepEqual(tiposDe043({ programacion: [{ mes: '2026-11', valor: 0, cantidad: 0 }] }), ['sin_programacion']);
+  // En el V5, 12 ítems tienen medida real en cero porque no se van a ejecutar.
+  assert.deepEqual(tiposDe043({ programacion: [], medidaReal: 0 }), []);
+});
+
+prueba('043/RF-30: lo programado después de la fecha de fin del contrato', () => {
+  const programacion = [
+    { mes: '2027-06', valor: 100, cantidad: 1 },
+    { mes: '2027-07', valor: 100, cantidad: 1 },
+  ];
+  assert.deepEqual(tiposDe043({ programacion }, '2027-06-30'), ['despues_del_plazo']);
+  // El mes de la fecha de fin todavía está dentro; un mes posterior en cero no cuenta.
+  assert.deepEqual(tiposDe043({ programacion: [programacion[0]] }, '2027-06-01'), []);
+  assert.deepEqual(tiposDe043({ programacion: [programacion[0], { mes: '2027-07', valor: 0, cantidad: 0 }] }, '2027-06-30'), []);
+  // Sin fecha de fin no hay contra qué comparar.
+  assert.deepEqual(tiposDe043({ programacion }, null), []);
+});
+
+prueba('043/RF-31, RF-32: sin precio de costo es vacío, cero o menos de un peso', () => {
+  assert.deepEqual(tiposDe043({ precioCosto: null }), ['sin_costo']);
+  assert.deepEqual(tiposDe043({ precioCosto: 0 }), ['sin_costo']);
+  assert.deepEqual(tiposDe043({ precioCosto: 0.000000001 }), ['sin_costo']);
+  assert.deepEqual(tiposDe043({ precioCosto: 0.99 }), ['sin_costo']);
+  assert.deepEqual(tiposDe043({ precioCosto: 1 }), []);
+  assert.equal(sinPrecioDeCosto(0.000000001), true);
+  assert.equal(sinPrecioDeCosto(40690), false);
+});
+
+prueba('043/RF-115: lo marcado para revisión también es un hallazgo', () => {
+  assert.deepEqual(tiposDe043({ revisar: true }), ['para_revisar']);
+});
+
+prueba('043/RF-110: un rubro sin par es un hallazgo; con par, no', () => {
+  const rubros = [
+    { nombre: 'PMA', valor: 1, costo: null, programacion: [], delPresupuesto: 'r-1' },
+    { nombre: 'Otro rubro', valor: 1, costo: null, programacion: [], delPresupuesto: null },
+  ];
+  const hallazgos = hallazgosDe({ items: [], rubros }, null);
+  assert.deepEqual(hallazgos.map((h) => h.tipo), ['rubro_sin_par']);
+  assert.match(hallazgos[0].detalle, /Otro rubro/);
+});
+
+prueba('043: los hallazgos dicen de qué ítem son y por qué, y un ítem puede tener varios', () => {
+  const hallazgos = hallazgosDe({ items: [{ ...ITEM_SANO_043, renglon: 3, medidaContractual: 2007, precioCosto: null }], rubros: [] }, null);
+  assert.deepEqual(hallazgos.map((h) => h.tipo), ['cantidad_distinta', 'sin_costo']);
+  assert.equal(hallazgos[0].item, '4.1.8');
+  assert.equal(hallazgos[0].capitulo, ALCANTARILLAS_043);
+  assert.equal(hallazgos[0].renglon, 3);
+  assert.match(hallazgos[0].detalle, /2007/);
+  assert.match(hallazgos[0].detalle, /2006/);
+});
+
+const RUBRO_043 = { nombre: 'PMA', valor: 500, costo: 200, programacion: [], delPresupuesto: 'r' };
+
+prueba('043/RF-23, RF-33, RF-111 a RF-113: totales, margen y resultado, con las dos medidas', () => {
+  const item = { ...ITEM_SANO_043, medidaReal: 10, medidaContractual: 8, precioContractual: 100, precioCosto: 40 };
+  const resumen = resumenDeLaPlanificacion({ items: [item], rubros: [RUBRO_043], indirectos: [{ mes: '2026-11', valor: 60 }, { mes: '2026-12', valor: 40 }] });
+  // Medida real: 10 × 100 + 500 de contractual, 10 × 40 + 200 de costo.
+  assert.deepEqual(resumen.medidaReal, { contractual: 1500, costo: 600, margen: 900, resultado: 800 });
+  // Medida contractual: 8 × 100 + 500 y 8 × 40 + 200.
+  assert.deepEqual(resumen.medidaContractual, { contractual: 1300, costo: 520, margen: 780, resultado: 680 });
+  assert.equal(resumen.indirectos, 100);
+});
+
+prueba('043/RF-111, RF-112: con los totales del V5, el resultado es la utilidad del Excel', () => {
+  const item = { ...ITEM_SANO_043, medidaReal: 1, medidaContractual: 1, precioContractual: 39558848104, precioCosto: 10791439267 };
+  const resumen = resumenDeLaPlanificacion({ items: [item], rubros: [], indirectos: [{ mes: '2026-11', valor: 20440864487 }] });
+  assert.equal(resumen.medidaReal.margen, 28767408837);
+  assert.equal(resumen.medidaReal.resultado, 8326544350);
+});
+
+prueba('043/RF-32: un costo de relleno no suma, y un ítem sin medidas tampoco rompe la cuenta', () => {
+  const relleno = { ...ITEM_SANO_043, medidaReal: 1000000000, medidaContractual: 0, precioContractual: 1, precioCosto: 0.5 };
+  const vacio = { ...ITEM_SANO_043, medidaReal: null, medidaContractual: null, precioContractual: null, precioCosto: null };
+  const resumen = resumenDeLaPlanificacion({ items: [relleno, vacio], rubros: [], indirectos: [] });
+  assert.equal(resumen.medidaReal.contractual, 1000000000);
+  assert.equal(resumen.medidaReal.costo, 0);
+});
+
+prueba('043/RF-114: la diferencia con los totales que trae el Excel', () => {
+  const item = { ...ITEM_SANO_043, medidaReal: 10, medidaContractual: 8, precioContractual: 100, precioCosto: 40 };
+  const estructura = { items: [item], rubros: [], indirectos: [{ mes: '2026-11', valor: 100 }] };
+
+  const iguales = resumenDeLaPlanificacion(estructura, { contractual: 1000, costo: 400.4, indirectos: 100 });
+  assert.deepEqual(iguales.diferenciasConElExcel, []);
+
+  const distintos = resumenDeLaPlanificacion(estructura, { contractual: 1200, costo: 400, indirectos: 287 });
+  assert.deepEqual(distintos.diferenciasConElExcel, [
+    { concepto: 'contractual', leido: 1000, delExcel: 1200, diferencia: -200 },
+    { concepto: 'indirectos', leido: 100, delExcel: 287, diferencia: -187 },
+  ]);
+
+  // Lo que el Excel no trae no se compara.
+  assert.deepEqual(resumenDeLaPlanificacion(estructura).diferenciasConElExcel, []);
+});
+
+prueba('043: el resumen dice de qué mes a qué mes va la programación', () => {
+  const item = {
+    ...ITEM_SANO_043,
+    programacion: [
+      { mes: '2026-10', valor: 0, cantidad: 0 },
+      { mes: '2026-11', valor: 10, cantidad: 1 },
+      { mes: '2027-12', valor: 10, cantidad: 1 },
+    ],
+  };
+  const resumen = resumenDeLaPlanificacion({ items: [item, { ...ITEM_SANO_043, programacion: [] }], rubros: [], indirectos: [] });
+  assert.equal(resumen.programacionDesde, '2026-11');
+  assert.equal(resumen.programacionHasta, '2027-12');
+  assert.equal(resumenDeLaPlanificacion({ items: [], rubros: [], indirectos: [] }).programacionDesde, null);
+});
+
+/** v1 rigió del 10 al 19 de noviembre y v2 desde el 20. */
+const V1_043 = { id: 'v1', numeroVersion: 1, rigeDesde: '2026-11-10', rigeHasta: '2026-11-19' };
+const V2_043 = { id: 'v2', numeroVersion: 2, rigeDesde: '2026-11-20', rigeHasta: null };
+const rige043 = (fecha: string, versiones: Parameters<typeof versionQueRige>[1]) => versionQueRige(fecha, versiones)?.id ?? null;
+
+prueba('043/RF-52: cada día se mide con la versión que regía', () => {
+  assert.equal(rige043('2026-11-15', [V1_043, V2_043]), 'v1');
+  assert.equal(rige043('2026-11-19', [V1_043, V2_043]), 'v1');
+  assert.equal(rige043('2027-01-01', [V1_043, V2_043]), 'v2');
+});
+
+prueba('043/RF-120: el día de la aprobación ya cuenta con la versión nueva, según la fecha de Colombia', () => {
+  assert.equal(rige043('2026-11-20', [V1_043, V2_043]), 'v2');
+  // Las 10:30 p. m. del 9 de noviembre en Colombia ya son el 10 en UTC.
+  assert.equal(fechaDeJornada(Date.parse('2026-11-10T03:30:00Z')), '2026-11-09');
+  assert.equal(fechaDeJornada(Date.parse('2026-11-10T05:30:00Z')), '2026-11-10');
+  // Quien deja de regir hoy, rigió hasta ayer.
+  assert.equal(ultimoDiaQueRige('2026-11-20'), '2026-11-19');
+  assert.equal(ultimoDiaQueRige('2027-01-01'), '2026-12-31');
+});
+
+prueba('043/RF-55, RF-56, RF-138: al anular, lo que rigió se conserva y desde ese día queda sin meta', () => {
+  // Anulada el 20: `rigeHasta` es el 19.
+  const anulada = [{ ...V1_043 }];
+  assert.equal(rige043('2026-11-19', anulada), 'v1');
+  assert.equal(rige043('2026-11-20', anulada), null);
+  assert.equal(rige043('2026-12-05', anulada), null);
+  // Sin ninguna versión aprobada, tampoco hay meta.
+  assert.equal(rige043('2026-11-15', []), null);
+});
+
+prueba('043/RF-57: antes de la primera aprobación se mide con esa versión, aunque se haya anulado', () => {
+  assert.equal(rige043('2026-02-01', [V1_043, V2_043]), 'v1');
+  assert.equal(rige043('2026-02-01', [{ ...V1_043, rigeHasta: '2026-11-12' }]), 'v1');
+  // El orden en que lleguen no importa.
+  assert.equal(rige043('2026-02-01', [V2_043, V1_043]), 'v1');
+  // Una versión reemplazada el mismo día que se aprobó no rigió ningún día, pero sí fue la primera.
+  const v1MismoDia = { id: 'v1', numeroVersion: 1, rigeDesde: '2026-11-10', rigeHasta: '2026-11-09' };
+  const v2MismoDia = { id: 'v2', numeroVersion: 2, rigeDesde: '2026-11-10', rigeHasta: null };
+  assert.equal(rige043('2026-11-10', [v1MismoDia, v2MismoDia]), 'v2');
+  assert.equal(rige043('2026-02-01', [v1MismoDia, v2MismoDia]), 'v1');
+});
+
+prueba('043/RF-53: un periodo con cambio de versión se parte por la fecha de aprobación', () => {
+  assert.deepEqual(tramosDelPeriodo('2026-11-16', '2026-11-22', [V1_043, V2_043]), [
+    { versionId: 'v1', desde: '2026-11-16', hasta: '2026-11-19' },
+    { versionId: 'v2', desde: '2026-11-20', hasta: '2026-11-22' },
+  ]);
+  assert.deepEqual(tramosDelPeriodo('2026-11-11', '2026-11-13', [V1_043, V2_043]), [{ versionId: 'v1', desde: '2026-11-11', hasta: '2026-11-13' }]);
+  // Con una anulación el segundo tramo no tiene versión.
+  assert.deepEqual(tramosDelPeriodo('2026-11-18', '2026-11-21', [V1_043]), [
+    { versionId: 'v1', desde: '2026-11-18', hasta: '2026-11-19' },
+    { versionId: null, desde: '2026-11-20', hasta: '2026-11-21' },
+  ]);
+});
+
+prueba('043/RF-121: los meses por marcar son los anteriores al actual con algo programado', () => {
+  const item = {
+    ...ITEM_SANO_043,
+    programacion: [
+      { mes: '2026-09', valor: 0, cantidad: 0 },
+      { mes: '2026-10', valor: 100, cantidad: 1 },
+      { mes: '2026-11', valor: 100, cantidad: 1 },
+      { mes: '2026-12', valor: 100, cantidad: 1 },
+    ],
+  };
+  const otro = { ...ITEM_SANO_043, programacion: [{ mes: '2026-08', valor: 5, cantidad: 1 }, { mes: '2026-10', valor: 5, cantidad: 1 }] };
+  assert.deepEqual(mesesAnterioresPorMarcar([item, otro], '2026-11-09'), ['2026-08', '2026-10']);
+  assert.deepEqual(mesesAnterioresPorMarcar([], '2026-11-09'), []);
+});
+
+/** Noviembre de 2026 tiene 23 días de reparto y diciembre, 25: las cantidades dan números redondos. */
+const itemConMeses043 = (meses: Record<string, number>) => ({
+  ...ITEM_SANO_043,
+  programacion: Object.entries(meses).map(([mes, cantidad]) => ({ mes, valor: cantidad * 100, cantidad })),
+});
+const LLAVE_043 = llaveDeItemPlanificado(ITEM_SANO_043);
+const unaVersion043 = (meses: Record<string, number>, rigeHasta: string | null = null, rigeDesde = '2026-01-01') =>
+  versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde, rigeHasta }, [itemConMeses043(meses)]);
+const semana043 = (desde: string, hasta: string) => ({ tipo: 'semana' as const, desde, hasta });
+const mes043 = (desde: string, hasta: string) => ({ tipo: 'mes' as const, desde, hasta });
+
+prueba('043/RF-65: el reparto va de lunes a sábado, sin festivos', () => {
+  const noviembre = diasDeReparto('2026-11');
+  assert.equal(noviembre.length, 23);
+  assert.ok(!noviembre.includes('2026-11-02'), 'festivo de Todos los Santos');
+  assert.ok(!noviembre.includes('2026-11-16'), 'festivo de Cartagena');
+  assert.ok(!noviembre.includes('2026-11-08'), 'domingo');
+  assert.ok(noviembre.includes('2026-11-07'), 'sábado');
+  assert.equal(diasDeReparto('2026-12').length, 25);
+});
+
+prueba('043/RF-63: el mes sin cambio de versión da exacto lo programado', () => {
+  const v = [unaVersion043({ '2026-11': 230 })];
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), v), { meta: 230, estimada: false });
+  // Una cantidad que no divide exacto tampoco deja residuo.
+  assert.equal(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), [unaVersion043({ '2026-11': 100.123 })]).meta, 100.123);
+});
+
+prueba('043/RF-65, RF-66: la semana sin plan reparte el mes y se marca estimada', () => {
+  const v = [unaVersion043({ '2026-11': 230 })];
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, semana043('2026-11-23', '2026-11-29'), v), { meta: 60, estimada: true });
+  // La del festivo del lunes 16 tiene un día menos.
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, semana043('2026-11-16', '2026-11-22'), v), { meta: 50, estimada: true });
+});
+
+prueba('043/RF-67: una semana entre dos meses suma lo de cada uno', () => {
+  const v = [unaVersion043({ '2026-11': 230, '2026-12': 500 })];
+  // Lunes 30 de noviembre (10) y del martes 1 al sábado 5 de diciembre (5 × 20).
+  assert.equal(metaDelPeriodo(LLAVE_043, semana043('2026-11-30', '2026-12-06'), v).meta, 110);
+});
+
+prueba('043/RF-119: un periodo partido reparte la meta de cada versión por sus días', () => {
+  const v = [
+    versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta: '2026-11-19' }, [itemConMeses043({ '2026-11': 230 })]),
+    versionMedible({ id: 'v2', numeroVersion: 2, rigeDesde: '2026-11-20', rigeHasta: null }, [itemConMeses043({ '2026-11': 460 })]),
+  ];
+  // Hasta el 19 hay 14 días de reparto a 10; desde el 20, 9 días a 20.
+  assert.equal(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), v).meta, 320);
+});
+
+prueba('043/RF-64: el plan semanal aprobado manda sobre el reparto, y no cambia la meta del mes', () => {
+  const v = [unaVersion043({ '2026-11': 230 })];
+  const plan = new Map([[LLAVE_043, 75]]);
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, semana043('2026-11-23', '2026-11-29'), v, plan), { meta: 75, estimada: false });
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), v, plan), { meta: 230, estimada: false });
+  // Un plan que no trae este ítem no le da meta.
+  assert.deepEqual(metaDelPeriodo(LLAVE_043, semana043('2026-11-23', '2026-11-29'), v, new Map()), { meta: null, estimada: false });
+});
+
+prueba('043/RF-130: la meta no depende de lo ejecutado; una semana incumplida no cambia la siguiente', () => {
+  const v = [unaVersion043({ '2026-11': 230 })];
+  // La regla ni siquiera recibe lo ejecutado: dos semanas iguales dan siempre lo mismo.
+  assert.equal(metaDelPeriodo(LLAVE_043, semana043('2026-11-09', '2026-11-15'), v).meta, 60);
+  assert.equal(metaDelPeriodo(LLAVE_043, semana043('2026-11-23', '2026-11-29'), v).meta, 60);
+});
+
+prueba('043/RF-56, RF-73: sin versión o sin programación no hay meta; una parte sin versión suma cero', () => {
+  assert.equal(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), []).meta, null);
+  assert.equal(metaDelPeriodo('otra|llave|1', mes043('2026-11-01', '2026-11-30'), [unaVersion043({ '2026-11': 230 })]).meta, null);
+  assert.equal(metaDelPeriodo(LLAVE_043, mes043('2026-10-01', '2026-10-31'), [unaVersion043({ '2026-11': 230 })]).meta, null);
+  // Anulada el 20: del mes solo cuentan los 14 días hasta el 19.
+  assert.equal(metaDelPeriodo(LLAVE_043, mes043('2026-11-01', '2026-11-30'), [unaVersion043({ '2026-11': 230 }, '2026-11-19')]).meta, 140);
+  // Un domingo con programación en el mes no tiene meta, sin error.
+  assert.equal(metaDelPeriodo(LLAVE_043, semana043('2026-11-29', '2026-11-29'), [unaVersion043({ '2026-11': 230 })]).meta, null);
+});
+
+prueba('043/RF-19: la llave de la meta es la del presupuesto; sin cruce, la del libro', () => {
+  assert.equal(LLAVE_043, llaveDelItem('Circuito', ALCANTARILLAS_043, '4.1.8'));
+  assert.equal(llaveDeItemPlanificado({ ...ITEM_SANO_043, delPresupuesto: null }), llaveDelItem(FRENTE_043, ALCANTARILLAS_043, '4.1.8'));
+});
+
+const actividad043 = (cantidad: number | null, cambio: object = {}) => ({
+  item: '4.1.8',
+  nombre: 'Excavación',
+  descripcion: '',
+  unidad: 'm3',
+  cantidad,
+  capituloId: 'c-b1',
+  capitulo: ALCANTARILLAS_043,
+  grupo: 'Circuito',
+  ...cambio,
+});
+const parte043 = (fecha: string, actividades: ReturnType<typeof actividad043>[], cambio: object = {}) => ({
+  fecha,
+  cerrado: true,
+  anulado: false,
+  actividades,
+  ...cambio,
+});
+/** 300 de medida real; 230 en noviembre (60 la semana del 23) y 270 en octubre. */
+const ITEM_MEDIDO_043 = { ...itemConMeses043({ '2026-10': 270, '2026-11': 230 }), medidaReal: 300 };
+const SEMANA_043 = semana043('2026-11-23', '2026-11-29');
+const ejecucion043 = (partes: ReturnType<typeof parte043>[], cambio: object = {}) =>
+  ejecucionDelPeriodo({
+    periodo: SEMANA_043,
+    hoy: '2026-11-30',
+    items: [ITEM_MEDIDO_043],
+    versiones: [versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta: null }, [ITEM_MEDIDO_043])],
+    partesDelPeriodo: partes,
+    partesAcumuladas: partes,
+    mesesCumplidos: [],
+    ...cambio,
+  });
+
+prueba('043/RF-60, RF-68 a RF-72: meta, ejecutado, porcentaje y pendiente por ítem', () => {
+  const [fila] = ejecucion043([parte043('2026-11-23', [actividad043(10), actividad043(20)])]).filas;
+  assert.equal(fila.meta, 60);
+  assert.equal(fila.estimada, true);
+  assert.equal(fila.ejecutado, 30);
+  assert.equal(fila.porcentaje, 50);
+  assert.equal(fila.pendientePeriodo, 30);
+  assert.equal(fila.estado, 'normal');
+
+  // RF-72: se ve el porcentaje real, y lo pendiente no baja de cero.
+  const [demas] = ejecucion043([parte043('2026-11-23', [actividad043(90)])]).filas;
+  assert.equal(demas.porcentaje, 150);
+  assert.equal(demas.pendientePeriodo, 0);
+});
+
+prueba('043/RF-60: un parte anulado no cuenta, y una cantidad sin anotar no suma', () => {
+  const [fila] = ejecucion043([parte043('2026-11-23', [actividad043(30)], { anulado: true }), parte043('2026-11-24', [actividad043(null)])]).filas;
+  assert.equal(fila.ejecutado, 0);
+});
+
+prueba('043/RF-129: el pendiente del total de la obra frente a lo planeado', () => {
+  const anteriores = [parte043('2026-10-05', [actividad043(100)]), parte043('2026-11-23', [actividad043(20)])];
+  const [fila] = ejecucion043([parte043('2026-11-23', [actividad043(20)])], { partesAcumuladas: anteriores }).filas;
+  assert.equal(fila.ejecutado, 20);
+  assert.equal(fila.planeada, 300);
+  assert.equal(fila.acumulado, 120);
+  assert.equal(fila.pendienteTotal, 180);
+
+  // Lo anulado tampoco acumula, y de más no da pendiente negativo.
+  const pasado = [parte043('2026-10-05', [actividad043(500)]), parte043('2026-10-06', [actividad043(100)], { anulado: true })];
+  const [otra] = ejecucion043([], { partesAcumuladas: pasado }).filas;
+  assert.equal(otra.acumulado, 500);
+  assert.equal(otra.pendienteTotal, 0);
+});
+
+prueba('043/RF-126, RF-74: lo ejecutado en Yondo no suma a Berrio y sale fuera de la planificación', () => {
+  const { filas, fuera } = ejecucion043([parte043('2026-11-23', [actividad043(30, { grupo: 'VIA LA YE-YONDO', capituloId: 'c-y1' })])]);
+  assert.equal(filas[0].ejecutado, 0);
+  assert.equal(fuera.length, 1);
+  assert.equal(fuera[0].cantidad, 30);
+  assert.equal(fuera[0].marca, null);
+});
+
+prueba('043/RF-127, RF-74: una actividad sin capítulo o sin ítem sale fuera, con su marca', () => {
+  const { filas, fuera } = ejecucion043([
+    parte043('2026-11-23', [actividad043(5, { capituloId: null, capitulo: null, grupo: null }), actividad043(2, { item: null, nombre: 'Otra' })]),
+  ]);
+  assert.equal(filas[0].ejecutado, 0);
+  assert.deepEqual(fuera.map((a) => a.marca), ['sin_capitulo', null]);
+  assert.equal(fuera[1].nombre, 'Otra');
+});
+
+prueba('043/RF-73: sin meta en el periodo se ve lo ejecutado con «Sin programación» y sin porcentaje', () => {
+  const sinMeta = semana043('2026-09-07', '2026-09-13');
+  const { filas } = ejecucion043([parte043('2026-09-08', [actividad043(7)])], { periodo: sinMeta });
+  assert.equal(filas[0].meta, null);
+  assert.equal(filas[0].ejecutado, 7);
+  assert.equal(filas[0].porcentaje, null);
+  assert.equal(filas[0].estado, 'sin_programacion');
+  // Sin meta y sin nada ejecutado no hay nada que mostrar.
+  assert.deepEqual(ejecucion043([], { periodo: sinMeta }).filas, []);
+});
+
+prueba('043/RF-61, RF-62: los partes abiertos se cuentan y avisan que las cifras pueden cambiar', () => {
+  const abiertos = ejecucion043([parte043('2026-11-23', [actividad043(30)], { cerrado: false }), parte043('2026-11-24', [])]);
+  assert.equal(abiertos.avisos.diasAbiertos, 1);
+  assert.equal(abiertos.avisos.cifrasPuedenCambiar, true);
+  assert.equal(abiertos.filas[0].ejecutado, 30);
+  const cerrados = ejecucion043([parte043('2026-11-23', [])]);
+  assert.equal(cerrados.avisos.diasAbiertos, 0);
+  assert.equal(cerrados.avisos.cifrasPuedenCambiar, false);
+});
+
+prueba('043/RF-128: los días de reparto sin parte se avisan, sin contar los futuros', () => {
+  // El 25 de noviembre, de la semana del 23 van tres días de reparto y hay parte de uno.
+  const { avisos } = ejecucion043([parte043('2026-11-23', [])], { hoy: '2026-11-25' });
+  assert.equal(avisos.diasSinParte, 2);
+  // Un parte anulado no es un parte; la semana completa son seis días de reparto.
+  assert.equal(ejecucion043([parte043('2026-11-23', [], { anulado: true })]).avisos.diasSinParte, 6);
+});
+
+prueba('043/RF-123 a RF-125: un mes marcado muestra «Meta cumplida», y sus semanas completas también', () => {
+  const OCTUBRE = mes043('2026-10-01', '2026-10-31');
+  const [mes] = ejecucion043([], { periodo: OCTUBRE, mesesCumplidos: ['2026-10'] }).filas;
+  assert.equal(mes.estado, 'meta_cumplida');
+  assert.equal(mes.porcentaje, null);
+  assert.equal(mes.pendientePeriodo, 0);
+
+  const dentro = semana043('2026-10-12', '2026-10-18');
+  assert.equal(ejecucion043([], { periodo: dentro, mesesCumplidos: ['2026-10'] }).filas[0].estado, 'meta_cumplida');
+  // La semana que cae entre dos meses no está por completo dentro.
+  const entreDos = semana043('2026-10-26', '2026-11-01');
+  assert.equal(ejecucion043([], { periodo: entreDos, mesesCumplidos: ['2026-10'] }).filas[0].estado, 'normal');
+
+  // RF-125: sin marcar se mide contra los partes.
+  const [sinMarcar] = ejecucion043([parte043('2026-10-05', [actividad043(27)])], { periodo: OCTUBRE }).filas;
+  assert.equal(sinMarcar.estado, 'normal');
+  assert.equal(sinMarcar.porcentaje, 10);
+});
+
+/** 230 unidades en noviembre a 100 de contrato y 40 de costo: 10 por día de reparto. */
+const ITEM_CON_PRECIOS_043 = { ...itemConMeses043({ '2026-11': 230 }), precioContractual: 100, precioCosto: 40 };
+const NOVIEMBRE_043 = mes043('2026-11-01', '2026-11-30');
+const EXTRAS_043 = {
+  indirectos: [{ mes: '2026-11', valor: 2300 }],
+  rubros: [],
+  lineaDeRubros: { nombre: 'Componentes', valores: [{ mes: '2026-11', valor: 500 }] },
+};
+const version043 = (items: (typeof ITEM_CON_PRECIOS_043)[], rigeHasta: string | null = null) =>
+  versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta }, items, EXTRAS_043);
+const valores043 = (periodo: ReturnType<typeof mes043> | ReturnType<typeof semana043>, partes: ReturnType<typeof parte043>[], items = [ITEM_CON_PRECIOS_043], versiones = [version043(items)]) =>
+  valoresDelPeriodo({ periodo, items, versiones, partesDelPeriodo: partes });
+const conTreinta043 = [parte043('2026-11-23', [actividad043(30)])];
+
+prueba('043/RF-75 a RF-79: programado, ejecutado, a cobrar, «Faltó» o «Sobró» y margen', () => {
+  const { totales, filas } = valores043(SEMANA_043, conTreinta043);
+  // Semana: 60 × 40 programado, 30 × 40 ejecutado, 30 × 100 a cobrar.
+  assert.equal(totales.programado, 2400);
+  assert.equal(totales.ejecutado, 1200);
+  assert.equal(totales.aCobrar, 3000);
+  assert.deepEqual(totales.faltoSobro, { tipo: 'falto', valor: 1200 });
+  assert.equal(totales.margen, 1800);
+  assert.deepEqual(filas[0], { llave: LLAVE_043, programado: 2400, ejecutado: 1200, aCobrar: 3000 });
+
+  const deMas = valores043(SEMANA_043, [parte043('2026-11-23', [actividad043(70)])]).totales;
+  assert.deepEqual(deMas.faltoSobro, { tipo: 'sobro', valor: 400 });
+  const justo = valores043(SEMANA_043, [parte043('2026-11-23', [actividad043(60)])]).totales;
+  assert.deepEqual(justo.faltoSobro, { tipo: null, valor: 0 });
+});
+
+prueba('043/RF-75, RF-76: cada día se valora con los precios de la versión que regía', () => {
+  const v1 = versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta: '2026-11-19' }, [ITEM_CON_PRECIOS_043]);
+  const v2 = versionMedible({ id: 'v2', numeroVersion: 2, rigeDesde: '2026-11-20', rigeHasta: null }, [{ ...ITEM_CON_PRECIOS_043, precioCosto: 50, precioContractual: 200 }]);
+  const { totales } = valores043(NOVIEMBRE_043, [parte043('2026-11-19', [actividad043(10)]), parte043('2026-11-20', [actividad043(10)])], [ITEM_CON_PRECIOS_043], [v1, v2]);
+  // 14 días × 10 × 40 + 9 días × 10 × 50.
+  assert.equal(totales.programado, 10100);
+  assert.equal(totales.ejecutado, 900);
+  assert.equal(totales.aCobrar, 3000);
+});
+
+prueba('043/RF-80 a RF-82: un ítem sin costo sale de todos los totales de plata, se lista aparte y se avisa', () => {
+  const sinCosto = { ...ITEM_CON_PRECIOS_043, item: '2.8', precioCosto: 0.000000001, delPresupuesto: { ...ITEM_SANO_043.delPresupuesto, item: '2.8' } };
+  const items = [ITEM_CON_PRECIOS_043, sinCosto];
+  const { totales, sinPrecioDeCosto: aparte, avisoSinCosto, filas } = valores043(SEMANA_043, [parte043('2026-11-23', [actividad043(30), actividad043(5, { item: '2.8' })])], items);
+  assert.equal(totales.ejecutado, 1200);
+  assert.equal(totales.aCobrar, 3000);
+  assert.equal(totales.margen, 1800);
+  assert.equal(totales.programado, 2400);
+  assert.deepEqual(aparte.map((a) => [a.item, a.cantidad]), [['2.8', 5]]);
+  assert.equal(avisoSinCosto, true);
+  assert.deepEqual(filas[1].ejecutado, null);
+
+  // También avisa si solo estaba programado, aunque aún no se ejecute; pero no se lista aparte.
+  const soloProgramado = valores043(SEMANA_043, [], items);
+  assert.equal(soloProgramado.avisoSinCosto, true);
+  assert.deepEqual(soloProgramado.sinPrecioDeCosto, []);
+
+  assert.equal(valores043(SEMANA_043, conTreinta043).avisoSinCosto, false);
+});
+
+prueba('043/RF-131, RF-132: el resultado después de indirectos solo sale en el mensual', () => {
+  const mes = valores043(NOVIEMBRE_043, conTreinta043).totales;
+  assert.equal(mes.margen, 1800);
+  assert.equal(mes.resultado, -500);
+  assert.equal(valores043(SEMANA_043, conTreinta043).totales.resultado, null);
+});
+
+prueba('043/RF-83 a RF-85, RF-133 a RF-135: indirectos y rubros van aparte, en el mensual y sin tocar el «Faltó»', () => {
+  const mes = valores043(NOVIEMBRE_043, conTreinta043);
+  assert.equal(mes.indirectos, 2300);
+  assert.deepEqual(mes.rubros, [{ nombre: 'Componentes', valor: 500 }]);
+  // El programado es solo el de los ítems; los rubros no entran al margen.
+  assert.equal(mes.totales.programado, 9200);
+  assert.deepEqual(mes.totales.faltoSobro, { tipo: 'falto', valor: 8000 });
+
+  const semana = valores043(SEMANA_043, conTreinta043);
+  assert.equal(semana.indirectos, null);
+  assert.deepEqual(semana.rubros, []);
+});
+
+prueba('043/RF-56, RF-119: lo que queda sin versión no tiene plata, e indirectos se parten igual', () => {
+  const anulada = [version043([ITEM_CON_PRECIOS_043], '2026-11-19')];
+  const { totales, indirectos, rubros } = valores043(NOVIEMBRE_043, [parte043('2026-11-25', [actividad043(10)])], [ITEM_CON_PRECIOS_043], anulada);
+  assert.equal(totales.ejecutado, 0);
+  assert.equal(totales.programado, 5600);
+  // 14 de los 23 días de reparto.
+  assert.equal(indirectos, 1400);
+  assert.deepEqual(rubros, [{ nombre: 'Componentes', valor: 304 }]);
+});
+
+prueba('043/RF-64, RF-75: con plan semanal, lo programado sale de la meta del plan', () => {
+  const items = [ITEM_CON_PRECIOS_043];
+  const r = valoresDelPeriodo({ periodo: SEMANA_043, items, versiones: [version043(items)], partesDelPeriodo: [], planSemanal: new Map([[LLAVE_043, 75]]) });
+  assert.equal(r.totales.programado, 3000);
+});
+
+prueba('043/RF-60: un parte anulado tampoco tiene plata', () => {
+  assert.equal(valores043(SEMANA_043, [parte043('2026-11-23', [actividad043(30)], { anulado: true })]).totales.ejecutado, 0);
+});
+
+const informe043 = (periodo: ReturnType<typeof mes043> | ReturnType<typeof semana043>, partes: ReturnType<typeof parte043>[], versiones = [{ ...version043([ITEM_CON_PRECIOS_043]), items: [ITEM_CON_PRECIOS_043] }]) =>
+  informeDeCumplimiento({
+    periodo,
+    hoy: '2026-11-30',
+    versiones,
+    partesDelPeriodo: partes,
+    partesAcumuladas: partes,
+    mesesCumplidos: [],
+  });
+
+prueba('043/RF-58, RF-59: el informe es de una semana de lunes a domingo o de un mes del calendario', () => {
+  assert.deepEqual(periodoDelInforme('semana', '2026-11-25'), { tipo: 'semana', desde: '2026-11-23', hasta: '2026-11-29' });
+  assert.deepEqual(periodoDelInforme('semana', '2026-11-29'), { tipo: 'semana', desde: '2026-11-23', hasta: '2026-11-29' });
+  assert.deepEqual(periodoDelInforme('mes', '2026-11-25'), { tipo: 'mes', desde: '2026-11-01', hasta: '2026-11-30' });
+});
+
+prueba('043: el informe junta cantidades y plata por ítem, y los totales', () => {
+  const informe = informe043(SEMANA_043, conTreinta043);
+  const [fila] = informe.filas;
+  assert.equal(fila.item, '4.1.8');
+  assert.equal(fila.meta, 60);
+  assert.equal(fila.ejecutado, 30);
+  assert.deepEqual(fila.valores, { programado: 2400, ejecutado: 1200, aCobrar: 3000 });
+  assert.equal(informe.totales.margen, 1800);
+  assert.equal(informe.periodo.desde, '2026-11-23');
+  assert.equal(informe.avisos.diasAbiertos, 0);
+});
+
+prueba('043/RF-54, RF-56: el informe dice qué versión o versiones usó, y si hubo días sin planificación', () => {
+  assert.deepEqual(informe043(SEMANA_043, []).versiones, [{ numeroVersion: 1, desde: '2026-11-23', hasta: '2026-11-29' }]);
+  assert.equal(informe043(SEMANA_043, []).sinPlanificacion, false);
+
+  const items = [ITEM_CON_PRECIOS_043];
+  const v1 = { ...versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta: '2026-11-19' }, items), items };
+  const v2 = { ...versionMedible({ id: 'v2', numeroVersion: 2, rigeDesde: '2026-11-20', rigeHasta: null }, items), items };
+  const partido = informe043(semana043('2026-11-16', '2026-11-22'), [], [v1, v2]);
+  assert.deepEqual(partido.versiones.map((v) => [v.numeroVersion, v.desde, v.hasta]), [
+    [1, '2026-11-16', '2026-11-19'],
+    [2, '2026-11-20', '2026-11-22'],
+  ]);
+
+  // Anulada el 20: lo ejecutado después se sigue viendo, sin meta, con el aviso.
+  const anulada = informe043(semana043('2026-11-23', '2026-11-29'), conTreinta043, [v1]);
+  assert.equal(anulada.sinPlanificacion, true);
+  assert.deepEqual(anulada.versiones, []);
+  assert.equal(anulada.filas[0].ejecutado, 30);
+  assert.equal(anulada.filas[0].estado, 'sin_programacion');
+
+  // Una obra que nunca tuvo planificación muestra lo ejecutado aparte.
+  const sinNinguna = informe043(SEMANA_043, conTreinta043, []);
+  assert.equal(sinNinguna.sinPlanificacion, true);
+  assert.deepEqual(sinNinguna.filas, []);
+  assert.equal(sinNinguna.fuera[0].cantidad, 30);
+});
+
+prueba('043/RF-88, RF-89: al Residente no le llega ninguna cifra de plata, en ningún rincón del informe', () => {
+  const precioUnico = 987654.321;
+  const item = { ...ITEM_CON_PRECIOS_043, precioContractual: precioUnico, precioCosto: 123456.789 };
+  const completo = informe043(NOVIEMBRE_043, conTreinta043, [{ ...version043([item]), items: [item] }]);
+  const prohibidas = /precio|costo|valor|margen|resultado|indirect|rubro|cobrar|falto|sobro|totales|programado/i;
+
+  const claves: string[] = [];
+  const recorrer = (nodo: unknown) => {
+    if (Array.isArray(nodo)) nodo.forEach(recorrer);
+    else if (nodo && typeof nodo === 'object') {
+      for (const [clave, valor] of Object.entries(nodo)) {
+        claves.push(clave);
+        recorrer(valor);
+      }
+    }
+  };
+  // Primero: la prueba sí sirve, el informe completo trae esas claves.
+  recorrer(completo);
+  assert.ok(claves.some((c) => prohibidas.test(c)));
+
+  claves.length = 0;
+  const reducido = sinPlata(completo);
+  recorrer(reducido);
+  assert.ok(claves.length > 0);
+  assert.deepEqual(claves.filter((c) => prohibidas.test(c)), []);
+  assert.ok(!JSON.stringify(reducido).includes('987654'));
+  assert.ok(!JSON.stringify(reducido).includes('123456'));
+
+  // Las cantidades y los porcentajes sí llegan.
+  assert.equal(reducido.filas[0].meta, 230);
+  assert.equal(reducido.filas[0].ejecutado, 30);
+  assert.equal(reducido.filas[0].porcentaje, 13);
+  assert.equal(reducido.avisos.diasAbiertos, 0);
+});
+
+prueba('043/RF-87, RF-88: según el acceso se entrega el informe con plata o solo en cantidades', () => {
+  const completo = informe043(SEMANA_043, conTreinta043);
+  assert.equal('totales' in informeSegunRol(completo, 'residente'), false);
+  for (const rol of ['admin', 'director_proyectos', 'director_obra'] as const) {
+    assert.equal('totales' in informeSegunRol(completo, rol), true);
+  }
+});
+
+const LIBRO_043 = [
+  { nombre: 'PLANIFIC BERRIO', visible: true, filas: [[null, 'Item', 'Unidad'], [], [1, '2.8', 'm3', 242062, null, null]] },
+  { nombre: 'PLANIFIC YONDO', visible: true, filas: [[39, '2.8', 'm3', 242062]] },
+  { nombre: 'FLUJO DE CAJA', visible: true, filas: [[1, 'm3', 18387029.52]] },
+  { nombre: 'Línea base', visible: true, filas: [[1, 'm3', 970008]] },
+  { nombre: 'MAT', visible: false, filas: [['secreto']] },
+];
+const PROPUESTA_043 = limpiarPropuesta(
+  {
+    hojas: [
+      { nombre: 'PLANIFIC BERRIO', usos: ['planificacion' as const], clase: 'otra' as const },
+      { nombre: 'PLANIFIC YONDO', usos: ['planificacion' as const], clase: 'otra' as const },
+      { nombre: 'FLUJO DE CAJA', usos: ['tiempos' as const], clase: 'flujo_de_caja' as const },
+      { nombre: 'Línea base', usos: ['programacion' as const], clase: 'linea_base' as const },
+    ],
+  },
+  LIBRO_043,
+);
+const BIEN_043 = [
+  { nombre: 'PLANIFIC BERRIO', usos: ['planificacion' as const] },
+  { nombre: 'Línea base', usos: ['programacion' as const, 'rubros' as const, 'indirectos' as const] },
+];
+const tiposDeFalta043 = (hojas: { nombre: string; usos: Parameters<typeof repasarSeleccion>[0]['hojas'][number]['usos'] }[], propuesta = PROPUESTA_043, confirmoProgramacion = false) =>
+  repasarSeleccion({ hojas, confirmoProgramacion }, propuesta, LIBRO_043).map((f) => f.tipo);
+
+prueba('043/RF-4, RF-5: para proponer va una muestra de cada hoja visible, y nunca una oculta', () => {
+  const muestra = muestraParaProponer(LIBRO_043);
+  assert.match(muestra, /«PLANIFIC BERRIO»/);
+  assert.match(muestra, /«Línea base»/);
+  assert.ok(!muestra.includes('MAT'));
+  assert.ok(!muestra.includes('secreto'));
+  // Una hoja larga no se manda entera.
+  const larga = [{ nombre: 'Larga', visible: true, filas: Array.from({ length: 40 }, (_, i) => [`fila-${i}`]) }];
+  assert.match(muestraParaProponer(larga), /fila-0/);
+  assert.ok(!muestraParaProponer(larga).includes('fila-30'));
+});
+
+prueba('043/RF-5: la propuesta de la IA no conserva hojas ocultas ni inventadas', () => {
+  const limpia = limpiarPropuesta(
+    {
+      hojas: [
+        { nombre: 'MAT', usos: ['planificacion'], clase: 'otra' },
+        { nombre: 'No existe', usos: ['planificacion'], clase: 'otra' },
+        { nombre: 'Línea base', usos: ['programacion'], clase: 'linea_base' },
+      ],
+    },
+    LIBRO_043,
+  );
+  assert.deepEqual(limpia.hojas.map((h) => h.nombre), ['Línea base']);
+});
+
+prueba('043/RF-6, RF-20: solo se manda lo confirmado, cada fila con su hoja y su número real', () => {
+  const lectura = textoParaLeer({ hojas: BIEN_043 }, LIBRO_043);
+  assert.ok(lectura);
+  assert.match(lectura.texto, /H1F3 \| 1 \| 2\.8 \| m3 \| 242062$/m);
+  assert.match(lectura.texto, /H2F1 \| 1 \| m3 \| 970008$/m);
+  assert.match(lectura.texto, /Hoja 1 · «PLANIFIC BERRIO» · planificacion/);
+  assert.ok(!lectura.texto.includes('PLANIFIC YONDO'));
+  assert.ok(!lectura.texto.includes('18387029'));
+  assert.equal(lectura.filas, 3);
+  assert.deepEqual(lectura.hojas.map((h) => h.nombre), ['PLANIFIC BERRIO', 'Línea base']);
+});
+
+prueba('043/RF-5, RF-6: una hoja oculta no entra aunque la pidan', () => {
+  const lectura = textoParaLeer({ hojas: [{ nombre: 'MAT', usos: ['planificacion'] }] }, LIBRO_043);
+  assert.ok(lectura);
+  assert.equal(lectura.filas, 0);
+  assert.deepEqual(tiposDeFalta043([{ nombre: 'MAT', usos: ['planificacion'] }, ...BIEN_043]), ['hoja_no_disponible', 'escoger_planificacion']);
+});
+
+prueba('043: una lectura que pasa de 1 500 filas no se manda', () => {
+  const libro = [{ nombre: 'Enorme', visible: true, filas: Array.from({ length: 1501 }, () => ['x']) }];
+  assert.equal(textoParaLeer({ hojas: [{ nombre: 'Enorme', usos: ['planificacion'] }] }, libro), null);
+});
+
+prueba('043/RF-100: dos hojas de frente exigen escoger una, y sin hoja de planificación falta', () => {
+  const dos = repasarSeleccion(
+    {
+      hojas: [{ nombre: 'PLANIFIC YONDO', usos: ['planificacion'] }, ...BIEN_043],
+    },
+    PROPUESTA_043,
+    LIBRO_043,
+  );
+  assert.deepEqual(dos.map((f) => f.tipo), ['escoger_planificacion']);
+  assert.deepEqual(dos[0].opciones, ['PLANIFIC YONDO', 'PLANIFIC BERRIO']);
+  assert.deepEqual(tiposDeFalta043(BIEN_043), []);
+  assert.deepEqual(tiposDeFalta043([BIEN_043[1]]), ['falta_planificacion']);
+});
+
+prueba('043/RF-101, RF-102: con línea base, el flujo de caja no vale como programación', () => {
+  assert.deepEqual(tiposDeFalta043([BIEN_043[0], { nombre: 'FLUJO DE CAJA', usos: ['programacion'] }]), ['programacion_no_es_linea_base']);
+  assert.deepEqual(tiposDeFalta043([BIEN_043[0]]), ['falta_programacion']);
+  // Sí vale para el mes de inicio y el tiempo de ejecución, que solo están ahí.
+  assert.deepEqual(tiposDeFalta043([...BIEN_043, { nombre: 'FLUJO DE CAJA', usos: ['tiempos'] }]), []);
+});
+
+prueba('043/RF-103: sin línea base identificable hay que confirmar la hoja de programación', () => {
+  const sinLineaBase = { hojas: PROPUESTA_043.hojas.filter((h) => h.clase !== 'linea_base') };
+  const conFlujo = [BIEN_043[0], { nombre: 'FLUJO DE CAJA', usos: ['programacion' as const] }];
+  assert.deepEqual(tiposDeFalta043(conFlujo, sinLineaBase), ['confirmar_programacion']);
+  assert.deepEqual(tiposDeFalta043(conFlujo, sinLineaBase, true), []);
+});
+
+prueba('043/RF-104: los nombres de las hojas no deciden nada', () => {
+  const libro = [
+    { nombre: 'Hoja rara 7', visible: true, filas: [['a']] },
+    { nombre: 'Otra cosa', visible: true, filas: [['b']] },
+  ];
+  const propuesta = limpiarPropuesta(
+    {
+      hojas: [
+        { nombre: 'Hoja rara 7', usos: ['planificacion'], clase: 'otra' },
+        { nombre: 'Otra cosa', usos: ['programacion'], clase: 'linea_base' },
+      ],
+    },
+    libro,
+  );
+  assert.deepEqual(
+    repasarSeleccion(
+      { hojas: [{ nombre: 'Hoja rara 7', usos: ['planificacion'] }, { nombre: 'Otra cosa', usos: ['programacion'] }] },
+      propuesta,
+      libro,
+    ),
+    [],
+  );
+});
+
+/** H1 es la planificación y H2 la línea base; las filas son las del V5, recortadas. */
+const HOJAS_LEIDAS_043 = [
+  {
+    nombre: 'PLANIFIC BERRIO',
+    visible: true,
+    filas: [
+      [null],
+      [5, '5.1.7', 'm3', 'Sub-base', 112153, 40690, 2121.42, 236, null],
+      [38.1, null, null, 'PMA', 218336960, 196503264],
+      ['TOTAL', 39558848104, 10791439267, 20440864487],
+      [9, '8.27', 'm', 'Sin celdas vacías', 2552782, 721278.04, 103.87, 354],
+      [11, '13.1', 'm3-Km', 'Relleno', 1450, 0.000000001, 201534.9, 36816],
+    ],
+  },
+  {
+    nombre: 'Línea base',
+    visible: true,
+    filas: [
+      [null],
+      [5, 'm3', 112153, 0, 18146151],
+      ['C', 'Componentes', 29161401, 29161401],
+      ['Egresos costo indirecto', 221042440, 244510539],
+    ],
+  },
+];
+const ITEM_LEIDO_043 = {
+  hoja: 1,
+  fila: 2,
+  renglon: '5',
+  item: '5.1.7',
+  descripcion: 'Sub-base',
+  unidad: 'm3',
+  grupo: 'BERRIO',
+  capitulo: ALCANTARILLAS_043,
+  precioContractual: 112153,
+  precioCosto: 40690,
+  medidaReal: 2121.42,
+  medidaContractual: 236,
+  programacion: { hoja: 2, fila: 2, meses: [{ mes: '2026-12', valor: 0 }, { mes: '2027-01', valor: 18146151 }] },
+  tiempos: { hoja: 0, fila: 0, mesInicioDelExcel: 0, mesInicio: '', tiempoEjecucion: 0 },
+};
+const LECTURA_043: LecturaDePlanificacion = {
+  items: [ITEM_LEIDO_043],
+  rubros: [
+    {
+      hoja: 1,
+      fila: 3,
+      nombre: 'PMA',
+      valor: 218336960,
+      costo: 196503264,
+      programacion: { hoja: 0, fila: 0, meses: [] },
+    },
+  ],
+  lineaDeRubros: { hoja: 2, fila: 3, nombre: 'Componentes', meses: [{ mes: '2026-10', valor: 29161401 }] },
+  indirectos: { hoja: 2, fila: 4, meses: [{ mes: '2026-02', valor: 221042440 }] },
+  supuestos: ['Distancia 25 km'],
+  objetivos: [],
+  totalesDelExcel: {
+    contractual: { hoja: 1, fila: 4, valor: 39558848104 },
+    costo: { hoja: 1, fila: 4, valor: 10791439267 },
+    indirectos: { hoja: 1, fila: 4, valor: 20440864487 },
+  },
+};
+const conItem043 = (cambio: object) => ({ ...LECTURA_043, items: [{ ...ITEM_LEIDO_043, ...cambio }] });
+const leido043 = (lectura: LecturaDePlanificacion) => {
+  const r = estructuraDeLaLectura(lectura, HOJAS_LEIDAS_043);
+  assert.ok(r.ok, 'la lectura debía servir');
+  return r;
+};
+
+prueba('043/RF-20: lo que está en su celda se acepta, con las cantidades calculadas', () => {
+  const { estructura, rechazados, totalesDelExcel } = leido043(LECTURA_043);
+  assert.deepEqual(rechazados, []);
+  const [item] = estructura.items;
+  assert.equal(item.renglon, 5);
+  assert.equal(item.precioCosto, 40690);
+  assert.equal(item.revisar, false);
+  assert.deepEqual(item.programacion, [
+    { mes: '2026-12', valor: 0, cantidad: 0 },
+    { mes: '2027-01', valor: 18146151, cantidad: 161.798 },
+  ]);
+  assert.equal(estructura.rubros.length, 1);
+  assert.deepEqual(estructura.rubros[0].programacion, []);
+  assert.equal(estructura.lineaDeRubros?.nombre, 'Componentes');
+  assert.deepEqual(estructura.indirectos, [{ mes: '2026-02', valor: 221042440 }]);
+  assert.equal(estructura.supuestos, 'Distancia 25 km');
+  assert.equal(totalesDelExcel.contractual, 39558848104);
+});
+
+prueba('043/RF-21, RF-22: una cifra inventada se descarta y marca su ítem, y las demás siguen', () => {
+  const { estructura, rechazados } = leido043(conItem043({ precioCosto: 99999 }));
+  const [item] = estructura.items;
+  assert.equal(item.precioCosto, null);
+  assert.equal(item.precioContractual, 112153);
+  assert.equal(item.medidaReal, 2121.42);
+  assert.equal(item.revisar, true);
+  assert.equal(rechazados.length, 1);
+  assert.match(rechazados[0].que, /5\.1\.7/);
+  assert.equal(rechazados[0].fila, 2);
+});
+
+prueba('043/RF-20, RF-21: una cifra sin hoja o fila, o que cita una que no existe, se descarta', () => {
+  for (const cita of [{ hoja: 0, fila: 2 }, { hoja: 1, fila: 0 }, { hoja: 9, fila: 2 }, { hoja: 1, fila: 99 }]) {
+    const [item] = leido043(conItem043(cita)).estructura.items;
+    assert.equal(item.precioContractual, null, JSON.stringify(cita));
+    assert.equal(item.precioCosto, null);
+    assert.equal(item.medidaReal, null);
+    assert.equal(item.medidaContractual, null);
+    assert.equal(item.revisar, true);
+  }
+});
+
+prueba('043/RF-21: un cero solo se acepta si la fila tiene un cero o una celda vacía', () => {
+  // La fila 2 tiene una celda vacía: las fórmulas que valen cero llegan así.
+  const conVacia = leido043(conItem043({ precioCosto: 0 })).estructura.items[0];
+  assert.equal(conVacia.precioCosto, 0);
+  assert.equal(conVacia.revisar, false);
+
+  // La fila 5 no tiene ni cero ni vacías.
+  const sinVacias = leido043(conItem043({ fila: 5, item: '8.27', precioContractual: 2552782, precioCosto: 0, medidaReal: 103.87, medidaContractual: 354 })).estructura.items[0];
+  assert.equal(sinVacias.precioCosto, null);
+  assert.equal(sinVacias.revisar, true);
+});
+
+prueba('043/RF-21, RF-32: un costo de relleno que sí está en la celda se conserva', () => {
+  const [item] = leido043(conItem043({ fila: 6, item: '13.1', precioContractual: 1450, precioCosto: 0.000000001, medidaReal: 201534.9, medidaContractual: 36816 })).estructura.items;
+  assert.equal(item.precioCosto, 0.000000001);
+  assert.equal(item.revisar, false);
+});
+
+prueba('043/RF-21, RF-22: un mes que no está en su fila, o mal escrito, se descarta y marca el ítem', () => {
+  const inventado = leido043(conItem043({ programacion: { hoja: 2, fila: 2, meses: [{ mes: '2027-01', valor: 18146151 }, { mes: '2027-02', valor: 7 }] } }));
+  assert.deepEqual(inventado.estructura.items[0].programacion.map((p) => p.mes), ['2027-01']);
+  assert.equal(inventado.estructura.items[0].revisar, true);
+
+  const malEscrito = leido043(conItem043({ programacion: { hoja: 2, fila: 2, meses: [{ mes: 'enero', valor: 18146151 }] } }));
+  assert.deepEqual(malEscrito.estructura.items[0].programacion, []);
+  assert.equal(malEscrito.estructura.items[0].revisar, true);
+
+  // Sin programación citada no es un descarte: es que no la trae.
+  const sinPrograma = leido043(conItem043({ programacion: { hoja: 0, fila: 0, meses: [] } }));
+  assert.deepEqual(sinPrograma.estructura.items[0].programacion, []);
+  assert.equal(sinPrograma.estructura.items[0].revisar, false);
+});
+
+prueba('043/RF-13, RF-14, RF-21: el mes de inicio y el tiempo se comprueban contra su fila', () => {
+  const fila = { ...ITEM_LEIDO_043.tiempos, hoja: 1, fila: 5 };
+  // La fila 5 trae un 9: sirve como mes de inicio relativo y como tiempo.
+  const bien = leido043(conItem043({ tiempos: { ...fila, mesInicioDelExcel: 9, mesInicio: '2026-10', tiempoEjecucion: 9 } })).estructura.items[0];
+  assert.equal(bien.mesInicio, '2026-10');
+  assert.equal(bien.tiempoEjecucion, 9);
+  assert.equal(bien.revisar, false);
+
+  const mal = leido043(conItem043({ tiempos: { ...fila, mesInicioDelExcel: 77, mesInicio: '2026-10', tiempoEjecucion: 66 } })).estructura.items[0];
+  assert.equal(mal.mesInicio, null);
+  assert.equal(mal.tiempoEjecucion, null);
+  assert.equal(mal.revisar, true);
+
+  // Que el libro no los traiga no es un descarte.
+  const sin = leido043(LECTURA_043).estructura.items[0];
+  assert.equal(sin.mesInicio, null);
+  assert.equal(sin.tiempoEjecucion, null);
+  assert.equal(sin.revisar, false);
+});
+
+prueba('043/RF-21: un rubro, un indirecto o un total sin su celda se descartan', () => {
+  const r = leido043({
+    ...LECTURA_043,
+    rubros: [{ ...LECTURA_043.rubros[0], valor: 5 }],
+    lineaDeRubros: { ...LECTURA_043.lineaDeRubros, meses: [{ mes: '2026-10', valor: 7 }] },
+    indirectos: { ...LECTURA_043.indirectos, meses: [{ mes: '2026-02', valor: 221042440 }, { mes: '2026-03', valor: 1 }] },
+    totalesDelExcel: { ...LECTURA_043.totalesDelExcel, costo: { hoja: 1, fila: 4, valor: 3 }, indirectos: { hoja: 0, fila: 0, valor: 0 } },
+  });
+  assert.deepEqual(r.estructura.rubros, []);
+  assert.deepEqual(r.estructura.lineaDeRubros?.valores, []);
+  assert.deepEqual(r.estructura.indirectos.map((i) => i.mes), ['2026-02']);
+  assert.equal(r.totalesDelExcel.contractual, 39558848104);
+  assert.equal(r.totalesDelExcel.costo, null);
+  assert.equal(r.totalesDelExcel.indirectos, null);
+  assert.ok(r.rechazados.length >= 3);
+});
+
+prueba('043/RF-109: sin línea de rubros, cada rubro conserva su programación', () => {
+  const r = leido043({ ...LECTURA_043, lineaDeRubros: { hoja: 0, fila: 0, nombre: '', meses: [] } });
+  assert.equal(r.estructura.lineaDeRubros, null);
+});
+
+prueba('043/RF-9: una lectura sin ítems no crea borrador', () => {
+  const vacia = estructuraDeLaLectura({ ...LECTURA_043, items: [] }, HOJAS_LEIDAS_043);
+  assert.equal(vacia.ok, false);
+  const sinNombre = estructuraDeLaLectura(conItem043({ renglon: '', item: '', descripcion: '' }), HOJAS_LEIDAS_043);
+  assert.equal(sinNombre.ok, false);
+  assert.ok(!sinNombre.ok);
+  assert.match(sinNombre.error, /ítem/);
+});
+
+prueba('043: un ítem sin ítem de pago se conserva si dice qué es (el 38.6 del V5)', () => {
+  const [item] = leido043(conItem043({ renglon: '38.6', item: '', descripcion: 'Disposición de material' })).estructura.items;
+  assert.equal(item.item, '');
+  assert.equal(item.renglon, null);
+  assert.equal(item.descripcion, 'Disposición de material');
+});
+
+prueba('043/RF-24: una observación solo sobrevive si habla de un hallazgo listado', () => {
+  const hallazgos = [{ tipo: 'sin_costo' as const, renglon: 5, item: '5.1.7', capitulo: ALCANTARILLAS_043, detalle: '' }];
+  const validas = observacionesValidas(
+    [
+      { tipo: 'sin_costo', item: '5.1.7', capitulo: ALCANTARILLAS_043, texto: 'Revisar el costo.' },
+      { tipo: 'costo_mayor', item: '5.1.7', capitulo: ALCANTARILLAS_043, texto: 'Inventada.' },
+      { tipo: 'sin_costo', item: '9.9', capitulo: ALCANTARILLAS_043, texto: 'De otro ítem.' },
+    ],
+    hallazgos,
+  );
+  assert.deepEqual(validas.map((o) => o.texto), ['Revisar el costo.']);
+});
+
+prueba('043/RF-35, RF-99, RF-121: aprobar exige la versión y los meses bien escritos', () => {
+  assert.equal(aprobacionDePlanificacion.safeParse({ confirmarHallazgos: true }).success, false);
+  assert.deepEqual(aprobacionDePlanificacion.parse({ version: 3 }), { version: 3, confirmarHallazgos: false });
+  assert.equal(aprobacionDePlanificacion.safeParse({ version: 3, mesesCumplidos: ['octubre'] }).success, false);
+  assert.deepEqual(aprobacionDePlanificacion.parse({ version: 3, confirmarHallazgos: true, mesesCumplidos: ['2026-10'] }).mesesCumplidos, ['2026-10']);
+});
+
+prueba('043/RF-47: anular exige un motivo escrito', () => {
+  assert.equal(anulacionDePlanificacion.safeParse({ motivo: '   ' }).success, false);
+  assert.equal(anulacionDePlanificacion.safeParse({}).success, false);
+  assert.equal(anulacionDePlanificacion.parse({ motivo: '  Otro plan ' }).motivo, 'Otro plan');
+});
+
+prueba('043/RF-6: las hojas confirmadas llegan con un uso conocido', () => {
+  const bien = seleccionDeHojasPedida.parse({ hojas: [{ nombre: 'Línea base', usos: ['programacion'] }] });
+  assert.equal(bien.hojas[0].nombre, 'Línea base');
+  assert.equal(seleccionDeHojasPedida.safeParse({ hojas: [{ nombre: 'X', usos: ['otra_cosa'] }] }).success, false);
+  assert.equal(seleccionDeHojasPedida.safeParse({ hojas: [] }).success, false);
+});
+
+prueba('043/RF-58, RF-59: el informe se pide por semana o por mes, con una fecha válida', () => {
+  assert.equal(pedidoDeInformeDeCumplimiento.safeParse({ tipo: 'semana', fecha: '2026-11-23' }).success, true);
+  assert.equal(pedidoDeInformeDeCumplimiento.safeParse({ tipo: 'dia', fecha: '2026-11-23' }).success, false);
+  assert.equal(pedidoDeInformeDeCumplimiento.safeParse({ tipo: 'mes', fecha: 'ayer' }).success, false);
 });
 
 verificarFirmaS3()

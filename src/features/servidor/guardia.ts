@@ -106,7 +106,7 @@ export async function requerirPermiso(
     // residente que intenta aprobar o anular se le dice a quién acudir en su obra (041/RF-34,
     // RF-35): ahí la acción existe y la hace otro cargo, no otro oficio. Llega aquí también
     // con una pantalla abierta desde antes del cambio (RF-56): la cerradura es esta.
-    const motivo = motivoParaNoAprobar(sesion.rol, accion) ?? motivoDeRechazo(modulo, accion);
+    const motivo = motivoParaNoAprobar(sesion.rol, accion, modulo) ?? motivoDeRechazo(modulo, accion);
     return errorDePeticion(motivo, 403);
   }
 

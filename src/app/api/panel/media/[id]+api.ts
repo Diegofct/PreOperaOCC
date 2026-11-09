@@ -80,6 +80,10 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       const documento = await documentoAlAlcance(sesion, fila.duenoId);
       if (!documento) return noEncontrado('ese documento');
       nombreArchivo = documento.nombreArchivo;
+    } else if (fila.duenoTipo === 'planificacion') {
+      // Spec 043, RF-50: el Excel original lleva costos y nómina, y aquí la guardia es genérica.
+      // Sale solo por su propia ruta, con su permiso.
+      return noEncontrado('ese archivo');
     } else if (
       !alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId), MODULO_DEL_DUENO[fila.duenoTipo])
     ) {
