@@ -23,6 +23,16 @@ import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EstadoDeSolicitud } from '@/shared/rules/compras';
 import type { EstadoDePago, PagoDeLaCompra } from '@/shared/rules/pagos';
 import { lugarDeLaRuta, type EmpresaId } from '@/shared/rules/empresas';
+import type {
+  AprobacionDePlanificacion,
+  EstadoDeLectura,
+  InformeRespuesta,
+  LecturaIniciada,
+  PlanificacionDetalle,
+  PlanificacionFila,
+  PropuestaDeHojasRespuesta,
+  SeleccionDeHojasPedida,
+} from '@/features/panel/planificacion';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -1035,6 +1045,53 @@ reportes: {
     crear: (datos: AsignacionNueva) => panelEnviar<AsignacionFila>('/asignaciones', 'POST', datos),
     cerrar: (id: string) =>
       panelEnviar<AsignacionFila>(`/asignaciones/${id}`, 'PATCH', { accion: 'cerrar' }),
+  },
+
+  /** Spec 043: las versiones de la planificación de una obra y cada una en solo lectura. */
+  planificaciones: {
+    listar: (obraId: string) => panel<PlanificacionFila[]>(`/planificaciones${conObra(obraId)}`),
+    de: (id: string) => panel<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}`),
+    /** El Excel tal como se subió (RF-8, RF-50). */
+    excel: (id: string) => descargar(`/api/panel/planificaciones/${encodeURIComponent(id)}/excel`),
+    /** RF-4: qué hojas propone la IA. No escribe nada. */
+    proponerHojas: (obraId: string, archivo: Blob) =>
+      pedir<PropuestaDeHojasRespuesta>(`/api/panel/planificaciones/hojas${conObra(obraId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        body: archivo,
+      }),
+    /** RF-6: lee las hojas confirmadas por detrás; 202 con la lectura. 422 trae `faltas`. */
+    leer: (obraId: string, archivo: Blob, seleccion: SeleccionDeHojasPedida, opciones: { sustituir: boolean; grupos?: Record<string, string> }) =>
+      pedir<LecturaIniciada>(
+        `/api/panel/planificaciones/leer?${new URLSearchParams({
+          obraId,
+          hojas: JSON.stringify(seleccion),
+          ...(opciones.sustituir ? { sustituir: '1' } : {}),
+          ...(opciones.grupos && Object.keys(opciones.grupos).length ? { grupos: JSON.stringify(opciones.grupos) } : {}),
+        })}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          body: archivo,
+        },
+      ),
+    /** RF-9, RF-107: en qué va una lectura. */
+    lectura: (id: string) => panel<EstadoDeLectura>(`/planificaciones/lecturas/${encodeURIComponent(id)}`),
+    /** RF-34 a RF-39, RF-121: 409 con `hallazgos`, `mesesPorMarcar` o si el borrador cambió (RF-99). */
+    aprobar: (id: string, datos: AprobacionDePlanificacion) =>
+      panelEnviar<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}/aprobar`, 'POST', datos),
+    /** RF-47, RF-48: solo la vigente, con motivo. */
+    anular: (id: string, motivo: string) =>
+      panelEnviar<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+  },
+
+  /** Spec 043: el cumplimiento de la planificación; al Residente le llega sin plata (RF-88). */
+  cumplimiento: {
+    informe: (obraId: string, tipo: 'semana' | 'mes', fecha: string) =>
+      panel<InformeRespuesta>(`/cumplimiento?${new URLSearchParams({ obraId, tipo, fecha })}`),
+    /** RF-92, RF-93: el mismo informe en Excel o PDF; al Residente, sin plata. */
+    descargar: (obraId: string, tipo: 'semana' | 'mes', fecha: string, formato: 'excel' | 'pdf') =>
+      descargar(`/api/panel/cumplimiento/exportar?${new URLSearchParams({ obraId, tipo, fecha, formato })}`),
   },
 };
 

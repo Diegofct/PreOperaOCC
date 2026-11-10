@@ -25,6 +25,8 @@ import PantallaPreoperacionales from '@/features/panel/pantalla-preoperacionales
 import PantallaVehiculos from '@/features/panel/pantalla-vehiculos';
 import PantallaBandeja from '@/features/panel/whatsapp/pantalla-bandeja';
 import { usePersona } from '@/features/panel/sesion';
+import PantallaCumplimiento from '@/features/planificacion/pantalla-cumplimiento';
+import PantallaPlanificacion from '@/features/planificacion/pantalla-planificacion';
 import PantallaReportes from '@/features/reportes/pantalla-reportes';
 import PantallaPersonal from '@/features/rrhh/pantalla-personal';
 import PantallaSolicitudesDePago from '@/features/tesoreria/pantalla-solicitudes-pago';
@@ -107,6 +109,9 @@ const PANTALLAS_DE_OBRA: Record<string, ComponentType> = {
   cantera: PantallaCantera,
   contrato: PantallaContrato,
   documentos: PantallaDocumentos,
+  // Spec 043, RF-86, RF-88.
+  planificacion: PantallaPlanificacion,
+  cumplimiento: PantallaCumplimiento,
   // Spec 036, RF-1.
     'solicitudes-compra': PantallaSolicitudes,
   // Spec 037, RF-1.

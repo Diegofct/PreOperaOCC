@@ -1,6 +1,6 @@
 # Spec 043 — Planificación de obra y cumplimiento
 
-> Estado: Aprobada por Diego el 2026-11-09, tras la clarificación · Fecha: 2026-11-08 · Tercera de la tanda 041–044 (depende de la 041 y del presupuesto de la 031; es la base de la 044)
+> Estado: **Cumplida** el 2026-11-10 (`validacion.md`) · Aprobada por Diego el 2026-11-09, tras la clarificación; cambio del 2026-11-10 (D31) aprobado ese mismo día · Fecha: 2026-11-08 · Tercera de la tanda 041–044 (depende de la 041 y del presupuesto de la 031; es la base de la 044)
 
 ## Contexto y objetivo
 
@@ -49,6 +49,8 @@ El presupuesto de cada obra dice lo que la entidad paga, pero no lo que a OCC le
 
 - RF-11: EL SISTEMA guarda de cada ítem su precio de costo.
 - RF-12: EL SISTEMA guarda de cada ítem su cantidad planeada, que es la «medida real» del Excel.
+- RF-139: EL SISTEMA guarda de cada ítem su medida para costo, que es la «Med. Coste» del Excel.
+- RF-140: SI el libro no trae medida para costo de un ítem, ENTONCES EL SISTEMA usa su medida real como medida para costo.
 - RF-13: EL SISTEMA guarda de cada ítem su mes de inicio.
 - RF-14: EL SISTEMA guarda de cada ítem su tiempo de ejecución.
 - RF-15: EL SISTEMA guarda de cada ítem su programación por mes del calendario.
@@ -76,12 +78,13 @@ El presupuesto de cada obra dice lo que la entidad paga, pero no lo que a OCC le
 - RF-25: CUANDO se crea un borrador, EL SISTEMA lista los ítems que no existen en el presupuesto vigente.
 - RF-26: CUANDO se crea un borrador, EL SISTEMA lista los ítems cuya unidad difiere de la del presupuesto.
 - RF-27: CUANDO se crea un borrador, EL SISTEMA lista los ítems cuya cantidad contractual difiere de la del presupuesto.
-- RF-28: CUANDO se crea un borrador, EL SISTEMA lista los ítems cuyo precio de costo supera el precio contractual.
+- RF-28: CUANDO se crea un borrador, EL SISTEMA lista los ítems con precio contractual mayor que cero cuyo precio de costo supera el precio contractual.
 - RF-29: CUANDO se crea un borrador, EL SISTEMA lista los ítems con medida real mayor que cero y sin programación.
 - RF-30: DONDE el contrato tenga fecha de fin, EL SISTEMA lista al crear el borrador los ítems programados en meses posteriores a esa fecha.
 - RF-31: CUANDO se crea un borrador, EL SISTEMA lista los ítems sin precio de costo.
 - RF-32: EL SISTEMA considera sin precio de costo un ítem cuyo costo está vacío, en cero o por debajo de un peso.
 - RF-33: EL SISTEMA muestra en el resumen del borrador el total a precio contractual y el total a costo, con medida real y con medida contractual.
+- RF-141: EL SISTEMA calcula el total a costo con medida real multiplicando el precio de costo de cada ítem por su medida para costo.
 - RF-111: EL SISTEMA calcula el margen del borrador como el total a precio contractual menos el total a costo, antes de indirectos.
 - RF-112: EL SISTEMA calcula el resultado del borrador como su margen menos los indirectos programados.
 - RF-113: EL SISTEMA muestra el margen y el resultado del borrador con medida real y con medida contractual.
@@ -234,6 +237,8 @@ Y los del caso concreto:
 - **Libro con un solo frente cargado**: en Magdalena se carga solo Berrio. El presupuesto tiene los mismos capítulos e ítems en Berrio y en Yondo, así que lo que los distingue es el grupo (RF-19, RF-126). Lo ejecutado en Yondo sale como actividad fuera de la planificación (RF-74), y los ítems del presupuesto que no estén en la planificación no se listan como hallazgo.
 - **Libro con línea base y flujo de caja**: la línea base manda (RF-101, RF-102). El flujo de caja lleva el control del dinero y puede traer varios frentes en la misma hoja.
 - **La línea base no cubre todos los meses**: en el V5 la programación por ítem arranca en octubre de 2026. Los meses anteriores no tienen meta por ítem, así que muestran lo ejecutado con «Sin programación» (RF-73) y no entran en la pregunta de RF-121.
+- **«Med. Coste» distinta de la medida real**: el Excel calcula el costo con una tercera medida. En el V5 difiere de la real en 7 ítems y cambia el total en 3 (5.1.15, 35.1 y 35.2). El total a costo usa esa medida (RF-141), para que cuadre con el del Excel; la medida real sigue siendo la cantidad planeada y la de los totales a precio contractual. Con la medida real, el costo daría unos $1.200 millones menos que el Excel.
+- **Ítems sin precio contractual**: en el V5, 35.1 y 35.2 solo tienen costo. No son «costo mayor» (RF-28): no hay precio con qué comparar. Su costo sí suma al total a costo.
 - **Indirectos en el resumen**: en el V5, el total de indirectos de la planificación de Berrio y el de la línea base difieren en unos $187 millones. El resumen muestra esa diferencia frente al Excel (RF-114).
 - **Actividades anteriores al presupuesto**: quedan sin capítulo por la regla de la 031 y salen con la marca «Sin capítulo» (RF-127); si un corte de obra les asigna capítulo, cuentan desde entonces.
 - **Un informe ya entregado**: se recalcula al abrirlo. Puede variar si después se anula o se cierra un parte de ese periodo.
@@ -308,3 +313,4 @@ Ninguna. Las aclaraciones y los huecos de la revisión se resolvieron el 2026-11
 - D28: El precio contractual de los informes es el de la versión de planificación que rige (RF-77).
 - D29: Si quien pregunta tiene todas las obras y no dice cuál, el asistente le pregunta la obra (RF-137).
 - D30: La anulación rige desde ese mismo día, igual que una versión nueva desde el día en que se aprueba (RF-138). Decidido por Diego al planificar, 2026-11-09.
+- D31: El total a costo del resumen usa la «Med. Coste» del Excel, y un ítem sin precio contractual no es «costo mayor» (RF-28, RF-139 a RF-141). Decidido por Diego el 2026-11-10, a propuesta de Claude: así el resumen cuadra con el Excel y la única diferencia que queda es la de los indirectos, unos $187 millones.

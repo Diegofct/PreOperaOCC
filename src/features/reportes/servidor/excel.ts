@@ -29,7 +29,8 @@ const FILAS_DEL_TITULO = 3;
 // La lectura en «General»: sin separador de miles y con los decimales que tenga (039/RF-17).
 const FORMATO: Record<string, string> = { numero: '#,##0.##', entero: '0', lectura: 'General' };
 
-function escribirHoja(libro: ExcelJS.Workbook, hoja: HojaDeReporte, titulo: string, subtitulo: string) {
+/** Una hoja con su título, su periodo y los encabezados fijos. La reutiliza la spec 043 (cumplimiento). */
+export function escribirHoja(libro: ExcelJS.Workbook, hoja: HojaDeReporte, titulo: string, subtitulo: string) {
   // Excel no deja más de 31 caracteres ni algunos signos en el nombre de una hoja.
   const nueva = libro.addWorksheet(hoja.nombre.replace(/[\/?*[\]:]/g, ' ').slice(0, 31));
   nueva.addRow([titulo]).font = { bold: true, size: 13 };

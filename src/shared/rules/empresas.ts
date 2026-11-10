@@ -152,6 +152,10 @@ const MENU_DE_OBRA: readonly EntradaDelMenu[] = [
   e('contrato', 'Contrato y Presupuesto', 'contrato'),
   // Spec 034, RF-2: los documentos de la obra, después de los del contrato, que siguen allí.
   e('documentos', 'Documentos', 'documentos'),
+  // Spec 043, RF-86, RF-88: la planificación del Excel y su cumplimiento. El Residente ve solo
+  // Cumplimiento, en cantidades; la tabla decide quién ve qué.
+  e('planificacion', 'Planificación', 'planificacion'),
+  e('cumplimiento', 'Cumplimiento', 'cumplimiento'),
   ...SOLICITUDES,
   ASISTENTE,
 ];
