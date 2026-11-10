@@ -70,6 +70,13 @@ export interface ItemDeLaPlanificacion {
   precioCosto: number | null;
   /** RF-12: la cantidad planeada, la «medida real» del Excel. */
   medidaReal: number | null;
+  /**
+   * RF-139, RF-140: la «Med. Coste» del Excel, con la que el libro calcula el costo; `null` si no la
+   * trae, y entonces cuenta la medida real. Es aparte de la real porque en el V5 difieren en 7 ítems,
+   * y con la real el costo no cuadra con el del Excel (D31). Los borradores leídos antes de la D31 no
+   * la tienen: por eso se lee siempre con `?? null`.
+   */
+  medidaCoste: number | null;
   medidaContractual: number | null;
   /** RF-13: `YYYY-MM`. */
   mesInicio: string | null;
@@ -95,9 +102,10 @@ export interface CruceDelItem {
   valorUnitario: number | null;
 }
 
-export type ItemLeidoDePlanificacion = Omit<ItemDeLaPlanificacion, 'programacion' | 'revisar' | 'delPresupuesto'> & {
+export type ItemLeidoDePlanificacion = Omit<ItemDeLaPlanificacion, 'programacion' | 'revisar' | 'delPresupuesto' | 'medidaCoste'> & {
   programacion: readonly ValorDelMes[];
   revisar?: boolean;
+  medidaCoste?: number | null;
 };
 
 export interface RubroDeLaPlanificacion {
@@ -154,6 +162,7 @@ export function armarItemDePlanificacion(leido: ItemLeidoDePlanificacion): ItemD
   return {
     ...leido,
     item: leido.item.trim(),
+    medidaCoste: leido.medidaCoste ?? null,
     revisar: leido.revisar ?? false,
     delPresupuesto: null,
     programacion: [...leido.programacion]
@@ -360,7 +369,13 @@ function hallazgosDelItem(item: ItemDeLaPlanificacion, fechaFinContrato: string 
       detalle: `La cantidad contractual es ${item.medidaContractual} y en el presupuesto, ${cruce.cantidad}.`,
     });
   }
-  if (!sinPrecioDeCosto(item.precioCosto) && item.precioContractual !== null && (item.precioCosto as number) > item.precioContractual) {
+  // RF-28, D31: sin precio contractual (35.1 y 35.2 del V5) no hay con qué comparar.
+  if (
+    !sinPrecioDeCosto(item.precioCosto) &&
+    item.precioContractual !== null &&
+    item.precioContractual > 0 &&
+    (item.precioCosto as number) > item.precioContractual
+  ) {
     hallazgos.push({
       tipo: 'costo_mayor',
       detalle: `El precio de costo (${item.precioCosto}) supera el contractual (${item.precioContractual}).`,
@@ -449,8 +464,10 @@ function costoReal(costo: number | null): number {
 }
 
 /**
- * RF-23, RF-33, RF-111 a RF-114. Los ítems sin costo real no suman al costo, igual que en el libro,
- * donde su relleno da casi cero. La comparación con el Excel es a medida real: sus totales son esos.
+ * RF-23, RF-33, RF-111 a RF-114, RF-141. Los ítems sin costo real no suman al costo, igual que en el
+ * libro, donde su relleno da casi cero. La comparación con el Excel es a medida real: sus totales son
+ * esos, y por eso el costo a medida real va con la «Med. Coste» del ítem, que es la que usa el libro
+ * (D31). Con la medida contractual, los dos totales van con la del contrato.
  */
 export function resumenDeLaPlanificacion(
   estructura: Pick<EstructuraDePlanificacion, 'items' | 'rubros' | 'indirectos'>,
@@ -460,15 +477,21 @@ export function resumenDeLaPlanificacion(
   const rubrosContractual = estructura.rubros.reduce((suma, r) => suma + r.valor, 0);
   const rubrosCosto = estructura.rubros.reduce((suma, r) => suma + costoReal(r.costo), 0);
 
-  const totales = (medida: (item: ItemDeLaPlanificacion) => number | null): TotalesDelResumen => {
+  type Medida = (item: ItemDeLaPlanificacion) => number | null;
+  const totales = (medida: Medida, medidaDelCosto: Medida = medida): TotalesDelResumen => {
     const contractual = Math.round(
       estructura.items.reduce((suma, i) => suma + (medida(i) ?? 0) * (i.precioContractual ?? 0), rubrosContractual),
     );
-    const costo = Math.round(estructura.items.reduce((suma, i) => suma + (medida(i) ?? 0) * costoReal(i.precioCosto), rubrosCosto));
+    const costo = Math.round(
+      estructura.items.reduce((suma, i) => suma + (medidaDelCosto(i) ?? 0) * costoReal(i.precioCosto), rubrosCosto),
+    );
     const margen = contractual - costo;
     return { contractual, costo, margen, resultado: margen - indirectos };
   };
-  const medidaReal = totales((i) => i.medidaReal);
+  const medidaReal = totales(
+    (i) => i.medidaReal,
+    (i) => i.medidaCoste ?? i.medidaReal,
+  );
 
   const leidos = { contractual: medidaReal.contractual, costo: medidaReal.costo, indirectos };
   const diferenciasConElExcel = (['contractual', 'costo', 'indirectos'] as const).flatMap((concepto) => {

@@ -41,7 +41,7 @@ import { hojasDelLibro } from './leer-excel';
 import { borradorDeLaObra, crearBorrador, detalleDe, siguienteVersion } from './presupuestos';
 
 /** Lo que pesa de más un formulario: el de OCC, con 76 ítems, pesa unos 60 KB. */
-const TAMANO_MAXIMO = 20 * 1024 * 1024;
+export const TAMANO_MAXIMO = 20 * 1024 * 1024;
 
 export interface VistaPrevia {
   conteo: { grupos: number; capitulos: number; items: number; rubros: number };
@@ -59,7 +59,7 @@ export interface VistaPrevia {
 }
 
 /** Un .xlsx es un ZIP: empieza por «PK». Más fiable que el tipo que diga el navegador. */
-function pareceXlsx(contenido: Uint8Array): boolean {
+export function pareceXlsx(contenido: Uint8Array): boolean {
   return contenido.length > 4 && contenido[0] === 0x50 && contenido[1] === 0x4b;
 }
 

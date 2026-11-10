@@ -9,4 +9,10 @@ export interface ContenidoDelArchivo {
   titulo: string;
   encabezado: EncabezadoDelArchivo;
   bloques: readonly BloqueDelArchivo[];
+  /**
+   * La línea del pie de cada página. Sin ella, la del asistente. La spec 043 arma con este mismo
+   * armador el informe de cumplimiento, que sale del panel y no del asistente, y decir lo contrario
+   * en el pie sería mentirle a quien lo recibe reenviado.
+   */
+  leyenda?: string;
 }

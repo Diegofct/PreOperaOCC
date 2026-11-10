@@ -111,6 +111,47 @@ export function limpiarPropuesta(propuesta: PropuestaDeHojas, libro: readonly Ho
   return { hojas: propuesta.hojas.filter((hoja) => visibles.has(hoja.nombre)) };
 }
 
+/** Lo que escoge la persona en la pantalla, sobre la propuesta (RF-6, RF-100, RF-103). */
+export interface EleccionDeHojas {
+  /** La hoja del frente que se carga: una sola (RF-100). */
+  frente: string;
+  /** La hoja con la programación mensual; en un libro con línea base, la línea base (RF-101). */
+  programacion: string;
+  /** Las demás hojas propuestas que se dejan marcadas. */
+  otras: readonly string[];
+  /** RF-103: confirmó la programación de un libro sin línea base. */
+  confirmoProgramacion: boolean;
+}
+
+/**
+ * RF-6: la selección que se manda a leer, armada aquí y no en la pantalla. El orden es el de la
+ * cita («H1» es la primera) y forma parte de la llave de la lectura guardada (RF-10): el frente,
+ * luego la programación y luego las demás en el orden de la propuesta. Así, volver a subir el mismo
+ * libro escogiendo lo mismo da la misma selección y no paga otra lectura.
+ *
+ * Cada hoja lleva los usos que propuso la IA, salvo que nadie más que el frente se lleva
+ * `planificacion` (las otras hojas de frente se quedan fuera aunque estén marcadas) y nadie más que
+ * la elegida se lleva `programacion`.
+ */
+export function armarSeleccion(propuesta: PropuestaDeHojas, eleccion: EleccionDeHojas): SeleccionDeHojas {
+  const usosDe = (nombre: string): UsoDeHoja[] => propuesta.hojas.find((h) => h.nombre === nombre)?.usos ?? [];
+  const sinFrenteNiProgramacion = (usos: readonly UsoDeHoja[]) => usos.filter((u) => u !== 'planificacion' && u !== 'programacion');
+
+  const hojas: SeleccionDeHojas['hojas'] = [];
+  const delFrente = new Set<UsoDeHoja>(['planificacion']);
+  if (eleccion.programacion === eleccion.frente) delFrente.add('programacion');
+  hojas.push({ nombre: eleccion.frente, usos: [...delFrente] });
+  if (eleccion.programacion && eleccion.programacion !== eleccion.frente) {
+    hojas.push({ nombre: eleccion.programacion, usos: ['programacion', ...sinFrenteNiProgramacion(usosDe(eleccion.programacion))] });
+  }
+  for (const hoja of propuesta.hojas) {
+    if (hoja.nombre === eleccion.frente || hoja.nombre === eleccion.programacion || !eleccion.otras.includes(hoja.nombre)) continue;
+    const usos = sinFrenteNiProgramacion(hoja.usos);
+    if (usos.length > 0) hojas.push({ nombre: hoja.nombre, usos });
+  }
+  return { hojas, confirmoProgramacion: eleccion.confirmoProgramacion };
+}
+
 /** RF-5, RF-100 a RF-103: lo que falta para poder leer lo confirmado. Vacío si se puede. */
 export function repasarSeleccion(
   seleccion: SeleccionDeHojas,
@@ -206,6 +247,9 @@ export interface ItemLeidoPorLaIa extends CitaDeLectura {
   precioCosto: number;
   medidaReal: number;
   medidaContractual: number;
+  /** RF-139, RF-140: si el libro trae «Med. Coste». Sin nulos en el esquema: si es `false`, `medidaCoste` no cuenta. */
+  traeMedidaCoste: boolean;
+  medidaCoste: number;
   programacion: MesesCitados;
   tiempos: CitaDeLectura & {
     /** El número tal como está en la celda; `mesInicio` es el mes del calendario que representa. */
@@ -308,6 +352,8 @@ function itemComprobado(leido: ItemLeidoPorLaIa, hojas: Hojas, rechazados: Recha
   const precioCosto = comprobar(leido.precioCosto, 'precio de costo', tolPesos);
   const medidaReal = comprobar(leido.medidaReal, 'medida real', tolCantidad);
   const medidaContractual = comprobar(leido.medidaContractual, 'medida contractual', tolCantidad);
+  // RF-140: si no la trae no se comprueba nada; el resumen usará la medida real.
+  const medidaCoste = leido.traeMedidaCoste ? comprobar(leido.medidaCoste, 'Med. Coste', tolCantidad) : null;
 
   const programacion = mesesComprobados(hojas, leido.programacion, que, rechazados);
   descarto ||= programacion.descarto;
@@ -341,6 +387,7 @@ function itemComprobado(leido: ItemLeidoPorLaIa, hojas: Hojas, rechazados: Recha
     precioContractual,
     precioCosto,
     medidaReal,
+    medidaCoste,
     medidaContractual,
     mesInicio,
     tiempoEjecucion,

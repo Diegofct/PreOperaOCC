@@ -60,6 +60,8 @@ const esquemaDeLectura = z.object({
       precioCosto: z.number(),
       medidaReal: z.number(),
       medidaContractual: z.number(),
+      traeMedidaCoste: z.boolean().describe('Si el libro tiene una columna «Med. Coste» o equivalente para este ítem.'),
+      medidaCoste: z.number().describe('La «Med. Coste», en la misma fila del ítem; 0 si no la trae.'),
       programacion: mesesCitados,
       tiempos: z.object({
         ...cita,
@@ -110,6 +112,7 @@ Reglas generales:
 - Un ítem es una fila con número, unidad y precio. Ignora títulos, subtotales, totales, indirectos, seguros, impuestos y análisis de precios.
 - El grupo es el título del frente o vía encima de sus capítulos. El capítulo es el título justo encima de los ítems.
 - precioContractual es el precio con AIU, el del contrato. precioCosto es el precio de costo. medidaReal es la medida tomada en campo. medidaContractual es la del contrato.
+- Si el libro tiene además una medida para calcular el costo («Med. Coste» o parecida, distinta de la real y de la contractual), copia su valor en medidaCoste y pon traeMedidaCoste en true; puede ser distinta de cero aunque la medida real esté en cero. Si no la tiene, traeMedidaCoste en false y medidaCoste en 0.
 - Si la fila no trae un ítem de pago propio, deja item en "" y copia el número en renglon.
 
 Rubros: lo que va aparte de los ítems y se cobra como valor global (plan de manejo ambiental, de tránsito, caracterización, garantías, actualización de precios). Cita su fila; valor es el precio contractual y costo su precio de costo.

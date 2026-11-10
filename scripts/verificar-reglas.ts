@@ -121,6 +121,7 @@ import {
   limpiarPropuesta,
   muestraParaProponer,
   observacionesValidas,
+  armarSeleccion,
   repasarSeleccion,
   textoParaLeer,
   type LecturaDePlanificacion,
@@ -327,6 +328,7 @@ import {
   paginaParaImprimir,
   textoDelPeriodo,
 } from '../src/features/reportes/exportar';
+import { bloquesDelInforme, hojasDelInforme } from '../src/features/planificacion/exportar';
 import type { ReporteDe } from '../src/features/reportes/servidor/reportes';
 import {
   calidadPorEnsayo,
@@ -10635,8 +10637,8 @@ prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente ta
     usa: true,
     obras: ['obra-a'],
     modulos: [
-      'bitacoras', 'preoperacionales', 'almacen', 'cantera', 'laboratorio', 'whatsapp', 'reportes', 'contrato', 'vehiculos', 'personas',
-      'solicitudes',
+      'bitacoras', 'preoperacionales', 'almacen', 'cantera', 'laboratorio', 'whatsapp', 'reportes', 'contrato', 'cumplimiento',
+      'vehiculos', 'personas', 'solicitudes',
     ],
     empresas: [],
     bitacorasDeEmpresa: [],
@@ -10648,6 +10650,26 @@ prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente ta
   assert.deepEqual(de('operador'), { usa: false, obras: [], modulos: [], empresas: [], bitacorasDeEmpresa: [] });
   // Solo gerencia alcanza todas las obras; los demás, la suya.
   assert.deepEqual(de('almacenista').obras, ['obra-a']);
+});
+
+prueba('043/RF-89, RF-94, RF-95: el cumplimiento lo consultan quienes lo ven en el panel, y nadie más', () => {
+  const de = (rol: Rol, obraId: string | null = 'obra-a', obras?: string[]) => alcanceDelAsistente({ rol, obraId, obras, modulosDeObra: TODOS_LOS_MODULOS });
+  for (const rol of ['admin', 'director_proyectos'] as const) {
+    assert.ok(de(rol, null).modulos.includes('cumplimiento'), rol);
+    assert.equal(de(rol, null).obras, 'todas');
+  }
+  // El Residente sí lo consulta (en cantidades, lo quita la consulta) y el Director de Obra también.
+  for (const rol of ['residente', 'director_obra'] as const) assert.ok(de(rol).modulos.includes('cumplimiento'), rol);
+  for (const rol of ['almacenista', 'encargado_planta', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'operador'] as const) {
+    assert.ok(!de(rol, rol === 'encargado_occ' || rol === 'auxiliar_administrativa' ? null : 'obra-a').modulos.includes('cumplimiento'), rol);
+  }
+  // RF-95: el Director de Obra con dos obras responde solo de la que tiene en uso.
+  const director = de('director_obra', 'obra-a', ['obra-a', 'obra-b']);
+  assert.deepEqual(director.obras, ['obra-a']);
+  assert.equal(obraAlAlcance(director, 'obra-b'), false);
+  // Sin obra no hay cumplimiento que consultar.
+  assert.ok(!de('residente', null).modulos.includes('cumplimiento'));
+  assert.ok(!de('director_obra', null, ['obra-a', 'obra-b']).modulos.includes('cumplimiento'));
 });
 
 prueba('028/RF-5, RF-10: un módulo apagado en la obra queda fuera, y sin obra no hay nada', () => {
@@ -11304,18 +11326,31 @@ prueba('033/RF-13 a RF-15, RF-29: gerencia ve el menú entero de cada empresa, c
 
 prueba('033/RF-17, RF-18: el menú de una obra, sin los módulos que la obra tiene apagados', () => {
   // Con Documentos después de Contrato y Presupuesto desde la spec 034 (RF-2).
+  // Con Planificación y Cumplimiento después de Documentos desde la spec 043 (RF-86, RF-88).
   assert.deepEqual(paginas(menuDeObra('admin')), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
-    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'solicitudes-compra',
-    'solicitudes-pago', 'asistente',
+    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
+    'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
   assert.equal(menuDeObra('admin')[2].titulo, 'Reportes e informes');
   // Calidad es el laboratorio de la obra: se apaga con él.
   const sinCanteraNiLaboratorio = { almacen: true, cantera: false, laboratorio: false };
   assert.deepEqual(paginas(menuDeObra('admin', sinCanteraNiLaboratorio)), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'almacen', 'preoperacionales',
-    'asignaciones', 'contrato', 'documentos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'asignaciones', 'contrato', 'documentos', 'planificacion', 'cumplimiento', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
+});
+
+prueba('043/RF-86, RF-88, RF-90: Planificación y Cumplimiento en el menú de la obra, según el acceso', () => {
+  const tiene = (rol: Rol) => paginas(menuDeObra(rol)).filter((p) => p === 'planificacion' || p === 'cumplimiento');
+  for (const rol of ['admin', 'director_proyectos', 'director_obra'] as const) assert.deepEqual(tiene(rol), ['planificacion', 'cumplimiento'], rol);
+  assert.deepEqual(tiene('residente'), ['cumplimiento']);
+  for (const rol of ['almacenista', 'encargado_planta', 'laboratorista', 'operador'] as const) assert.deepEqual(tiene(rol), [], rol);
+  const planificacion = menuDeObra('admin').find((m) => m.pagina === 'planificacion');
+  assert.equal(planificacion?.titulo, 'Planificación');
+  assert.equal(menuDeObra('admin').find((m) => m.pagina === 'cumplimiento')?.titulo, 'Cumplimiento');
+  // No dependen de los módulos que la obra apaga.
+  assert.deepEqual(paginas(menuDeObra('residente', { almacen: false, cantera: false, laboratorio: false })).filter((p) => p === 'cumplimiento'), ['cumplimiento']);
 });
 
 prueba('033/RF-49: Licitaciones abre LicitApp en una pestaña nueva', () => {
@@ -11432,8 +11467,8 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   // (spec 034, RF-5).
   assert.deepEqual(paginas(menuDeObra('director_obra')), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
-    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'solicitudes-compra',
-    'solicitudes-pago', 'asistente',
+    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
+    'solicitudes-compra', 'solicitudes-pago', 'asistente',
   ]);
   // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21). Personas, que la
   // 041 le abrió para dar accesos de obra, no es una entrada del menú de la obra: es la pestaña
@@ -12560,6 +12595,9 @@ prueba('040/RF-29: lo que dice mientras consulta', () => {
   assert.equal(d('generar_archivo', { formato: 'pdf', titulo: '' }), 'Armando el PDF…');
   assert.equal(d('consulta_nueva', {}), 'Consultando…');
   assert.equal(d('almacen', null), 'Leyendo el almacén…');
+  // Spec 043: se nombra la semana o el mes que se lee, no el día que se pidió.
+  assert.equal(d('cumplimiento_de_obra', { obraId: 'x', tipo: 'mes', fecha: '2026-11-10' }), 'Leyendo el cumplimiento de la planificación de noviembre…');
+  assert.equal(d('cumplimiento_de_obra', { obraId: 'x', tipo: 'semana', fecha: '2026-11-10' }), 'Leyendo el cumplimiento de la planificación del 9-nov al 15-nov…');
   // Cada consulta del asistente tiene su frase: ninguna se queda en «Consultando…».
   const fuente = readFileSync(path.join(__dirname, '../src/features/asistente/servidor/herramientas.ts'), 'utf8');
   const nombres = [...fuente.matchAll(/^  nombre: '(\w+)',$/gm)].map((m) => m[1]);
@@ -15504,6 +15542,12 @@ prueba('043/RF-28: el costo por encima del precio contractual', () => {
   assert.deepEqual(tiposDe043({ precioCosto: 55525 }), []);
 });
 
+prueba('043/RF-28, D31: sin precio contractual no hay con qué comparar, y no es «costo mayor»', () => {
+  // 35.1 y 35.2 del V5: solo traen costo.
+  assert.ok(!tiposDe043({ precioContractual: 0, precioCosto: 1200000000 }).includes('costo_mayor'));
+  assert.ok(!tiposDe043({ precioContractual: null, precioCosto: 1200000000 }).includes('costo_mayor'));
+});
+
 prueba('043/RF-29: sin programación, solo si tiene medida real', () => {
   assert.deepEqual(tiposDe043({ programacion: [] }), ['sin_programacion']);
   assert.deepEqual(tiposDe043({ programacion: [{ mes: '2026-11', valor: 0, cantidad: 0 }] }), ['sin_programacion']);
@@ -15575,6 +15619,35 @@ prueba('043/RF-111, RF-112: con los totales del V5, el resultado es la utilidad 
   const resumen = resumenDeLaPlanificacion({ items: [item], rubros: [], indirectos: [{ mes: '2026-11', valor: 20440864487 }] });
   assert.equal(resumen.medidaReal.margen, 28767408837);
   assert.equal(resumen.medidaReal.resultado, 8326544350);
+});
+
+prueba('043/RF-139 a RF-141: el costo con medida real usa la «Med. Coste»; el contractual, la real', () => {
+  const item = { ...ITEM_SANO_043, medidaReal: 10, medidaCoste: 12, medidaContractual: 8, precioContractual: 100, precioCosto: 40 };
+  const resumen = resumenDeLaPlanificacion({ items: [item], rubros: [], indirectos: [] });
+  assert.equal(resumen.medidaReal.contractual, 1000);
+  assert.equal(resumen.medidaReal.costo, 480);
+  // Con medida contractual, la del contrato para los dos totales.
+  assert.deepEqual(resumen.medidaContractual, { contractual: 800, costo: 320, margen: 480, resultado: 480 });
+});
+
+prueba('043/RF-140: sin «Med. Coste», el costo usa la medida real', () => {
+  const item = { ...ITEM_SANO_043, medidaReal: 10, medidaCoste: null, precioContractual: 100, precioCosto: 40 };
+  assert.equal(resumenDeLaPlanificacion({ items: [item], rubros: [], indirectos: [] }).medidaReal.costo, 400);
+  assert.equal(ITEM_SANO_043.medidaCoste, null);
+});
+
+prueba('043/RF-141, D31: con la «Med. Coste», el costo del V5 cuadra con el del Excel', () => {
+  // Lo de los demás ítems junto en uno, y un ítem como 35.1: sin precio contractual, sin medida
+  // real y con «Med. Coste». Con la medida real, el costo daría 1 200 millones menos.
+  const resto = { ...ITEM_SANO_043, medidaReal: 1, medidaCoste: 1, medidaContractual: 1, precioContractual: 39558848104, precioCosto: 9591439267 };
+  const sinPrecio = { ...ITEM_SANO_043, medidaReal: 0, medidaCoste: 1, medidaContractual: 0, precioContractual: null, precioCosto: 1200000000 };
+  const resumen = resumenDeLaPlanificacion(
+    { items: [resto, sinPrecio], rubros: [], indirectos: [{ mes: '2026-11', valor: 20440864487 }] },
+    { contractual: 39558848104, costo: 10791439267, indirectos: 20440864487 },
+  );
+  assert.equal(resumen.medidaReal.costo, 10791439267);
+  assert.equal(resumen.medidaReal.resultado, 8326544350);
+  assert.deepEqual(resumen.diferenciasConElExcel, []);
 });
 
 prueba('043/RF-32: un costo de relleno no suma, y un ítem sin medidas tampoco rompe la cuenta', () => {
@@ -16092,6 +16165,90 @@ prueba('043/RF-88, RF-89: al Residente no le llega ninguna cifra de plata, en ni
   assert.equal(reducido.avisos.diasAbiertos, 0);
 });
 
+prueba('043/RF-92, RF-96: el Excel trae las mismas cifras que el informe, con su plata', () => {
+  const informe = informe043(SEMANA_043, conTreinta043);
+  const hojas = hojasDelInforme(informe);
+  const cumplimiento = hojas.find((h) => h.nombre === 'Cumplimiento');
+  assert.ok(cumplimiento);
+  const columna = (nombre: string) => cumplimiento.encabezados.indexOf(nombre);
+  const [fila] = cumplimiento.filas;
+  assert.equal(fila[columna('Ítem')], '4.1.8');
+  assert.equal(fila[columna('Meta')], 60);
+  assert.equal(fila[columna('Ejecutado')], 30);
+  assert.equal(fila[columna('Valor programado')], 2400);
+  assert.equal(fila[columna('Valor ejecutado')], 1200);
+  assert.equal(fila[columna('A cobrar')], 3000);
+  const totales = hojas.find((h) => h.nombre === 'Totales');
+  assert.ok(totales);
+  assert.deepEqual(totales.filas.find((f) => f[0] === 'Margen'), ['Margen', 1800]);
+});
+
+prueba('043/RF-89, RF-92: el Excel del Residente no tiene ni una columna ni una cifra de plata', () => {
+  const precioUnico = 987654.321;
+  const item = { ...ITEM_CON_PRECIOS_043, precioContractual: precioUnico, precioCosto: 123456.789 };
+  const completo = informe043(NOVIEMBRE_043, conTreinta043, [{ ...version043([item]), items: [item] }]);
+  const prohibidas = /precio|costo|valor|margen|resultado|indirect|rubro|cobrar|falt|sobr|totales|programado/i;
+
+  const conPlata = hojasDelInforme(completo);
+  const textos = (hojas: ReturnType<typeof hojasDelInforme>) =>
+    hojas.flatMap((h) => [h.nombre, ...h.encabezados, ...h.filas.flat().filter((c): c is string => typeof c === 'string')]);
+  // La prueba sí sirve: el Excel con plata trae esas palabras.
+  assert.ok(textos(conPlata).some((t) => prohibidas.test(t)));
+
+  const reducido = hojasDelInforme(sinPlata(completo));
+  assert.deepEqual(textos(reducido).filter((t) => prohibidas.test(t)), []);
+  const numeros = reducido.flatMap((h) => h.filas.flat().filter((c): c is number => typeof c === 'number'));
+  const deLaPlata = new Set(conPlata.flatMap((h) => h.filas.flat()).filter((c): c is number => typeof c === 'number' && c > 1000));
+  assert.deepEqual(numeros.filter((n) => deLaPlata.has(n)), []);
+  // Las cantidades sí están.
+  const fila = reducido.find((h) => h.nombre === 'Cumplimiento')?.filas[0];
+  assert.ok(fila?.includes(230));
+  assert.ok(fila?.includes(30));
+});
+
+prueba('043/RF-93, RF-96: el PDF lleva las mismas cifras que el Excel, con la plata en pesos', () => {
+  const informe = informe043(SEMANA_043, conTreinta043);
+  const bloques = bloquesDelInforme(informe);
+  const tablas = bloques.flatMap((b) => (b.tipo === 'tabla' ? [b.tabla] : []));
+  const hojas = hojasDelInforme(informe);
+  const celda = (t: { encabezados: string[]; filas: unknown[][] }, fila: unknown[], nombre: string) => fila[t.encabezados.indexOf(nombre)];
+
+  // Cada cifra de cada ítem del Excel está en el PDF, en la fila de su capítulo e ítem.
+  const excel = hojas.find((h) => h.nombre === 'Cumplimiento');
+  assert.ok(excel);
+  const cumplimiento = tablas.find((t) => t.titulo === 'Cumplimiento');
+  const valores = tablas.find((t) => t.titulo === 'Valores por ítem');
+  assert.ok(cumplimiento && valores);
+  for (const fila of excel.filas) {
+    const llave = (t: { encabezados: string[]; filas: unknown[][] }): unknown[] | undefined =>
+      t.filas.find((f) => celda(t, f, 'Capítulo') === celda(excel, fila, 'Capítulo') && celda(t, f, 'Ítem') === celda(excel, fila, 'Ítem'));
+    const enCantidades = llave(cumplimiento);
+    const enValores = llave(valores);
+    assert.ok(enCantidades && enValores);
+    for (const nombre of excel.encabezados) {
+      if (nombre === 'Grupo') continue;
+      const enPdf: unknown = cumplimiento.encabezados.includes(nombre) ? celda(cumplimiento, enCantidades, nombre) : celda(valores, enValores, nombre);
+      assert.equal(enPdf, celda(excel, fila, nombre), nombre);
+    }
+  }
+  // Un solo frente va una vez, como texto, y no ocupa una columna.
+  assert.ok(!cumplimiento.encabezados.includes('Grupo'));
+  assert.ok(bloques.some((b) => b.tipo === 'texto' && b.markdown.includes('Circuito')));
+  // Las demás hojas, iguales.
+  for (const nombre of ['Fuera de la planificación', 'Totales', 'Sin precio de costo', 'Avisos']) {
+    assert.deepEqual(tablas.find((t) => t.titulo === nombre)?.filas, hojas.find((h) => h.nombre === nombre)?.filas, nombre);
+  }
+  assert.equal(valores.formatos[valores.encabezados.indexOf('A cobrar')], 'pesos');
+  assert.equal(cumplimiento.formatos[cumplimiento.encabezados.indexOf('Meta')], 'numero');
+  assert.equal(cumplimiento.formatos[cumplimiento.encabezados.indexOf('Ítem')], 'texto');
+  assert.equal(tablas.find((t) => t.titulo === 'Totales')?.formatos[1], 'pesos');
+
+  // Sin plata, el PDF del Residente no tiene la tabla de valores ni una sola columna en pesos.
+  const reducido = bloquesDelInforme(sinPlata(informe)).flatMap((b) => (b.tipo === 'tabla' ? [b.tabla] : []));
+  assert.deepEqual(reducido.flatMap((t) => t.formatos).filter((f) => f === 'pesos'), []);
+  assert.deepEqual(reducido.map((t) => t.titulo), ['Cumplimiento', 'Fuera de la planificación', 'Avisos']);
+});
+
 prueba('043/RF-87, RF-88: según el acceso se entrega el informe con plata o solo en cantidades', () => {
   const completo = informe043(SEMANA_043, conTreinta043);
   assert.equal('totales' in informeSegunRol(completo, 'residente'), false);
@@ -16173,6 +16330,46 @@ prueba('043/RF-5, RF-6: una hoja oculta no entra aunque la pidan', () => {
 prueba('043: una lectura que pasa de 1 500 filas no se manda', () => {
   const libro = [{ nombre: 'Enorme', visible: true, filas: Array.from({ length: 1501 }, () => ['x']) }];
   assert.equal(textoParaLeer({ hojas: [{ nombre: 'Enorme', usos: ['planificacion'] }] }, libro), null);
+});
+
+prueba('043/RF-6, RF-100, RF-103: la selección que se manda sale de la propuesta y lo que se escogió', () => {
+  // La propuesta del V5, como la dio la IA en la T17.
+  const propuesta = {
+    hojas: [
+      { nombre: 'PLANIFIC BERRIO', usos: ['planificacion' as const], clase: 'otra' as const },
+      { nombre: 'PLANIFIC YONDO', usos: ['planificacion' as const], clase: 'otra' as const },
+      { nombre: 'FLUJO DE CAJA', usos: ['tiempos' as const], clase: 'flujo_de_caja' as const },
+      { nombre: 'Línea base', usos: ['programacion' as const, 'indirectos' as const, 'rubros' as const], clase: 'linea_base' as const },
+      { nombre: 'supuestos', usos: ['supuestos' as const], clase: 'otra' as const },
+      { nombre: 'objetivos', usos: ['objetivos' as const], clase: 'otra' as const },
+    ],
+  };
+  const otras = ['FLUJO DE CAJA', 'supuestos', 'objetivos'];
+  // Con Berrio y la línea base sale la misma selección, en el mismo orden, que leyó la T19: la
+  // lectura guardada sirve y no se paga otra vez.
+  assert.deepEqual(armarSeleccion(propuesta, { frente: 'PLANIFIC BERRIO', programacion: 'Línea base', otras, confirmoProgramacion: false }), {
+    hojas: [
+      { nombre: 'PLANIFIC BERRIO', usos: ['planificacion'] },
+      { nombre: 'Línea base', usos: ['programacion', 'indirectos', 'rubros'] },
+      { nombre: 'FLUJO DE CAJA', usos: ['tiempos'] },
+      { nombre: 'supuestos', usos: ['supuestos'] },
+      { nombre: 'objetivos', usos: ['objetivos'] },
+    ],
+    confirmoProgramacion: false,
+  });
+  // Yondo no entra aunque esté propuesto: se escogió un frente. Una hoja quitada tampoco.
+  const sinFlujo = armarSeleccion(propuesta, { frente: 'PLANIFIC BERRIO', programacion: 'Línea base', otras: ['supuestos', 'PLANIFIC YONDO'], confirmoProgramacion: false });
+  assert.deepEqual(sinFlujo.hojas.map((h) => h.nombre), ['PLANIFIC BERRIO', 'Línea base', 'supuestos']);
+  // Si la de programación es la misma del frente, va una sola vez con los dos usos.
+  const misma = armarSeleccion(propuesta, { frente: 'PLANIFIC BERRIO', programacion: 'PLANIFIC BERRIO', otras: [], confirmoProgramacion: true });
+  assert.deepEqual(misma, { hojas: [{ nombre: 'PLANIFIC BERRIO', usos: ['planificacion', 'programacion'] }], confirmoProgramacion: true });
+  // Lo que arma pasa el repaso del servidor sin faltas.
+  assert.deepEqual(
+    repasarSeleccion(armarSeleccion(propuesta, { frente: 'PLANIFIC BERRIO', programacion: 'Línea base', otras, confirmoProgramacion: false }), propuesta, [
+      ...propuesta.hojas.map((h) => ({ nombre: h.nombre, visible: true, filas: [] })),
+    ]),
+    [],
+  );
 });
 
 prueba('043/RF-100: dos hojas de frente exigen escoger una, y sin hoja de planificación falta', () => {
@@ -16265,6 +16462,8 @@ const ITEM_LEIDO_043 = {
   precioCosto: 40690,
   medidaReal: 2121.42,
   medidaContractual: 236,
+  traeMedidaCoste: false,
+  medidaCoste: 0,
   programacion: { hoja: 2, fila: 2, meses: [{ mes: '2026-12', valor: 0 }, { mes: '2027-01', valor: 18146151 }] },
   tiempos: { hoja: 0, fila: 0, mesInicioDelExcel: 0, mesInicio: '', tiempoEjecucion: 0 },
 };
@@ -16314,6 +16513,22 @@ prueba('043/RF-20: lo que está en su celda se acepta, con las cantidades calcul
   assert.deepEqual(estructura.indirectos, [{ mes: '2026-02', valor: 221042440 }]);
   assert.equal(estructura.supuestos, 'Distancia 25 km');
   assert.equal(totalesDelExcel.contractual, 39558848104);
+});
+
+prueba('043/RF-139, RF-140: la «Med. Coste» se comprueba contra su fila; si el libro no la trae, queda vacía', () => {
+  const sin = leido043(LECTURA_043);
+  assert.equal(sin.estructura.items[0].medidaCoste, null);
+  assert.deepEqual(sin.rechazados, []);
+
+  // 236 está en la fila 2 de la planificación.
+  const con = leido043(conItem043({ traeMedidaCoste: true, medidaCoste: 236 }));
+  assert.equal(con.estructura.items[0].medidaCoste, 236);
+  assert.equal(con.estructura.items[0].revisar, false);
+
+  const inventada = leido043(conItem043({ traeMedidaCoste: true, medidaCoste: 2500 }));
+  assert.equal(inventada.estructura.items[0].medidaCoste, null);
+  assert.equal(inventada.estructura.items[0].revisar, true);
+  assert.match(inventada.rechazados[0].que, /Med\. Coste/);
 });
 
 prueba('043/RF-21, RF-22: una cifra inventada se descarta y marca su ítem, y las demás siguen', () => {

@@ -12,7 +12,7 @@
  * las personas de su obra (RF-65), que en el panel solo ve en los selectores.
  */
 import { diaCorto, esFechaReal, fechaDeJornada, restarDias } from './jornada';
-import { diasDe } from './periodos';
+import { diasDe, periodoDe } from './periodos';
 import { alcanzaLaEmpresa, esEmpresa, nombreDeEmpresa, type EmpresaId } from './empresas';
 import {
   alcanza,
@@ -53,6 +53,9 @@ export const MODULOS_CONSULTABLES = [
   'whatsapp',
   'reportes',
   'contrato',
+  // Spec 043, RF-94: el cumplimiento de la planificación. Vive en el menú de la obra y no en
+  // `MODULOS`, así que `modulosVisibles` no lo trae: lo suma `deObraFuera`, con la tabla.
+  'cumplimiento',
   'vehiculos',
   'personas',
   // Spec 040, RF-13 a RF-15: lo de las empresas. No son de una obra: los alcanza quien entra a
@@ -162,6 +165,15 @@ function deEmpresa(rol: Rol): {
   return { empresas, modulos, bitacorasDeEmpresa };
 }
 
+/**
+ * Spec 043: los módulos de obra que están en el menú de la obra y no en `MODULOS` (T1), y por eso
+ * no salen de `modulosVisibles`. Se dan por la tabla, como en el panel. La planificación no: es la
+ * del Excel, y al asistente solo le toca el informe de cumplimiento (RF-94).
+ */
+function deObraFuera(rol: Rol): ModuloConPermiso[] {
+  return alcanza(rol, 'cumplimiento', 'listar') ? ['cumplimiento'] : [];
+}
+
 /** Lo que alcanza el asistente para quien pregunta. */
 export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
   if (!ROLES_DEL_ASISTENTE.includes(quien.rol)) return NADA;
@@ -172,7 +184,7 @@ export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
     return {
       usa: true,
       obras: 'todas',
-      modulos: consultables([...modulosVisibles(quien.rol), ...empresa.modulos]),
+      modulos: consultables([...modulosVisibles(quien.rol), ...deObraFuera(quien.rol), ...empresa.modulos]),
       empresas: empresa.empresas,
       bitacorasDeEmpresa: empresa.bitacorasDeEmpresa,
     };
@@ -196,7 +208,7 @@ export function alcanceDelAsistente(quien: QuienPregunta): AlcanceDelAsistente {
       ...limite,
     };
   }
-  const visibles: ModuloConPermiso[] = [...modulosVisibles(quien.rol, quien.modulosDeObra), ...empresa.modulos];
+  const visibles: ModuloConPermiso[] = [...modulosVisibles(quien.rol, quien.modulosDeObra), ...deObraFuera(quien.rol), ...empresa.modulos];
   // RF-65: el residente, también vehículos, máquinas y personas de su obra. Desde la 041, el
   // Residente y el Director de Obra, que se repartieron el acceso de antes (RF-55, RF-73); el
   // Director de Proyectos los tiene por la tabla, en la rama de quien ve todas.
@@ -682,8 +694,13 @@ export function ejemplosDePregunta(alcance: AlcanceDelAsistente): string[] {
 /* Lo que puede consultar y lo que está consultando (spec 040)               */
 /* ------------------------------------------------------------------------ */
 
-/** Cómo se nombra cada módulo de obra en la frase «De su obra: …», en el orden del menú. */
-const MODULO_DE_OBRA_EN_CORTO: Record<ModuloDeObraConsultable, string> = {
+/**
+ * Cómo se nombra cada módulo de obra en la frase «De su obra: …», en el orden del menú. El
+ * cumplimiento (spec 043) va en una frase aparte: en la lista, la del Director de Obra pasaba de
+ * los 160 caracteres que RF-25 deja a una frase corta.
+ */
+type ModuloDeObraEnLaLista = Exclude<ModuloDeObraConsultable, 'cumplimiento'>;
+const MODULO_DE_OBRA_EN_CORTO: Record<ModuloDeObraEnLaLista, string> = {
   bitacoras: 'bitácoras',
   preoperacionales: 'preoperacionales',
   almacen: 'almacén',
@@ -713,7 +730,7 @@ export function loQueConsulta(alcance: AlcanceDelAsistente): string[] {
   const frases: string[] = [];
 
   const deObra = MODULOS_CONSULTABLES.filter(
-    (x): x is ModuloDeObraConsultable => x in MODULO_DE_OBRA_EN_CORTO && m(x),
+    (x): x is ModuloDeObraEnLaLista => x in MODULO_DE_OBRA_EN_CORTO && m(x),
   );
   // A quien de las obras solo alcanza las personas (la auxiliar) no se le abre con «De las
   // obras: personas.»: lo suyo es lo del grupo, y las personas van al final, en una frase.
@@ -722,6 +739,7 @@ export function loQueConsulta(alcance: AlcanceDelAsistente): string[] {
     const cuales = enLista(deObra.map((x) => MODULO_DE_OBRA_EN_CORTO[x]));
     frases.push(`${alcance.obras === 'todas' ? 'De las obras' : 'De su obra'}: ${cuales}.`);
   }
+  if (m('cumplimiento')) frases.push('Cómo va la obra frente a su planificación: metas, lo ejecutado y lo pendiente.');
   if (m('compras')) frases.push('Las compras del grupo: qué falta aprobar, comprar o recibir.');
   else if (m('solicitudes')) frases.push('Sus solicitudes de compra y de pago, y en qué van.');
   if (m('tesoreria')) frases.push('Las solicitudes de pago y los pagos del grupo.');
@@ -772,7 +790,7 @@ const TEMAS_DEL_RECUADRO = 5;
 export function resumenDeLoQueConsulta(alcance: AlcanceDelAsistente): string {
   const ambito = ambitoDelAsistente(alcance);
   const m = (modulo: ModuloConsultable) => alcance.modulos.includes(modulo);
-  const deObra = MODULOS_CONSULTABLES.filter((x): x is ModuloDeObraConsultable => x in MODULO_DE_OBRA_EN_CORTO && m(x)).map(
+  const deObra = MODULOS_CONSULTABLES.filter((x): x is ModuloDeObraEnLaLista => x in MODULO_DE_OBRA_EN_CORTO && m(x)).map(
     (x) => MODULO_DE_OBRA_EN_CORTO[x],
   );
   const deEmpresa = MODULOS_CONSULTABLES.filter((x): x is ModuloDeEmpresaConsultable => x in MODULO_DE_EMPRESA_EN_CORTO && m(x))
@@ -804,6 +822,7 @@ const LO_QUE_LEE: Record<string, string> = {
   reporte: 'Leyendo los Reportes',
   bitacora_del_dia: 'Leyendo la bitácora',
   bitacora_de_empresa: 'Leyendo la Bitácora de la empresa',
+  cumplimiento_de_obra: 'Leyendo el cumplimiento de la planificación',
   solicitudes_de_compra: 'Leyendo las solicitudes de compra',
   solicitudes_de_pago: 'Leyendo las solicitudes de pago',
   cortes_financieros: 'Leyendo los cortes financieros',
@@ -899,7 +918,13 @@ export function descripcionDeLaConsulta(
   const empresa = texto('empresa');
   if (nombre === 'bitacora_de_empresa' && esEmpresa(empresa)) que = `Leyendo la Bitácora de ${nombreDeEmpresa(empresa)}`;
 
-  const periodo = periodoEnPalabras(fechaDe(e.desde) ?? fechaDe(e.fecha), fechaDe(e.hasta) ?? fechaDe(e.fecha), hoy);
+  // Spec 043: el cumplimiento pide un día y lee su semana o su mes; se nombra lo que lee.
+  const delInforme = nombre === 'cumplimiento_de_obra' && fechaDe(e.fecha) && (texto('tipo') === 'semana' || texto('tipo') === 'mes')
+    ? periodoDe(texto('tipo') as 'semana' | 'mes', fechaDe(e.fecha) as string)
+    : null;
+  const periodo = delInforme
+    ? periodoEnPalabras(delInforme.desde, delInforme.hasta, hoy)
+    : periodoEnPalabras(fechaDe(e.desde) ?? fechaDe(e.fecha), fechaDe(e.hasta) ?? fechaDe(e.fecha), hoy);
   return `${que}${periodo ? ` ${periodo}` : ''}…`;
 }
 

@@ -19,7 +19,7 @@ de hojas de `reportes/servidor/excel.ts`, `pdfDelAsistente`, `almacen.ts` y `req
 
 | Archivo | Qué cambia | RF |
 | --- | --- | --- |
-| `src/shared/rules/planificacion.ts` (nuevo) | Tipos y estados; cruce con el presupuesto; hallazgos; resumen; cantidad mensual; meses anteriores por marcar | RF-11 a RF-19, RF-23, RF-25 a RF-33, RF-105 a RF-115, RF-121 |
+| `src/shared/rules/planificacion.ts` (nuevo) | Tipos y estados; cruce con el presupuesto; hallazgos; resumen; cantidad mensual; meses anteriores por marcar | RF-11 a RF-19, RF-23, RF-25 a RF-33, RF-105 a RF-115, RF-121, RF-139 a RF-141 |
 | `src/shared/rules/planificacion-ia.ts` (nuevo) | Qué se manda a la IA y qué se acepta: hojas visibles, texto citado, comprobación contra la celda | RF-4 a RF-6, RF-20 a RF-22, RF-24, RF-100 a RF-104 |
 | `src/shared/rules/cumplimiento-de-obra.ts` (nuevo) | Días de reparto, versión que rige, meta por día, informe por ítem, valores y proyección sin plata | RF-52 a RF-85, RF-88, RF-89, RF-119, RF-120, RF-123 a RF-135, RF-138 |
 | `src/shared/rules/permisos.ts` | Módulos `planificacion` y `cumplimiento` en la tabla | RF-1, RF-36, RF-48, RF-49, RF-50, RF-86 a RF-90 |
@@ -204,9 +204,12 @@ Todas abren con `requerirPermiso`. La obra sale de `pedidoDeReporte` o `alcanzaL
     flujo de caja (RF-5, RF-20 a RF-22, RF-101 a RF-103).
   - Cruce: los 38 ítems de Berrio, el mismo ítem y capítulo en Yondo no cruza, presupuesto sin
     grupos, empate pide grupo, resolución por renglón (RF-19, RF-105 a RF-107).
-  - Hallazgos, uno por RF-25 a RF-32; un ítem con medida cero no sale en RF-29; rubros contra rubros.
+  - Hallazgos, uno por RF-25 a RF-32; un ítem con medida cero no sale en RF-29; un ítem sin precio
+    contractual no sale en RF-28; rubros contra rubros.
   - Resumen: el del V5 da utilidad de $8.327 millones con los indirectos de la hoja de Berrio
-    (RF-33, RF-111 a RF-114).
+    (RF-33, RF-111 a RF-114). El total a costo con medida real usa la «Med. Coste» del ítem
+    (`medidaCoste`, en la `estructura` jsonb: sin migración), y sin ella, la medida real
+    (RF-139 a RF-141, D31).
   - Versiones: reemplazo, anulación el mismo día, primera versión anulada y días anteriores
     (RF-52, RF-55 a RF-57, RF-120, RF-138).
   - Meta: festivo fuera, mes exacto, semana entre dos meses, periodo partido, plan semanal, sin

@@ -115,7 +115,13 @@ function anchosDe(tabla: TablaDelArchivo): number[] {
   const muestra = tabla.filas.slice(0, 200);
   const pesos = tabla.encabezados.map((encabezado, i) => {
     const largos = muestra.map((f) => celdaEnTexto(f[i], tabla.formatos[i]).length);
-    const tipico = largos.length ? largos.sort((a, b) => a - b)[Math.floor(largos.length * 0.9)] : 0;
+    // Un texto largo se puede partir en renglones; una cifra partida («490.102, / 84») ya no se lee.
+    // Por eso las columnas de números se miden por su valor más largo y las de texto, por el típico
+    // (spec 043, T27: el informe de cumplimiento las partía).
+    const deNumeros = tabla.formatos[i] !== 'texto' && tabla.formatos[i] !== 'fecha';
+    const ordenados = largos.sort((a, b) => a - b);
+    // Y con un carácter de holgura: los dígitos son más anchos que la letra promedio con que se reparte.
+    const tipico = ordenados.length ? (deNumeros ? ordenados[ordenados.length - 1] + 1 : ordenados[Math.floor(ordenados.length * 0.9)]) : 0;
     // Al menos la palabra más larga del título, para que no se parta a mitad («Cantida/d»).
     const palabra = Math.max(...encabezado.split(' ').map((p) => p.length));
     return Math.min(40, Math.max(6, palabra * 1.15 + 1, encabezado.length * 0.6, tipico));
@@ -199,7 +205,7 @@ export async function pdfDelAsistente(contenido: ContenidoDelArchivo): Promise<U
   }
 
   const paginas = doc.getPages();
-  const leyenda = textoParaPdf(LEYENDA_DEL_ARCHIVO);
+  const leyenda = textoParaPdf(contenido.leyenda ?? LEYENDA_DEL_ARCHIVO);
   paginas.forEach((pagina, i) => {
     pagina.drawText(leyenda, { x: MARGEN, y: MARGEN - 10, size: 7, font: fuentes.normal, color: GRIS });
     const numero = `Página ${i + 1} de ${paginas.length}`;

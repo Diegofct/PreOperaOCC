@@ -60,6 +60,7 @@ import { duenoDelPedido, documentosDelLugar } from '@/features/documentos/servid
 import { consolidadoDelGrupo, cortesDe } from '@/features/empresas/servidor/cortes';
 import { laboratorioDeLasObras } from '@/features/empresas/servidor/laboratorio';
 import { leerEnsayos } from '@/features/laboratorio/servidor/ensayos';
+import { informeParaLaPersona } from '@/features/planificacion/servidor/cumplimiento';
 import { detalleDe, listarPresupuestos } from '@/features/presupuestos/servidor/presupuestos';
 import { TITULO_DE_PESTANA } from '@/features/reportes/exportar';
 import { partesDelPeriodo, vehiculosDeLaObra } from '@/features/reportes/servidor/datos';
@@ -839,6 +840,43 @@ const personasDeLaObra = herramienta({
   },
 });
 
+/**
+ * Spec 043, RF-94 a RF-96: el informe de cumplimiento de una semana o un mes, el mismo de la
+ * pantalla y las descargas (`informeParaLaPersona`). Al Residente le llega ya sin plata: no es la
+ * IA la que la calla, es que no la recibe (RF-89). No estricta: la gerencia ya está en el tope de
+ * la gramática (ver `estricta`), y la entrada la valida entera su esquema.
+ */
+const cumplimientoDeObra = herramienta({
+  nombre: 'cumplimiento_de_obra',
+  descripcion:
+    'Cómo va la obra frente a su planificación aprobada en una semana (de lunes a domingo) o un mes: por ítem, la meta, lo ejecutado, el % cumplido y lo pendiente, más lo ejecutado fuera de la planificación y los avisos (partes abiertos, días sin parte, días sin planificación). Si trae «totales», también los valores programado, ejecutado y a cobrar, el faltó o sobró y el margen; en el mes, además los indirectos y el resultado. Los rubros van aparte, como programado: no son parte de los indirectos ni entran al margen. Si no los trae, la persona no ve plata: no la mencione ni la estime. La meta de la semana es «estimada» cuando sale de repartir el mes. Si la persona alcanza todas las obras y no dice cuál, pregúntele la obra antes de consultar.',
+  modulo: 'cumplimiento',
+  estricta: false,
+  entrada: z.strictObject({
+    obraId: OBRA,
+    tipo: z.enum(['semana', 'mes']).describe('semana: la de lunes a domingo que contiene la fecha; mes: el del calendario.'),
+    fecha: FECHA.describe('Un día del periodo, AAAA-MM-DD.'),
+  }),
+  async ejecutar({ obraId, tipo, fecha }, alcance, sesion) {
+    const obra = await obraConsultada(alcance, obraId);
+    if ('error' in obra) return obra;
+    const informe = await informeParaLaPersona(sesion, obra.id, tipo, fecha);
+    const que = tipo === 'semana' ? `semana del ${informe.periodo.desde} al ${informe.periodo.hasta}` : `mes de ${informe.periodo.desde.slice(0, 7)}`;
+    return {
+      datos: informe,
+      fuentes: [
+        {
+          modulo: 'cumplimiento',
+          etiqueta: `Cumplimiento, ${obra.codigo}, ${que}`,
+          fecha: null,
+          ruta: `${rutaDeObra(obra.id, 'cumplimiento')}?${new URLSearchParams({ tipo, fecha })}`,
+        },
+      ],
+      consulto: consulta(obra.id, 'cumplimiento'),
+    };
+  },
+});
+
 const contratoYPresupuesto = herramienta({
   nombre: 'contrato_y_presupuesto',
   descripcion:
@@ -1108,6 +1146,7 @@ const NOMBRE_DEL_MODULO: Record<ModuloDeObraConsultable, string> = {
   whatsapp: 'Reportes de WhatsApp',
   reportes: 'Reportes',
   contrato: 'Contrato y Presupuesto',
+  cumplimiento: 'Cumplimiento',
   vehiculos: 'Vehículos',
   personas: 'Personas',
 };
@@ -1123,6 +1162,7 @@ const RUTA_DEL_MODULO: Record<ModuloDeObraConsultable, (obraId: string, fecha: s
   whatsapp: (obraId, fecha) => `${rutaDeObra(obraId, 'whatsapp')}?${new URLSearchParams({ desde: fecha })}`,
   reportes: (obraId, fecha) => `${rutaDeObra(obraId, 'reportes')}?${new URLSearchParams({ fecha })}`,
   contrato: (obraId) => rutaDeObra(obraId, 'contrato'),
+  cumplimiento: (obraId, fecha) => `${rutaDeObra(obraId, 'cumplimiento')}?${new URLSearchParams({ fecha })}`,
   vehiculos: () => rutaDeEmpresa('occ', 'vehiculos'),
   personas: (obraId) => rutaDeObra(obraId, 'recursos-humanos'),
 };
@@ -1755,6 +1795,7 @@ const TODAS: Herramienta<never>[] = [
   vehiculosYMedidores,
   personasDeLaObra,
   contratoYPresupuesto,
+  cumplimientoDeObra,
   anulados,
   mensajesDeWhatsapp,
 ] as unknown as Herramienta<never>[];
