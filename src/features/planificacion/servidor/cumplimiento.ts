@@ -7,6 +7,13 @@
  * asistente (RF-96): si alguno armara su propia consulta, en la siguiente revisión darían cifras
  * distintas para la misma semana sin que nada falle a la vista.
  *
+ * ── Los planes semanales (spec 044, RF-70 a RF-77, RF-107) ──
+ *
+ * El informe de una semana carga los planes de esa semana que alguna vez se aprobaron, vigentes y
+ * anulados: uno anulado sigue midiendo los días que rigió (044/RF-68). Qué plan mide cada día y qué
+ * pasa sin planificación lo decide la regla; aquí solo se traen. El del mes no los carga, porque su
+ * meta sale siempre de la planificación (044/RF-74). Sin planes, el informe es el de la 043.
+ *
  * No escribe nada (RF-98): lee planificaciones aprobadas y partes, y el informe se recalcula cada
  * vez que se abre. Un informe ya entregado puede variar si después se anula o se cierra un parte de
  * ese periodo, y eso es lo acordado (casos límite de la spec).
@@ -14,10 +21,10 @@
  * Lo que se quita para el Residente se quita aquí, con `informeSegunRol`, antes de que salga del
  * servidor: la pantalla no esconde columnas, nunca las recibe (RF-88, RF-89).
  */
-import { and, eq, isNotNull, lte } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, lte } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { partesDeObra, planificaciones } from '@/db/servidor/esquema';
+import { partesDeObra, planesSemanales, planificaciones } from '@/db/servidor/esquema';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import {
   informeDeCumplimiento,
@@ -28,9 +35,11 @@ import {
   type InformeEnCantidades,
   type ParteMedido,
   type PeriodoDeMeta,
+  type PlanSemanalParaMedir,
   type VersionDelInforme,
 } from '@/shared/rules/cumplimiento-de-obra';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { lunesDe, metasPorDiaDelPlan } from '@/shared/rules/plan-semanal';
 
 /** Las versiones que alguna vez se aprobaron, también las reemplazadas y anuladas (RF-52, RF-57). */
 async function versionesDeLaObra(obraId: string): Promise<{ versiones: VersionDelInforme[]; mesesCumplidos: string[] }> {
@@ -61,10 +70,62 @@ async function partesHasta(obraId: string, hasta: string): Promise<ParteMedido[]
   return filas.map((p) => ({ fecha: p.fecha, cerrado: p.cerradoEn !== null, anulado: p.anuladoEn !== null, actividades: p.actividades }));
 }
 
+/**
+ * Spec 044, RF-68, RF-70: los planes de las semanas del periodo que alguna vez se aprobaron. Un
+ * borrador o un descartado nunca rigió; un anulado sí, hasta el día anterior a anularlo.
+ */
+async function planesAprobados(obraId: string, periodo: PeriodoDeMeta): Promise<PlanSemanalParaMedir[]> {
+  // 044/RF-74: la meta del mes no sale de los planes, así que no se consultan.
+  if (periodo.tipo !== 'semana') return [];
+  const filas = await baseServidor()
+    .select({
+      id: planesSemanales.id,
+      semana: planesSemanales.semana,
+      rigeDesde: planesSemanales.rigeDesde,
+      rigeHasta: planesSemanales.rigeHasta,
+      estructura: planesSemanales.estructura,
+    })
+    .from(planesSemanales)
+    .where(
+      and(
+        eq(planesSemanales.obraId, obraId),
+        inArray(planesSemanales.estado, ['vigente', 'anulado']),
+        isNotNull(planesSemanales.rigeDesde),
+        gte(planesSemanales.semana, lunesDe(periodo.desde)),
+        lte(planesSemanales.semana, periodo.hasta),
+      ),
+    );
+  return filas.map((p) => ({
+    id: p.id,
+    semana: p.semana,
+    rigeDesde: p.rigeDesde as string,
+    rigeHasta: p.rigeHasta,
+    metasPorDia: metasPorDiaDelPlan(p.estructura),
+  }));
+}
+
+export interface OpcionesDelInforme {
+  /**
+   * Spec 044, RF-35: el informe como si no hubiera planes semanales. Lo pide la propuesta de la IA
+   * para la semana que va a planear: su punto de partida es lo que la planificación estimaría, no
+   * lo que ya decía un plan anterior de esa misma semana.
+   */
+  sinPlanes?: boolean;
+}
+
 /** RF-58 a RF-85: el informe completo, con plata. Lo usan la ruta, las descargas y el asistente. */
-export async function informeDeLaObra(obraId: string, tipo: PeriodoDeMeta['tipo'], fecha: string): Promise<InformeDeCumplimiento> {
+export async function informeDeLaObra(
+  obraId: string,
+  tipo: PeriodoDeMeta['tipo'],
+  fecha: string,
+  opciones: OpcionesDelInforme = {},
+): Promise<InformeDeCumplimiento> {
   const periodo = periodoDelInforme(tipo, fecha);
-  const [{ versiones, mesesCumplidos }, partes] = await Promise.all([versionesDeLaObra(obraId), partesHasta(obraId, periodo.hasta)]);
+  const [{ versiones, mesesCumplidos }, partes, planes] = await Promise.all([
+    versionesDeLaObra(obraId),
+    partesHasta(obraId, periodo.hasta),
+    opciones.sinPlanes ? [] : planesAprobados(obraId, periodo),
+  ]);
   return informeDeCumplimiento({
     periodo,
     hoy: fechaDeJornada(),
@@ -72,8 +133,7 @@ export async function informeDeLaObra(obraId: string, tipo: PeriodoDeMeta['tipo'
     partesDelPeriodo: partes.filter((p) => p.fecha >= periodo.desde),
     partesAcumuladas: partes,
     mesesCumplidos,
-    // Spec 044: el plan semanal aprobado mandará sobre la meta estimada (RF-64). Hasta entonces, no hay.
-    planSemanal: null,
+    planesSemanales: planes,
   });
 }
 

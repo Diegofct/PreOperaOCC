@@ -137,6 +137,8 @@ export const MODULOS_DE_EMPRESA = [
   // de cumplimiento y no a la planificación, que lleva los costos.
   'planificacion',
   'cumplimiento',
+  // Spec 044. Solo en el menú de una obra, como los dos de arriba.
+  'plan_semanal',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -595,6 +597,21 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar'],
   },
+  // Spec 044, RF-54, RF-59. Lo arman la Gerencia, los dos directores y el Residente; aprobar y anular
+  // no son del Residente. Quién aprueba qué plan depende además de quién lo creó (RF-56 a RF-58):
+  // eso no cabe en esta tabla y lo decide la regla del plan semanal.
+  plan_semanal: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    residente: ['ver', 'listar', 'escribir'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -788,6 +805,14 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
     ver: 'ver el cumplimiento de la obra',
     listar: 'ver el cumplimiento de la obra',
   },
+  // Spec 044.
+  plan_semanal: {
+    ver: 'ver el plan semanal de la obra',
+    listar: 'ver el plan semanal de la obra',
+    escribir: 'armar un plan semanal',
+    aprobar: 'aprobar un plan semanal',
+    anular: 'anular un plan semanal',
+  },
 };
 
 /** Quién es cada rol dentro de una frase: «lo hacen la gerencia y el almacenista». */
@@ -901,6 +926,7 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   bitacora_empresa: 'Bitácora',
   planificacion: 'Planificación',
   cumplimiento: 'Cumplimiento de obra',
+  plan_semanal: 'Plan semanal',
 };
 
 /**

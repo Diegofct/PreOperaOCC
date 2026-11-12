@@ -212,6 +212,15 @@ export function llaveDelItem(grupo: string, capitulo: string, item: string): str
   return [grupo, capitulo, item].map(limpio).join('|');
 }
 
+/**
+ * La identidad con que se mide un ítem: la del presupuesto; si no cruzó, la del libro. La usan el
+ * cumplimiento (043) y el plan semanal (044), que tienen que hablar del mismo ítem.
+ */
+export function llaveDeItemPlanificado(item: Pick<ItemDeLaPlanificacion, 'delPresupuesto' | 'grupo' | 'capitulo' | 'item'>): string {
+  const cruce = item.delPresupuesto;
+  return cruce ? llaveDelItem(cruce.grupo, cruce.capitulo, cruce.item) : llaveDelItem(item.grupo, item.capitulo, item.item);
+}
+
 /** El libro solo trae el «Nº»: su columna de ítem está vacía o repite el renglón. */
 function sinItemDePago(item: ItemDeLaPlanificacion): boolean {
   return item.item === '' || item.item === String(item.renglon);

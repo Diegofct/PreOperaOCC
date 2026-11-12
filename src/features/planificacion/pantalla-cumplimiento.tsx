@@ -27,7 +27,7 @@ import { guardarArchivo } from '@/features/panel/guardar-archivo';
 import { informeConPlata, type InformeRespuesta } from '@/features/panel/planificacion';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { textoDelPeriodo } from '@/features/reportes/exportar';
-import type { ActividadFueraDeLaPlanificacion, FilaEnCantidades } from '@/shared/rules/cumplimiento-de-obra';
+import { etiquetaDeEstimada, type ActividadFueraDeLaPlanificacion, type FilaEnCantidades } from '@/shared/rules/cumplimiento-de-obra';
 import { diaCorto, fechaDeJornada } from '@/shared/rules/jornada';
 import { periodoDe, periodoVecino } from '@/shared/rules/periodos';
 
@@ -158,7 +158,8 @@ function Informe({ datos }: { datos: InformeRespuesta }) {
       pintar: (f) => (
         <View style={estilos.celda}>
           <Celda>{cantidad(f.meta)}</Celda>
-          {f.meta !== null && f.estimada ? <Etiqueta tono="neutro">Estimada</Etiqueta> : null}
+          {/* Spec 044, RF-95: con días del plan y días estimados, «Parcialmente estimada (n días del plan)». */}
+          {etiquetaDeEstimada(f) ? <Etiqueta tono="neutro">{etiquetaDeEstimada(f)}</Etiqueta> : null}
         </View>
       ),
     },

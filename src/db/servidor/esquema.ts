@@ -90,6 +90,14 @@ import {
   type ResumenDeLaPlanificacion,
 } from '../../shared/rules/planificacion';
 import type { LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
+import {
+  ESTADOS_DE_LECTURA_DE_PLAN,
+  ESTADOS_DE_PLAN_SEMANAL,
+  ORIGENES_DE_PLAN_SEMANAL,
+  TIPOS_DE_LECTURA_DE_PLAN,
+  type DiferenciaConElExcelDelPlan,
+  type EstructuraDelPlan,
+} from '../../shared/rules/plan-semanal';
 import type { EmpresaId } from '../../shared/rules/empresas';
 import type {
   ActividadDeMantenimiento,
@@ -2199,6 +2207,117 @@ export const planificacionLecturasIa = pgTable('planificacion_lecturas_ia', {
     .references(() => usuarios.id),
   creadoEn: creadoEn(),
 });
+
+/* ------------------------------------------------------------------------ */
+/* Spec 044: el plan de trabajo semanal                                      */
+/* ------------------------------------------------------------------------ */
+
+export const estadoPlanSemanal = pgEnum('estado_plan_semanal', ESTADOS_DE_PLAN_SEMANAL);
+export const origenPlanSemanal = pgEnum('origen_plan_semanal', ORIGENES_DE_PLAN_SEMANAL);
+export const estadoLecturaPlanSemanal = pgEnum('estado_lectura_plan_semanal', ESTADOS_DE_LECTURA_DE_PLAN);
+export const tipoLecturaPlanSemanal = pgEnum('tipo_lectura_plan_semanal', TIPOS_DE_LECTURA_DE_PLAN);
+
+/**
+ * Los planes semanales de una obra (RF-50 a RF-69). La estructura va entera en un jsonb, como la
+ * planificación: un plan aprobado no cambia, y Neon por HTTP no da transacciones interactivas. Los
+ * valores en pesos **no** se guardan (RF-94): se calculan al mostrar con el costo de la planificación.
+ *
+ * A lo sumo un borrador y un vigente por obra y semana (RF-50, RF-51): lo garantizan los índices
+ * parciales, no la pantalla. Un borrador sustituido queda `descartado` (RF-53) y un plan anulado se
+ * conserva con su motivo (RF-64, RF-69): nada se borra.
+ *
+ * `rige_desde` y `rige_hasta` son fechas de Colombia, resueltas al aprobar y al anular (RF-62,
+ * RF-67). Mientras rige, `rige_hasta` va vacío: el plan rige hasta el domingo de su semana.
+ * `creado_por` es el autor que decide quién aprueba (RF-55 a RF-58), y no cambia aunque otro edite.
+ */
+export const planesSemanales = pgTable(
+  'planes_semanales',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    /** El lunes de la semana. */
+    semana: date('semana', { mode: 'string' }).notNull(),
+    estado: estadoPlanSemanal('estado').notNull().default('borrador'),
+    origen: origenPlanSemanal('origen').notNull(),
+    estructura: jsonb('estructura').$type<EstructuraDelPlan>().notNull(),
+    /** RF-45: las cifras del Excel que no estaban en su fila, para mostrarlas. */
+    rechazados: jsonb('rechazados').$type<RechazadoPorIa[]>().notNull().default([]),
+    /** RF-48: lo que traía el Excel y no cuadraba. */
+    diferenciasExcel: jsonb('diferencias_excel').$type<DiferenciaConElExcelDelPlan[]>().notNull().default([]),
+    /** RF-100: la versión de la planificación con que se cruzó. */
+    planificacionId: text('planificacion_id')
+      .notNull()
+      .references(() => planificaciones.id),
+    rigeDesde: date('rige_desde', { mode: 'string' }),
+    rigeHasta: date('rige_hasta', { mode: 'string' }),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    descartadoPor: text('descartado_por').references(() => usuarios.id),
+    version: integer('version').notNull().default(0),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_plan_semanal_borrador')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'borrador'`),
+    uniqueIndex('ux_plan_semanal_vigente')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'vigente'`),
+    check(
+      'ck_plan_semanal_anulado',
+      sql`(${t.estado} = 'anulado') = (${t.anuladoEn} is not null)
+       and (${t.anuladoEn} is null or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0))`,
+    ),
+    check('ck_plan_semanal_descartado', sql`(${t.estado} = 'descartado') = (${t.descartadoEn} is not null)`),
+    check(
+      'ck_plan_semanal_aprobado',
+      sql`${t.estado} not in ('vigente', 'anulado') or (${t.aprobadoEn} is not null and ${t.rigeDesde} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Cada propuesta de la IA o lectura de un Excel (RF-34, RF-42). Corre por detrás, como la lectura de
+ * la planificación, porque el proxy del VPS corta a los 120 segundos. A lo sumo una en curso por obra
+ * y semana (RF-101): lo garantiza el índice parcial. `vence_en` la libera si el servidor se reinicia
+ * a mitad de camino. `plan_id` se reserva al empezar: es el borrador que va a crear.
+ */
+export const planSemanalLecturas = pgTable(
+  'plan_semanal_lecturas',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    semana: date('semana', { mode: 'string' }).notNull(),
+    tipo: tipoLecturaPlanSemanal('tipo').notNull(),
+    estado: estadoLecturaPlanSemanal('estado').notNull().default('en_curso'),
+    planId: text('plan_id').notNull(),
+    error: text('error'),
+    venceEn: timestamp('vence_en', { withTimezone: true, mode: 'date' }).notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_plan_semanal_lectura_en_curso')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'en_curso'`),
+  ],
+);
 
 /* ------------------------------------------------------------------------ */
 /* Spec 028: el asistente                                                    */

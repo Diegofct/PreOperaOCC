@@ -17,7 +17,7 @@ import type {
   FormatoDeColumna as FormatoDeColumnaDelArchivo,
   TablaDelArchivo,
 } from '@/shared/rules/archivos-del-asistente';
-import type { EstadoDeFila } from '@/shared/rules/cumplimiento-de-obra';
+import { etiquetaDeEstimada, type EstadoDeFila } from '@/shared/rules/cumplimiento-de-obra';
 
 const ESTADO: Record<EstadoDeFila, string> = { normal: '', sin_programacion: 'Sin programación', meta_cumplida: 'Meta cumplida' };
 
@@ -41,6 +41,16 @@ const COLUMNAS_DE_PLATA = ['Valor programado', 'Valor ejecutado', 'A cobrar'];
 
 const CANTIDADES = ['Meta', 'Ejecutado', 'Pendiente del periodo', 'Cantidad planeada', 'Acumulado', 'Pendiente total'] as const;
 
+/**
+ * La columna «Estimada»: «Sí», «No» o, con días del plan y días estimados, la misma
+ * «Parcialmente estimada (n días del plan)» de la pantalla (spec 044, RF-95). Sin meta, vacía.
+ */
+function columnaEstimada(fila: InformeRespuesta['filas'][number]): string {
+  if (fila.meta === null) return '';
+  const etiqueta = etiquetaDeEstimada(fila);
+  return etiqueta === null ? 'No' : etiqueta === 'Estimada' ? 'Sí' : etiqueta;
+}
+
 function hojaDeCumplimiento(informe: InformeRespuesta): HojaDeReporte {
   const conPlata = informeConPlata(informe);
   const formatos: HojaDeReporte['formatos'] = { '% cumplido': 'entero' };
@@ -59,7 +69,7 @@ function hojaDeCumplimiento(informe: InformeRespuesta): HojaDeReporte {
         fila.descripcion,
         fila.unidad,
         fila.meta,
-        fila.meta === null ? '' : fila.estimada ? 'Sí' : 'No',
+        columnaEstimada(fila),
         fila.ejecutado,
         fila.porcentaje,
         fila.pendientePeriodo,
@@ -155,7 +165,14 @@ function columnas(hoja: HojaDeReporte, nombre: string, cuales: readonly string[]
  * una vez arriba, como texto, y no en cada fila; y la plata de cada ítem va en una segunda tabla,
  * «Valores por ítem», con su capítulo e ítem para cruzarla. Las demás hojas pasan iguales. La
  * plata va en pesos.
+ *
+ * La columna «Estimada» también es angosta: el PDF la mide por su texto típico («Sí»), y
+ * «Parcialmente estimada (4 días del plan)» salía cortado en «Parcialme / nte / estimad…». Por eso
+ * en el PDF va «Parcial (4 días del plan)», y debajo de la tabla una nota dice qué es (spec 044,
+ * RF-95). El Excel y la pantalla llevan el texto entero.
  */
+const PARCIAL = 'Parcialmente estimada';
+
 export function bloquesDelInforme(informe: InformeRespuesta): BloqueDelArchivo[] {
   const conPlata = informeConPlata(informe);
   const [cumplimiento, ...resto] = hojasDelInforme(informe);
@@ -165,7 +182,23 @@ export function bloquesDelInforme(informe: InformeRespuesta): BloqueDelArchivo[]
   const enCantidades = COLUMNAS_EN_CANTIDADES.filter((c) => !(unSoloFrente && c === 'Grupo'));
   const bloques: BloqueDelArchivo[] = [];
   if (unSoloFrente) bloques.push({ tipo: 'texto', markdown: `**Frente:** ${grupos[0]}` });
-  bloques.push({ tipo: 'tabla', tabla: tablaDe(columnas(cumplimiento, 'Cumplimiento', enCantidades), conPlata) });
+  const tabla = tablaDe(columnas(cumplimiento, 'Cumplimiento', enCantidades), conPlata);
+  const estimada = tabla.encabezados.indexOf('Estimada');
+  let hayParciales = false;
+  tabla.filas = tabla.filas.map((fila) => {
+    const valor = fila[estimada];
+    if (typeof valor !== 'string' || !valor.startsWith(PARCIAL)) return fila;
+    hayParciales = true;
+    return fila.map((celda, i) => (i === estimada ? `Parcial${valor.slice(PARCIAL.length)}` : celda));
+  });
+  bloques.push({ tipo: 'tabla', tabla });
+  if (hayParciales) {
+    bloques.push({
+      tipo: 'texto',
+      markdown:
+        '**Parcial:** Parcialmente estimada. Esos días la meta salió del plan semanal aprobado; los demás días del periodo, de repartir la meta del mes.',
+    });
+  }
   if (conPlata) {
     const llave = unSoloFrente ? ['Capítulo', 'Ítem', 'Descripción'] : ['Grupo', 'Capítulo', 'Ítem', 'Descripción'];
     bloques.push({ tipo: 'tabla', tabla: tablaDe(columnas(cumplimiento, 'Valores por ítem', [...llave, ...COLUMNAS_DE_PLATA]), conPlata) });
