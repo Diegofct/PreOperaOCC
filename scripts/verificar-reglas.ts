@@ -746,6 +746,32 @@ import {
   type MovimientoRegistrado,
 } from '../src/shared/rules/almacen';
 import {
+  cantidadEnElMaterial,
+  claveDelDocumento,
+  documentoRepetido,
+  estadoDelRenglon,
+  faltasParaConfirmar,
+  importacionAConfirmar,
+  materialesNuevosDe,
+  renglonBloqueado,
+  valorConSuUnidad,
+  type IngresoParaRepetido,
+  type RenglonDeLaImportacion,
+} from '../src/shared/rules/almacen-importacion';
+import {
+  faltaDeTamano,
+  INSTRUCCIONES_PARA_IMPORTAR,
+  propuestaDeLaLectura,
+  type ContextoDeLaLectura,
+  type LecturaDeImportacion,
+  type RenglonLeidoPorLaIa,
+  textoDelExcelParaImportar,
+  textoDelWordParaImportar,
+  textoParaImportar,
+} from '../src/shared/rules/almacen-importacion-ia';
+import { confirmacionDeImportacion } from '../src/features/panel/almacen-importacion';
+import { pdfCifrado, revisarDocumentoParaImportar } from '../src/shared/rules/archivos-subidos';
+import {
   avisoDeValeRepetido,
   canteraDelParte,
   conductorElegible,
@@ -5173,6 +5199,12 @@ prueba('el Excel del almacén trae los movimientos y las existencias como se ven
     anuladoEn: null,
     anuladoPorNombre: null,
     motivoAnulacion: null,
+    // Spec 042: los movimientos de esta prueba no se importaron.
+    proveedor: null,
+    documentoTipo: null,
+    documentoNumero: null,
+    valorUnitario: null,
+    valorUnidad: null,
   };
   const movimientos: MovimientoParaExportar[] = [
     // Un ingreso de antes del cambio: sin nombre.
@@ -14699,7 +14731,7 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     asignaciones: ['ver', 'listar', 'escribir'],
     bitacoras: ['ver', 'listar', 'escribir', 'anular'],
     preoperacionales: ['ver', 'listar', 'anular'],
-    almacen: ['ver', 'listar', 'anular'],
+    almacen: ['ver', 'listar', 'anular', 'importar'],
     cantera: ['ver', 'listar', 'anular'],
     laboratorio: ['ver', 'listar', 'aprobar', 'anular'],
     whatsapp: ['ver', 'listar', 'escribir', 'aprobar'],
@@ -14727,7 +14759,7 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     asignaciones: ['ver', 'listar', 'escribir'],
     bitacoras: ['ver', 'listar', 'escribir', 'anular'],
     preoperacionales: ['ver', 'listar', 'anular'],
-    almacen: ['ver', 'listar', 'escribir', 'anular'],
+    almacen: ['ver', 'listar', 'escribir', 'anular', 'importar'],
     cantera: ['ver', 'listar', 'escribir', 'anular'],
     laboratorio: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
     whatsapp: ['ver', 'listar', 'escribir', 'aprobar'],
@@ -14760,7 +14792,8 @@ prueba('041/RF-1, RF-2: los tres accesos existen y ninguno se llama «Residente 
 });
 
 prueba('041/RF-57: la tabla completa de los tres accesos, módulo por módulo', () => {
-  const acciones = ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar'] as const;
+  // `importar` es de la spec 042 (Almacén).
+  const acciones = ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar', 'importar'] as const;
   for (const [rol, modulos] of Object.entries(ESPERADO_041) as [keyof typeof ESPERADO_041, Partial<Record<ModuloConPermiso, readonly string[]>>][]) {
     for (const modulo of [...MODULOS, ...MODULOS_DE_EMPRESA]) {
       const esperado = modulos[modulo];
@@ -17545,6 +17578,741 @@ prueba('044/RF-95: la meta con días del plan y días estimados es «Parcialment
   // Sin filas parciales, ni la nota.
   const sinParciales = bloquesDelInforme(base);
   assert.ok(!sinParciales.some((b) => b.tipo === 'texto' && b.markdown.includes('Parcial')));
+});
+
+prueba('042/RF-1, RF-2: importan al Almacén la Gerencia, el Almacenista y los dos directores; nadie más', () => {
+  const importan = ROLES.filter((rol) => alcanza(rol, 'almacen', 'importar'));
+  assert.deepEqual([...importan].sort(), ['admin', 'almacenista', 'director_obra', 'director_proyectos']);
+  for (const rol of ['residente', 'operador', 'encargado_planta', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
+    assert.equal(alcanza(rol, 'almacen', 'importar'), false, rol);
+  }
+  // Ningún otro módulo tiene `importar`.
+  for (const modulo of [...MODULOS, ...MODULOS_DE_EMPRESA]) {
+    if (modulo === 'almacen') continue;
+    assert.deepEqual(ROLES.filter((rol) => alcanza(rol, modulo, 'importar')), [], modulo);
+  }
+  assert.match(motivoDeRechazo('almacen', 'importar'), /^No puede importar documentos al Almacén: lo hacen /);
+});
+
+prueba('042/RF-78: el Director de Obra importa, pero no registra a mano', () => {
+  assert.ok(alcanza('director_obra', 'almacen', 'importar'));
+  assert.equal(alcanza('director_obra', 'almacen', 'escribir'), false);
+  // Lo de antes sigue: consulta y anula.
+  assert.ok(alcanza('director_obra', 'almacen', 'listar'));
+  assert.ok(alcanza('director_obra', 'almacen', 'anular'));
+  // El Residente sigue solo consultando.
+  assert.deepEqual(
+    (['ver', 'listar', 'escribir', 'anular', 'importar'] as const).filter((a) => alcanza('residente', 'almacen', a)),
+    ['ver', 'listar'],
+  );
+});
+
+prueba('042/RF-45: proveedor y número se comparan sin mayúsculas, tildes, espacios, puntos ni guiones', () => {
+  const una = claveDelDocumento('Ferretería Ñandú S.A.S.', 'FV-0012');
+  assert.ok(una);
+  assert.equal(claveDelDocumento('ferreteria nandu sas', 'fv 0012'), una);
+  assert.equal(claveDelDocumento('  FERRETERIA  NANDU  S A S ', 'FV_0012'), una);
+  // Otro número u otro proveedor ya es otro documento.
+  assert.notEqual(claveDelDocumento('Ferretería Ñandú S.A.S.', 'FV-0013'), una);
+  assert.notEqual(claveDelDocumento('Ferretería El Clavo', 'FV-0012'), una);
+  // Los ceros a la izquierda cuentan: «12» no es «0012».
+  assert.notEqual(claveDelDocumento('Ferretería Ñandú S.A.S.', 'FV-12'), una);
+  // El proveedor y el número no se pegan: «AB» + «C1» no es «A» + «BC1».
+  assert.notEqual(claveDelDocumento('AB', 'C1'), claveDelDocumento('A', 'BC1'));
+});
+
+prueba('042/RF-90: sin proveedor o sin número no hay clave, y no se puede revisar si está repetido', () => {
+  assert.equal(claveDelDocumento(null, 'FV-0012'), null);
+  assert.equal(claveDelDocumento('Ferretería Ñandú', null), null);
+  assert.equal(claveDelDocumento('  ', 'FV-0012'), null);
+  assert.equal(claveDelDocumento('Ferretería Ñandú', ' - '), null);
+  assert.equal(documentoRepetido(null, []), null);
+});
+
+prueba('042/RF-43, RF-91: un documento es repetido si tiene ingresos vigentes; con todos anulados, no', () => {
+  const clave = claveDelDocumento('Ferretería Ñandú', 'FV-0012')!;
+  const otra = claveDelDocumento('Ferretería Ñandú', 'FV-0099')!;
+  const ingreso = (documentoClave: string | null, anulado: boolean, registradoEn: string, registradoPorNombre: string): IngresoParaRepetido => ({
+    documentoClave,
+    anulado,
+    registradoEn,
+    registradoPorNombre,
+  });
+  // Sin ingresos con esa clave, nada.
+  assert.equal(documentoRepetido(clave, [ingreso(otra, false, '2026-11-10T15:00:00Z', 'Ana')]), null);
+  // Todos anulados: no cuenta como importado (RF-91).
+  assert.equal(
+    documentoRepetido(clave, [ingreso(clave, true, '2026-11-10T15:00:00Z', 'Ana'), ingreso(clave, true, '2026-11-10T15:00:00Z', 'Ana')]),
+    null,
+  );
+  // Con uno vigente sí, con la fecha y quién de la importación más reciente.
+  assert.deepEqual(
+    documentoRepetido(clave, [
+      ingreso(clave, true, '2026-11-05T15:00:00Z', 'Ana'),
+      ingreso(clave, false, '2026-11-10T15:00:00Z', 'Beto'),
+      ingreso(clave, false, '2026-11-10T15:00:00Z', 'Beto'),
+      ingreso(null, false, '2026-11-11T15:00:00Z', 'Carla'),
+    ]),
+    { importadoEn: '2026-11-10T15:00:00Z', importadoPor: 'Beto', ingresosVigentes: 2 },
+  );
+});
+
+prueba('042/RF-24, RF-25, RF-26: con el factor del documento, 100 bultos de 50 kg son 5.000 kg', () => {
+  const r = cantidadEnElMaterial({ cantidad: 100, unidad: 'Bultos', factor: { factor: 50, fuente: 'bulto x 50 kg' } }, 'kilogramo');
+  assert.deepEqual(r, { cantidad: 5000, conversion: { factor: 50, fuente: 'bulto x 50 kg' }, unidadDistinta: true });
+  // El factor del documento manda aunque haya una equivalencia universal.
+  const t = cantidadEnElMaterial({ cantidad: 2, unidad: 't', factor: { factor: 980, fuente: 'tonelada de 980 kg' } }, 'kilogramo');
+  assert.equal(t.cantidad, 1960);
+  // Un factor que no sirve (cero, negativo) no se usa.
+  assert.equal(cantidadEnElMaterial({ cantidad: 100, unidad: 'bultos', factor: { factor: 0, fuente: 'x' } }, 'kilogramo').cantidad, null);
+});
+
+prueba('042/RF-79: las formas comunes de una unidad son la misma, y entonces no hay conversión', () => {
+  for (const unidad of ['kg', 'KG', 'kilos', 'Kilogramo', 'Kgs.']) {
+    assert.deepEqual(cantidadEnElMaterial({ cantidad: 12.5, unidad, factor: null }, 'kilogramo'), { cantidad: 12.5, conversion: null, unidadDistinta: false }, unidad);
+  }
+  assert.equal(cantidadEnElMaterial({ cantidad: 3, unidad: 'm³', factor: null }, 'metro_cubico').unidadDistinta, false);
+});
+
+prueba('042/RF-80, RF-26: sin factor en el documento, las equivalencias universales con su texto', () => {
+  assert.deepEqual(cantidadEnElMaterial({ cantidad: 2, unidad: 'toneladas', factor: null }, 'kilogramo'), {
+    cantidad: 2000,
+    conversion: { factor: 1000, fuente: '1 t = 1.000 kg' },
+    unidadDistinta: true,
+  });
+  assert.deepEqual(cantidadEnElMaterial({ cantidad: 2500, unidad: 'kg', factor: null }, 'tonelada'), {
+    cantidad: 2.5,
+    conversion: { factor: 0.001, fuente: '1.000 kg = 1 t' },
+    unidadDistinta: true,
+  });
+  assert.equal(cantidadEnElMaterial({ cantidad: 2, unidad: 'm3', factor: null }, 'litro').cantidad, 2000);
+});
+
+prueba('042/D31: una conversión con más decimales se redondea a dos', () => {
+  // 3 galones × 3,785411784 L = 11,356… L.
+  const r = cantidadEnElMaterial({ cantidad: 3, unidad: 'gal', factor: null }, 'litro');
+  assert.equal(r.cantidad, 11.36);
+  assert.equal(r.conversion?.fuente, '1 gal = 3,785 L');
+  // Y la cantidad sin conversión también: el Almacén lleva dos decimales.
+  assert.equal(cantidadEnElMaterial({ cantidad: 1.005, unidad: 'kg', factor: null }, 'kilogramo').cantidad, 1.01);
+  assert.equal(cantidadEnElMaterial({ cantidad: 2.344, unidad: 'kg', factor: null }, 'kilogramo').cantidad, 2.34);
+});
+
+prueba('042/RF-27, RF-24: sin cómo convertir, la cantidad queda por escribir y el renglón dice «Unidad distinta»', () => {
+  // Bultos a kilos sin decir cuánto pesa el bulto: no hay equivalencia universal.
+  assert.deepEqual(cantidadEnElMaterial({ cantidad: 100, unidad: 'bultos', factor: null }, 'kilogramo'), { cantidad: null, conversion: null, unidadDistinta: true });
+  // Una unidad que no está en la lista tampoco se adivina.
+  assert.deepEqual(cantidadEnElMaterial({ cantidad: 4, unidad: 'viajes', factor: null }, 'metro_cubico'), { cantidad: null, conversion: null, unidadDistinta: true });
+  // Sin unidad del material (uno nuevo sin escoger, RF-77), no se decide nada.
+  assert.deepEqual(cantidadEnElMaterial({ cantidad: 4, unidad: 'viajes', factor: null }, null), { cantidad: null, conversion: null, unidadDistinta: false });
+  // Sin cantidad en el documento, tampoco.
+  assert.equal(cantidadEnElMaterial({ cantidad: null, unidad: 'kg', factor: null }, 'kilogramo').cantidad, null);
+});
+
+prueba('042/RF-29, RF-58: el valor no se convierte y se muestra con la unidad del documento', () => {
+  // 100 bultos a $30.000 pasan a 5.000 kg, y el valor sigue siendo por bulto.
+  assert.equal(valorConSuUnidad(30000, 'Bultos'), '$ 30.000 por bulto');
+  assert.equal(valorConSuUnidad(1234.5, 'm3'), '$ 1.234,50 por metro cúbico');
+  assert.equal(valorConSuUnidad(850000, 'Viaje'), '$ 850.000 por viaje');
+  assert.equal(valorConSuUnidad(15000, null), '$ 15.000');
+  assert.equal(valorConSuUnidad(null, 'kg'), null);
+});
+
+/** Un renglón de factura sin nada que corregir: 20 kg de cemento de un material de la obra. */
+const RENGLON_042: RenglonDeLaImportacion = {
+  cita: 'p. 1',
+  nombreEnDocumento: 'Cemento gris uso general',
+  material: { tipo: 'existente', id: 'mat-cemento' },
+  cantidadEnDocumento: 20,
+  unidadEnDocumento: 'kg',
+  cantidad: 20,
+  conversion: null,
+  valorUnitario: 1200,
+  valorUnidad: 'kg',
+  valorCalculadoDelTotal: false,
+  revisar: null,
+};
+const marcasDe042 = (r: RenglonDeLaImportacion, unidad: Parameters<typeof estadoDelRenglon>[1] = 'kilogramo') =>
+  estadoDelRenglon(r, unidad).map((m) => `${m.marca}:${m.tipo}`);
+
+prueba('042/RF-85: un renglón completo no tiene ninguna marca y se puede confirmar', () => {
+  assert.deepEqual(estadoDelRenglon(RENGLON_042, 'kilogramo'), []);
+  assert.equal(renglonBloqueado(estadoDelRenglon(RENGLON_042, 'kilogramo')), false);
+});
+
+prueba('042/RF-37, RF-28, RF-83, RF-84: lo que impide confirmar, cada cosa con su marca', () => {
+  // Sin cantidad, en la misma unidad (RF-37).
+  assert.deepEqual(marcasDe042({ ...RENGLON_042, cantidad: null }), ['sin_cantidad:bloquea']);
+  // Unidad distinta sin convertir (RF-28): 100 bultos sin el peso del bulto.
+  const bultos = { ...RENGLON_042, cantidadEnDocumento: 100, unidadEnDocumento: 'bultos', cantidad: null };
+  assert.deepEqual(marcasDe042(bultos), ['unidad_sin_convertir:bloquea']);
+  assert.match(estadoDelRenglon(bultos, 'kilogramo')[0].texto, /bultos.*kg/);
+  // Una cifra que no estaba donde se citó (RF-83).
+  assert.deepEqual(marcasDe042({ ...RENGLON_042, revisar: 'La cantidad 20 no está en H1F7.' }), ['revisar:bloquea']);
+  // Sin material (RF-84), y uno nuevo al que le falta la unidad (RF-77).
+  assert.deepEqual(marcasDe042({ ...RENGLON_042, material: null }, null), ['sin_material:bloquea']);
+  const sinUnidad = { ...RENGLON_042, material: { tipo: 'nuevo' as const, nombre: 'Cemento blanco', deLaLista: true, unidad: null } };
+  assert.deepEqual(marcasDe042(sinUnidad, null), ['sin_material:bloquea']);
+  assert.match(estadoDelRenglon(sinUnidad, null)[0].texto, /unidad/);
+  // Uno de la obra que ya no está vigente (sin unidad que darle): se dice eso, no que falta la unidad (RF-84, RF-86).
+  const deBaja = { ...RENGLON_042, material: { tipo: 'existente' as const, id: 'mat-de-baja' } };
+  assert.deepEqual(marcasDe042(deBaja, null), ['sin_material:bloquea']);
+  assert.match(estadoDelRenglon(deBaja, null)[0].texto, /ya no está vigente/);
+  // Cualquiera de ellas bloquea.
+  assert.equal(renglonBloqueado(estadoDelRenglon({ ...RENGLON_042, cantidad: null }, 'kilogramo')), true);
+});
+
+prueba('042/RF-85: «Unidad distinta» ya convertida y «Calculado del total» son avisos, no bloquean', () => {
+  const convertido = {
+    ...RENGLON_042,
+    cantidadEnDocumento: 100,
+    unidadEnDocumento: 'bultos',
+    cantidad: 5000,
+    conversion: { factor: 50, fuente: 'bulto x 50 kg' },
+  };
+  assert.deepEqual(marcasDe042(convertido), ['unidad_distinta:aviso']);
+  assert.match(estadoDelRenglon(convertido, 'kilogramo')[0].texto, /bulto x 50 kg/);
+  // Escrita a mano en la unidad del material, también vale (RF-27).
+  assert.deepEqual(marcasDe042({ ...convertido, conversion: null }), ['unidad_distinta:aviso']);
+  const delTotal = { ...RENGLON_042, valorCalculadoDelTotal: true };
+  assert.deepEqual(marcasDe042(delTotal), ['calculado_del_total:aviso']);
+  assert.equal(renglonBloqueado(estadoDelRenglon({ ...convertido, valorCalculadoDelTotal: true }, 'kilogramo')), false);
+});
+
+prueba('042/RF-24: sin unidad en el documento el renglón es «Unidad distinta»: no se supone la del material', () => {
+  assert.deepEqual(marcasDe042({ ...RENGLON_042, unidadEnDocumento: null, cantidad: null }), ['unidad_sin_convertir:bloquea']);
+  assert.deepEqual(marcasDe042({ ...RENGLON_042, unidadEnDocumento: null, cantidad: 20 }), ['unidad_distinta:aviso']);
+});
+
+prueba('042/D12: varias marcas a la vez salen todas, primero las que bloquean', () => {
+  assert.deepEqual(
+    marcasDe042({ ...RENGLON_042, revisar: 'El valor no está en H1F7.', valorCalculadoDelTotal: true, unidadEnDocumento: 'bultos', cantidad: null }),
+    ['unidad_sin_convertir:bloquea', 'revisar:bloquea', 'calculado_del_total:aviso'],
+  );
+});
+
+/** Una propuesta lista para confirmar, de la que cada prueba quita o cambia algo. */
+const PROPUESTA_042 = {
+  documento: { proveedor: ' Ferretería Ñandú ', tipo: 'factura' as const, numero: ' FV-0012 ', fecha: '2026-11-12', entregadoPor: ' Juan Pérez ' },
+  renglones: [RENGLON_042, { ...RENGLON_042, cita: 'p. 1', nombreEnDocumento: 'Varilla 1/2', material: { tipo: 'existente' as const, id: 'mat-varilla' }, cantidadEnDocumento: 12.345, unidadEnDocumento: 'und', cantidad: 12.345, valorUnitario: null, valorUnidad: null }],
+};
+const UNIDADES_042: Record<string, Parameters<typeof estadoDelRenglon>[1]> = { 'mat-cemento': 'kilogramo', 'mat-varilla': 'unidad' };
+const unidadDe042 = (r: RenglonDeLaImportacion) => (r.material?.tipo === 'existente' ? (UNIDADES_042[r.material.id] ?? null) : null);
+const HOY_042 = '2026-11-12';
+
+prueba('042/RF-81, RF-82: se confirma con material, cantidad, fecha y «Entregado por»; proveedor, número y valor son opcionales', () => {
+  assert.deepEqual(faltasParaConfirmar(PROPUESTA_042, unidadDe042, HOY_042), []);
+  const sinOpcionales = {
+    documento: { ...PROPUESTA_042.documento, proveedor: null, numero: null },
+    renglones: PROPUESTA_042.renglones.map((r) => ({ ...r, valorUnitario: null, valorUnidad: null })),
+  };
+  assert.deepEqual(faltasParaConfirmar(sinOpcionales, unidadDe042, HOY_042), []);
+  // Un aviso no es una falta: la unidad distinta ya convertida pasa (RF-85).
+  const convertido = { ...RENGLON_042, unidadEnDocumento: 'bultos', cantidadEnDocumento: 2, cantidad: 100, conversion: { factor: 50, fuente: 'bulto x 50 kg' } };
+  assert.deepEqual(faltasParaConfirmar({ ...PROPUESTA_042, renglones: [convertido] }, unidadDe042, HOY_042), []);
+});
+
+prueba('042/RF-34, RF-36: la fecha de mañana en Colombia y la falta de «Entregado por» se dicen para todo el documento', () => {
+  const faltas = faltasParaConfirmar({ ...PROPUESTA_042, documento: { ...PROPUESTA_042.documento, fecha: '2026-11-13', entregadoPor: '   ' } }, unidadDe042, HOY_042);
+  assert.deepEqual(faltas, [
+    { renglon: null, texto: 'La fecha no puede ser posterior a hoy.' },
+    { renglon: null, texto: 'Escriba quién entregó el material.' },
+  ]);
+  // Hoy sí se puede, y un día de antes también.
+  for (const fecha of ['2026-11-12', '2026-10-30']) {
+    assert.deepEqual(faltasParaConfirmar({ ...PROPUESTA_042, documento: { ...PROPUESTA_042.documento, fecha } }, unidadDe042, HOY_042), [], fecha);
+  }
+});
+
+prueba('042/RF-35, RF-37, RF-84: las faltas de cada renglón nombran el renglón', () => {
+  const renglones = [
+    { ...RENGLON_042, cantidad: 0 },
+    { ...RENGLON_042, cantidad: -2 },
+    { ...RENGLON_042, cantidad: null },
+    { ...RENGLON_042, material: null },
+  ];
+  assert.deepEqual(faltasParaConfirmar({ ...PROPUESTA_042, renglones }, unidadDe042, HOY_042), [
+    { renglon: 0, texto: 'La cantidad tiene que ser mayor que cero.' },
+    { renglon: 1, texto: 'La cantidad tiene que ser mayor que cero.' },
+    { renglon: 2, texto: 'Escriba la cantidad o quite el renglón.' },
+    { renglon: 3, texto: 'Escoja el material de este renglón.' },
+  ]);
+});
+
+prueba('042/RF-31, RF-40: sin ningún renglón no hay nada que confirmar', () => {
+  assert.deepEqual(faltasParaConfirmar({ ...PROPUESTA_042, renglones: [] }, unidadDe042, HOY_042), [
+    { renglon: null, texto: 'No queda ningún renglón: agregue uno o descarte la propuesta.' },
+  ]);
+});
+
+prueba('042/RF-38, D31: lo que se confirma va en centésimas, con el valor y su unidad, y los textos sin espacios de sobra', () => {
+  const armado = importacionAConfirmar({
+    ...PROPUESTA_042,
+    renglones: [{ ...RENGLON_042, cantidad: 5000, unidadEnDocumento: 'bultos', valorUnitario: 30000, valorUnidad: 'bulto', conversion: { factor: 50, fuente: 'bulto x 50 kg' } }, PROPUESTA_042.renglones[1]],
+  });
+  assert.deepEqual(armado, {
+    fecha: '2026-11-12',
+    entregadoPor: 'Juan Pérez',
+    proveedor: 'Ferretería Ñandú',
+    tipo: 'factura',
+    numero: 'FV-0012',
+    clave: claveDelDocumento('Ferretería Ñandú', 'FV-0012'),
+    ingresos: [
+      { renglon: 0, material: { tipo: 'existente', id: 'mat-cemento' }, centesimas: 500000, valorUnitario: 30000, valorUnidad: 'bulto' },
+      // 12,345 se guarda con dos decimales: 12,35 (D31).
+      { renglon: 1, material: { tipo: 'existente', id: 'mat-varilla' }, centesimas: 1235, valorUnitario: null, valorUnidad: null },
+    ],
+  });
+  // Sin proveedor o número: vacíos, y sin clave para el repetido (RF-90).
+  const sin = importacionAConfirmar({ ...PROPUESTA_042, documento: { ...PROPUESTA_042.documento, proveedor: '  ', numero: null } });
+  assert.equal(sin.proveedor, null);
+  assert.equal(sin.clave, null);
+});
+
+prueba('042/RF-15: el Excel va con hoja y fila de cada renglón, solo las hojas a la vista', () => {
+  const libro = [
+    { nombre: 'Remisión', visible: true, filas: [['REMISIÓN 4512', null], [null, null], ['Cemento gris', 100, 'bultos'], ['Varilla 1/2', 30, 'und']] },
+    { nombre: 'Oculta', visible: false, filas: [['No debe ir', 1]] },
+  ];
+  const r = textoDelExcelParaImportar(libro);
+  assert.ok('texto' in r);
+  assert.match(r.texto, /^H1F1 \| REMISIÓN 4512$/m);
+  assert.match(r.texto, /^H1F3 \| Cemento gris \| 100 \| bultos$/m);
+  assert.match(r.texto, /^H1F4 \| Varilla 1\/2 \| 30 \| und$/m);
+  // La fila vacía no va, y la hoja oculta tampoco.
+  assert.doesNotMatch(r.texto, /H1F2|No debe ir/);
+  assert.equal(r.filas, 3);
+});
+
+prueba('042/RF-60: un Excel de más de 200 renglones con datos se rechaza pidiendo partirlo', () => {
+  const filas = (n: number) => [{ nombre: 'Lista', visible: true, filas: Array.from({ length: n }, (_, i) => [`Material ${i + 1}`, i + 1]) }];
+  assert.ok('texto' in textoDelExcelParaImportar(filas(200)));
+  const largo = textoDelExcelParaImportar(filas(201));
+  assert.deepEqual(largo, { error: 'El Excel tiene 201 renglones con datos; el máximo es 200. Pártalo y súbalo por partes.' });
+  // Las filas vacías no cuentan.
+  const conVacias = [{ nombre: 'Lista', visible: true, filas: [...filas(200)[0].filas, [null, null], ['', null]] }];
+  assert.ok('texto' in textoDelExcelParaImportar(conVacias));
+});
+
+prueba('042/RF-15: el Word va con sus líneas numeradas, sin las vacías', () => {
+  const r = textoDelWordParaImportar('REMISIÓN 4512\n\nCemento gris | 100 | bultos\n   \nVarilla 1/2 | 30 | und');
+  assert.equal(r.texto, 'L1 | REMISIÓN 4512\nL2 | Cemento gris | 100 | bultos\nL3 | Varilla 1/2 | 30 | und');
+  // Las líneas quedan partidas en celdas para comprobar después la cifra citada (RF-16).
+  assert.deepEqual(r.lineas[1], ['Cemento gris', '100', 'bultos']);
+});
+
+prueba('042/RF-59: más de 10 páginas se rechaza; una foto es una página', () => {
+  assert.equal(faltaDeTamano('pdf', 10), null);
+  assert.equal(faltaDeTamano('pdf', 11), 'El documento tiene 11 páginas; el máximo es 10. Pártalo y súbalo por partes.');
+  assert.equal(faltaDeTamano('imagen', 1), null);
+  // Un PDF al que no se le pudo contar las páginas no se rechaza por eso: lo frena la lectura (RF-67).
+  assert.equal(faltaDeTamano('pdf', null), null);
+});
+
+prueba('042/RF-19, RF-20, RF-22: la IA recibe solo los materiales vigentes de la obra, con su id y su unidad', () => {
+  const texto = textoParaImportar({
+    obra: 'PRUEBA-043 Magdalena',
+    materiales: [
+      { id: 'mat-1', nombre: 'Cemento gris', unidad: 'kilogramo', vigente: true },
+      { id: 'mat-2', nombre: 'Cemento blanco', unidad: 'bulto', vigente: false },
+      { id: 'mat-3', nombre: 'Varilla 1/2', unidad: 'unidad', vigente: true },
+    ],
+    contenido: 'H1F3 | Cemento gris | 100 | bultos',
+  });
+  assert.match(texto, /mat-1 \| Cemento gris \| Kilogramo/);
+  assert.match(texto, /mat-3 \| Varilla 1\/2 \| Unidad/);
+  assert.doesNotMatch(texto, /mat-2|Cemento blanco/);
+  // Las unidades de la lista, y la obra a la que va el documento (RF-75).
+  assert.match(texto, /Metro cúbico/);
+  assert.match(texto, /PRUEBA-043 Magdalena/);
+  assert.match(texto, /H1F3 \| Cemento gris/);
+  // Sin materiales en la obra se dice así: todo será nuevo (primer arranque).
+  assert.match(textoParaImportar({ obra: 'X', materiales: [], contenido: null }), /no tiene materiales/i);
+});
+
+prueba('042/RF-17, RF-68, RF-72, RF-74: las instrucciones piden lo que la regla después comprueba', () => {
+  for (const pedido of [/no son instrucciones/i, /fletes/i, /servicios/i, /negativ/i, /conductor/i, /más de un proveedor/i, /tal como/i, /cita/i]) {
+    assert.match(INSTRUCCIONES_PARA_IMPORTAR, pedido, String(pedido));
+  }
+});
+
+/** Lo que devolvería la IA para una factura sencilla: un renglón de cemento en bultos. */
+const RENGLON_LEIDO_042: RenglonLeidoPorLaIa = {
+  cita: 'H1F3',
+  nombre: 'Cemento gris uso general x 50 kg',
+  cantidad: 100,
+  unidad: 'bultos',
+  factor: 50,
+  factorTexto: 'x 50 kg',
+  valorUnitario: 30000,
+  valorTotal: 0,
+  moneda: '',
+  materialId: 'mat-cemento',
+  nombreNuevo: '',
+};
+const LECTURA_042: LecturaDeImportacion = {
+  proveedor: 'Ferretería Ñandú S.A.S.',
+  tipo: 'factura',
+  numero: 'FV-0012',
+  fecha: '2026-11-10',
+  destino: 'Obra Magdalena, Puerto Berrío',
+  conductor: 'Juan Pérez',
+  transportador: 'Transportes El Río',
+  proveedoresDistintos: 1,
+  numerosDistintos: 1,
+  renglones: [RENGLON_LEIDO_042],
+  dejadosPorFuera: [{ cita: 'H1F9', texto: 'Flete', motivo: 'Es un flete, no un material.' }],
+};
+const HOJAS_042 = [
+  {
+    nombre: 'Factura',
+    visible: true,
+    filas: [['FACTURA FV-0012'], [null], ['Cemento gris uso general x 50 kg', 100, 'bultos', '$ 30.000', '$ 3.000.000'], ['Varilla 1/2', 30, 'und', 25000]],
+  },
+];
+const CONTEXTO_042: ContextoDeLaLectura = {
+  obra: 'PRUEBA-043 Magdalena',
+  hoy: '2026-11-12',
+  materiales: [
+    { id: 'mat-cemento', nombre: 'Cemento gris', unidad: 'kilogramo', vigente: true },
+    { id: 'mat-viejo', nombre: 'Cemento blanco', unidad: 'bulto', vigente: false },
+  ],
+  fuente: { tipo: 'excel', hojas: HOJAS_042 },
+};
+const propuestaOk042 = (lectura: LecturaDeImportacion, contexto: ContextoDeLaLectura = CONTEXTO_042) => {
+  const r = propuestaDeLaLectura(lectura, contexto);
+  assert.ok(r.ok, r.ok ? '' : r.error);
+  return r.propuesta;
+};
+
+prueba('042/RF-10, RF-11, RF-13, RF-25: una factura sencilla queda propuesta, con su conversión y lo dejado por fuera', () => {
+  const p = propuestaOk042(LECTURA_042);
+  assert.deepEqual(p.documento, {
+    proveedor: 'Ferretería Ñandú S.A.S.',
+    tipo: 'factura',
+    numero: 'FV-0012',
+    fecha: '2026-11-10',
+    entregadoPor: 'Juan Pérez',
+  });
+  assert.deepEqual(p.renglones, [
+    {
+      cita: 'H1F3',
+      nombreEnDocumento: 'Cemento gris uso general x 50 kg',
+      material: { tipo: 'existente', id: 'mat-cemento' },
+      cantidadEnDocumento: 100,
+      unidadEnDocumento: 'bultos',
+      cantidad: 5000,
+      conversion: { factor: 50, fuente: 'x 50 kg' },
+      valorUnitario: 30000,
+      valorUnidad: 'bultos',
+      valorCalculadoDelTotal: false,
+      revisar: null,
+    },
+  ]);
+  // RF-73: lo que la IA dejó por fuera llega con su motivo.
+  assert.deepEqual(p.dejadosPorFuera, [{ cita: 'H1F9', texto: 'Flete', motivo: 'Es un flete, no un material.' }]);
+  // El destino es esta obra: sin avisos.
+  assert.deepEqual(p.avisos, []);
+});
+
+prueba('042/RF-68, RF-9: más de un documento en el archivo, o ningún material, no propone nada', () => {
+  const varios = propuestaDeLaLectura({ ...LECTURA_042, proveedoresDistintos: 2 }, CONTEXTO_042);
+  assert.deepEqual(varios, { ok: false, error: 'El archivo trae más de un documento (2 proveedores, 1 número). Súbalos por separado.' });
+  const numeros = propuestaDeLaLectura({ ...LECTURA_042, numerosDistintos: 3 }, CONTEXTO_042);
+  assert.equal(numeros.ok, false);
+  const vacio = propuestaDeLaLectura({ ...LECTURA_042, renglones: [] }, CONTEXTO_042);
+  assert.deepEqual(vacio, { ok: false, error: 'No encontré ningún material recibido en el documento.' });
+  // Si todo quedó por fuera, también es «ningún material».
+  assert.equal(propuestaDeLaLectura({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cantidad: -5 }] }, CONTEXTO_042).ok, false);
+});
+
+prueba('042/RF-16: en un Excel, la cifra que no está en la fila citada se descarta y el renglón queda para revisar', () => {
+  // La IA dice 120 bultos, pero la fila H1F3 dice 100.
+  const [r] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cantidad: 120 }] }).renglones;
+  assert.equal(r.cantidadEnDocumento, null);
+  assert.equal(r.cantidad, null);
+  assert.match(r.revisar ?? '', /120.*H1F3/);
+  // Un valor que no está tampoco.
+  const [v] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, valorUnitario: 31000 }] }).renglones;
+  assert.equal(v.valorUnitario, null);
+  assert.equal(v.cantidad, 5000);
+  assert.match(v.revisar ?? '', /31\.000/);
+  // Una cita que no es ninguna fila.
+  const [c] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cita: 'H1F99' }] }).renglones;
+  assert.equal(c.cantidad, null);
+  assert.match(c.revisar ?? '', /H1F99/);
+});
+
+prueba('042/RF-16: en un Word, la cifra se busca dentro del texto de su línea', () => {
+  const contexto: ContextoDeLaLectura = {
+    ...CONTEXTO_042,
+    fuente: { tipo: 'word', lineas: [['REMISIÓN 4512'], ['Se entregan 100 bultos de cemento gris x 50 kg a $30.000 cada uno']] },
+  };
+  const [ok] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cita: 'L2' }] }, contexto).renglones;
+  assert.equal(ok.revisar, null);
+  assert.equal(ok.cantidad, 5000);
+  const [mal] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cita: 'L1' }] }, contexto).renglones;
+  assert.ok(mal.revisar);
+});
+
+prueba('042/RF-16: en un PDF o una foto no hay fila que comprobar', () => {
+  const [r] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cita: 'p. 1', cantidad: 120 }] }, { ...CONTEXTO_042, fuente: { tipo: 'pdf' } }).renglones;
+  assert.equal(r.revisar, null);
+  assert.equal(r.cantidad, 6000);
+});
+
+prueba('042/RF-17, RF-73, RF-74: una cantidad negativa queda por fuera con su motivo', () => {
+  const p = propuestaOk042({ ...LECTURA_042, renglones: [RENGLON_LEIDO_042, { ...RENGLON_LEIDO_042, cita: 'H1F4', nombre: 'Devolución varilla', cantidad: -5 }] });
+  assert.equal(p.renglones.length, 1);
+  assert.deepEqual(p.dejadosPorFuera.at(-1), {
+    cita: 'H1F4',
+    texto: 'Devolución varilla',
+    motivo: 'Cantidad negativa: una devolución o una nota crédito no es un ingreso.',
+  });
+});
+
+prueba('042/RF-69, RF-70, RF-71: el unitario del total, y la moneda distinta deja el valor vacío con aviso', () => {
+  // 3 × $90.000 de total: $30.000, marcado «Calculado del total».
+  const fila3 = { nombre: 'Factura', visible: true, filas: [['Tubo PVC 4"', 3, 'und', null, 90000]] };
+  const [t] = propuestaOk042(
+    { ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, cita: 'H1F1', nombre: 'Tubo PVC 4"', cantidad: 3, unidad: 'und', factor: 0, factorTexto: '', valorUnitario: 0, valorTotal: 90000, materialId: '' }] },
+    { ...CONTEXTO_042, fuente: { tipo: 'excel', hojas: [fila3] } },
+  ).renglones;
+  assert.equal(t.valorUnitario, 30000);
+  assert.equal(t.valorCalculadoDelTotal, true);
+  const p = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, moneda: 'USD' }] });
+  assert.equal(p.renglones[0].valorUnitario, null);
+  assert.match(p.avisos.join(' '), /USD/);
+  // «COP» o «pesos» son pesos: sin aviso.
+  assert.equal(propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, moneda: 'COP' }] }).renglones[0].valorUnitario, 30000);
+});
+
+prueba('042/RF-20, RF-22, RF-77: un material que no es vigente de la obra se propone nuevo, de la lista de OCC si está en ella', () => {
+  // Un id que no existe, o uno dado de baja: nuevo, con el nombre del documento.
+  for (const materialId of ['mat-que-no-existe', 'mat-viejo']) {
+    const [r] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, materialId, nombreNuevo: 'Cemento blanco' }] }).renglones;
+    assert.equal(r.material?.tipo, 'nuevo', materialId);
+  }
+  // Un nombre que está en la lista de OCC sale con el nombre de la lista; si no, «Otro».
+  const deLaLista = MATERIALES_DE_OCC[0];
+  const [l] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, materialId: '', nombreNuevo: deLaLista.toUpperCase() }] }).renglones;
+  assert.deepEqual(l.material, { tipo: 'nuevo', nombre: deLaLista, deLaLista: true, unidad: 'bulto' });
+  const [o] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, materialId: '', nombreNuevo: 'Aditivo Sika 1 qwz' }] }).renglones;
+  assert.deepEqual(o.material, { tipo: 'nuevo', nombre: 'Aditivo Sika 1 qwz', deLaLista: false, unidad: 'bulto' });
+  // Con la unidad de la lista la cantidad queda en ella; con una que no está, por escoger y por escribir (RF-77).
+  assert.equal(o.cantidad, 100);
+  const [v] = propuestaOk042({ ...LECTURA_042, renglones: [{ ...RENGLON_LEIDO_042, materialId: '', nombreNuevo: 'Arena', unidad: 'viajes', factor: 0, factorTexto: '' }] }).renglones;
+  assert.deepEqual(v.material, { tipo: 'nuevo', nombre: 'Arena', deLaLista: v.material?.tipo === 'nuevo' && v.material.deLaLista, unidad: null });
+  assert.equal(v.cantidad, null);
+});
+
+prueba('042/RF-13, RF-14, RF-72: «Entregado por» es el conductor, si no el transportador, si no vacío', () => {
+  assert.equal(propuestaOk042(LECTURA_042).documento.entregadoPor, 'Juan Pérez');
+  assert.equal(propuestaOk042({ ...LECTURA_042, conductor: '' }).documento.entregadoPor, 'Transportes El Río');
+  assert.equal(propuestaOk042({ ...LECTURA_042, conductor: '', transportador: ' ' }).documento.entregadoPor, '');
+});
+
+prueba('042/RF-32, RF-33: la fecha del documento, o la de hoy si no trae o no se entiende', () => {
+  assert.equal(propuestaOk042(LECTURA_042).documento.fecha, '2026-11-10');
+  assert.equal(propuestaOk042({ ...LECTURA_042, fecha: '' }).documento.fecha, '2026-11-12');
+  assert.equal(propuestaOk042({ ...LECTURA_042, fecha: '10/11/2026' }).documento.fecha, '2026-11-12');
+  // Sin proveedor ni número, vacíos (RF-82).
+  const sin = propuestaOk042({ ...LECTURA_042, proveedor: ' ', numero: '' }).documento;
+  assert.equal(sin.proveedor, null);
+  assert.equal(sin.numero, null);
+});
+
+prueba('042/RF-75: una remisión dirigida a otra obra se avisa sin bloquear', () => {
+  const p = propuestaOk042({ ...LECTURA_042, destino: 'Obra Yondó, vía Barrancabermeja' });
+  assert.match(p.avisos.join(' '), /Yondó/);
+  assert.equal(p.renglones.length, 1);
+  // Sin destino, nada que avisar.
+  assert.deepEqual(propuestaOk042({ ...LECTURA_042, destino: '' }).avisos, []);
+});
+
+prueba('042/RF-30, RF-38: la confirmación acepta la propuesta corregida, con material existente, nuevo o ninguno', () => {
+  const pedido = {
+    version: 3,
+    documento: { proveedor: null, tipo: 'remision', numero: 'R-77', fecha: '2026-11-12', entregadoPor: 'Juan' },
+    renglones: [
+      RENGLON_042,
+      { ...RENGLON_042, material: { tipo: 'nuevo', nombre: 'Cemento blanco', deLaLista: true, unidad: 'bulto' } },
+      { ...RENGLON_042, material: null, cantidad: null, valorUnitario: null, valorUnidad: null },
+    ],
+  };
+  const leido = confirmacionDeImportacion.parse(pedido);
+  // Sin `confirmarRepetido`, es que no se confirmó (RF-44).
+  assert.equal(leido.confirmarRepetido, false);
+  assert.equal(leido.renglones.length, 3);
+});
+
+prueba('042/RF-30: la confirmación rechaza la forma equivocada; lo de fondo lo decide la regla', () => {
+  const base = { version: 1, documento: PROPUESTA_042.documento, renglones: [RENGLON_042] };
+  const falla = (cambio: Record<string, unknown>) => !confirmacionDeImportacion.safeParse({ ...base, ...cambio }).success;
+  assert.ok(falla({ version: -1 }));
+  assert.ok(falla({ documento: { ...PROPUESTA_042.documento, tipo: 'cotizacion' } }));
+  assert.ok(falla({ documento: { ...PROPUESTA_042.documento, fecha: '12/11/2026' } }));
+  assert.ok(falla({ renglones: [{ ...RENGLON_042, material: { tipo: 'nuevo', nombre: 'X', deLaLista: false, unidad: 'viaje' } }] }));
+  assert.ok(falla({ renglones: [{ ...RENGLON_042, conversion: { factor: 0, fuente: 'x' } }] }));
+  assert.ok(falla({ renglones: [{ ...RENGLON_042, valorUnitario: -5 }] }));
+  assert.ok(falla({ renglones: Array.from({ length: 201 }, () => RENGLON_042) }));
+  // Una cantidad cero o negativa pasa la forma: la rechaza la regla, nombrando el renglón (RF-35).
+  assert.ok(!falla({ renglones: [{ ...RENGLON_042, cantidad: 0 }] }));
+  // Una fecha futura también: es la regla la que sabe qué día es hoy en Colombia (RF-34).
+  assert.ok(!falla({ documento: { ...PROPUESTA_042.documento, fecha: '2099-01-01' } }));
+});
+
+/** Unos bytes que empiezan como el archivo que dicen ser. */
+const bytesDe042 = (inicio: number[] | string, largo = 64): Uint8Array<ArrayBuffer> => {
+  const cabeza = typeof inicio === 'string' ? Array.from(inicio, (c) => c.charCodeAt(0)) : inicio;
+  const b = new Uint8Array(Math.max(largo, cabeza.length));
+  b.set(cabeza);
+  return b;
+};
+const PDF_042 = (cuerpo: string) => bytesDe042(`%PDF-1.4\n${cuerpo}\n%%EOF`);
+const XLSX_042 = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+prueba('042/RF-3: se aceptan PDF, Excel, Word y fotos JPG o PNG, por su contenido', () => {
+  const pdf = revisarDocumentoParaImportar({ nombre: 'factura.pdf', tipo: 'application/pdf', contenido: PDF_042('<< /Type /Pages /Count 2 >>') });
+  assert.deepEqual(pdf, { ok: true, clase: 'pdf', mime: 'application/pdf', paginas: 2 });
+  const jpg = revisarDocumentoParaImportar({ nombre: 'remision.jpg', tipo: 'image/jpeg', contenido: bytesDe042([0xff, 0xd8, 0xff, 0xe0]) });
+  assert.deepEqual(jpg, { ok: true, clase: 'imagen', mime: 'image/jpeg', paginas: 1 });
+  assert.equal(revisarDocumentoParaImportar({ nombre: 'r.png', tipo: 'image/png', contenido: bytesDe042([0x89, 0x50, 0x4e, 0x47]) }).ok, true);
+  const xlsx = revisarDocumentoParaImportar({ nombre: 'lista.xlsx', tipo: XLSX_042, contenido: bytesDe042('PK') });
+  assert.deepEqual(xlsx, { ok: true, clase: 'excel', mime: XLSX_042, paginas: null });
+  assert.equal(revisarDocumentoParaImportar({ nombre: 'r.docx', tipo: '', contenido: bytesDe042('PK') }).ok, true);
+});
+
+prueba('042/RF-4, RF-5: un .xls o .doc viejo, o un archivo que no es lo que dice, se rechazan explicando', () => {
+  const ole = [0xd0, 0xcf, 0x11, 0xe0];
+  const xls = revisarDocumentoParaImportar({ nombre: 'lista.xls', tipo: 'application/vnd.ms-excel', contenido: bytesDe042(ole) });
+  assert.deepEqual(xls, { ok: false, estado: 422, error: '«lista.xls» es un Excel o un Word del formato antiguo. Ábralo y guárdelo como .xlsx o .docx.' });
+  // Un .xls con el nombre cambiado a .xlsx: el contenido manda.
+  const renombrado = revisarDocumentoParaImportar({ nombre: 'lista.xlsx', tipo: XLSX_042, contenido: bytesDe042(ole) });
+  assert.deepEqual(renombrado, { ok: false, estado: 422, error: '«lista.xlsx» es un Excel o un Word del formato antiguo. Ábralo y guárdelo como .xlsx o .docx.' });
+  const falso = revisarDocumentoParaImportar({ nombre: 'factura.pdf', tipo: 'application/pdf', contenido: bytesDe042('hola') });
+  assert.deepEqual(falso, { ok: false, estado: 422, error: '«factura.pdf» no es un PDF, aunque su nombre lo diga.' });
+  // WEBP no está entre las fotos que acepta la importación (RF-3).
+  const webp = revisarDocumentoParaImportar({ nombre: 'r.webp', tipo: 'image/webp', contenido: bytesDe042('RIFF\0\0\0\0WEBP') });
+  assert.equal(webp.ok, false);
+  const video = revisarDocumentoParaImportar({ nombre: 'r.mp4', tipo: 'video/mp4', contenido: bytesDe042('xxxx') });
+  assert.equal(!video.ok && video.error, '«r.mp4»: solo se importan PDF, Excel (.xlsx), Word (.docx) y fotos JPG o PNG.');
+});
+
+prueba('042/RF-6: más de 20 MB se rechaza diciendo el límite, y un archivo vacío también', () => {
+  const grande = revisarDocumentoParaImportar({ nombre: 'grande.xlsx', tipo: XLSX_042, contenido: bytesDe042('PK', 21 * 1024 * 1024) });
+  assert.deepEqual(grande, { ok: false, estado: 413, error: '«grande.xlsx» pesa 21,0 MB; el máximo es 20 MB.' });
+  assert.equal(revisarDocumentoParaImportar({ nombre: 'justo.xlsx', tipo: XLSX_042, contenido: bytesDe042('PK', 20 * 1024 * 1024) }).ok, true);
+  const vacio = revisarDocumentoParaImportar({ nombre: 'v.pdf', tipo: 'application/pdf', contenido: new Uint8Array(0) });
+  assert.deepEqual(vacio, { ok: false, estado: 422, error: '«v.pdf» llegó vacío.' });
+});
+
+prueba('042/RF-59, RF-61: un PDF de más de 10 páginas o con contraseña se rechaza', () => {
+  const largo = revisarDocumentoParaImportar({ nombre: 'f.pdf', tipo: 'application/pdf', contenido: PDF_042('<< /Type /Pages /Kids [] /Count 11 >>') });
+  assert.deepEqual(largo, { ok: false, estado: 422, error: 'El documento tiene 11 páginas; el máximo es 10. Pártalo y súbalo por partes.' });
+  const cifrado = revisarDocumentoParaImportar({ nombre: 'f.pdf', tipo: 'application/pdf', contenido: PDF_042('<< /Type /Pages /Count 1 >>\ntrailer\n<< /Root 1 0 R /Encrypt 5 0 R >>') });
+  assert.deepEqual(cifrado, { ok: false, estado: 422, error: '«f.pdf» está protegido con contraseña. Quítele la contraseña y súbalo de nuevo.' });
+  // La palabra en el texto de una página no lo vuelve cifrado: tiene que ser la entrada del tráiler.
+  assert.equal(pdfCifrado(PDF_042('BT (Encrypt) Tj ET')), false);
+  assert.equal(pdfCifrado(PDF_042('trailer << /Encrypt << /Filter /Standard >> >>')), true);
+});
+
+prueba('042/RF-39: dos renglones con el mismo material nuevo crean uno solo, comparado como la base', () => {
+  const nuevo = (nombre: string, unidad: Parameters<typeof estadoDelRenglon>[1]) => ({ tipo: 'nuevo' as const, nombre, deLaLista: false, unidad });
+  const armado = importacionAConfirmar({
+    ...PROPUESTA_042,
+    renglones: [
+      { ...RENGLON_042, material: nuevo('Alambre negro', 'kilogramo') },
+      RENGLON_042,
+      // Con otra forma de escribirlo: mayúsculas, tildes y espacios de sobra.
+      { ...RENGLON_042, material: nuevo('  ALAMBRE NEGRO ', 'kilogramo'), cantidad: 5 },
+      { ...RENGLON_042, material: nuevo('Puntilla 2"', 'caja') },
+    ],
+  });
+  const r = materialesNuevosDe(armado);
+  assert.deepEqual(r.faltas, []);
+  assert.deepEqual(
+    r.nuevos.map((n) => [n.nombre, n.unidad, n.renglones]),
+    [
+      ['Alambre negro', 'kilogramo', [0, 2]],
+      ['Puntilla 2"', 'caja', [3]],
+    ],
+  );
+  // La clave es la misma que usa el índice único de la base: sin tildes y en minúsculas.
+  assert.equal(r.nuevos[0].clave, 'alambre negro');
+});
+
+prueba('042/RF-39, RF-23: un material nuevo con dos unidades distintas no se puede confirmar', () => {
+  const nuevo = (unidad: Parameters<typeof estadoDelRenglon>[1]) => ({ tipo: 'nuevo' as const, nombre: 'Arena', deLaLista: true, unidad });
+  const armado = importacionAConfirmar({ ...PROPUESTA_042, renglones: [{ ...RENGLON_042, material: nuevo('metro_cubico') }, { ...RENGLON_042, material: nuevo('tonelada') }] });
+  const r = materialesNuevosDe(armado);
+  assert.deepEqual(r.faltas, [
+    { renglon: 0, texto: 'El material nuevo «Arena» va con dos unidades distintas: escoja una sola.' },
+    { renglon: 1, texto: 'El material nuevo «Arena» va con dos unidades distintas: escoja una sola.' },
+  ]);
+});
+
+prueba('042/RF-51, RF-52: el Excel del almacén suma proveedor, documento y valor; vacíos en lo que no se importó', () => {
+  const base042 = {
+    obraNombre: 'PRUEBA-043 Magdalena',
+    materialId: 'cem',
+    materialNombre: 'Cemento gris',
+    unidad: 'kilogramo',
+    tipo: 'ingreso' as const,
+    fecha: '2026-11-10',
+    responsable: 'Pedro Gómez',
+    paraQue: null,
+    observacion: null,
+    registradoPorNombre: 'Almacenista',
+    anuladoEn: null,
+    anuladoPorNombre: null,
+    motivoAnulacion: null,
+  };
+  const movimientos: MovimientoParaExportar[] = [
+    {
+      ...base042,
+      id: 'imp',
+      cantidad: 500000,
+      registradoEn: new Date('2026-11-12T19:00:00Z'),
+      proveedor: 'Ferretería El Ejemplo S.A.S.',
+      documentoTipo: 'remision',
+      documentoNumero: 'FE-2291',
+      valorUnitario: 30000.5,
+      valorUnidad: 'bulto',
+    },
+    {
+      ...base042,
+      id: 'mano',
+      cantidad: 1000,
+      responsable: 'Bodega central',
+      registradoEn: new Date('2026-11-12T20:00:00Z'),
+      proveedor: null,
+      documentoTipo: null,
+      documentoNumero: null,
+      valorUnitario: null,
+      valorUnidad: null,
+    },
+  ];
+  const hojas = hojasDelAlmacen(movimientos, []);
+  const columna = (nombre: string) => ENCABEZADOS_MOVIMIENTOS.indexOf(nombre);
+  for (const nombre of ['Proveedor', 'Tipo de documento', 'Número de documento', 'Valor unitario', 'Valor por']) {
+    assert.ok(columna(nombre) > -1, nombre);
+  }
+  const [importado, aMano] = hojas.movimientos.filas;
+  assert.equal(importado[columna('Proveedor')], 'Ferretería El Ejemplo S.A.S.');
+  assert.equal(importado[columna('Tipo de documento')], 'Remisión');
+  assert.equal(importado[columna('Número de documento')], 'FE-2291');
+  // El valor como número, para que Excel lo sume (RF-49), y por qué unidad del documento es.
+  assert.equal(importado[columna('Valor unitario')], 30000.5);
+  assert.equal(importado[columna('Valor por')], 'bulto');
+  assert.equal(importado[columna('Cantidad')], 5000);
+  // Lo registrado a mano: vacío, no «—» ni cero (RF-52).
+  for (const nombre of ['Proveedor', 'Tipo de documento', 'Número de documento', 'Valor unitario', 'Valor por']) {
+    assert.equal(aMano[columna(nombre)], null, nombre);
+  }
+  // Las columnas de siempre siguen en su sitio y con lo suyo.
+  assert.equal(aMano[columna('Entregó / recibió')], 'Bodega central');
+  assert.equal(hojas.movimientos.filas[0].length, ENCABEZADOS_MOVIMIENTOS.length);
 });
 
 verificarFirmaS3()

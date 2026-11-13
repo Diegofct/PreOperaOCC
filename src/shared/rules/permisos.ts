@@ -175,8 +175,12 @@ export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true, 
  * `escribir` porque son dos personas distintas: el laboratorista escribe y no
  * aprueba, el residente aprueba y no escribe. Con las acciones que había no se
  * podían decir las dos cosas.
+ *
+ * `importar` es subir un documento al Almacén para que la IA proponga sus ingresos (spec 042).
+ * Es aparte de `escribir` porque el Director de Obra importa pero no registra a mano (042/D4,
+ * D28): dándole `escribir` se le habría abierto también el formulario de la spec 009.
  */
-export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar' | 'aprobar';
+export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar' | 'aprobar' | 'importar';
 
 const NADA: readonly Accion[] = [];
 
@@ -319,16 +323,17 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // Spec 041 (RF-9, RF-60): dentro de las obras anulan también los dos directores, que
   // responden por ellas. El almacenista sigue sin anular.
   almacen: {
-    admin: ['ver', 'listar', 'escribir', 'anular'],
+    // Spec 042: `importar` lo tienen quienes registran ingresos, y además el Director de Obra.
+    admin: ['ver', 'listar', 'escribir', 'anular', 'importar'],
     residente: ['ver', 'listar'],
     operador: NADA,
-    almacenista: ['ver', 'listar', 'escribir'],
+    almacenista: ['ver', 'listar', 'escribir', 'importar'],
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
-    director_obra: ['ver', 'listar', 'anular'],
-    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
+    director_obra: ['ver', 'listar', 'anular', 'importar'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular', 'importar'],
   },
   cantera: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -764,6 +769,7 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
   anular: 'anular este registro',
   activar: 'emitir códigos de activación',
   aprobar: 'aprobar ni devolver este ensayo',
+  importar: 'importar documentos al Almacén',
 };
 
 /**

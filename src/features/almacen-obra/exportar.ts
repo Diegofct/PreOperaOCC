@@ -18,6 +18,7 @@
  */
 import { nombreDeUnidad } from '@/shared/catalogos/almacen';
 import { totalesDelMaterial, type TipoMovimiento } from '@/shared/rules/almacen';
+import type { TipoDeDocumento } from '@/shared/rules/almacen-importacion';
 import { DESFASE_COLOMBIA_MS } from '@/shared/rules/jornada';
 
 /** Lo que el archivo necesita saber de un movimiento. Cantidad en centésimas. */
@@ -41,6 +42,16 @@ export interface MovimientoParaExportar {
   anuladoEn: Date | null;
   anuladoPorNombre: string | null;
   motivoAnulacion: string | null;
+  /**
+   * Spec 042, RF-51: lo que trae el documento de un ingreso importado. `null` en lo registrado a
+   * mano o por WhatsApp (RF-52), y en un importado sin ese dato (RF-82).
+   */
+  proveedor: string | null;
+  documentoTipo: TipoDeDocumento | null;
+  documentoNumero: string | null;
+  /** Pesos, como los trae el documento, por la unidad de `valorUnidad` (RF-29, RF-58). */
+  valorUnitario: number | null;
+  valorUnidad: string | null;
 }
 
 /** Un material vigente, para la hoja de existencias. */
@@ -72,6 +83,12 @@ export const ENCABEZADOS_MOVIMIENTOS = [
   'Cantidad',
   'Entregó / recibió',
   'Para qué / observación',
+  // Spec 042, RF-51.
+  'Proveedor',
+  'Tipo de documento',
+  'Número de documento',
+  'Valor unitario',
+  'Valor por',
   'Registró',
   'Registrado el',
   'Estado',
@@ -81,6 +98,9 @@ export const ENCABEZADOS_MOVIMIENTOS = [
 ];
 
 export const ENCABEZADOS_EXISTENCIAS = ['Obra', 'Material', 'Unidad', 'Ingresado', 'Salido', 'Stock'];
+
+/** Spec 042: el tipo de documento como se lee. */
+const NOMBRE_DE_DOCUMENTO: Record<TipoDeDocumento, string> = { factura: 'Factura', remision: 'Remisión', otro: 'Otro' };
 
 /** Centésimas a número: 250 → 2.5. */
 function cantidad(centesimas: number): number {
@@ -119,6 +139,12 @@ export function hojasDelAlmacen(
     cantidad(m.cantidad),
     m.responsable ?? '—',
     (m.tipo === 'salida' ? m.paraQue : m.observacion) ?? null,
+    // RF-51, RF-52: vacío, no «—» ni cero, en lo que no se importó.
+    m.proveedor,
+    m.documentoTipo ? NOMBRE_DE_DOCUMENTO[m.documentoTipo] : null,
+    m.documentoNumero,
+    m.valorUnitario,
+    m.valorUnitario === null ? null : m.valorUnidad,
     m.registradoPorNombre,
     horaDeLaObra(m.registradoEn),
     m.anuladoEn ? 'Anulado' : 'Vigente',

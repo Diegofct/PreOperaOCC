@@ -42,6 +42,7 @@ import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/mater
 import { formatearCantidad, rechazoDeBaja, type TipoMovimiento } from '@/shared/rules/almacen';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { ImportarDocumento } from '@/features/almacen-obra/importar-documento';
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
 import { api, mensajeDe } from './cliente-api';
@@ -89,7 +90,8 @@ const OPCIONES_DE_MATERIAL = [
 ];
 
 export default function PantallaAlmacen() {
-  const { rol } = usePersona();
+  const persona = usePersona();
+  const { rol } = persona;
   const puedeRegistrar = alcanza(rol, 'almacen', 'escribir');
   const esGerencia = alcanza(rol, 'obras', 'listar');
 
@@ -122,6 +124,9 @@ export default function PantallaAlmacen() {
   const obraId = obraDeLaRuta ?? obraIdElegida;
   const obraFiltro = obraDeLaRuta ?? obraFiltroElegido;
   const eligeObra = esGerencia && !obraDeLaRuta;
+  // Spec 042: a qué Almacén se importa. La de la ruta; si no, la de la persona; y la Gerencia fuera
+  // de una obra, la que eligió en el filtro.
+  const obraParaImportar = obraDeLaRuta ?? persona.obraId ?? (eligeObra ? obraFiltroElegido : null);
   const filtrado = useListadoFiltrado(
     materiales.datos,
     (m) => [m.nombre, nombreDeUnidad(m.unidad), m.obraNombre],
@@ -281,6 +286,9 @@ export default function PantallaAlmacen() {
       error={materiales.error ?? obras.error}
       cargando={materiales.cargando || obras.cargando}
     >
+      {/* Spec 042: solo lo ve quien puede importar; se muestra aunque no registre a mano (el Director de Obra). */}
+      <ImportarDocumento obraId={obraParaImportar} alConfirmar={materiales.recargar} />
+
       {puedeRegistrar ? (
         <Seccion titulo="Registrar un material">
           <Formulario>

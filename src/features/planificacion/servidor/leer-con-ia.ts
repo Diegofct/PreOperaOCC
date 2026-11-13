@@ -14,6 +14,7 @@
  * el vencimiento de la lectura en curso tiene que ser mayor que este tope.
  */
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import * as z from 'zod/v4';
 
 import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
@@ -153,11 +154,14 @@ const FALLOS_DE_LA_PLANIFICACION: TextosDeFalloDeIa = {
  * La llamada con salida estructurada, una sola para todo lo que lee o propone con un esquema. La usa
  * también el plan semanal (spec 044, `plan-semanal/servidor/con-ia.ts`): las condiciones de arriba
  * —streaming, sin reintentos, el tope— se deciden aquí una vez.
+ *
+ * `contenido` es texto, o bloques cuando va un archivo que el modelo lee tal cual: la importación al
+ * Almacén (spec 042) manda así sus fotos y sus PDF.
  */
 export async function llamarConEsquema<T>(
   esquema: z.ZodType<T>,
   instrucciones: string,
-  texto: string,
+  texto: string | BetaContentBlockParam[],
   que: string,
   fallos: TextosDeFalloDeIa = FALLOS_DE_LA_PLANIFICACION,
 ): Promise<RespuestaDeIa<T>> {

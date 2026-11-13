@@ -62,6 +62,12 @@ import type {
 } from '../../features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '../../features/laboratorio/tipos';
 import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
+import {
+  ESTADOS_DE_IMPORTACION,
+  TIPOS_DE_DOCUMENTO,
+  type PropuestaDeImportacion,
+  type TipoDeDocumento,
+} from '../../shared/rules/almacen-importacion';
 import type { Cargo } from '../../shared/catalogos/cargos';
 import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
 import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
@@ -169,6 +175,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'repositorio',
   // Spec 043: el Excel original de una planificación.
   'planificacion',
+  // Spec 042: el documento original de una importación al Almacén, con `dueno_id` = la importación.
+  'almacen',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -944,6 +952,56 @@ export const almacenMateriales = pgTable(
   ],
 );
 
+/** Spec 042: por dónde pasa una importación (ver `ESTADOS_DE_IMPORTACION`). */
+export const estadoImportacionAlmacen = pgEnum('estado_importacion_almacen', ESTADOS_DE_IMPORTACION);
+
+/**
+ * Cada documento que alguien sube al Almacén para que la IA proponga sus ingresos (spec 042).
+ *
+ * La lectura corre por detrás, como la del plan semanal, porque el proxy del VPS corta a los 120 s: la
+ * fila nace `en_curso`, y `vence_lectura_en` la libera si el servidor se reinicia a mitad de camino.
+ * Lista, la propuesta espera un día a quien la subió (`vence_propuesta_en`, RF-66) y nadie más la ve.
+ * Una persona puede tener varias a la vez (D32): por eso no hay índice único por obra.
+ *
+ * `propuesta` es un borrador que nunca se consulta por renglón: lo que vale como evidencia son los
+ * ingresos que salen de ella al confirmar, que apuntan aquí por `importacion_id`. El archivo es
+ * `media_id`, con dueño `almacen`; se guarda desde la subida y no se borra al descartar (RF-94, RF-48).
+ * `version` sube con cada cambio de estado, para que dos confirmaciones no entren dos veces (RF-88).
+ */
+export const almacenImportaciones = pgTable(
+  'almacen_importaciones',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    nombreArchivo: text('nombre_archivo').notNull(),
+    estado: estadoImportacionAlmacen('estado').notNull().default('en_curso'),
+    error: text('error'),
+    propuesta: jsonb('propuesta').$type<PropuestaDeImportacion>(),
+    version: integer('version').notNull().default(1),
+    venceLecturaEn: timestamp('vence_lectura_en', { withTimezone: true, mode: 'date' }).notNull(),
+    vencePropuestaEn: timestamp('vence_propuesta_en', { withTimezone: true, mode: 'date' }),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    confirmadaEn: timestamp('confirmada_en', { withTimezone: true, mode: 'date' }),
+    confirmadaPor: text('confirmada_por').references(() => usuarios.id),
+    descartadaEn: timestamp('descartada_en', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => [
+    // RF-65, RF-98: las pendientes de quien pregunta en esa obra.
+    index('ix_almacen_importacion_pendientes').on(t.obraId, t.creadoPor, t.estado),
+    check('ck_almacen_importacion_confirmada', sql`(${t.estado} = 'confirmada') = (${t.confirmadaEn} is not null)`),
+    check('ck_almacen_importacion_descartada', sql`(${t.estado} = 'descartada') = (${t.descartadaEn} is not null)`),
+  ],
+);
+
 /**
  * Cada ingreso y cada salida. **Evidencia: no se edita ni se borra** (RF-23), por
  * eso no lleva `actualizado_en`. Un movimiento equivocado se anula con motivo, y
@@ -996,6 +1054,27 @@ export const almacenMovimientos = pgTable(
     mensajeWhatsappId: text('mensaje_whatsapp_id').references(
       (): AnyPgColumn => whatsappMensajes.id,
     ),
+    /**
+     * Spec 042: lo que trae el documento de un ingreso importado (RF-38). **Nulas a propósito**:
+     * los movimientos registrados a mano, por WhatsApp o antes de la 042 no las tienen (RF-52,
+     * RF-57), y en uno importado el proveedor, el número y el valor son opcionales (RF-82).
+     *
+     * Se repiten en cada ingreso del documento en vez de leerse de la importación: el historial, el
+     * Excel y el aviso de repetido las leen por movimiento, y cada ingreso se anula por separado
+     * (RF-96). `documento_clave` es el proveedor y el número normalizados (`claveDelDocumento`,
+     * RF-45), con índice para el aviso de repetido (RF-43).
+     *
+     * `valor_unitario` va como lo trae el documento, y `valor_unidad` dice por qué unidad del
+     * documento es («bulto», «viaje»): texto y no la lista cerrada, porque esa unidad puede no estar
+     * en ella (RF-29, RF-58, D8).
+     */
+    proveedor: text('proveedor'),
+    documentoTipo: text('documento_tipo').$type<TipoDeDocumento>(),
+    documentoNumero: text('documento_numero'),
+    documentoClave: text('documento_clave'),
+    valorUnitario: numeric('valor_unitario', { precision: 16, scale: 2 }),
+    valorUnidad: text('valor_unidad'),
+    importacionId: text('importacion_id').references(() => almacenImportaciones.id),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),
@@ -1011,7 +1090,14 @@ export const almacenMovimientos = pgTable(
     // ver entre sí.
     index('ix_almacen_movimiento_material').on(t.materialId),
     index('ix_almacen_movimiento_obra_fecha').on(t.obraId, t.fecha),
+    // Spec 042, RF-43: ¿este documento ya entró a la obra?
+    index('ix_almacen_movimiento_documento').on(t.obraId, t.documentoClave),
     check('ck_almacen_movimiento_cantidad', sql`${t.cantidad} > 0`),
+    // Spec 042: el tipo de documento es uno de los de la regla; nulo en lo que no se importó.
+    check(
+      'ck_almacen_movimiento_documento_tipo',
+      sql`${t.documentoTipo} is null or ${t.documentoTipo} in (${sql.raw(TIPOS_DE_DOCUMENTO.map((x) => `'${x}'`).join(', '))})`,
+    ),
   ],
 );
 

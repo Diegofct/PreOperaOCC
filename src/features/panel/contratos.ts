@@ -35,6 +35,7 @@ import {
   type PendienteDelDia,
   type TrabajoDeMantenimiento,
 } from '@/shared/rules/bitacora-occ';
+import type { TipoDeDocumento } from '@/shared/rules/almacen-importacion';
 import type { EnsayoDeObra } from '@/shared/rules/ensayos-de-obra';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '@/shared/rules/mantenimiento';
 import {
@@ -1480,6 +1481,18 @@ export interface MovimientoDeAlmacenFila {
    * es entonces quien lo aprobó.
    */
   desdeWhatsapp: boolean;
+  /**
+   * Spec 042, RF-49, RF-52: lo que trae el documento de un ingreso importado. `null` en los
+   * registrados a mano o por WhatsApp, y en uno importado sin ese dato (RF-82).
+   */
+  proveedor: string | null;
+  documentoTipo: TipoDeDocumento | null;
+  documentoNumero: string | null;
+  /** Como lo trae el documento, con la unidad a la que corresponde (RF-29, RF-58). */
+  valorUnitario: number | null;
+  valorUnidad: string | null;
+  /** RF-47: el id del documento original, para descargarlo por `media/[id]`; solo de una importación confirmada. */
+  documentoOriginalId: string | null;
   anulado: boolean;
   anuladoEn: string | null;
   anuladoPorNombre: string | null;

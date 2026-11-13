@@ -1,11 +1,12 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import { almacenImportaciones, asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
 import { archivoGeneradoAlAlcance } from '@/features/asistente/servidor/conversaciones';
 import { disposicionDelArchivo, documentoAlAlcance } from '@/features/documentos/servidor/documentos';
 import { leer } from '@/features/media/servidor/almacen';
-import { alcanzaLaImagen, esDeSusObras, veTodasLasObras } from '@/features/servidor/alcance';
+import { alcanzaLaImagen, alcanzaLaObra, esDeSusObras, veTodasLasObras } from '@/features/servidor/alcance';
+import { modulosDeLaObra } from '@/features/servidor/modulos-de-obra';
 import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
@@ -84,6 +85,12 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       // Spec 043, RF-50: el Excel original lleva costos y nómina, y aquí la guardia es genérica.
       // Sale solo por su propia ruta, con su permiso.
       return noEncontrado('ese archivo');
+    } else if (fila.duenoTipo === 'almacen') {
+      // Spec 042, RF-47, RF-92 a RF-95: el documento original de una importación, solo confirmada
+      // y a quien puede ver el Almacén de esa obra. Una descartada o a medio revisar no sale.
+      const importacion = await importacionConfirmadaAlAlcance(sesion, fila.duenoId);
+      if (!importacion) return noEncontrado('ese archivo');
+      nombreArchivo = importacion.nombreArchivo;
     } else if (
       !alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId), MODULO_DEL_DUENO[fila.duenoTipo])
     ) {
@@ -166,6 +173,23 @@ async function duenoDeLaImagen(
 
   // Los documentos todavía no tienen dueño con obra: solo los ve la gerencia.
   return { existe: false, obraId: null };
+}
+
+/**
+ * Spec 042: la importación al Almacén de la que cuelga un documento, si está confirmada y quien lo
+ * pide puede ver el Almacén de esa obra, con el módulo activo; si no, `null` (RF-47, RF-92, RF-95).
+ * El Residente lo ve: consulta el Almacén y ve sus valores (D3).
+ */
+async function importacionConfirmadaAlAlcance(sesion: PersonaEnSesion, importacionId: string): Promise<{ nombreArchivo: string } | null> {
+  if (!alcanza(sesion.rol, 'almacen', 'ver')) return null;
+  const [importacion] = await baseServidor()
+    .select({ obraId: almacenImportaciones.obraId, estado: almacenImportaciones.estado, nombreArchivo: almacenImportaciones.nombreArchivo })
+    .from(almacenImportaciones)
+    .where(eq(almacenImportaciones.id, importacionId))
+    .limit(1);
+  if (!importacion || importacion.estado !== 'confirmada' || !alcanzaLaObra(sesion, importacion.obraId)) return null;
+  if (!(await modulosDeLaObra(importacion.obraId)).almacen) return null;
+  return { nombreArchivo: importacion.nombreArchivo };
 }
 
 /**

@@ -40,6 +40,13 @@ import type {
   ListaDePlanesSemanales,
   PlanSemanalDetalle,
 } from '@/features/panel/plan-semanal';
+import type {
+  confirmacionDeImportacion,
+  ImportacionConfirmada,
+  ImportacionDetalle,
+  ImportacionIniciada,
+  ImportacionPendienteFila,
+} from '@/features/panel/almacen-importacion';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -596,6 +603,31 @@ export const api = {
         panelEnviar<MovimientoDeAlmacenFila>('/almacen/movimientos', 'POST', datos),
       anular: (id: string, motivo: string) =>
         panelEnviar<{ id: string }>(`/almacen/movimientos/${id}/anular`, 'POST', { motivo }),
+    },
+    /** Spec 042: importar un documento para que la IA proponga sus ingresos. */
+    importaciones: {
+      /** RF-65, RF-98: las de quien pregunta en esa obra que siguen abiertas. */
+      listar: (obraId: string) => panel<ImportacionPendienteFila[]>(`/almacen/importaciones?${new URLSearchParams({ obraId })}`),
+      /**
+       * RF-3 a RF-9: sube el archivo tal cual; la lectura sigue por detrás (202). El nombre va en una
+       * cabecera, codificado: una cabecera solo admite ASCII y los nombres traen tildes.
+       */
+      subir: (obraId: string, archivo: File) =>
+        pedir<ImportacionIniciada>(`/api/panel/almacen/importaciones?${new URLSearchParams({ obraId })}`, {
+          method: 'POST',
+          headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name) },
+          body: archivo,
+        }),
+      /** RF-8, RF-65: en qué va y, si está lista, su propuesta. Liviana: se consulta seguido. */
+      de: (id: string) => panel<ImportacionDetalle>(`/almacen/importaciones/${encodeURIComponent(id)}`),
+      /** RF-48: la deja descartada; el archivo no se borra. */
+      descartar: (id: string) => panelEnviar<ImportacionPendienteFila>(`/almacen/importaciones/${encodeURIComponent(id)}/descartar`, 'POST', {}),
+      /**
+       * RF-30 a RF-46, RF-88, RF-89: registra todos los ingresos o ninguno. 400 con `faltas`; 409 con
+       * `repetido` si falta aceptar el aviso, o si ya entró, cambió o venció.
+       */
+      confirmar: (id: string, datos: z.input<typeof confirmacionDeImportacion>) =>
+        panelEnviar<ImportacionConfirmada>(`/almacen/importaciones/${encodeURIComponent(id)}/confirmar`, 'POST', datos),
     },
   },
 
