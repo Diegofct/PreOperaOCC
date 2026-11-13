@@ -22,8 +22,22 @@
  *
  * Se muestra del más reciente al más antiguo: lo que se busca casi siempre es lo
  * último que pasó.
+ *
+ * ── Lo importado de un documento (spec 042) ──
+ *
+ * Un ingreso importado lleva el documento del que salió —tipo, número y proveedor—, su
+ * valor unitario con la unidad del documento («$ 30.000 por bulto», RF-49, RF-58) y
+ * «Ver documento» para abrir el original (RF-47). Todo va **dentro de la columna de
+ * detalle**, sin columnas nuevas: la tabla ya llena el ancho del panel, y una columna
+ * más escondería la de anular. El valor lo ve todo el que ve el historial, Residente
+ * incluido (RF-50). Un ingreso a mano o por WhatsApp no tiene esos datos y se ve como
+ * siempre (RF-52).
+ *
+ * El original se abre por `/api/panel/media/:id`, la única puerta al almacén de
+ * archivos, que vuelve a mirar la sesión y la obra (RF-92).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 
 import {
   filtrarMovimientos,
@@ -31,6 +45,7 @@ import {
   rechazoDeAnulacion,
   type TipoMovimiento,
 } from '@/shared/rules/almacen';
+import { valorConSuUnidad, type TipoDeDocumento } from '@/shared/rules/almacen-importacion';
 
 import { api, mensajeDe } from './cliente-api';
 import {
@@ -54,6 +69,20 @@ import { useListado } from './marco';
 import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
+const NOMBRE_DEL_DOCUMENTO: Record<TipoDeDocumento, string> = { factura: 'Factura', remision: 'Remisión', otro: 'Documento' };
+
+/** RF-49: «Factura FE-2291 · Ferretería…», con lo que haya; `null` si el ingreso no viene de un documento. */
+function delDocumento(m: MovimientoDeAlmacenFila): string | null {
+  if (!m.documentoTipo && !m.documentoNumero && !m.proveedor) return null;
+  const documento = [m.documentoTipo ? NOMBRE_DEL_DOCUMENTO[m.documentoTipo] : null, m.documentoNumero].filter(Boolean).join(' ');
+  return [documento || null, m.proveedor].filter(Boolean).join(' · ');
+}
+
+/** RF-47: el original en otra pestaña, por la puerta de siempre. */
+function abrirOriginal(id: string) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') window.open(`/api/panel/media/${encodeURIComponent(id)}`, '_blank', 'noopener');
+}
 
 /** Día y hora en la obra, corto: «15 sept, 04:58 p. m.». */
 function momento(iso: string): string {
@@ -162,18 +191,31 @@ export function HistorialAlmacen({
       clave: 'detalle',
       titulo: 'Para qué / observación',
       ancho: 180,
-      pintar: (m) => (
-        <>
-          <Celda lineas={3}>{(m.tipo === 'salida' ? m.paraQue : m.observacion) ?? '—'}</Celda>
-          {m.anulado ? (
-            // Hasta cinco renglones: el motivo es lo único que explica la anulación
-            // (RF-24), y en uno solo se cortaba a las pocas palabras.
-            <Celda lineas={5}>
-              {`Anulado por ${m.anuladoPorNombre ?? '—'}${m.anuladoEn ? ` el ${momento(m.anuladoEn)}` : ''}: ${m.motivoAnulacion ?? ''}`}
-            </Celda>
-          ) : null}
-        </>
-      ),
+      pintar: (m) => {
+        const documento = delDocumento(m);
+        const valor = valorConSuUnidad(m.valorUnitario, m.valorUnidad);
+        const nota = m.tipo === 'salida' ? m.paraQue : m.observacion;
+        return (
+          <>
+            {/* RF-52: sin documento, «—» como siempre; con documento, la nota solo si la hay. */}
+            {nota || !documento ? <Celda lineas={3}>{nota ?? '—'}</Celda> : null}
+            {documento ? <Celda lineas={3}>{documento}</Celda> : null}
+            {valor ? <Celda>{valor}</Celda> : null}
+            {m.documentoOriginalId ? (
+              <Acciones>
+                <Boton titulo="Ver documento" tono="secundario" onPress={() => abrirOriginal(m.documentoOriginalId!)} />
+              </Acciones>
+            ) : null}
+            {m.anulado ? (
+              // Hasta cinco renglones: el motivo es lo único que explica la anulación
+              // (RF-24), y en uno solo se cortaba a las pocas palabras.
+              <Celda lineas={5}>
+                {`Anulado por ${m.anuladoPorNombre ?? '—'}${m.anuladoEn ? ` el ${momento(m.anuladoEn)}` : ''}: ${m.motivoAnulacion ?? ''}`}
+              </Celda>
+            ) : null}
+          </>
+        );
+      },
     },
     {
       clave: 'estado',

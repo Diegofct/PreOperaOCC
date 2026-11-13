@@ -137,6 +137,8 @@ export const MODULOS_DE_EMPRESA = [
   // de cumplimiento y no a la planificación, que lleva los costos.
   'planificacion',
   'cumplimiento',
+  // Spec 044. Solo en el menú de una obra, como los dos de arriba.
+  'plan_semanal',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -173,8 +175,12 @@ export const TODOS_LOS_MODULOS: ModulosDeObra = { almacen: true, cantera: true, 
  * `escribir` porque son dos personas distintas: el laboratorista escribe y no
  * aprueba, el residente aprueba y no escribe. Con las acciones que había no se
  * podían decir las dos cosas.
+ *
+ * `importar` es subir un documento al Almacén para que la IA proponga sus ingresos (spec 042).
+ * Es aparte de `escribir` porque el Director de Obra importa pero no registra a mano (042/D4,
+ * D28): dándole `escribir` se le habría abierto también el formulario de la spec 009.
  */
-export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar' | 'aprobar';
+export type Accion = 'ver' | 'listar' | 'escribir' | 'anular' | 'activar' | 'aprobar' | 'importar';
 
 const NADA: readonly Accion[] = [];
 
@@ -317,16 +323,17 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
   // Spec 041 (RF-9, RF-60): dentro de las obras anulan también los dos directores, que
   // responden por ellas. El almacenista sigue sin anular.
   almacen: {
-    admin: ['ver', 'listar', 'escribir', 'anular'],
+    // Spec 042: `importar` lo tienen quienes registran ingresos, y además el Director de Obra.
+    admin: ['ver', 'listar', 'escribir', 'anular', 'importar'],
     residente: ['ver', 'listar'],
     operador: NADA,
-    almacenista: ['ver', 'listar', 'escribir'],
+    almacenista: ['ver', 'listar', 'escribir', 'importar'],
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
     auxiliar_administrativa: NADA,
-    director_obra: ['ver', 'listar', 'anular'],
-    director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
+    director_obra: ['ver', 'listar', 'anular', 'importar'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'anular', 'importar'],
   },
   cantera: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -595,6 +602,21 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar'],
   },
+  // Spec 044, RF-54, RF-59. Lo arman la Gerencia, los dos directores y el Residente; aprobar y anular
+  // no son del Residente. Quién aprueba qué plan depende además de quién lo creó (RF-56 a RF-58):
+  // eso no cabe en esta tabla y lo decide la regla del plan semanal.
+  plan_semanal: {
+    admin: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    residente: ['ver', 'listar', 'escribir'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    auxiliar_administrativa: NADA,
+    director_obra: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -747,6 +769,7 @@ const QUE_SE_INTENTABA: Record<Accion, string> = {
   anular: 'anular este registro',
   activar: 'emitir códigos de activación',
   aprobar: 'aprobar ni devolver este ensayo',
+  importar: 'importar documentos al Almacén',
 };
 
 /**
@@ -787,6 +810,14 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
   cumplimiento: {
     ver: 'ver el cumplimiento de la obra',
     listar: 'ver el cumplimiento de la obra',
+  },
+  // Spec 044.
+  plan_semanal: {
+    ver: 'ver el plan semanal de la obra',
+    listar: 'ver el plan semanal de la obra',
+    escribir: 'armar un plan semanal',
+    aprobar: 'aprobar un plan semanal',
+    anular: 'anular un plan semanal',
   },
 };
 
@@ -901,6 +932,7 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   bitacora_empresa: 'Bitácora',
   planificacion: 'Planificación',
   cumplimiento: 'Cumplimiento de obra',
+  plan_semanal: 'Plan semanal',
 };
 
 /**

@@ -32,6 +32,7 @@ import {
   type AdjuntoGuardado,
   type ClaseDeAdjunto,
 } from '@/shared/rules/asistente';
+import { esPdf, esZip, MIME_DE_CLASE, mimeDeImagen, paginasDelPdf } from '@/shared/rules/archivos-subidos';
 import { texto } from '@/shared/rules/formulario-presupuesto';
 
 import { leerWord } from './leer-word';
@@ -55,39 +56,11 @@ export interface AdjuntoLeido {
 /** Lo que se le manda a la IA de un Excel o un Word; más se recorta con aviso. */
 const CARACTERES_MAXIMOS_DE_TEXTO = 150_000;
 
-const MIME_DE_CLASE: Record<Exclude<ClaseDeAdjunto, 'imagen'>, string> = {
-  pdf: 'application/pdf',
-  excel: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  word: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-};
-
-/** La foto por sus primeros bytes, no por lo que diga el navegador. */
-function mimeDeImagen(b: Uint8Array): 'image/jpeg' | 'image/png' | 'image/webp' | null {
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
-  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
-  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45) return 'image/webp';
-  return null;
-}
-
-const esPdf = (b: Uint8Array) => b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46; // %PDF
-const esZip = (b: Uint8Array) => b[0] === 0x50 && b[1] === 0x4b; // PK
-
 /**
- * Las páginas de un PDF, por su árbol de páginas: el `/Count` más grande de los objetos
- * `/Type /Pages`. `null` si el PDF lo esconde en un flujo comprimido; entonces el límite
- * lo pone la API, que también rechaza los PDF demasiado largos.
+ * Un archivo en base64, para mandarlo a la IA como bloque. La importación al Almacén (spec 042) lo
+ * usa igual para sus fotos y PDF.
  */
-export function paginasDelPdf(b: Uint8Array): number | null {
-  const textoDelPdf = new TextDecoder('latin1').decode(b);
-  let mayor: number | null = null;
-  for (const m of textoDelPdf.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)|\/Count\s+(\d+)[^>]*?\/Type\s*\/Pages\b/g)) {
-    const n = Number(m[1] ?? m[2]);
-    if (mayor === null || n > mayor) mayor = n;
-  }
-  return mayor;
-}
-
-function aBase64(b: Uint8Array): string {
+export function aBase64(b: Uint8Array): string {
   let binario = '';
   for (let i = 0; i < b.length; i += 0x8000) binario += String.fromCharCode(...b.subarray(i, i + 0x8000));
   return btoa(binario);

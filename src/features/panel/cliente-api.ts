@@ -33,6 +33,20 @@ import type {
   PropuestaDeHojasRespuesta,
   SeleccionDeHojasPedida,
 } from '@/features/panel/planificacion';
+import type {
+  EstadoDeLecturaDePlanRespuesta,
+  GuardadoDePlanSemanal,
+  LecturaDePlanIniciada,
+  ListaDePlanesSemanales,
+  PlanSemanalDetalle,
+} from '@/features/panel/plan-semanal';
+import type {
+  confirmacionDeImportacion,
+  ImportacionConfirmada,
+  ImportacionDetalle,
+  ImportacionIniciada,
+  ImportacionPendienteFila,
+} from '@/features/panel/almacen-importacion';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
 
@@ -590,6 +604,31 @@ export const api = {
       anular: (id: string, motivo: string) =>
         panelEnviar<{ id: string }>(`/almacen/movimientos/${id}/anular`, 'POST', { motivo }),
     },
+    /** Spec 042: importar un documento para que la IA proponga sus ingresos. */
+    importaciones: {
+      /** RF-65, RF-98: las de quien pregunta en esa obra que siguen abiertas. */
+      listar: (obraId: string) => panel<ImportacionPendienteFila[]>(`/almacen/importaciones?${new URLSearchParams({ obraId })}`),
+      /**
+       * RF-3 a RF-9: sube el archivo tal cual; la lectura sigue por detrás (202). El nombre va en una
+       * cabecera, codificado: una cabecera solo admite ASCII y los nombres traen tildes.
+       */
+      subir: (obraId: string, archivo: File) =>
+        pedir<ImportacionIniciada>(`/api/panel/almacen/importaciones?${new URLSearchParams({ obraId })}`, {
+          method: 'POST',
+          headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name) },
+          body: archivo,
+        }),
+      /** RF-8, RF-65: en qué va y, si está lista, su propuesta. Liviana: se consulta seguido. */
+      de: (id: string) => panel<ImportacionDetalle>(`/almacen/importaciones/${encodeURIComponent(id)}`),
+      /** RF-48: la deja descartada; el archivo no se borra. */
+      descartar: (id: string) => panelEnviar<ImportacionPendienteFila>(`/almacen/importaciones/${encodeURIComponent(id)}/descartar`, 'POST', {}),
+      /**
+       * RF-30 a RF-46, RF-88, RF-89: registra todos los ingresos o ninguno. 400 con `faltas`; 409 con
+       * `repetido` si falta aceptar el aviso, o si ya entró, cambió o venció.
+       */
+      confirmar: (id: string, datos: z.input<typeof confirmacionDeImportacion>) =>
+        panelEnviar<ImportacionConfirmada>(`/almacen/importaciones/${encodeURIComponent(id)}/confirmar`, 'POST', datos),
+    },
   },
 
   /**
@@ -1083,6 +1122,43 @@ reportes: {
     /** RF-47, RF-48: solo la vigente, con motivo. */
     anular: (id: string, motivo: string) =>
       panelEnviar<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+  },
+
+  /** Spec 044: los planes semanales de una obra. Al Residente le llegan sin plata (RF-30). */
+  planesSemanales: {
+    /** RF-2, RF-78: las semanas que se pueden planear hoy y los planes de la obra. */
+    listar: (obraId: string) => panel<ListaDePlanesSemanales>(`/planes-semanales${conObra(obraId)}`),
+    de: (id: string) => panel<PlanSemanalDetalle>(`/planes-semanales/${encodeURIComponent(id)}`),
+    /** RF-22, RF-23, RF-86: guarda el borrador. 400 si una actividad no cuadra; 409 si cambió desde que se abrió. */
+    guardar: (id: string, datos: GuardadoDePlanSemanal) =>
+      panelEnviar<{ version: number }>(`/planes-semanales/${encodeURIComponent(id)}`, 'PUT', datos),
+    /** Un borrador en blanco. 409 si ya hay uno de esa semana o la obra no tiene planificación. */
+    crear: (obraId: string, semana: string) => panelEnviar<{ id: string }>('/planes-semanales', 'POST', { obraId, semana }),
+    /** RF-34: la IA arma la propuesta por detrás; 202 con la lectura. 409 trae `borrador` si hay uno sin confirmar. */
+    proponer: (obraId: string, semana: string, sustituir: boolean) =>
+      pedir<LecturaDePlanIniciada>(
+        `/api/panel/planes-semanales/proponer?${new URLSearchParams({ obraId, semana, ...(sustituir ? { sustituir: 'true' } : {}) })}`,
+        { method: 'POST' },
+      ),
+    /** RF-42, RF-92: lee el Excel de la semana escogida por detrás; 202 con la lectura. */
+    leer: (obraId: string, semana: string, archivo: Blob, sustituir: boolean) =>
+      pedir<LecturaDePlanIniciada>(
+        `/api/panel/planes-semanales/leer?${new URLSearchParams({ obraId, semana, ...(sustituir ? { sustituir: 'true' } : {}) })}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          body: archivo,
+        },
+      ),
+    /** RF-49: en qué va una propuesta o una lectura. */
+    lectura: (id: string) => panel<EstadoDeLecturaDePlanRespuesta>(`/planes-semanales/lecturas/${encodeURIComponent(id)}`),
+    /** RF-56 a RF-63, RF-99: 409 con `avisos` si los hay y no se confirmaron, o si el borrador cambió. */
+    aprobar: (id: string, datos: { version: number; confirmarAvisos: boolean }) =>
+      panelEnviar<PlanSemanalDetalle>(`/planes-semanales/${encodeURIComponent(id)}/aprobar`, 'POST', datos),
+    /** RF-65 a RF-67: con motivo; deja de regir hoy. */
+    anular: (id: string, motivo: string) => panelEnviar<PlanSemanalDetalle>(`/planes-semanales/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+    /** RF-80: el plan en Excel; al Residente, sin plata (RF-30, RF-102). */
+    excel: (id: string) => descargar(`/api/panel/planes-semanales/${encodeURIComponent(id)}/excel`),
   },
 
   /** Spec 043: el cumplimiento de la planificación; al Residente le llega sin plata (RF-88). */

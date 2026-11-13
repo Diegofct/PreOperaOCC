@@ -156,6 +156,8 @@ const MENU_DE_OBRA: readonly EntradaDelMenu[] = [
   // Cumplimiento, en cantidades; la tabla decide quién ve qué.
   e('planificacion', 'Planificación', 'planificacion'),
   e('cumplimiento', 'Cumplimiento', 'cumplimiento'),
+  // Spec 044, RF-78: el plan de trabajo de cada semana, junto a lo que lo mide.
+  e('plan-semanal', 'Plan semanal', 'plan_semanal'),
   ...SOLICITUDES,
   ASISTENTE,
 ];

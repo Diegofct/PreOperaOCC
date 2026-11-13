@@ -14,6 +14,7 @@
  * el vencimiento de la lectura en curso tiene que ser mayor que este tope.
  */
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import * as z from 'zod/v4';
 
 import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
@@ -138,11 +139,31 @@ supuestos y objetivos: cada renglón como texto, de las hojas de esos usos.`;
 
 export type RespuestaDeIa<T> = { ok: true; datos: T; modelo: string; tokensEntrada: number; tokensSalida: number } | { ok: false; error: string };
 
-async function llamar<T>(
+/** Lo que se le dice a la persona cuando la IA se niega o la respuesta no cabe. */
+export interface TextosDeFalloDeIa {
+  seNego: string;
+  muyLargo: string;
+}
+
+const FALLOS_DE_LA_PLANIFICACION: TextosDeFalloDeIa = {
+  seNego: 'La IA no quiso leer este archivo.',
+  muyLargo: 'La planificación es demasiado larga para leerla con IA.',
+};
+
+/**
+ * La llamada con salida estructurada, una sola para todo lo que lee o propone con un esquema. La usa
+ * también el plan semanal (spec 044, `plan-semanal/servidor/con-ia.ts`): las condiciones de arriba
+ * —streaming, sin reintentos, el tope— se deciden aquí una vez.
+ *
+ * `contenido` es texto, o bloques cuando va un archivo que el modelo lee tal cual: la importación al
+ * Almacén (spec 042) manda así sus fotos y sus PDF.
+ */
+export async function llamarConEsquema<T>(
   esquema: z.ZodType<T>,
   instrucciones: string,
-  texto: string,
+  texto: string | BetaContentBlockParam[],
   que: string,
+  fallos: TextosDeFalloDeIa = FALLOS_DE_LA_PLANIFICACION,
 ): Promise<RespuestaDeIa<T>> {
   const ia = clienteDeIa();
   if (!ia) return { ok: false, error: 'La lectura con IA no está configurada en este servidor.' };
@@ -161,8 +182,8 @@ async function llamar<T>(
         { timeout: TIEMPO_MAXIMO_DE_LECTURA_MS, maxRetries: 0 },
       )
       .finalMessage();
-    if (mensaje.stop_reason === 'refusal') return { ok: false, error: 'La IA no quiso leer este archivo.' };
-    if (mensaje.stop_reason === 'max_tokens') return { ok: false, error: 'La planificación es demasiado larga para leerla con IA.' };
+    if (mensaje.stop_reason === 'refusal') return { ok: false, error: fallos.seNego };
+    if (mensaje.stop_reason === 'max_tokens') return { ok: false, error: fallos.muyLargo };
     const leido = esquema.safeParse(mensaje.parsed_output);
     if (!leido.success) {
       console.error(`[ia] ${que}: la respuesta no tiene la forma esperada:`, leido.error);
@@ -176,10 +197,10 @@ async function llamar<T>(
 
 /** RF-4: para qué sirve cada hoja, a partir de su muestra. */
 export function proponerHojas(muestra: string): Promise<RespuestaDeIa<PropuestaDeHojas>> {
-  return llamar(esquemaDePropuesta, INSTRUCCIONES_PARA_PROPONER, muestra, 'propuesta de hojas');
+  return llamarConEsquema(esquemaDePropuesta, INSTRUCCIONES_PARA_PROPONER, muestra, 'propuesta de hojas');
 }
 
 /** RF-20: lo que dicen las hojas confirmadas, con la hoja y la fila de cada cifra. */
 export function leerPlanificacion(texto: string): Promise<RespuestaDeIa<LecturaDePlanificacion>> {
-  return llamar(esquemaDeLectura, INSTRUCCIONES_PARA_LEER, texto, 'lectura de la planificación');
+  return llamarConEsquema(esquemaDeLectura, INSTRUCCIONES_PARA_LEER, texto, 'lectura de la planificación');
 }

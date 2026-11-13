@@ -47,6 +47,7 @@ import { diaDeLaSemana, esFestivo } from './festivos';
 import { sumarDias } from './jornada';
 import { diasDe, periodoDe } from './periodos';
 import {
+  llaveDeItemPlanificado,
   llaveDelItem,
   rubrosDelMes,
   sinPrecioDeCosto,
@@ -55,6 +56,7 @@ import {
   type ProgramacionDeRubros,
 } from './planificacion';
 import type { Rol } from './permisos';
+import { planQueRige, type PlanAprobado } from './plan-semanal';
 import { redondearCantidad } from './presupuesto';
 import type { ActividadLeida } from './reportes';
 
@@ -123,11 +125,8 @@ export function diasDeReparto(mes: string): string[] {
   return diasDe(periodoDe('mes', `${mes}-01`)).filter(esDiaDeReparto);
 }
 
-/** La identidad con que se mide un ítem: la del presupuesto; si no cruzó, la del libro. */
-export function llaveDeItemPlanificado(item: Pick<ItemDeLaPlanificacion, 'delPresupuesto' | 'grupo' | 'capitulo' | 'item'>): string {
-  const cruce = item.delPresupuesto;
-  return cruce ? llaveDelItem(cruce.grupo, cruce.capitulo, cruce.item) : llaveDelItem(item.grupo, item.capitulo, item.item);
-}
+// Vive en `planificacion.ts` desde la spec 044, que también la usa; aquí se sigue ofreciendo igual.
+export { llaveDeItemPlanificado };
 
 export interface VersionMedible extends VersionAprobada {
   /** La cantidad programada: `llave → mes → cantidad`. */
@@ -176,35 +175,75 @@ export interface PeriodoDeMeta {
 export interface MetaDelPeriodo {
   /** `null`: ningún día del periodo tiene meta para este ítem (RF-56, RF-73). */
   meta: number | null;
-  /** RF-66: salió de repartir el mes. */
+  /** RF-66: algún día salió de repartir el mes. */
   estimada: boolean;
+  /**
+   * Spec 044, RF-95: cuántos días salieron de un plan semanal aprobado. Solo aparece si hay alguno:
+   * con días de los dos tipos, la fila es «Parcialmente estimada».
+   */
+  diasDelPlan?: number;
 }
 
 /**
- * RF-63 a RF-67, RF-119. `planSemanal` es el de la semana, `llave → cantidad`, cuando existe uno
- * aprobado (spec 044): manda sobre el reparto y no toca la meta del mes (RF-63, RF-64).
+ * Spec 044, RF-95: cómo se dice que una meta no salió entera del plan. «Estimada» si todos sus días
+ * salieron de repartir el mes; «Parcialmente estimada» con cuántos días salieron del plan si se
+ * mezclan; nada si salió entera del plan o no hay meta. Se escribe una vez para que la pantalla, el
+ * Excel y el PDF digan lo mismo.
+ */
+export function etiquetaDeEstimada(fila: { meta: number | null; estimada: boolean; diasDelPlan?: number }): string | null {
+  if (fila.meta === null || !fila.estimada) return null;
+  if (fila.diasDelPlan) return `Parcialmente estimada (${fila.diasDelPlan} ${fila.diasDelPlan === 1 ? 'día' : 'días'} del plan)`;
+  return 'Estimada';
+}
+
+/** Spec 044: un plan semanal aprobado, con lo que pide cada día a cada ítem (`metasPorDiaDelPlan`). */
+export interface PlanSemanalParaMedir extends PlanAprobado {
+  metasPorDia: ReadonlyMap<string, ReadonlyMap<string, number>>;
+}
+
+/**
+ * RF-63 a RF-67, RF-119; spec 044, RF-70 a RF-77, RF-95. Día por día: si rige un plan semanal
+ * aprobado, la meta de ese día es la del plan (y un ítem que no está en el plan no tiene meta ese
+ * día); si no, el reparto del mes. Sin planificación que rija, ningún día tiene meta, haya o no plan
+ * (044/RF-77). La meta del mes no usa planes (044/RF-74).
  */
 export function metaDelPeriodo(
   llave: string,
   periodo: PeriodoDeMeta,
   versiones: readonly VersionMedible[],
-  planSemanal: ReadonlyMap<string, number> | null = null,
+  planes: readonly PlanSemanalParaMedir[] = [],
 ): MetaDelPeriodo {
-  if (periodo.tipo === 'semana' && planSemanal) return { meta: planSemanal.get(llave) ?? null, estimada: false };
-
+  const conPlanes = periodo.tipo === 'semana' && planes.length > 0;
   const repartos = new Map<string, number>();
   let suma = 0;
   let tieneMeta = false;
+  let estimados = 0;
+  let delPlan = 0;
   for (const dia of diasDe(periodo)) {
+    const version = versionQueRige(dia, versiones);
+    const plan = conPlanes ? planQueRige(dia, planes) : null;
+    if (plan) {
+      const cantidad = version ? plan.metasPorDia.get(dia)?.get(llave) : undefined;
+      if (cantidad === undefined) continue;
+      suma += cantidad;
+      tieneMeta = true;
+      delPlan += 1;
+      continue;
+    }
     if (!esDiaDeReparto(dia)) continue;
     const mes = dia.slice(0, 7);
-    const cantidad = versionQueRige(dia, versiones)?.cantidades.get(llave)?.get(mes);
+    const cantidad = version?.cantidades.get(llave)?.get(mes);
     if (cantidad === undefined) continue;
     if (!repartos.has(mes)) repartos.set(mes, diasDeReparto(mes).length);
     suma += cantidad / (repartos.get(mes) as number);
     tieneMeta = true;
+    estimados += 1;
   }
-  return { meta: tieneMeta ? redondearCantidad(suma) : null, estimada: tieneMeta && periodo.tipo === 'semana' };
+  return {
+    meta: tieneMeta ? redondearCantidad(suma) : null,
+    estimada: periodo.tipo === 'semana' && estimados > 0,
+    ...(delPlan > 0 ? { diasDelPlan: delPlan } : {}),
+  };
 }
 
 /** Un parte de obra como lo necesita el informe. */
@@ -222,6 +261,8 @@ export interface FilaDeCumplimiento {
   item: ItemDeLaPlanificacion;
   meta: number | null;
   estimada: boolean;
+  /** Spec 044, RF-95: los días que salieron del plan semanal, si hubo alguno. */
+  diasDelPlan?: number;
   ejecutado: number;
   /** `null` si no tiene meta o el mes está marcado como cumplido (RF-73, RF-123). */
   porcentaje: number | null;
@@ -270,7 +311,8 @@ export interface PedidoDeEjecucion {
   partesAcumuladas: readonly ParteMedido[];
   /** `YYYY-MM`. */
   mesesCumplidos: readonly string[];
-  planSemanal?: ReadonlyMap<string, number> | null;
+  /** Spec 044: los planes semanales aprobados que tocan el periodo. */
+  planesSemanales?: readonly PlanSemanalParaMedir[];
 }
 
 function llaveDeActividad(actividad: ActividadLeida): string {
@@ -296,6 +338,25 @@ function sumarPorLlave(partes: readonly ParteMedido[]): Map<string, number> {
   return suma;
 }
 
+/**
+ * Spec 044, RF-33, RF-93: lo que le falta a cada ítem en la obra, por su llave. Es el mismo
+ * «pendiente total» del informe (planeada menos acumulado, sin partes anulados), para que el aviso
+ * del plan y el informe nunca den dos cifras distintas. Un ítem sin medida planeada no aparece.
+ */
+export function pendientesPorLlave(
+  items: readonly Pick<ItemDeLaPlanificacion, 'delPresupuesto' | 'grupo' | 'capitulo' | 'item' | 'medidaReal'>[],
+  partes: readonly ParteMedido[],
+): Map<string, number> {
+  const acumulado = sumarPorLlave(partes);
+  const pendientes = new Map<string, number>();
+  for (const item of items) {
+    if (item.medidaReal === null) continue;
+    const llave = llaveDeItemPlanificado(item);
+    pendientes.set(llave, redondearCantidad(Math.max(item.medidaReal - redondearCantidad(acumulado.get(llave) ?? 0), 0)));
+  }
+  return pendientes;
+}
+
 /** Lo ejecutado frente a la meta, ítem por ítem (RF-60 a RF-62, RF-68 a RF-74, RF-123 a RF-129). */
 export function ejecucionDelPeriodo(pedido: PedidoDeEjecucion): EjecucionDelPeriodo {
   const { periodo, hoy, items, versiones, mesesCumplidos } = pedido;
@@ -306,7 +367,7 @@ export function ejecucionDelPeriodo(pedido: PedidoDeEjecucion): EjecucionDelPeri
 
   const filas = items.flatMap((item): FilaDeCumplimiento[] => {
     const llave = llaveDeItemPlanificado(item);
-    const { meta, estimada } = metaDelPeriodo(llave, periodo, versiones, pedido.planSemanal ?? null);
+    const { meta, estimada, diasDelPlan } = metaDelPeriodo(llave, periodo, versiones, pedido.planesSemanales ?? []);
     const ejecutado = redondearCantidad(delPeriodo.get(llave) ?? 0);
     if (meta === null && ejecutado === 0) return [];
 
@@ -318,6 +379,7 @@ export function ejecucionDelPeriodo(pedido: PedidoDeEjecucion): EjecucionDelPeri
         item,
         meta,
         estimada,
+        ...(diasDelPlan ? { diasDelPlan } : {}),
         ejecutado,
         porcentaje: meta === null || meta === 0 || cumplida ? null : Math.round((ejecutado / meta) * 1000) / 10,
         pendientePeriodo: meta === null || cumplida ? 0 : redondearCantidad(Math.max(meta - ejecutado, 0)),
@@ -401,7 +463,8 @@ export interface PedidoDeValores {
   items: readonly ItemDeLaPlanificacion[];
   versiones: readonly VersionMedible[];
   partesDelPeriodo: readonly ParteMedido[];
-  planSemanal?: ReadonlyMap<string, number> | null;
+  /** Spec 044: los planes semanales aprobados que tocan el periodo. */
+  planesSemanales?: readonly PlanSemanalParaMedir[];
 }
 
 function tieneCosto(precios: { costo: number | null; contractual: number | null } | undefined): precios is { costo: number; contractual: number } {
@@ -416,7 +479,7 @@ function diasConVersion(periodo: PeriodoDeMeta, versiones: readonly VersionMedib
     if (!version) return [];
     const mes = dia.slice(0, 7);
     if (!repartos.has(mes)) repartos.set(mes, diasDeReparto(mes).length);
-    return [{ version, mes, fraccion: 1 / (repartos.get(mes) as number) }];
+    return [{ dia, version, mes, fraccion: 1 / (repartos.get(mes) as number) }];
   });
 }
 
@@ -425,8 +488,13 @@ export function valoresDelPeriodo(pedido: PedidoDeValores): ValoresDelPeriodo {
   const { periodo, items, versiones, partesDelPeriodo } = pedido;
   const esMes = periodo.tipo === 'mes';
   const dias = diasConVersion(periodo, versiones);
-  const planSemanal = periodo.tipo === 'semana' ? (pedido.planSemanal ?? null) : null;
-  const versionDelPlan = planSemanal ? versionQueRige(periodo.desde, versiones) : null;
+  // Spec 044: los días que mide un plan semanal, con la versión que rige cada uno (RF-75).
+  const planes = periodo.tipo === 'semana' ? (pedido.planesSemanales ?? []) : [];
+  const diasDelPlan = diasDe(periodo).flatMap((dia) => {
+    const plan = planes.length > 0 ? planQueRige(dia, planes) : null;
+    return plan ? [{ dia, plan, version: versionQueRige(dia, versiones) }] : [];
+  });
+  const conPlan = new Set(diasDelPlan.map((d) => d.dia));
 
   const programado = new Map<string, number>();
   const ejecutado = new Map<string, number>();
@@ -436,14 +504,15 @@ export function valoresDelPeriodo(pedido: PedidoDeValores): ValoresDelPeriodo {
 
   const llaves = new Map(items.map((item) => [llaveDeItemPlanificado(item), item]));
   for (const llave of llaves.keys()) {
-    if (planSemanal) {
-      const meta = planSemanal.get(llave);
-      const precios = versionDelPlan?.precios.get(llave);
-      if (meta !== undefined && tieneCosto(precios)) programado.set(llave, meta * precios.costo);
-      else if (meta !== undefined) avisoSinCosto = true;
-      continue;
+    for (const { dia, plan, version } of diasDelPlan) {
+      const cantidad = version ? plan.metasPorDia.get(dia)?.get(llave) : undefined;
+      if (cantidad === undefined || !version) continue;
+      const precios = version.precios.get(llave);
+      if (tieneCosto(precios)) programado.set(llave, (programado.get(llave) ?? 0) + cantidad * precios.costo);
+      else avisoSinCosto = true;
     }
-    for (const { version, mes, fraccion } of dias) {
+    for (const { dia, version, mes, fraccion } of dias) {
+      if (conPlan.has(dia)) continue;
       const cantidad = version.cantidades.get(llave)?.get(mes);
       if (cantidad === undefined) continue;
       const precios = version.precios.get(llave);
@@ -539,7 +608,8 @@ export interface PedidoDeInforme {
   partesDelPeriodo: readonly ParteMedido[];
   partesAcumuladas: readonly ParteMedido[];
   mesesCumplidos: readonly string[];
-  planSemanal?: ReadonlyMap<string, number> | null;
+  /** Spec 044: los planes semanales aprobados que tocan el periodo. */
+  planesSemanales?: readonly PlanSemanalParaMedir[];
 }
 
 /** Lo que el informe dice de un ítem, solo en cantidades. */
@@ -552,6 +622,8 @@ export interface FilaEnCantidades {
   capitulo: string;
   meta: number | null;
   estimada: boolean;
+  /** Spec 044, RF-95: los días que salieron del plan semanal, si hubo alguno. */
+  diasDelPlan?: number;
   ejecutado: number;
   porcentaje: number | null;
   pendientePeriodo: number;
@@ -611,7 +683,7 @@ export function informeDeCumplimiento(pedido: PedidoDeInforme): InformeDeCumplim
   const items = itemsDelInforme(versiones, usadas);
 
   const ejecucion = ejecucionDelPeriodo({ ...pedido, items });
-  const valores = valoresDelPeriodo({ periodo, items, versiones, partesDelPeriodo, planSemanal: pedido.planSemanal });
+  const valores = valoresDelPeriodo({ periodo, items, versiones, partesDelPeriodo, planesSemanales: pedido.planesSemanales });
   const valoresPorLlave = new Map(valores.filas.map((fila) => [fila.llave, fila]));
 
   return {
@@ -632,6 +704,7 @@ export function informeDeCumplimiento(pedido: PedidoDeInforme): InformeDeCumplim
         capitulo: fila.item.delPresupuesto?.capitulo ?? fila.item.capitulo,
         meta: fila.meta,
         estimada: fila.estimada,
+        ...(fila.diasDelPlan ? { diasDelPlan: fila.diasDelPlan } : {}),
         ejecutado: fila.ejecutado,
         porcentaje: fila.porcentaje,
         pendientePeriodo: fila.pendientePeriodo,
@@ -669,6 +742,7 @@ export function sinPlata(informe: InformeDeCumplimiento): InformeEnCantidades {
       capitulo: fila.capitulo,
       meta: fila.meta,
       estimada: fila.estimada,
+      ...(fila.diasDelPlan ? { diasDelPlan: fila.diasDelPlan } : {}),
       ejecutado: fila.ejecutado,
       porcentaje: fila.porcentaje,
       pendientePeriodo: fila.pendientePeriodo,

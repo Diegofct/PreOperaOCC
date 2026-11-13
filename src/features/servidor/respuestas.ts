@@ -167,6 +167,13 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
       // Spec 043, RF-117. `abrirLectura` vence antes las pasadas de tiempo: si choca, es que otra
       // persona está leyendo un Excel en esa misma obra ahora mismo.
       return { mensaje: 'Ya se está leyendo una planificación en esta obra. Espere a que termine y vuelva a intentarlo.' };
+    case 'ux_plan_semanal_lectura_en_curso':
+      // Spec 044, RF-101. `abrirLectura` vence antes las pasadas de tiempo: si choca, es que otra
+      // propuesta o lectura de esa misma obra y semana sigue viva.
+      return { mensaje: 'Ya se está armando el plan de esa semana en esta obra. Espere a que termine y vuelva a intentarlo.' };
+    case 'ux_plan_semanal_vigente':
+      // Spec 044, RF-51. `aprobarPlan` lo mira antes; esto es el respaldo si dos aprueban a la vez.
+      return { mensaje: 'Esa semana ya tiene un plan aprobado. Anúlelo antes de aprobar otro.' };
     case 'ux_obras_codigo':
       return { mensaje: 'Ya existe una obra con ese código.', campo: 'codigo' };
     case 'ux_usuarios_usuario':

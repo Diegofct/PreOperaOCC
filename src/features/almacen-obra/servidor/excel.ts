@@ -51,6 +51,12 @@ const FORMATO_DE_COLUMNA: Record<string, { ancho: number; formato?: string }> = 
   Cantidad: { ancho: 12, formato: '#,##0.00' },
   'Entregó / recibió': { ancho: 28 },
   'Para qué / observación': { ancho: 40 },
+  // Spec 042, RF-51.
+  Proveedor: { ancho: 30 },
+  'Tipo de documento': { ancho: 14 },
+  'Número de documento': { ancho: 16 },
+  'Valor unitario': { ancho: 14, formato: '"$" #,##0.00' },
+  'Valor por': { ancho: 12 },
   Registró: { ancho: 24 },
   'Registrado el': { ancho: 18, formato: 'yyyy-mm-dd hh:mm' },
   Estado: { ancho: 10 },
@@ -98,6 +104,12 @@ async function leerMovimientos(condicion: SQL | undefined): Promise<MovimientoPa
       anuladoEn: almacenMovimientos.anuladoEn,
       anuladoPorNombre: anulador.nombreCompleto,
       motivoAnulacion: almacenMovimientos.motivoAnulacion,
+      // Spec 042, RF-51.
+      proveedor: almacenMovimientos.proveedor,
+      documentoTipo: almacenMovimientos.documentoTipo,
+      documentoNumero: almacenMovimientos.documentoNumero,
+      valorUnitario: almacenMovimientos.valorUnitario,
+      valorUnidad: almacenMovimientos.valorUnidad,
     })
     .from(almacenMovimientos)
     // Sin filtrar los dados de baja: sus movimientos siguen siendo de la obra.
@@ -112,6 +124,7 @@ async function leerMovimientos(condicion: SQL | undefined): Promise<MovimientoPa
     ...f,
     obraNombre: f.obraNombre ?? '—',
     cantidad: cantidadDeLaBase(f.cantidad),
+    valorUnitario: f.valorUnitario === null ? null : Number(f.valorUnitario),
   }));
 }
 

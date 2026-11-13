@@ -300,7 +300,8 @@ function filaCitada(hojas: Hojas, cita: CitaDeLectura): readonly Celda[] | null 
   return hojas[cita.hoja - 1]?.filas[cita.fila - 1] ?? null;
 }
 
-function estaEnLaFila(fila: readonly Celda[] | null, cifra: number, tolerancia: (n: number) => number): boolean {
+/** RF-20, RF-21 de la 043; RF-44, RF-45 de la 044: la cifra está entre los números de esa fila. */
+export function estaEnLaFila(fila: readonly Celda[] | null, cifra: number, tolerancia: (n: number) => number): boolean {
   if (!fila || !Number.isFinite(cifra)) return false;
   const numeros = fila.map(numero).filter((n): n is number => n !== null);
   if (cifra === 0 && fila.some((celda) => celda === null)) return true;

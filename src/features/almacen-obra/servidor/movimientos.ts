@@ -8,7 +8,7 @@
 import { asc, eq, sql } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { almacenMovimientos, usuarios } from '@/db/servidor/esquema';
+import { almacenImportaciones, almacenMovimientos, usuarios } from '@/db/servidor/esquema';
 import { firmasConAcceso } from '@/features/auth/servidor/accesos';
 import type { MovimientoDeAlmacenFila } from '@/features/panel/contratos';
 import {
@@ -41,12 +41,22 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       // diciendo quién lo hizo (caso límite de la spec).
       registradoPorNombre: usuarios.nombreCompleto,
       mensajeWhatsappId: almacenMovimientos.mensajeWhatsappId,
+      // Spec 042, RF-49: lo que trae el documento de un ingreso importado.
+      proveedor: almacenMovimientos.proveedor,
+      documentoTipo: almacenMovimientos.documentoTipo,
+      documentoNumero: almacenMovimientos.documentoNumero,
+      valorUnitario: almacenMovimientos.valorUnitario,
+      valorUnidad: almacenMovimientos.valorUnidad,
+      // RF-47: el original, solo de una importación confirmada (RF-95).
+      documentoMediaId: almacenImportaciones.mediaId,
+      importacionEstado: almacenImportaciones.estado,
       anuladoEn: almacenMovimientos.anuladoEn,
       anuladoPor: almacenMovimientos.anuladoPor,
       motivoAnulacion: almacenMovimientos.motivoAnulacion,
     })
     .from(almacenMovimientos)
     .leftJoin(usuarios, eq(usuarios.id, almacenMovimientos.registradoPor))
+    .leftJoin(almacenImportaciones, eq(almacenImportaciones.id, almacenMovimientos.importacionId))
     .where(eq(almacenMovimientos.materialId, materialId))
     .orderBy(asc(almacenMovimientos.creadoEn), asc(almacenMovimientos.id));
 
@@ -68,6 +78,13 @@ export async function historialDelMaterial(materialId: string): Promise<Movimien
       registradoPorNombre: f.registradoPorNombre,
       // Spec 023, RF-38: aprobado desde un reporte de WhatsApp.
       desdeWhatsapp: f.mensajeWhatsappId !== null,
+      // Spec 042: vacíos en lo registrado a mano o por WhatsApp (RF-52).
+      proveedor: f.proveedor,
+      documentoTipo: f.documentoTipo,
+      documentoNumero: f.documentoNumero,
+      valorUnitario: f.valorUnitario === null ? null : Number(f.valorUnitario),
+      valorUnidad: f.valorUnidad,
+      documentoOriginalId: f.importacionEstado === 'confirmada' ? f.documentoMediaId : null,
       anulado: f.anuladoEn !== null,
       anuladoEn: f.anuladoEn?.toISOString() ?? null,
       anuladoPorNombre: firma(f.anuladoPor, f.anuladoEn),

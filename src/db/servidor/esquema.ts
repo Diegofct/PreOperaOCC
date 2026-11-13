@@ -62,6 +62,12 @@ import type {
 } from '../../features/bitacoras/tipos';
 import type { EventoDelEnsayo, GranulometriaDelParte } from '../../features/laboratorio/tipos';
 import type { UnidadAlmacen } from '../../shared/catalogos/almacen';
+import {
+  ESTADOS_DE_IMPORTACION,
+  TIPOS_DE_DOCUMENTO,
+  type PropuestaDeImportacion,
+  type TipoDeDocumento,
+} from '../../shared/rules/almacen-importacion';
 import type { Cargo } from '../../shared/catalogos/cargos';
 import { ESTADOS_ENSAYO } from '../../shared/catalogos/estados-ensayo';
 import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granulometricas';
@@ -90,6 +96,14 @@ import {
   type ResumenDeLaPlanificacion,
 } from '../../shared/rules/planificacion';
 import type { LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
+import {
+  ESTADOS_DE_LECTURA_DE_PLAN,
+  ESTADOS_DE_PLAN_SEMANAL,
+  ORIGENES_DE_PLAN_SEMANAL,
+  TIPOS_DE_LECTURA_DE_PLAN,
+  type DiferenciaConElExcelDelPlan,
+  type EstructuraDelPlan,
+} from '../../shared/rules/plan-semanal';
 import type { EmpresaId } from '../../shared/rules/empresas';
 import type {
   ActividadDeMantenimiento,
@@ -161,6 +175,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'repositorio',
   // Spec 043: el Excel original de una planificación.
   'planificacion',
+  // Spec 042: el documento original de una importación al Almacén, con `dueno_id` = la importación.
+  'almacen',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -936,6 +952,56 @@ export const almacenMateriales = pgTable(
   ],
 );
 
+/** Spec 042: por dónde pasa una importación (ver `ESTADOS_DE_IMPORTACION`). */
+export const estadoImportacionAlmacen = pgEnum('estado_importacion_almacen', ESTADOS_DE_IMPORTACION);
+
+/**
+ * Cada documento que alguien sube al Almacén para que la IA proponga sus ingresos (spec 042).
+ *
+ * La lectura corre por detrás, como la del plan semanal, porque el proxy del VPS corta a los 120 s: la
+ * fila nace `en_curso`, y `vence_lectura_en` la libera si el servidor se reinicia a mitad de camino.
+ * Lista, la propuesta espera un día a quien la subió (`vence_propuesta_en`, RF-66) y nadie más la ve.
+ * Una persona puede tener varias a la vez (D32): por eso no hay índice único por obra.
+ *
+ * `propuesta` es un borrador que nunca se consulta por renglón: lo que vale como evidencia son los
+ * ingresos que salen de ella al confirmar, que apuntan aquí por `importacion_id`. El archivo es
+ * `media_id`, con dueño `almacen`; se guarda desde la subida y no se borra al descartar (RF-94, RF-48).
+ * `version` sube con cada cambio de estado, para que dos confirmaciones no entren dos veces (RF-88).
+ */
+export const almacenImportaciones = pgTable(
+  'almacen_importaciones',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    nombreArchivo: text('nombre_archivo').notNull(),
+    estado: estadoImportacionAlmacen('estado').notNull().default('en_curso'),
+    error: text('error'),
+    propuesta: jsonb('propuesta').$type<PropuestaDeImportacion>(),
+    version: integer('version').notNull().default(1),
+    venceLecturaEn: timestamp('vence_lectura_en', { withTimezone: true, mode: 'date' }).notNull(),
+    vencePropuestaEn: timestamp('vence_propuesta_en', { withTimezone: true, mode: 'date' }),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    confirmadaEn: timestamp('confirmada_en', { withTimezone: true, mode: 'date' }),
+    confirmadaPor: text('confirmada_por').references(() => usuarios.id),
+    descartadaEn: timestamp('descartada_en', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => [
+    // RF-65, RF-98: las pendientes de quien pregunta en esa obra.
+    index('ix_almacen_importacion_pendientes').on(t.obraId, t.creadoPor, t.estado),
+    check('ck_almacen_importacion_confirmada', sql`(${t.estado} = 'confirmada') = (${t.confirmadaEn} is not null)`),
+    check('ck_almacen_importacion_descartada', sql`(${t.estado} = 'descartada') = (${t.descartadaEn} is not null)`),
+  ],
+);
+
 /**
  * Cada ingreso y cada salida. **Evidencia: no se edita ni se borra** (RF-23), por
  * eso no lleva `actualizado_en`. Un movimiento equivocado se anula con motivo, y
@@ -988,6 +1054,27 @@ export const almacenMovimientos = pgTable(
     mensajeWhatsappId: text('mensaje_whatsapp_id').references(
       (): AnyPgColumn => whatsappMensajes.id,
     ),
+    /**
+     * Spec 042: lo que trae el documento de un ingreso importado (RF-38). **Nulas a propósito**:
+     * los movimientos registrados a mano, por WhatsApp o antes de la 042 no las tienen (RF-52,
+     * RF-57), y en uno importado el proveedor, el número y el valor son opcionales (RF-82).
+     *
+     * Se repiten en cada ingreso del documento en vez de leerse de la importación: el historial, el
+     * Excel y el aviso de repetido las leen por movimiento, y cada ingreso se anula por separado
+     * (RF-96). `documento_clave` es el proveedor y el número normalizados (`claveDelDocumento`,
+     * RF-45), con índice para el aviso de repetido (RF-43).
+     *
+     * `valor_unitario` va como lo trae el documento, y `valor_unidad` dice por qué unidad del
+     * documento es («bulto», «viaje»): texto y no la lista cerrada, porque esa unidad puede no estar
+     * en ella (RF-29, RF-58, D8).
+     */
+    proveedor: text('proveedor'),
+    documentoTipo: text('documento_tipo').$type<TipoDeDocumento>(),
+    documentoNumero: text('documento_numero'),
+    documentoClave: text('documento_clave'),
+    valorUnitario: numeric('valor_unitario', { precision: 16, scale: 2 }),
+    valorUnidad: text('valor_unidad'),
+    importacionId: text('importacion_id').references(() => almacenImportaciones.id),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),
@@ -1003,7 +1090,14 @@ export const almacenMovimientos = pgTable(
     // ver entre sí.
     index('ix_almacen_movimiento_material').on(t.materialId),
     index('ix_almacen_movimiento_obra_fecha').on(t.obraId, t.fecha),
+    // Spec 042, RF-43: ¿este documento ya entró a la obra?
+    index('ix_almacen_movimiento_documento').on(t.obraId, t.documentoClave),
     check('ck_almacen_movimiento_cantidad', sql`${t.cantidad} > 0`),
+    // Spec 042: el tipo de documento es uno de los de la regla; nulo en lo que no se importó.
+    check(
+      'ck_almacen_movimiento_documento_tipo',
+      sql`${t.documentoTipo} is null or ${t.documentoTipo} in (${sql.raw(TIPOS_DE_DOCUMENTO.map((x) => `'${x}'`).join(', '))})`,
+    ),
   ],
 );
 
@@ -2199,6 +2293,117 @@ export const planificacionLecturasIa = pgTable('planificacion_lecturas_ia', {
     .references(() => usuarios.id),
   creadoEn: creadoEn(),
 });
+
+/* ------------------------------------------------------------------------ */
+/* Spec 044: el plan de trabajo semanal                                      */
+/* ------------------------------------------------------------------------ */
+
+export const estadoPlanSemanal = pgEnum('estado_plan_semanal', ESTADOS_DE_PLAN_SEMANAL);
+export const origenPlanSemanal = pgEnum('origen_plan_semanal', ORIGENES_DE_PLAN_SEMANAL);
+export const estadoLecturaPlanSemanal = pgEnum('estado_lectura_plan_semanal', ESTADOS_DE_LECTURA_DE_PLAN);
+export const tipoLecturaPlanSemanal = pgEnum('tipo_lectura_plan_semanal', TIPOS_DE_LECTURA_DE_PLAN);
+
+/**
+ * Los planes semanales de una obra (RF-50 a RF-69). La estructura va entera en un jsonb, como la
+ * planificación: un plan aprobado no cambia, y Neon por HTTP no da transacciones interactivas. Los
+ * valores en pesos **no** se guardan (RF-94): se calculan al mostrar con el costo de la planificación.
+ *
+ * A lo sumo un borrador y un vigente por obra y semana (RF-50, RF-51): lo garantizan los índices
+ * parciales, no la pantalla. Un borrador sustituido queda `descartado` (RF-53) y un plan anulado se
+ * conserva con su motivo (RF-64, RF-69): nada se borra.
+ *
+ * `rige_desde` y `rige_hasta` son fechas de Colombia, resueltas al aprobar y al anular (RF-62,
+ * RF-67). Mientras rige, `rige_hasta` va vacío: el plan rige hasta el domingo de su semana.
+ * `creado_por` es el autor que decide quién aprueba (RF-55 a RF-58), y no cambia aunque otro edite.
+ */
+export const planesSemanales = pgTable(
+  'planes_semanales',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    /** El lunes de la semana. */
+    semana: date('semana', { mode: 'string' }).notNull(),
+    estado: estadoPlanSemanal('estado').notNull().default('borrador'),
+    origen: origenPlanSemanal('origen').notNull(),
+    estructura: jsonb('estructura').$type<EstructuraDelPlan>().notNull(),
+    /** RF-45: las cifras del Excel que no estaban en su fila, para mostrarlas. */
+    rechazados: jsonb('rechazados').$type<RechazadoPorIa[]>().notNull().default([]),
+    /** RF-48: lo que traía el Excel y no cuadraba. */
+    diferenciasExcel: jsonb('diferencias_excel').$type<DiferenciaConElExcelDelPlan[]>().notNull().default([]),
+    /** RF-100: la versión de la planificación con que se cruzó. */
+    planificacionId: text('planificacion_id')
+      .notNull()
+      .references(() => planificaciones.id),
+    rigeDesde: date('rige_desde', { mode: 'string' }),
+    rigeHasta: date('rige_hasta', { mode: 'string' }),
+    aprobadoEn: timestamp('aprobado_en', { withTimezone: true, mode: 'date' }),
+    aprobadoPor: text('aprobado_por').references(() => usuarios.id),
+    anuladoEn: timestamp('anulado_en', { withTimezone: true, mode: 'date' }),
+    anuladoPor: text('anulado_por').references(() => usuarios.id),
+    motivoAnulacion: text('motivo_anulacion'),
+    descartadoEn: timestamp('descartado_en', { withTimezone: true, mode: 'date' }),
+    descartadoPor: text('descartado_por').references(() => usuarios.id),
+    version: integer('version').notNull().default(0),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    actualizadoPor: text('actualizado_por').references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_plan_semanal_borrador')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'borrador'`),
+    uniqueIndex('ux_plan_semanal_vigente')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'vigente'`),
+    check(
+      'ck_plan_semanal_anulado',
+      sql`(${t.estado} = 'anulado') = (${t.anuladoEn} is not null)
+       and (${t.anuladoEn} is null or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0))`,
+    ),
+    check('ck_plan_semanal_descartado', sql`(${t.estado} = 'descartado') = (${t.descartadoEn} is not null)`),
+    check(
+      'ck_plan_semanal_aprobado',
+      sql`${t.estado} not in ('vigente', 'anulado') or (${t.aprobadoEn} is not null and ${t.rigeDesde} is not null)`,
+    ),
+  ],
+);
+
+/**
+ * Cada propuesta de la IA o lectura de un Excel (RF-34, RF-42). Corre por detrás, como la lectura de
+ * la planificación, porque el proxy del VPS corta a los 120 segundos. A lo sumo una en curso por obra
+ * y semana (RF-101): lo garantiza el índice parcial. `vence_en` la libera si el servidor se reinicia
+ * a mitad de camino. `plan_id` se reserva al empezar: es el borrador que va a crear.
+ */
+export const planSemanalLecturas = pgTable(
+  'plan_semanal_lecturas',
+  {
+    id: text('id').primaryKey(),
+    obraId: text('obra_id')
+      .notNull()
+      .references(() => obras.id),
+    semana: date('semana', { mode: 'string' }).notNull(),
+    tipo: tipoLecturaPlanSemanal('tipo').notNull(),
+    estado: estadoLecturaPlanSemanal('estado').notNull().default('en_curso'),
+    planId: text('plan_id').notNull(),
+    error: text('error'),
+    venceEn: timestamp('vence_en', { withTimezone: true, mode: 'date' }).notNull(),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_plan_semanal_lectura_en_curso')
+      .on(t.obraId, t.semana)
+      .where(sql`estado = 'en_curso'`),
+  ],
+);
 
 /* ------------------------------------------------------------------------ */
 /* Spec 028: el asistente                                                    */

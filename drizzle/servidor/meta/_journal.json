@@ -302,6 +302,20 @@
       "when": 1794264241013,
       "tag": "0042_condemned_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794345341931,
+      "tag": "0043_fearless_firedrake",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794502729916,
+      "tag": "0044_charming_oracle",
+      "breakpoints": true
     }
   ]
 }
