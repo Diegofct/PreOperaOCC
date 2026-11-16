@@ -52,7 +52,15 @@ async function versionesDeLaObra(obraId: string): Promise<{ versiones: VersionDe
     ...versionMedible(
       { id: p.id, numeroVersion: p.numeroVersion, rigeDesde: p.rigeDesde as string, rigeHasta: p.rigeHasta },
       p.estructura.items,
-      { indirectos: p.estructura.indirectos, rubros: p.estructura.rubros, lineaDeRubros: p.estructura.lineaDeRubros },
+      // Spec 045, RF-157, RF-158: con lo de la 045 sale por concepto; sin esto, todo «sin desglose».
+      {
+        indirectos: p.estructura.indirectos,
+        rubros: p.estructura.rubros,
+        lineaDeRubros: p.estructura.lineaDeRubros,
+        esquema: p.estructura.esquema,
+        indirectosPorConcepto: p.estructura.indirectosPorConcepto,
+        renglonesIndirectos: p.estructura.renglonesIndirectos,
+      },
     ),
     items: p.estructura.items,
   }));

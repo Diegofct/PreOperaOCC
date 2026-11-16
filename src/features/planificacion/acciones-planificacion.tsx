@@ -12,6 +12,11 @@
  * Se manda la `version` que se leyó. Si otra persona sustituyó o aprobó el borrador mientras tanto,
  * el servidor responde 409 sin aplicar nada (RF-99), y aquí se dice así y se ofrece recargar: nunca
  * se reintenta solo, porque lo que se iba a aprobar ya no es lo que se tiene delante.
+ *
+ * Spec 045: lo que impide aprobar (RF-127 a RF-133) llega como 422 con la lista, y aquí se muestra
+ * renglón por renglón (RF-132); no hay confirmación que lo salte. Y la vigente ofrece «Nueva
+ * versión» (RF-138): copia todo en un borrador; si ya hay uno, pide confirmar antes de sustituirlo
+ * (RF-142), y al terminar abre la copia.
  */
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -22,15 +27,34 @@ import { Acciones, Aviso, Boton, Campo, Casilla, Modal } from '@/features/panel/
 import type { PlanificacionDetalle } from '@/features/panel/planificacion';
 import { usePersona } from '@/features/panel/sesion';
 import { alcanza } from '@/shared/rules/permisos';
+import type { ImpedimentoParaAprobar } from '@/shared/rules/planificacion';
+
+/** RF-132: de qué es cada impedimento, en palabras. */
+function deQue(i: ImpedimentoParaAprobar): string {
+  if (i.de.en === 'item') return `Ítem ${i.de.item} · ${i.de.capitulo}`;
+  if (i.de.en === 'rubro') return `Rubro ${i.de.nombre}`;
+  return `Renglón indirecto «${i.de.descripcion}»`;
+}
 
 /** «octubre de 2026». */
 function nombreDelMes(mes: string): string {
   return new Date(`${mes}-15T12:00:00Z`).toLocaleDateString('es-CO', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
-export function AccionesPlanificacion({ p, alCambiar }: { p: PlanificacionDetalle; alCambiar: () => void }) {
+export function AccionesPlanificacion({
+  p,
+  alCambiar,
+  alAbrir,
+}: {
+  p: PlanificacionDetalle;
+  alCambiar: () => void;
+  /** Abre otra versión: la copia recién creada. */
+  alAbrir?: (id: string) => void;
+}) {
   const { rol } = usePersona();
-  const [ventana, setVentana] = useState<'aprobar' | 'anular' | null>(null);
+  const [ventana, setVentana] = useState<'aprobar' | 'anular' | 'copiar' | null>(null);
+  const [impedimentos, setImpedimentos] = useState<ImpedimentoParaAprobar[]>([]);
+  const [borradorQueSeSustituye, setBorradorQueSeSustituye] = useState<number | null>(null);
   const [confirmo, setConfirmo] = useState(false);
   const [cumplidos, setCumplidos] = useState<string[]>([]);
   const [motivo, setMotivo] = useState('');
@@ -40,9 +64,12 @@ export function AccionesPlanificacion({ p, alCambiar }: { p: PlanificacionDetall
 
   const puedeAprobar = p.estado === 'borrador' && alcanza(rol, 'planificacion', 'aprobar');
   const puedeAnular = p.estado === 'vigente' && alcanza(rol, 'planificacion', 'anular');
-  if (!puedeAprobar && !puedeAnular) return null;
+  // RF-138: la versión nueva la hace quien escribe planificación.
+  const puedeCopiar = p.estado === 'vigente' && alcanza(rol, 'planificacion', 'escribir');
+  if (!puedeAprobar && !puedeAnular && !puedeCopiar) return null;
 
   function abrir(cual: 'aprobar' | 'anular') {
+    setImpedimentos([]);
     setVentana(cual);
     setConfirmo(false);
     setCumplidos([]);
@@ -61,6 +88,8 @@ export function AccionesPlanificacion({ p, alCambiar }: { p: PlanificacionDetall
     } catch (fallo) {
       // RF-99: el borrador cambió o ya no es lo que era. No se reintenta: se avisa y se recarga.
       setCambio(fallo instanceof ErrorApi && fallo.estado === 409 && !(fallo.cuerpo as { hallazgos?: unknown } | undefined)?.hallazgos);
+      // RF-132: lo que impide aprobar, con su ítem, rubro o renglón.
+      setImpedimentos(fallo instanceof ErrorApi ? ((fallo.cuerpo as { impedimentos?: ImpedimentoParaAprobar[] } | undefined)?.impedimentos ?? []) : []);
       setError(mensajeDe(fallo));
     } finally {
       setEnviando(false);
@@ -70,12 +99,53 @@ export function AccionesPlanificacion({ p, alCambiar }: { p: PlanificacionDetall
   const hallazgos = p.hallazgos.length;
   const listoParaAprobar = hallazgos === 0 || confirmo;
 
+  /** RF-138 a RF-142: la copia; con un borrador en la obra, primero se pregunta. */
+  async function copiar(sustituir: boolean) {
+    setEnviando(true);
+    setError(null);
+    try {
+      const copia = await api.planificaciones.copiar(p.id, sustituir);
+      setVentana(null);
+      alCambiar();
+      alAbrir?.(copia.id);
+    } catch (fallo) {
+      const borrador = fallo instanceof ErrorApi ? (fallo.cuerpo as { borrador?: { numeroVersion: number } } | undefined)?.borrador : undefined;
+      if (borrador && !sustituir) {
+        setBorradorQueSeSustituye(borrador.numeroVersion);
+        setVentana('copiar');
+      } else {
+        setError(mensajeDe(fallo));
+      }
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   return (
     <View>
       <Acciones>
         {puedeAprobar ? <Boton titulo="Aprobar" tono="primario" onPress={() => abrir('aprobar')} /> : null}
+        {puedeCopiar ? (
+          <Boton titulo={enviando && ventana === null ? 'Copiando…' : 'Nueva versión'} tono="secundario" onPress={() => void copiar(false)} deshabilitado={enviando} />
+        ) : null}
         {puedeAnular ? <Boton titulo="Anular" tono="peligro" onPress={() => abrir('anular')} /> : null}
       </Acciones>
+      {error && ventana === null ? <Aviso tono="error">{error}</Aviso> : null}
+
+      {ventana === 'copiar' ? (
+        <Modal titulo="Nueva versión desde la vigente" onCerrar={() => setVentana(null)} angosta>
+          <View style={estilos.columna}>
+            <Text style={estilos.texto}>
+              {`Esta obra ya tiene un borrador (v${borradorQueSeSustituye ?? '?'}). La versión nueva lo sustituye: el anterior queda descartado, no se borra.`}
+            </Text>
+            {error ? <Aviso tono="error">{error}</Aviso> : null}
+            <Acciones>
+              <Boton titulo={enviando ? 'Copiando…' : 'Sustituir y copiar'} tono="primario" deshabilitado={enviando} onPress={() => void copiar(true)} />
+              <Boton titulo="Cancelar" tono="secundario" onPress={() => setVentana(null)} />
+            </Acciones>
+          </View>
+        </Modal>
+      ) : null}
 
       {ventana === 'aprobar' ? (
         <Modal titulo={`Aprobar la versión ${p.numeroVersion}`} onCerrar={() => setVentana(null)}>
@@ -108,6 +178,14 @@ export function AccionesPlanificacion({ p, alCambiar }: { p: PlanificacionDetall
               </View>
             ) : null}
             {error ? <Aviso tono="error">{error}</Aviso> : null}
+            {impedimentos.length > 0 ? (
+              <View style={estilos.columna}>
+                <Text style={estilos.subtitulo}>Lo que falta para aprobar</Text>
+                {impedimentos.map((i, n) => (
+                  <Text key={n} style={estilos.nota}>{`• ${deQue(i)}: ${i.detalle}`}</Text>
+                ))}
+              </View>
+            ) : null}
             <Acciones>
               {cambio ? (
                 <Boton

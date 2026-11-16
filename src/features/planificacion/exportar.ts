@@ -17,7 +17,7 @@ import type {
   FormatoDeColumna as FormatoDeColumnaDelArchivo,
   TablaDelArchivo,
 } from '@/shared/rules/archivos-del-asistente';
-import { etiquetaDeEstimada, type EstadoDeFila } from '@/shared/rules/cumplimiento-de-obra';
+import { etiquetaDeEstimada, NOMBRE_DEL_CONCEPTO, type EstadoDeFila } from '@/shared/rules/cumplimiento-de-obra';
 
 const ESTADO: Record<EstadoDeFila, string> = { normal: '', sin_programacion: 'Sin programación', meta_cumplida: 'Meta cumplida' };
 
@@ -120,6 +120,10 @@ export function hojasDelInforme(informe: InformeRespuesta): HojaDeReporte[] {
       ['Margen', totales.margen],
     ];
     if (informe.indirectos !== null) filas.push(['Indirectos programados', informe.indirectos]);
+    // Spec 045, RF-158: el desglose por concepto, debajo de su total. El PDF sale de esta misma hoja.
+    for (const { concepto, valor } of informe.indirectosPorConcepto ?? []) {
+      filas.push([`Indirectos: ${NOMBRE_DEL_CONCEPTO[concepto]}`, valor]);
+    }
     if (totales.resultado !== null) filas.push(['Resultado', totales.resultado]);
     for (const rubro of informe.rubros) filas.push([`Rubro: ${rubro.nombre}`, rubro.valor]);
     hojas.push({ nombre: 'Totales', encabezados: ['Concepto', 'Valor'], formatos: { Valor: 'numero' }, filas });

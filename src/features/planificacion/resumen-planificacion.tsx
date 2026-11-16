@@ -10,6 +10,11 @@
  * Los hallazgos no se esconden ni se resumen: cada uno con su ítem y su capítulo, porque aprobar
  * con hallazgos es una decisión que se confirma viéndolos (RF-35). Las columnas de cada tabla caben
  * en `MaxContentWidthPanel` (1 280): sus anchos están anotados junto a cada una.
+ *
+ * Spec 045 (RF-122, RF-123): el factor de indirectos y una tabla de los siete conceptos mes por mes.
+ * Salen de lo guardado (`indirectosPorConcepto`), no de recalcular aquí: al Director de Obra le llega
+ * la estructura sin los renglones de mano de obra indirecta (RF-151), y recalcularla le pondría ese
+ * concepto en cero. El factor es el de la regla: 1 + indirectos / costo con medida real.
  */
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -19,9 +24,28 @@ import type { PlanificacionDetalle } from '@/features/panel/planificacion';
 import type { RechazadoPorIa } from '@/shared/rules/formulario-presupuesto-ia';
 import { diaCorto } from '@/shared/rules/jornada';
 import { enPesos } from '@/shared/rules/pesos';
-import type { DiferenciaConElExcel, HallazgoDePlanificacion, TipoDeHallazgo } from '@/shared/rules/planificacion';
+import {
+  CONCEPTOS_INDIRECTOS,
+  type ConceptoIndirecto,
+  type DiferenciaConElExcel,
+  type HallazgoDelBorrador,
+  type TipoDeHallazgoDelBorrador,
+} from '@/shared/rules/planificacion';
 
-const NOMBRE_DEL_HALLAZGO: Record<TipoDeHallazgo, string> = {
+/** Cortos, para que siete columnas quepan en la tabla por mes. */
+const CONCEPTO_CORTO: Record<ConceptoIndirecto, string> = {
+  seguros_garantias: 'Seguros',
+  impuestos: 'Impuestos',
+  maquinaria_general: 'Maquinaria',
+  instalaciones_generales: 'Instalaciones',
+  varios: 'Varios',
+  mano_obra_indirecta: 'Mano de obra',
+  otros: 'Otros',
+};
+
+type FilaPorMes = { id: string; mes: string; valores: Record<ConceptoIndirecto, number>; total?: boolean };
+
+const NOMBRE_DEL_HALLAZGO: Record<TipoDeHallazgoDelBorrador, string> = {
   no_existe: 'No está en el presupuesto',
   unidad_distinta: 'Unidad distinta',
   cantidad_distinta: 'Cantidad contractual distinta',
@@ -30,7 +54,13 @@ const NOMBRE_DEL_HALLAZGO: Record<TipoDeHallazgo, string> = {
   despues_del_plazo: 'Después del plazo',
   sin_costo: 'Sin precio de costo',
   para_revisar: 'Para revisar',
+  periodo_deducido: 'Periodo deducido',
   rubro_sin_par: 'Rubro sin par',
+  // Spec 045.
+  rubro_sin_costo: 'Rubro sin costo',
+  fuera_del_plazo: 'Fuera del plazo',
+  reparto_no_cuadra: 'Meses fijados que no cuadran',
+  porcentajes_sin_programacion: 'Porcentajes sin obra programada',
 };
 
 const NOMBRE_DEL_TOTAL: Record<DiferenciaConElExcel['concepto'], string> = {
@@ -73,9 +103,42 @@ export function ResumenPlanificacion({ p }: { p: PlanificacionDetalle }) {
     },
   ];
 
+  // RF-122: el factor de indirectos, con la misma fórmula de la regla.
+  const factor = resumen.medidaReal.costo > 0 ? 1 + resumen.indirectos / resumen.medidaReal.costo : null;
+
+  // RF-123: cada concepto, mes por mes, y su total abajo.
+  const porConcepto = p.estructura.indirectosPorConcepto;
+  const filasPorMes: FilaPorMes[] = [];
+  if (porConcepto) {
+    const meses = [...new Set(CONCEPTOS_INDIRECTOS.flatMap((c) => (porConcepto[c] ?? []).map((v) => v.mes)))].sort();
+    const ceros = () => Object.fromEntries(CONCEPTOS_INDIRECTOS.map((c) => [c, 0])) as Record<ConceptoIndirecto, number>;
+    const total = ceros();
+    for (const m of meses) {
+      const valores = ceros();
+      for (const c of CONCEPTOS_INDIRECTOS) {
+        valores[c] = (porConcepto[c] ?? []).filter((v) => v.mes === m).reduce((suma, v) => suma + v.valor, 0);
+        total[c] += valores[c];
+      }
+      filasPorMes.push({ id: m, mes: mes(m), valores });
+    }
+    if (meses.length > 0) filasPorMes.push({ id: 'total', mes: 'Total', valores: total, total: true });
+  }
+  // 120 + 7 × 140 = 1 100, más 7 separaciones de 16 (112) y 32: 1 244.
+  const columnasPorMes: Columna<FilaPorMes>[] = [
+    { clave: 'mes', titulo: 'Mes', ancho: 120, pintar: (f) => <Text style={f.total ? estilos.destacado : estilos.celda}>{f.mes}</Text> },
+    ...CONCEPTOS_INDIRECTOS.map(
+      (c): Columna<FilaPorMes> => ({
+        clave: c,
+        titulo: CONCEPTO_CORTO[c],
+        ancho: 140,
+        pintar: (f) => <Text style={f.total ? estilos.destacado : estilos.celda}>{f.valores[c] === 0 ? '—' : enPesos(f.valores[c])}</Text>,
+      }),
+    ),
+  ];
+
   const hallazgos = p.hallazgos.map((h, i) => ({ ...h, id: String(i) }));
   // 220 + 300 + 90 + 500 = 1 110, más 5 separaciones: 1 190.
-  const columnasDeHallazgos: Columna<HallazgoDePlanificacion & { id: string }>[] = [
+  const columnasDeHallazgos: Columna<HallazgoDelBorrador & { id: string }>[] = [
     {
       clave: 'tipo',
       titulo: 'Hallazgo',
@@ -108,6 +171,7 @@ export function ResumenPlanificacion({ p }: { p: PlanificacionDetalle }) {
             {resumen.programacionDesde && resumen.programacionHasta
               ? ` La programación va de ${mes(resumen.programacionDesde)} a ${mes(resumen.programacionHasta)}.`
               : ''}
+            {factor === null ? '' : ` Factor de indirectos: ${factor.toLocaleString('es-CO', { maximumFractionDigits: 4 })}.`}
           </Text>
           {resumen.diferenciasConElExcel.length > 0 ? (
             <Aviso tono="info">
@@ -120,6 +184,12 @@ export function ResumenPlanificacion({ p }: { p: PlanificacionDetalle }) {
           )}
         </View>
       </Seccion>
+
+      {filasPorMes.length > 0 ? (
+        <Seccion titulo="Indirectos por concepto y mes">
+          <Tabla filas={filasPorMes} columnas={columnasPorMes} vacio="" />
+        </Seccion>
+      ) : null}
 
       <Seccion titulo={`Hallazgos (${hallazgos.length})`}>
         <Tabla filas={hallazgos} columnas={columnasDeHallazgos} vacio="Sin hallazgos: todo cuadra con el presupuesto vigente." />

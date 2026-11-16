@@ -15,7 +15,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import { Aviso, Celda, Cifra, Cifras, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
-import type { FilaDelInforme, InformeDeCumplimiento } from '@/shared/rules/cumplimiento-de-obra';
+import { NOMBRE_DEL_CONCEPTO, type FilaDelInforme, type InformeDeCumplimiento } from '@/shared/rules/cumplimiento-de-obra';
 import { enPesos } from '@/shared/rules/pesos';
 
 function pesos(n: number | null): string {
@@ -38,6 +38,8 @@ export function PlataDelCumplimiento({ informe }: { informe: InformeDeCumplimien
   ];
 
   const rubros = informe.rubros.map((r, i) => ({ ...r, id: String(i) }));
+  // Spec 045, RF-158: solo en el mensual; en la semana llega `null`.
+  const indirectos = (informe.indirectosPorConcepto ?? []).map((c) => ({ ...c, id: c.concepto }));
   const sinCosto = informe.sinPrecioDeCosto.map((s) => ({ ...s, id: s.llave }));
 
   return (
@@ -78,6 +80,19 @@ export function PlataDelCumplimiento({ informe }: { informe: InformeDeCumplimien
       <Seccion titulo="Valores por ítem">
         <Tabla filas={filas} columnas={columnas} vacio="Ningún ítem con precio de costo tiene valores en este periodo." />
       </Seccion>
+
+      {indirectos.length > 0 ? (
+        <Seccion titulo="Indirectos programados del mes, por concepto">
+          <Tabla
+            filas={indirectos}
+            columnas={[
+              { clave: 'nombre', titulo: 'Concepto', ancho: 600, pintar: (c) => <Celda>{NOMBRE_DEL_CONCEPTO[c.concepto]}</Celda> },
+              { clave: 'valor', titulo: 'Valor programado', ancho: 200, pintar: (c) => <Celda>{enPesos(c.valor)}</Celda> },
+            ]}
+            vacio=""
+          />
+        </Seccion>
+      ) : null}
 
       {rubros.length > 0 ? (
         <Seccion titulo="Rubros programados del mes">

@@ -16,6 +16,13 @@
  * `rige_desde` es hoy y la que se reemplaza rige hasta ayer (RF-120), con `fechaDeJornada`: la
  * fecha del equipo daría la de UTC en el servidor (notas de T6). Una versión aprobada y reemplazada
  * el mismo día queda con el rango invertido, y la regla la trata como que no rigió ningún día.
+ *
+ * ── Lo que impide aprobar (spec 045) ──
+ *
+ * Antes de la confirmación de hallazgos de la 043 se recalcula el borrador con la regla y se miran
+ * los impedimentos (RF-127 a RF-133): un ítem o rubro sin costo, un ítem sin medida real, algo con
+ * valor y sin programación, un renglón incompleto. Con alguno, 422 con la lista y sin preguntar por
+ * los hallazgos; no hay confirmación que lo salte. Lo que se aprueba es lo recalculado.
  */
 import { and, eq, ne, sql } from 'drizzle-orm';
 
@@ -24,8 +31,11 @@ import { planificaciones } from '@/db/servidor/esquema';
 import type { AprobacionDePlanificacion, PlanificacionDetalle } from '@/features/panel/planificacion';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
+import { leerContrato } from '@/features/contratos/servidor/contrato';
 import { ultimoDiaQueRige } from '@/shared/rules/cumplimiento-de-obra';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { hallazgosDelBorrador, impedimentosParaAprobar, resumenDeLaPlanificacion } from '@/shared/rules/planificacion';
+import { recalcularPlanificacion } from '@/shared/rules/planificacion-borrador';
 
 import { detalleDePlanificacion, planificacionAlAlcance } from './planificaciones';
 
@@ -43,16 +53,31 @@ export async function aprobarPlanificacion(
   if (fila.estado !== 'borrador') return errorDePeticion('Solo se aprueba un borrador.', 409);
   if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_CHOQUE_DE_PLANIFICACION, 409);
 
-  // RF-35: una sola confirmación del conjunto, con la lista a la vista.
-  if (fila.hallazgos.length > 0 && !pedido.confirmarHallazgos) {
+  // Spec 045, RF-127 a RF-133: recalculado por la regla, y nada que lo impida.
+  const { estructura, calculo } = recalcularPlanificacion(fila.estructura);
+  const impedimentos = impedimentosParaAprobar(estructura);
+  if (impedimentos.length > 0) {
     return Response.json(
-      { error: `Esta planificación tiene ${fila.hallazgos.length} hallazgos. Revíselos y confirme que la aprueba así.`, hallazgos: fila.hallazgos },
+      {
+        error: `No se puede aprobar todavía: ${impedimentos.length === 1 ? 'hay 1 cosa' : `hay ${impedimentos.length} cosas`} por completar.`,
+        impedimentos,
+      },
+      { status: 422 },
+    );
+  }
+  const { contrato } = await leerContrato(fila.obraId);
+  const hallazgos = hallazgosDelBorrador(estructura, contrato?.fechaFin ?? null, calculo.hallazgosDeReparto);
+
+  // RF-35, RF-134: una sola confirmación del conjunto, con la lista a la vista.
+  if (hallazgos.length > 0 && !pedido.confirmarHallazgos) {
+    return Response.json(
+      { error: `Esta planificación tiene ${hallazgos.length} hallazgos. Revíselos y confirme que la aprueba así.`, hallazgos },
       { status: 409 },
     );
   }
 
   // RF-121: en la primera de la obra, la respuesta mes por mes. Una lista vacía también es respuesta.
-  const { mesesPorMarcar } = await detalleDePlanificacion(fila);
+  const { mesesPorMarcar } = await detalleDePlanificacion(fila, sesion);
   if (mesesPorMarcar.length > 0 && pedido.mesesCumplidos === undefined) {
     return Response.json(
       { error: 'Antes de aprobar la primera planificación, diga cuáles de estos meses ya cumplieron su meta.', mesesPorMarcar },
@@ -79,6 +104,10 @@ export async function aprobarPlanificacion(
       .update(planificaciones)
       .set({
         estado: 'vigente',
+        // Spec 045: lo aprobado es lo recalculado.
+        estructura,
+        hallazgos,
+        resumen: resumenDeLaPlanificacion(estructura),
         rigeDesde: hoy,
         aprobadoEn: ahora,
         aprobadoPor: sesion.id,
@@ -91,7 +120,7 @@ export async function aprobarPlanificacion(
       .returning(),
   ]);
   if (aprobada.length === 0) return errorDePeticion(MENSAJE_DE_CHOQUE_DE_PLANIFICACION, 409);
-  return detalleDePlanificacion(aprobada[0]);
+  return detalleDePlanificacion(aprobada[0], sesion);
 }
 
 /**
@@ -125,5 +154,5 @@ export async function anularPlanificacion(
     .returning();
   // Otra persona la anuló o la reemplazó entre la lectura y la escritura.
   if (!anulada) return errorDePeticion('Esta planificación ya no es la vigente. Vuelva a abrirla.', 409);
-  return detalleDePlanificacion(anulada);
+  return detalleDePlanificacion(anulada, sesion);
 }

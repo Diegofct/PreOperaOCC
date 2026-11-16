@@ -3,9 +3,10 @@
  * y desde cuándo rigen, y la elegida en solo lectura.
  *
  * Solo se entra desde una obra de Proyectos: el menú la da a la Gerencia, al Director de
- * Proyectos y al Director de Obra, y el servidor vuelve a mirar la obra en cada petición. Suben el
- * Excel la Gerencia y el Director de Proyectos (`subir-planificacion.tsx`), y ellos mismos aprueban
- * y anulan desde el detalle.
+ * Proyectos y al Director de Obra, y el servidor vuelve a mirar la obra en cada petición. Crean el
+ * borrador la Gerencia y el Director de Proyectos —subiendo el Excel (`subir-planificacion.tsx`) o,
+ * desde la spec 045, desde el presupuesto con la IA (`crear-desde-presupuesto.tsx`)—, y ellos
+ * mismos aprueban y anulan desde el detalle. El Director de Obra no ve ninguno de los dos botones.
  *
  * La versión que se mira va en la dirección (`version`), como en el presupuesto: recargar o
  * compartir el enlace deja a quien lo abre en la misma. Sin elegir, se abre el borrador si lo hay
@@ -23,6 +24,7 @@ import { usePersona } from '@/features/panel/sesion';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { CrearDesdePresupuesto } from './crear-desde-presupuesto';
 import { DetallePlanificacion, vigenciaEnTexto } from './detalle-planificacion';
 import { NOMBRE_DE_ESTADO, TONO_DE_ESTADO } from './estados';
 import { SubirPlanificacion } from './subir-planificacion';
@@ -82,11 +84,22 @@ export default function PantallaPlanificacion() {
     <MarcoPantalla
       exigeObra
       titulo="Planificación"
-      descripcion="La planificación de la obra que se lee del Excel del Director de Proyectos: precios de costo, medidas y programación mes a mes, con sus versiones."
+      descripcion="La planificación de la obra: precios de costo, medidas, programación mes a mes y costos indirectos, con sus versiones. Se crea desde el presupuesto o desde el Excel del Director de Proyectos."
       error={lista.error}
       cargando={lista.cargando}
     >
       <View style={estilos.columna}>
+        {obraId && puedeSubir ? (
+          <CrearDesdePresupuesto
+            key={`presupuesto-${obraId}`}
+            obraId={obraId}
+            borrador={borrador}
+            alTerminar={(id) => {
+              setElegida(id);
+              lista.recargar();
+            }}
+          />
+        ) : null}
         {obraId && puedeSubir ? (
           <SubirPlanificacion
             key={obraId}
@@ -100,7 +113,15 @@ export default function PantallaPlanificacion() {
         <Seccion titulo="Versiones">
           <Tabla filas={lista.datos} columnas={columnas} vacio="Esta obra todavía no tiene planificación." />
         </Seccion>
-        {visible ? <DetallePlanificacion key={visible.id} id={visible.id} alCambiar={lista.recargar} /> : null}
+        {visible ? (
+          <DetallePlanificacion
+            key={visible.id}
+            id={visible.id}
+            alCambiar={lista.recargar}
+            alAbrir={setElegida}
+            numeroDe={(id) => lista.datos.find((v) => v.id === id)?.numeroVersion}
+          />
+        ) : null}
       </View>
     </MarcoPantalla>
   );

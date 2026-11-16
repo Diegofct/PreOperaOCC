@@ -1,6 +1,6 @@
 # Spec 043 — Planificación de obra y cumplimiento
 
-> Estado: **Cumplida** el 2026-11-10 (`validacion.md`) · Aprobada por Diego el 2026-11-09, tras la clarificación; cambio del 2026-11-10 (D31) aprobado ese mismo día · Fecha: 2026-11-08 · Tercera de la tanda 041–044 (depende de la 041 y del presupuesto de la 031; es la base de la 044)
+> Estado: **Cumplida** el 2026-11-10 (`validacion.md`) · Aprobada por Diego el 2026-11-09, tras la clarificación; cambio del 2026-11-10 (D31) aprobado ese mismo día · Fecha: 2026-11-08 · Tercera de la tanda 041–044 (depende de la 041 y del presupuesto de la 031; es la base de la 044) · **Modificada por la spec 045** (2026-11-13): el borrador se edita en pantalla, se puede crear sin Excel, los indirectos van por renglón y no se aprueba sin costos — ver «Cambios a la 043» en `specs/045-planificacion-en-pantalla/spec.md`
 
 ## Contexto y objetivo
 

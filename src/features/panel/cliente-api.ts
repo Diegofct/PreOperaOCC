@@ -25,12 +25,17 @@ import type { EstadoDePago, PagoDeLaCompra } from '@/shared/rules/pagos';
 import { lugarDeLaRuta, type EmpresaId } from '@/shared/rules/empresas';
 import type {
   AprobacionDePlanificacion,
+  BorradorGuardado,
+  EdicionDeBorradorPedida,
   EstadoDeLectura,
+  FuenteDeIndirectosFila,
   InformeRespuesta,
   LecturaIniciada,
+  PedidoDesdePresupuesto,
   PlanificacionDetalle,
   PlanificacionFila,
   PropuestaDeHojasRespuesta,
+  PropuestaEnCurso,
   SeleccionDeHojasPedida,
 } from '@/features/panel/planificacion';
 import type {
@@ -1122,6 +1127,23 @@ reportes: {
     /** RF-47, RF-48: solo la vigente, con motivo. */
     anular: (id: string, motivo: string) =>
       panelEnviar<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
+    /** Spec 045, RF-8 a RF-31: el borrador desde el presupuesto, con la IA por detrás; 202 con la lectura. */
+    desdePresupuesto: (obraId: string, pedido: PedidoDesdePresupuesto) =>
+      pedir<LecturaIniciada>(`/api/panel/planificaciones/desde-presupuesto${conObra(obraId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pedido),
+      }),
+    /** Spec 045, RF-28: la propuesta de la IA que corre en la obra, o `null`. */
+    propuestaEnCurso: (obraId: string) => panel<PropuestaEnCurso | null>(`/planificaciones/propuesta-en-curso${conObra(obraId)}`),
+    /** Spec 045, RF-112, RF-113: de dónde se pueden copiar los indirectos. */
+    paraCopiarIndirectos: () => panel<FuenteDeIndirectosFila[]>('/planificaciones/para-copiar-indirectos'),
+    /** Spec 045, RF-46 a RF-60: guarda el borrador; 409 si otra persona guardó antes (RF-58). */
+    guardar: (id: string, datos: EdicionDeBorradorPedida) =>
+      panelEnviar<BorradorGuardado>(`/planificaciones/${encodeURIComponent(id)}`, 'PUT', datos),
+    /** Spec 045, RF-138 a RF-143: versión nueva desde la vigente; 409 con `borrador` si hay uno. */
+    copiar: (id: string, sustituir: boolean) =>
+      panelEnviar<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}/copiar`, 'POST', { sustituir }),
   },
 
   /** Spec 044: los planes semanales de una obra. Al Residente le llegan sin plata (RF-30). */

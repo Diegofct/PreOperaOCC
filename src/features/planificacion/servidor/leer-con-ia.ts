@@ -1,6 +1,12 @@
 /**
- * Las dos llamadas a la IA de la planificación (spec 043, RF-4, RF-20): proponer para qué sirve
- * cada hoja y leer las confirmadas. **Solo servidor.**
+ * Las llamadas a la IA de la planificación: proponer para qué sirve cada hoja y leer las
+ * confirmadas (spec 043, RF-4, RF-20); proponer el calendario de un borrador hecho desde el
+ * presupuesto y leer los indirectos de un Excel renglón por renglón (spec 045, RF-19, RF-36).
+ * **Solo servidor.**
+ *
+ * Las dos de la 045 van con su propio esquema y aparte de la lectura de ítems: la de indirectos
+ * suma unas 200 filas, y la lectura del V5 ya rozaba el tope; si falla, el borrador nace igual con
+ * «Indirectos sin desglose» en vez de perder los ítems.
  *
  * Aquí solo van las llamadas. Qué se manda y qué se acepta lo deciden las reglas puras de
  * `shared/rules/planificacion-ia.ts`, que comprueban cada cifra contra la celda citada.
@@ -18,9 +24,12 @@ import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/mes
 import * as z from 'zod/v4';
 
 import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
+import { CONCEPTOS_INDIRECTOS, FORMAS_DE_INDIRECTO } from '@/shared/rules/planificacion';
+import type { RespuestaDelCalendario } from '@/shared/rules/planificacion-calendario-ia';
 import {
   CLASES_DE_HOJA,
   USOS_DE_HOJA,
+  type LecturaDeIndirectos,
   type LecturaDePlanificacion,
   type PropuestaDeHojas,
 } from '@/shared/rules/planificacion-ia';
@@ -164,6 +173,8 @@ export async function llamarConEsquema<T>(
   texto: string | BetaContentBlockParam[],
   que: string,
   fallos: TextosDeFalloDeIa = FALLOS_DE_LA_PLANIFICACION,
+  /** Spec 045: una extracción larga y mecánica va en `low`, para no pasarse del tope de tiempo. */
+  esfuerzo: 'low' | 'medium' = 'medium',
 ): Promise<RespuestaDeIa<T>> {
   const ia = clienteDeIa();
   if (!ia) return { ok: false, error: 'La lectura con IA no está configurada en este servidor.' };
@@ -175,7 +186,7 @@ export async function llamarConEsquema<T>(
           max_tokens: 64000,
           betas: ['server-side-fallback-2026-07-01'],
           fallbacks: 'default',
-          output_config: { effort: 'medium', format: betaZodOutputFormat(esquema) },
+          output_config: { effort: esfuerzo, format: betaZodOutputFormat(esquema) },
           system: instrucciones,
           messages: [{ role: 'user', content: texto }],
         },
@@ -203,4 +214,109 @@ export function proponerHojas(muestra: string): Promise<RespuestaDeIa<PropuestaD
 /** RF-20: lo que dicen las hojas confirmadas, con la hoja y la fila de cada cifra. */
 export function leerPlanificacion(texto: string): Promise<RespuestaDeIa<LecturaDePlanificacion>> {
   return llamarConEsquema(esquemaDeLectura, INSTRUCCIONES_PARA_LEER, texto, 'lectura de la planificación');
+}
+
+// ── Spec 045 ──
+
+/** RF-19, RF-26: por índice, en qué mes del plazo empieza y cuántos dura. Nada más. */
+const esquemaDelCalendario = z.object({
+  renglones: z.array(
+    z.object({
+      indice: z.number().int().describe('El número del renglón en la lista.'),
+      inicio: z.number().int().describe('El mes del plazo en que empieza: 1 es el primero.'),
+      meses: z.number().int().describe('Cuántos meses dura, contando el de inicio.'),
+    }),
+  ),
+  explicacion: z.string().describe('Por qué ese orden, en español, en menos de 1 000 caracteres.'),
+}) satisfies z.ZodType<RespuestaDelCalendario>;
+
+const INSTRUCCIONES_PARA_EL_CALENDARIO = `Planeas el orden de ejecución de un contrato de obra civil en Colombia (vías, alcantarillas, cunetas, pavimentos, señalización).
+
+Recibes el plazo del contrato en meses, el nombre del mes 1 y una lista numerada con los ítems del presupuesto (ítem de pago, capítulo, descripción, cantidad y unidad, importe) y después los rubros que se pagan como valor global.
+
+Para cada renglón de la lista devuelve su índice, el mes del plazo en que empieza (inicio, de 1 al plazo) y cuántos meses dura (meses). Tiene que terminar a más tardar en el último mes del plazo: inicio + meses - 1 no puede pasar del plazo. Los meses son números enteros: nunca una fecha.
+
+Cómo ordenar:
+- Primero lo preliminar (localización, replanteo, desmonte, demoliciones), luego el movimiento de tierras y los drenajes (alcantarillas, cunetas, filtros), luego las estructuras, después las capas del pavimento de abajo hacia arriba, y al final la señalización y las obras de cierre.
+- Lo que va bajo la vía se hace antes que la vía que lo cubre.
+- Cuanto más grande el importe de un ítem, más meses suele necesitar; uno pequeño puede caber en uno o dos meses.
+- Los rubros de gestión (plan de manejo ambiental, de tránsito, social, caracterización, interventoría) duran todo el plazo salvo que su nombre diga otra cosa; la actualización de precios va hacia el final.
+- Ten en cuenta la temporada de lluvias de Colombia: evita poner el movimiento de tierras y las capas del pavimento en los meses de lluvias fuertes (abril-mayo y octubre-noviembre) cuando se pueda.
+
+No devuelvas cantidades, precios, costos ni importes: solo el calendario. En explicacion, di en pocas frases y en español por qué escogiste ese orden, sin cifras de plata.`;
+
+/** RF-36 a RF-38, RF-43: los renglones de los siete conceptos y sus totales, citando cada fila. */
+const renglonDeIndirectos = z.object({
+  ...cita,
+  concepto: z.enum(CONCEPTOS_INDIRECTOS),
+  descripcion: z.string(),
+  forma: z.enum(FORMAS_DE_INDIRECTO),
+  valor: z.number().describe('Forma fijo: el valor. 0 en las demás.'),
+  porcentaje: z.number().describe('Forma porcentaje: la fracción, como 0.02 para 2 %. 0 en las demás.'),
+  cantidad: z.number().describe('Forma mensual: la cantidad. 0 en las demás.'),
+  valorMensual: z.number().describe('Forma mensual: el valor unitario por mes. 0 en las demás.'),
+  valorMensualAdicional: z.number().describe('Forma mensual: lo que se suma al valor mensual (consumible, servicios públicos); 0 si no.'),
+  salario: z.number().describe('Forma personal: el salario. 0 en las demás.'),
+  acomodacion: z.number().describe('Forma personal: la acomodación; 0 si no.'),
+  viaticos: z.number().describe('Forma personal: los viáticos; 0 si no.'),
+  dedicacion: z.number().describe('Forma personal: la dedicación, como 0.5 o 1. 0 en las demás.'),
+  meses: z.number().describe('Formas mensual y personal: los meses de la fórmula, tal como están. 0 en las demás.'),
+  operativo: z.boolean().describe('Forma personal: si su fórmula suma las horas extras al factor prestacional.'),
+  totalDelExcel: z.number().describe('El total del renglón tal como está en su fila.'),
+  programacion: mesesCitados,
+});
+
+const esquemaDeIndirectos = z.object({
+  renglones: z.array(renglonDeIndirectos),
+  totalesPorConcepto: z.array(z.object({ ...cita, concepto: z.enum(CONCEPTOS_INDIRECTOS), valor: z.number() })),
+}) satisfies z.ZodType<LecturaDeIndirectos>;
+
+const INSTRUCCIONES_PARA_LEER_INDIRECTOS = `Lees el bloque de costos indirectos de un libro de Excel con la planificación de un contrato de obra civil en Colombia, renglón por renglón, y lo devuelves como datos.
+
+Recibes las filas con contenido de las hojas confirmadas. Cada hoja empieza con una línea que dice su número, su nombre y sus usos. Cada fila empieza por «H<hoja>F<fila>» y sigue con las celdas separadas por « | », en el orden de las columnas; las celdas vacías van vacías entre dos « | ».
+
+El bloque suele empezar con un título como «COSTE INDIRECTO DE OBRA» y tener siete secciones, cada una con un título y su subtotal:
+- seguros_garantias: seguros y garantías, pólizas.
+- impuestos: retenciones, contribuciones, estampillas, ICA, GMF.
+- maquinaria_general: maquinaria general de obra, vehículos.
+- instalaciones_generales: oficinas, campamentos, almacenes, servicios públicos.
+- varios: gastos varios.
+- mano_obra_indirecta: el personal (director, residentes, inspectores, conductores, administrativos), y las liquidaciones del personal.
+- otros: otros costos indirectos.
+
+Por cada renglón (una fila con descripción y total, debajo del título de su sección), su concepto, su descripción, la fila que citas y su forma de cálculo según lo que muestran sus columnas:
+- fijo: un solo valor.
+- porcentaje: una fracción multiplicada por el importe real total de la obra (una retención del 2 % es 0.02).
+- mensual: una cantidad, un valor unitario por mes, a veces un valor que se le suma (consumible, servicios públicos), y los meses.
+- personal: salario, acomodación, viáticos, dedicación y meses; su total es (salario × factor prestacional + acomodación + viáticos) × dedicación × meses. operativo es true si el encabezado o la fila indica que lleva horas extras.
+Si no sabes cuál es, escoge fijo con su total en valor.
+
+Reglas:
+- Cada cifra está en la fila que citas. Copia los números tal como están en la celda, sin redondear ni convertir. No inventes nada: lo que la forma no usa va en 0.
+- totalDelExcel es el total del renglón en su fila.
+- Ignora los títulos de sección, los subtotales y el total del bloque como renglones: van en totalesPorConcepto, uno por sección, con la fila de su subtotal.
+- programacion: si alguna hoja trae el reparto mes a mes de ese renglón, solo para esta obra o frente, cita esa fila y pon todos los meses de su periodo con su mes del calendario en AAAA-MM, también los que valen cero dentro del periodo. Nunca uses un flujo de caja que mezcle varios frentes o vías, ni lo pagado o facturado. Si no hay, hoja 0, fila 0 y meses vacío.`;
+
+/** RF-19 a RF-27: el calendario propuesto para la lista de `textoParaElCalendario`. */
+export function proponerCalendario(texto: string): Promise<RespuestaDeIa<RespuestaDelCalendario>> {
+  return llamarConEsquema(esquemaDelCalendario, INSTRUCCIONES_PARA_EL_CALENDARIO, texto, 'propuesta del calendario', {
+    seNego: 'La IA no quiso proponer el calendario.',
+    muyLargo: 'La lista es demasiado larga para proponer el calendario con IA.',
+  });
+}
+
+/**
+ * RF-36 a RF-38: los indirectos del libro renglón por renglón, con la hoja y la fila de cada cifra.
+ * Va en esfuerzo `low`: con `medium`, los 160 renglones del V2 tardaron 245 s y 36 937 tokens de
+ * salida, al filo del tope de 4 minutos. Es copiar cifras citadas, y la regla las comprueba todas.
+ */
+export function leerIndirectos(texto: string): Promise<RespuestaDeIa<LecturaDeIndirectos>> {
+  return llamarConEsquema(
+    esquemaDeIndirectos,
+    INSTRUCCIONES_PARA_LEER_INDIRECTOS,
+    texto,
+    'lectura de los indirectos',
+    FALLOS_DE_LA_PLANIFICACION,
+    'low',
+  );
 }

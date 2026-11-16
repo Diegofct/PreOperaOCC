@@ -90,12 +90,15 @@ import { ESTADOS_DE_PRESUPUESTO, type EstructuraDePresupuesto } from '../../shar
 import {
   ESTADOS_DE_LECTURA_DE_PLANIFICACION,
   ESTADOS_DE_PLANIFICACION,
+  ORIGENES_DE_PLANIFICACION,
+  TIPOS_DE_LECTURA_DE_PLANIFICACION,
   type EstructuraDePlanificacion,
   type FrenteSinGrupo,
-  type HallazgoDePlanificacion,
+  type HallazgoDelBorrador,
+  type PedidoDePropuesta,
   type ResumenDeLaPlanificacion,
 } from '../../shared/rules/planificacion';
-import type { LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
+import type { LecturaDeIndirectos, LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
 import {
   ESTADOS_DE_LECTURA_DE_PLAN,
   ESTADOS_DE_PLAN_SEMANAL,
@@ -2159,6 +2162,9 @@ export const presupuestoLecturasIa = pgTable('presupuesto_lecturas_ia', {
 
 export const estadoPlanificacion = pgEnum('estado_planificacion', ESTADOS_DE_PLANIFICACION);
 export const estadoLecturaPlanificacion = pgEnum('estado_lectura_planificacion', ESTADOS_DE_LECTURA_DE_PLANIFICACION);
+/** Spec 045, RF-147. */
+export const origenPlanificacion = pgEnum('origen_planificacion', ORIGENES_DE_PLANIFICACION);
+export const tipoLecturaPlanificacion = pgEnum('tipo_lectura_planificacion', TIPOS_DE_LECTURA_DE_PLANIFICACION);
 
 /**
  * Las planificaciones de una obra, una fila por versión (RF-41 a RF-47). Como `presupuestos`, la
@@ -2171,6 +2177,12 @@ export const estadoLecturaPlanificacion = pgEnum('estado_lectura_planificacion',
  *
  * `rige_desde` y `rige_hasta` son fechas de Colombia, resueltas al aprobar y al anular. Un rango
  * invertido es una versión reemplazada el mismo día en que se aprobó (RF-52, RF-120, RF-138).
+ *
+ * Spec 045: una planificación ya no nace solo de un Excel. Puede salir del presupuesto o de copiar
+ * otra versión (RF-147), y entonces no tiene archivo, huella ni hojas: por eso esas tres columnas
+ * son opcionales, y el check `ck_planificacion_origen` pide el Excel original exactamente cuando
+ * el origen es un Excel. Las filas de la 043 quedan con `origen = 'excel'` por el valor por
+ * defecto, que es lo que son.
  */
 export const planificaciones = pgTable(
   'planificaciones',
@@ -2182,17 +2194,19 @@ export const planificaciones = pgTable(
     numeroVersion: integer('numero_version').notNull(),
     estado: estadoPlanificacion('estado').notNull().default('borrador'),
     estructura: jsonb('estructura').$type<EstructuraDePlanificacion>().notNull(),
-    hallazgos: jsonb('hallazgos').$type<HallazgoDePlanificacion[]>().notNull().default([]),
+    /** Spec 045: los del borrador (`hallazgosDelBorrador`), que incluyen todos los de la 043. */
+    hallazgos: jsonb('hallazgos').$type<HallazgoDelBorrador[]>().notNull().default([]),
     resumen: jsonb('resumen').$type<ResumenDeLaPlanificacion>().notNull(),
     /** Las cifras que la IA leyó y no estaban en su celda (RF-21), para mostrarlas. */
     rechazados: jsonb('rechazados').$type<RechazadoPorIa[]>().notNull().default([]),
-    /** SHA-256 del archivo tal como se subió. */
-    huella: text('huella').notNull(),
-    hojas: jsonb('hojas').$type<SeleccionDeHojas>().notNull(),
-    /** RF-8: el Excel original. */
-    mediaId: text('media_id')
-      .notNull()
-      .references(() => media.id),
+    /** SHA-256 del archivo tal como se subió; `null` si no nació de un Excel (045). */
+    huella: text('huella'),
+    hojas: jsonb('hojas').$type<SeleccionDeHojas>(),
+    /** RF-8: el Excel original; `null` si no nació de un Excel (045, RF-149). */
+    mediaId: text('media_id').references(() => media.id),
+    /** Spec 045, RF-147: de dónde nació, y de cuál versión si es una copia. */
+    origen: origenPlanificacion('origen').notNull().default('excel'),
+    copiadaDe: text('copiada_de').references((): AnyPgColumn => planificaciones.id),
     /** RF-39: el presupuesto contra el que se cruzó, y su versión. */
     presupuestoId: text('presupuesto_id')
       .notNull()
@@ -2237,6 +2251,7 @@ export const planificaciones = pgTable(
        and (${t.anuladoEn} is null or (${t.motivoAnulacion} is not null and length(trim(${t.motivoAnulacion})) > 0))`,
     ),
     check('ck_planificacion_descartada', sql`(${t.estado} = 'descartada') = (${t.descartadoEn} is not null)`),
+    check('ck_planificacion_origen', sql`(${t.origen} = 'excel') = (${t.mediaId} is not null)`),
     check(
       'ck_planificacion_aprobada',
       sql`${t.estado} not in ('vigente', 'reemplazada', 'anulada') or (${t.aprobadoEn} is not null and ${t.rigeDesde} is not null)`,
@@ -2262,6 +2277,10 @@ export const planificacionLecturas = pgTable(
     error: text('error'),
     /** RF-107: los frentes que hay que asociar a mano. */
     candidatos: jsonb('candidatos').$type<FrenteSinGrupo[]>(),
+    /** Spec 045: la lectura de un Excel o la propuesta del calendario (RF-28, RF-29). */
+    tipo: tipoLecturaPlanificacion('tipo').notNull().default('excel'),
+    /** Spec 045: lo pedido al crear desde el presupuesto; `null` en una lectura de Excel. */
+    pedido: jsonb('pedido').$type<PedidoDePropuesta>(),
     venceEn: timestamp('vence_en', { withTimezone: true, mode: 'date' }).notNull(),
     creadoPor: text('creado_por')
       .notNull()
@@ -2284,7 +2303,8 @@ export const planificacionLecturas = pgTable(
 export const planificacionLecturasIa = pgTable('planificacion_lecturas_ia', {
   /** SHA-256 de la huella del archivo más las hojas confirmadas. */
   llave: text('llave').primaryKey(),
-  lectura: jsonb('lectura').$type<LecturaDePlanificacion>().notNull(),
+  /** Spec 045: también la de indirectos por renglón, con su propia llave (`indirectos|…`). */
+  lectura: jsonb('lectura').$type<LecturaDePlanificacion | LecturaDeIndirectos>().notNull(),
   modelo: text('modelo').notNull(),
   tokensEntrada: integer('tokens_entrada').notNull(),
   tokensSalida: integer('tokens_salida').notNull(),
