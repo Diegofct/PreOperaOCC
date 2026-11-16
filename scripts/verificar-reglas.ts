@@ -81,6 +81,7 @@ import {
 } from '../src/shared/rules/permisos';
 import {
   diasDeReparto,
+  NOMBRE_DEL_CONCEPTO,
   ejecucionDelPeriodo,
   informeDeCumplimiento,
   informeSegunRol,
@@ -100,7 +101,20 @@ import {
 import {
   armarItemDePlanificacion,
   cantidadDelMes,
+  CONCEPTOS_INDIRECTOS,
   cruzarConPresupuesto,
+  ESQUEMA_DE_PLANIFICACION,
+  FORMAS_DE_INDIRECTO,
+  hallazgosDelBorrador,
+  impedimentosParaAprobar,
+  mesesDelPlazo,
+  ORIGENES_DE_PLANIFICACION,
+  sumarMeses,
+  ultimoMesDelPlazo,
+  validarCantidadDeMeses,
+  validarPlazo,
+  type EstructuraDePlanificacion,
+  type RenglonIndirecto,
   ESTADOS_DE_LECTURA_DE_PLANIFICACION,
   ESTADOS_DE_PLANIFICACION,
   hallazgosDe,
@@ -113,8 +127,49 @@ import {
   valoresPorMes,
 } from '../src/shared/rules/planificacion';
 import {
+  descartarFijadosFuera,
+  mesesDelPeriodo,
+  programacionConCantidades,
+  repartir as repartirEnElPeriodo,
+  repartirCosto,
+  repartirEnPartesIguales,
+  repartirPorcentaje,
+  sumaPorMes,
+} from '../src/shared/rules/planificacion-reparto';
+import {
+  aplicarEdicion,
+  borradorDesdePresupuesto,
+  copiarVersion,
+  costoConOtraMedida,
+  edicionDe,
+  normalizarLegada,
+  recalcularPlanificacion,
+  type EdicionDelBorrador,
+} from '../src/shared/rules/planificacion-borrador';
+import {
+  LARGO_DE_LA_EXPLICACION,
+  textoParaElCalendario,
+  validarCalendario,
+} from '../src/shared/rules/planificacion-calendario-ia';
+import {
+  copiarRenglones,
+  recortarManoDeObraIndirecta,
+  renglonesParaCopiar,
+  DESCRIPCION_SIN_DESGLOSE,
+  FACTOR_PRESTACIONAL_POR_DEFECTO,
+  RECARGO_HORAS_EXTRAS_POR_DEFECTO,
+  totalDeIndirectos,
+  totalDelRenglon,
+  totalesPorConcepto,
+  validarRenglonIndirecto,
+} from '../src/shared/rules/planificacion-indirectos';
+import {
   anulacionDePlanificacion,
   aprobacionDePlanificacion,
+  copiaDePlanificacion,
+  edicionDeBorradorPedida,
+  edicionDelPedido,
+  pedidoDesdePresupuesto,
   pedidoDeInformeDeCumplimiento,
   seleccionDeHojasPedida,
 } from '../src/features/panel/planificacion';
@@ -126,6 +181,8 @@ import {
   pedidoDeLecturaDePlan,
 } from '../src/features/panel/plan-semanal';
 import {
+  borradorDelExcel,
+  diferenciasPorConcepto,
   estructuraDeLaLectura,
   limpiarPropuesta,
   muestraParaProponer,
@@ -133,7 +190,10 @@ import {
   armarSeleccion,
   repasarSeleccion,
   textoParaLeer,
+  type HojaDelLibro,
+  type LecturaDeIndirectos,
   type LecturaDePlanificacion,
+  type RenglonIndirectoLeidoPorLaIa,
 } from '../src/shared/rules/planificacion-ia';
 import {
   avisosDelPlan,
@@ -18313,6 +18373,1753 @@ prueba('042/RF-51, RF-52: el Excel del almacén suma proveedor, documento y valo
   // Las columnas de siempre siguen en su sitio y con lo suyo.
   assert.equal(aMano[columna('Entregó / recibió')], 'Bodega central');
   assert.equal(hojas.movimientos.filas[0].length, ENCABEZADOS_MOVIMIENTOS.length);
+});
+
+prueba('045/RF-1, RF-4: el plazo es un entero entre 1 y 120 meses, y el motivo se explica', () => {
+  for (const malo of [0, 121, 2.5, -3, Number.NaN]) {
+    const error = validarPlazo({ meses: malo, arranque: '2026-01' });
+    assert.ok(error, `plazo ${malo}`);
+    assert.match(error, /entero entre 1 y 120/, `plazo ${malo}`);
+  }
+  assert.equal(validarPlazo({ meses: 16, arranque: '2026-01' }), null);
+  assert.equal(validarPlazo({ meses: 1, arranque: '2026-01' }), null);
+  assert.equal(validarPlazo({ meses: 120, arranque: '2026-01' }), null);
+});
+
+prueba('045/RF-2, RF-5: el mes de arranque es un mes válido y puede estar en el pasado', () => {
+  for (const malo of ['2026-13', '2026-00', '2026-1', '26-01', '2026-01-15', '']) {
+    assert.match(validarPlazo({ meses: 16, arranque: malo }) ?? '', /mes de arranque/, malo);
+  }
+  assert.equal(validarPlazo({ meses: 16, arranque: '2019-05' }), null);
+});
+
+prueba('045/RF-3: el mes de arranque es el mes 1 del plazo', () => {
+  const plazo = { meses: 16, arranque: '2026-01' };
+  const meses = mesesDelPlazo(plazo);
+  assert.equal(meses.length, 16);
+  assert.equal(meses[0], '2026-01');
+  assert.equal(meses[15], '2027-04');
+  assert.equal(ultimoMesDelPlazo(plazo), '2027-04');
+  assert.equal(ultimoMesDelPlazo({ meses: 1, arranque: '2026-12' }), '2026-12');
+  assert.equal(sumarMeses('2026-11', 2), '2027-01');
+  assert.equal(sumarMeses('2026-03', -3), '2025-12');
+});
+
+prueba('045/RF-55: una cantidad de meses tiene que ser un entero mayor que cero', () => {
+  for (const malo of [0, -1, 1.5, Number.NaN]) assert.match(validarCantidadDeMeses(malo) ?? '', /entero mayor que cero/, String(malo));
+  assert.equal(validarCantidadDeMeses(1), null);
+  assert.equal(validarCantidadDeMeses(22), null);
+});
+
+prueba('045/RF-80, RF-86, RF-87: siete conceptos, cuatro formas y la estructura nueva convive con la de la 043', () => {
+  assert.deepEqual(CONCEPTOS_INDIRECTOS, [
+    'seguros_garantias',
+    'impuestos',
+    'maquinaria_general',
+    'instalaciones_generales',
+    'varios',
+    'mano_obra_indirecta',
+    'otros',
+  ]);
+  assert.deepEqual(FORMAS_DE_INDIRECTO, ['fijo', 'porcentaje', 'mensual', 'personal']);
+  assert.deepEqual(ORIGENES_DE_PLANIFICACION, ['excel', 'presupuesto', 'copia']);
+
+  // Una estructura de la 043, sin nada de lo nuevo, sigue siendo del tipo.
+  const de043: EstructuraDePlanificacion = {
+    items: [],
+    rubros: [{ nombre: 'Componentes', valor: 1000, costo: null, programacion: [] }],
+    lineaDeRubros: { nombre: 'Componentes', valores: [{ mes: '2026-01', valor: 1000 }] },
+    indirectos: [{ mes: '2026-01', valor: 50 }],
+    supuestos: '',
+    objetivos: '',
+  };
+  assert.equal(de043.esquema, undefined);
+
+  const operativo: RenglonIndirecto = {
+    id: 'r1',
+    concepto: 'mano_obra_indirecta',
+    descripcion: 'Inspector',
+    forma: 'personal',
+    salario: 3_000_000,
+    acomodacion: 0,
+    viaticos: 0,
+    dedicacion: 1,
+    operativo: true,
+    mesInicio: '2026-01',
+    tiempoEjecucion: 16,
+    fijados: [],
+    revisar: false,
+  };
+  const porcentaje: RenglonIndirecto = {
+    id: 'r2',
+    concepto: 'impuestos',
+    descripcion: 'Retención',
+    forma: 'porcentaje',
+    porcentaje: 0.02,
+    revisar: false,
+  };
+  const de045: EstructuraDePlanificacion = {
+    ...de043,
+    esquema: ESQUEMA_DE_PLANIFICACION,
+    plazo: { meses: 16, arranque: '2026-01' },
+    factorPrestacional: 1.2295,
+    recargoHorasExtras: 0.16,
+    rubros: [{ ...de043.rubros[0], mesInicio: null, tiempoEjecucion: null, fijados: [], revisar: false }],
+    lineaDeRubros: { ...(de043.lineaDeRubros as NonNullable<typeof de043.lineaDeRubros>), fijados: [{ mes: '2026-01', valor: 1000 }] },
+    renglonesIndirectos: [operativo, porcentaje],
+    propuesta: { explicacion: 'Primero el movimiento de tierra.', fallida: false },
+  };
+  assert.equal(de045.esquema, 2);
+  // RF-85: el de porcentaje no lleva periodo.
+  assert.ok(!('mesInicio' in porcentaje));
+});
+
+const valoresDe = (reparto: { meses: { mes: string; valor: number }[] }) => reparto.meses.map((m) => m.valor);
+
+prueba('045/RF-96, RF-99: sin meses fijados, el total se reparte en partes iguales en su periodo', () => {
+  const periodo = { mesInicio: '2026-11', tiempoEjecucion: 4 };
+  assert.deepEqual(mesesDelPeriodo(periodo), ['2026-11', '2026-12', '2027-01', '2027-02']);
+  const reparto = repartirEnElPeriodo(1200, periodo, []);
+  assert.deepEqual(reparto.meses, [
+    { mes: '2026-11', valor: 300 },
+    { mes: '2026-12', valor: 300 },
+    { mes: '2027-01', valor: 300 },
+    { mes: '2027-02', valor: 300 },
+  ]);
+  assert.equal(reparto.hallazgo, null);
+  // Sin periodo no hay dónde repartir.
+  assert.deepEqual(repartirEnElPeriodo(1200, { mesInicio: null, tiempoEjecucion: 4 }, []).meses, []);
+  assert.deepEqual(repartirEnElPeriodo(1200, { mesInicio: '2026-01', tiempoEjecucion: null }, []).meses, []);
+  // RF-161: sin redondear.
+  const tercios = valoresDe(repartirEnElPeriodo(1000, { mesInicio: '2026-01', tiempoEjecucion: 3 }, []));
+  assert.ok(Math.abs(tercios[0] - 1000 / 3) < 1e-9);
+});
+
+prueba('045/RF-98, RF-99, P7: un mes fijado y el resto entre todos los no fijados, anteriores y siguientes', () => {
+  const reparto = repartirEnElPeriodo(1200, { mesInicio: '2026-01', tiempoEjecucion: 4 }, [{ mes: '2026-02', valor: 600 }]);
+  assert.deepEqual(valoresDe(reparto), [200, 600, 200, 200]);
+  assert.equal(reparto.hallazgo, null);
+  // Un fijado en cero también cuenta como fijado: no se rellena (D11).
+  assert.deepEqual(valoresDe(repartirEnElPeriodo(900, { mesInicio: '2026-01', tiempoEjecucion: 4 }, [{ mes: '2026-03', valor: 0 }])), [
+    300, 300, 0, 300,
+  ]);
+});
+
+prueba('045/RF-100: los meses fijados que suman más que el total son hallazgo', () => {
+  const reparto = repartirEnElPeriodo(1000, { mesInicio: '2026-01', tiempoEjecucion: 4 }, [
+    { mes: '2026-01', valor: 900 },
+    { mes: '2026-02', valor: 600 },
+  ]);
+  assert.equal(reparto.hallazgo?.tipo, 'fijados_exceden_total');
+  assert.equal(reparto.hallazgo?.diferencia, 500);
+  // Los fijados se respetan; a los demás no se les reparte un negativo.
+  assert.deepEqual(valoresDe(reparto), [900, 600, 0, 0]);
+});
+
+prueba('045/RF-101: todos los meses fijados y sin sumar el total es hallazgo', () => {
+  const fijados = ['2026-01', '2026-02', '2026-03', '2026-04'].map((mes) => ({ mes, valor: 250 }));
+  const reparto = repartirEnElPeriodo(1200, { mesInicio: '2026-01', tiempoEjecucion: 4 }, fijados);
+  assert.equal(reparto.hallazgo?.tipo, 'fijados_no_suman_total');
+  assert.equal(reparto.hallazgo?.diferencia, -200);
+  assert.deepEqual(valoresDe(reparto), [250, 250, 250, 250]);
+  // Si suman el total, no hay nada que mirar.
+  assert.equal(repartirEnElPeriodo(1000, { mesInicio: '2026-01', tiempoEjecucion: 4 }, fijados).hallazgo, null);
+});
+
+prueba('045/RF-103, RF-104: acortar el periodo descarta los fijados que quedan fuera y dice cuáles', () => {
+  const fijados = [
+    { mes: '2026-01', valor: 100 },
+    { mes: '2026-03', valor: 700 },
+  ];
+  const { fijados: quedan, descartados } = descartarFijadosFuera(fijados, { mesInicio: '2026-01', tiempoEjecucion: 2 });
+  assert.deepEqual(quedan, [{ mes: '2026-01', valor: 100 }]);
+  assert.deepEqual(descartados, [{ mes: '2026-03', valor: 700 }]);
+  // Un fijado fuera del periodo tampoco cuenta al repartir.
+  assert.deepEqual(valoresDe(repartirEnElPeriodo(1000, { mesInicio: '2026-01', tiempoEjecucion: 2 }, fijados)), [100, 900]);
+});
+
+prueba('045/RF-102: «Repartir en partes iguales» quita los meses fijados', () => {
+  const rubro = { nombre: 'Componentes', fijados: [{ mes: '2026-02', valor: 600 }] };
+  const igual = repartirEnPartesIguales(rubro);
+  assert.deepEqual(igual.fijados, []);
+  assert.equal(igual.nombre, 'Componentes');
+  assert.deepEqual(rubro.fijados.length, 1, 'no muta el original');
+  assert.deepEqual(valoresDe(repartirEnElPeriodo(1200, { mesInicio: '2026-01', tiempoEjecucion: 4 }, igual.fijados)), [300, 300, 300, 300]);
+});
+
+prueba('045/RF-105: un porcentaje se reparte en proporción a lo programado en cada mes', () => {
+  const programado = sumaPorMes([
+    [{ mes: '2026-02', valor: 200 }, { mes: '2026-01', valor: 100 }],
+    [{ mes: '2026-01', valor: 200 }, { mes: '2026-02', valor: -100 }, { mes: '2026-03', valor: 0 }],
+  ]);
+  assert.deepEqual(programado, [
+    { mes: '2026-01', valor: 300 },
+    { mes: '2026-02', valor: 100 },
+    { mes: '2026-03', valor: 0 },
+  ]);
+  // Un 2 % de 20 000 es 400: 75 % al mes de 300 y 25 % al de 100.
+  const reparto = repartirPorcentaje(400, programado, { meses: 16, arranque: '2026-01' });
+  assert.deepEqual(reparto.meses, [
+    { mes: '2026-01', valor: 300 },
+    { mes: '2026-02', valor: 100 },
+  ]);
+  assert.equal(reparto.hallazgo, null);
+});
+
+prueba('045/RF-106, RF-107, P9: sin nada programado, el porcentaje va en partes iguales en el plazo y es hallazgo', () => {
+  const reparto = repartirPorcentaje(400, [], { meses: 4, arranque: '2026-01' });
+  assert.deepEqual(reparto.meses, [
+    { mes: '2026-01', valor: 100 },
+    { mes: '2026-02', valor: 100 },
+    { mes: '2026-03', valor: 100 },
+    { mes: '2026-04', valor: 100 },
+  ]);
+  assert.equal(reparto.hallazgo?.tipo, 'sin_programacion');
+  // Meses en cero no son programación.
+  assert.equal(repartirPorcentaje(400, [{ mes: '2026-01', valor: 0 }], { meses: 4, arranque: '2026-01' }).hallazgo?.tipo, 'sin_programacion');
+});
+
+prueba('045/RF-109: el costo va en los mismos meses y en la misma proporción que el importe real', () => {
+  const real = [
+    { mes: '2026-01', valor: 200 },
+    { mes: '2026-02', valor: 600 },
+    { mes: '2026-03', valor: 200 },
+  ];
+  assert.deepEqual(repartirCosto(500, real, { mesInicio: '2026-01', tiempoEjecucion: 3 }), [
+    { mes: '2026-01', valor: 100 },
+    { mes: '2026-02', valor: 300 },
+    { mes: '2026-03', valor: 100 },
+  ]);
+});
+
+prueba('045/RF-108, RF-110, RF-111, P8: con precio contractual 0, el costo en partes iguales y sin cantidad', () => {
+  const periodo = { mesInicio: '2026-01', tiempoEjecucion: 3 };
+  const real = repartirEnElPeriodo(0, periodo, []).meses;
+  assert.deepEqual(
+    repartirCosto(900, real, periodo).map((m) => m.valor),
+    [300, 300, 300],
+  );
+  assert.ok(programacionConCantidades(real, 0).every((m) => m.cantidad === null));
+  // RF-108: la cantidad del mes es el valor entre el precio contractual.
+  assert.deepEqual(programacionConCantidades([{ mes: '2026-01', valor: 300 }], 150), [{ mes: '2026-01', valor: 300, cantidad: 2 }]);
+  assert.equal(programacionConCantidades([{ mes: '2026-01', valor: 300 }], null)[0].cantidad, null);
+});
+
+/** Filas reales de «PLANIFIC BERRIO» del Excel V2 OPC 8 (assets/), con su valor de la columna M. */
+const K69_DEL_V2 = 39_558_848_104.09154;
+const CONTEXTO_V2 = { importeRealTotal: K69_DEL_V2, factorPrestacional: 1.2295, recargoHorasExtras: 0.16 };
+const sinPeriodo = { mesInicio: '2026-01', tiempoEjecucion: null, fijados: [], revisar: false };
+const renglonesDelV2: { fila: number; m: number; renglon: RenglonIndirecto }[] = [
+  {
+    fila: 74,
+    m: 0,
+    renglon: { ...sinPeriodo, id: '74', concepto: 'seguros_garantias', descripcion: 'Poliza de seriedad de oferta', forma: 'fijo', valor: 0 },
+  },
+  {
+    fila: 75,
+    m: 115_001_699.5,
+    renglon: { ...sinPeriodo, id: '75', concepto: 'seguros_garantias', descripcion: 'Polizas definitivas', forma: 'fijo', valor: 115_001_699.5 },
+  },
+  {
+    fila: 79,
+    m: 791_176_962.0818307,
+    renglon: { id: '79', concepto: 'impuestos', descripcion: 'Retencion en la fuente', forma: 'porcentaje', porcentaje: 0.02, revisar: false },
+  },
+  {
+    fila: 94,
+    m: 28_000_000,
+    renglon: {
+      ...sinPeriodo,
+      tiempoEjecucion: 7,
+      id: '94',
+      concepto: 'maquinaria_general',
+      descripcion: 'Camioneta Nissan 4x2',
+      forma: 'mensual',
+      cantidad: 1,
+      valorMensual: 4_000_000,
+      valorMensualAdicional: 0,
+    },
+  },
+  {
+    fila: 139,
+    m: 31_850_000,
+    renglon: {
+      ...sinPeriodo,
+      tiempoEjecucion: 6.5,
+      id: '139',
+      concepto: 'instalaciones_generales',
+      descripcion: 'Oficina berrio',
+      forma: 'mensual',
+      cantidad: 1,
+      valorMensual: 3_900_000,
+      valorMensualAdicional: 1_000_000,
+    },
+  },
+  {
+    fila: 151,
+    m: 0,
+    renglon: {
+      ...sinPeriodo,
+      tiempoEjecucion: 16,
+      id: '151',
+      concepto: 'varios',
+      descripcion: 'Control gerencia',
+      forma: 'mensual',
+      cantidad: 0,
+      valorMensual: 1_000_000,
+      valorMensualAdicional: 0,
+    },
+  },
+  {
+    fila: 189,
+    m: 43_879_055.00000001,
+    renglon: {
+      ...sinPeriodo,
+      tiempoEjecucion: 7.273474783473541,
+      id: '189',
+      concepto: 'mano_obra_indirecta',
+      descripcion: 'Residente obra - berrio',
+      forma: 'personal',
+      salario: 4_500_000,
+      acomodacion: 0,
+      viaticos: 500_000,
+      dedicacion: 1,
+      operativo: false,
+    },
+  },
+  {
+    fila: 205,
+    m: 55_842_675,
+    renglon: {
+      ...sinPeriodo,
+      tiempoEjecucion: 15,
+      id: '205',
+      concepto: 'mano_obra_indirecta',
+      descripcion: 'Conductor de carrotanque-ford',
+      forma: 'personal',
+      salario: 2_500_000,
+      acomodacion: 249_095,
+      viaticos: 0,
+      dedicacion: 1,
+      operativo: true,
+    },
+  },
+  {
+    fila: 239,
+    m: 474_706_177.2490985,
+    renglon: { id: '239', concepto: 'otros', descripcion: 'Pago experiencia españoles', forma: 'porcentaje', porcentaje: 0.012, revisar: false },
+  },
+];
+
+prueba('045/RF-74 a RF-77, RF-93: cada forma reproduce su renglón del Excel V2 OPC 8 con menos de un peso', () => {
+  for (const { fila, m, renglon } of renglonesDelV2) {
+    const total = totalDelRenglon(renglon, CONTEXTO_V2);
+    assert.ok(Math.abs(total - m) < 1, `fila ${fila}: ${total} contra ${m} del libro`);
+  }
+  // RF-93: el mismo conductor sin la marca de operativo no lleva el recargo.
+  const [conductor] = renglonesDelV2.filter((r) => r.fila === 205).map((r) => r.renglon);
+  const sinRecargo = totalDelRenglon({ ...conductor, operativo: false } as RenglonIndirecto, CONTEXTO_V2);
+  assert.ok(Math.abs(sinRecargo - (2_500_000 * 1.2295 + 249_095) * 15) < 1);
+  // Un valor que falta cuenta como cero mientras se digita; impedir aprobar es otra regla (RF-133).
+  assert.equal(totalDelRenglon({ ...conductor, salario: null } as RenglonIndirecto, CONTEXTO_V2), 249_095 * 15);
+});
+
+prueba('045/RF-94, RF-95: el total de cada concepto es la suma de sus renglones y el de indirectos, la de los siete', () => {
+  const renglones = renglonesDelV2.map((r) => r.renglon);
+  const porConcepto = totalesPorConcepto(renglones, CONTEXTO_V2);
+  assert.equal(Object.keys(porConcepto).length, 7);
+  assert.ok(Math.abs(porConcepto.seguros_garantias - 115_001_699.5) < 1);
+  assert.ok(Math.abs(porConcepto.mano_obra_indirecta - (43_879_055 + 55_842_675)) < 1);
+  assert.equal(porConcepto.impuestos, totalDelRenglon(renglones[2], CONTEXTO_V2));
+  const suma = renglonesDelV2.reduce((acumulado, r) => acumulado + r.m, 0);
+  assert.ok(Math.abs(totalDeIndirectos(renglones, CONTEXTO_V2) - suma) < 1);
+  assert.equal(totalDeIndirectos([], CONTEXTO_V2), 0);
+});
+
+prueba('045/RF-78, RF-79: un renglón sin descripción o sin forma se rechaza', () => {
+  assert.match(validarRenglonIndirecto({ descripcion: '  ', forma: 'fijo' }) ?? '', /descripción/);
+  assert.match(validarRenglonIndirecto({ descripcion: 'Oficina', forma: undefined }) ?? '', /forma de cálculo/);
+  assert.match(validarRenglonIndirecto({ descripcion: 'Oficina', forma: 'otra' }) ?? '', /forma de cálculo/);
+  assert.equal(validarRenglonIndirecto({ descripcion: 'Oficina', forma: 'mensual' }), null);
+});
+
+prueba('045/RF-88, RF-89: los factores por defecto son 1,2295 y 0,16', () => {
+  assert.equal(FACTOR_PRESTACIONAL_POR_DEFECTO, 1.2295);
+  assert.equal(RECARGO_HORAS_EXTRAS_POR_DEFECTO, 0.16);
+});
+
+prueba('045/RF-114 a RF-119: copiar indirectos a otro plazo pone el arranque nuevo, recorta, no copia fijados y trae los factores', () => {
+  const largo = renglonesDelV2.find((r) => r.fila === 189)?.renglon as RenglonIndirecto;
+  const origen = {
+    factorPrestacional: 1.25,
+    recargoHorasExtras: 0.2,
+    renglonesIndirectos: [
+      { ...largo, id: 'a', tiempoEjecucion: 22, mesInicio: '2025-03', fijados: [{ mes: '2025-04', valor: 9 }] },
+      { ...largo, id: 'b', tiempoEjecucion: 6, mesInicio: '2025-05', fijados: [], revisar: true },
+      renglonesDelV2.find((r) => r.fila === 79)?.renglon as RenglonIndirecto,
+    ] as RenglonIndirecto[],
+  };
+  const copia = copiarRenglones(origen, { meses: 10, arranque: '2027-02' });
+  assert.equal(copia.factorPrestacional, 1.25);
+  assert.equal(copia.recargoHorasExtras, 0.2);
+  const [a, b, retencion] = copia.renglonesIndirectos;
+  assert.ok(a.forma === 'personal' && b.forma === 'personal');
+  assert.equal(a.mesInicio, '2027-02');
+  assert.equal(a.tiempoEjecucion, 10, 'recortado al plazo');
+  assert.equal(a.revisar, true, 'el recortado se marca');
+  assert.deepEqual(a.fijados, []);
+  assert.equal(a.salario, 4_500_000, 'conserva sus valores');
+  assert.equal(a.descripcion, largo.descripcion);
+  assert.equal(b.tiempoEjecucion, 6);
+  assert.equal(b.revisar, true, 'conserva la marca que traía');
+  assert.equal(b.mesInicio, '2027-02');
+  assert.deepEqual(retencion, origen.renglonesIndirectos[2], 'el de porcentaje no tiene periodo');
+  // El origen no se toca.
+  assert.equal((origen.renglonesIndirectos[0] as { mesInicio: string }).mesInicio, '2025-03');
+  // Una de la 043 no trae factores: van los de por defecto.
+  const sinFactores = copiarRenglones({ renglonesIndirectos: [] }, { meses: 10, arranque: '2027-02' });
+  assert.equal(sinFactores.factorPrestacional, FACTOR_PRESTACIONAL_POR_DEFECTO);
+  assert.equal(sinFactores.recargoHorasExtras, RECARGO_HORAS_EXTRAS_POR_DEFECTO);
+});
+
+prueba('045/RF-140, RF-141, RF-145: una planificación de la 043 se ve con un renglón «Indirectos sin desglose»', () => {
+  const indirectos = [
+    { mes: '2026-01', valor: 100 },
+    { mes: '2026-02', valor: 250 },
+    { mes: '2026-04', valor: 50 },
+  ];
+  const de043: EstructuraDePlanificacion = {
+    items: [
+      armarItemDePlanificacion({
+        renglon: 1,
+        item: '2.8',
+        descripcion: 'Demolición',
+        unidad: 'm3',
+        grupo: 'BERRIO',
+        capitulo: 'ALCANTARILLAS',
+        precioContractual: 100,
+        precioCosto: 50,
+        medidaReal: 10,
+        medidaContractual: 10,
+        mesInicio: '2026-01',
+        tiempoEjecucion: 3,
+        programacion: [
+          { mes: '2026-01', valor: 600 },
+          { mes: '2026-03', valor: 400 },
+        ],
+      }),
+    ],
+    rubros: [{ nombre: 'Componentes', valor: 1000, costo: null, programacion: [] }],
+    lineaDeRubros: { nombre: 'Componentes', valores: [{ mes: '2026-02', valor: 1000 }] },
+    indirectos,
+    supuestos: '',
+    objetivos: '',
+  };
+  const copiaAntes = JSON.stringify(de043);
+  const normal = normalizarLegada(de043);
+  assert.equal(JSON.stringify(de043), copiaAntes, 'no reescribe la guardada');
+
+  const [renglon, ...otros] = normal.renglonesIndirectos ?? [];
+  assert.equal(otros.length, 0);
+  assert.equal(renglon.descripcion, DESCRIPCION_SIN_DESGLOSE);
+  assert.equal(renglon.sinDesglose, true);
+  assert.equal(renglon.revisar, true);
+  assert.ok(renglon.forma === 'fijo');
+  assert.equal(renglon.valor, 400);
+  assert.equal(renglon.mesInicio, '2026-01');
+  assert.equal(renglon.tiempoEjecucion, 4);
+  // Los mismos meses, y el que faltaba en medio en cero para que el reparto no lo rellene.
+  assert.deepEqual(renglon.fijados, [...indirectos.slice(0, 2), { mes: '2026-03', valor: 0 }, indirectos[2]]);
+  assert.equal(totalDeIndirectos(normal.renglonesIndirectos ?? [], CONTEXTO_V2), 400);
+
+  // La programación de ítems y de la línea de rubros queda como meses fijados.
+  assert.deepEqual(normal.items[0].fijados, [
+    { mes: '2026-01', valor: 600 },
+    { mes: '2026-02', valor: 0 },
+    { mes: '2026-03', valor: 400 },
+  ]);
+  assert.deepEqual(normal.lineaDeRubros?.fijados, [{ mes: '2026-02', valor: 1000 }]);
+  // Lo que miden el cumplimiento y el plan semanal no cambia (RF-146).
+  assert.deepEqual(normal.items[0].programacion, de043.items[0].programacion);
+  assert.deepEqual(normal.indirectos, indirectos);
+
+  // Sin indirectos, sin renglón; y una de la 045 pasa tal cual.
+  assert.deepEqual(normalizarLegada({ ...de043, indirectos: [] }).renglonesIndirectos, []);
+  const de045: EstructuraDePlanificacion = { ...de043, esquema: ESQUEMA_DE_PLANIFICACION, renglonesIndirectos: [] };
+  assert.equal(normalizarLegada(de045), de045);
+});
+
+/** La fila 12 de «PLANIFIC BERRIO» del V2 OPC 8: 2.8, demolición, con costo de relleno. */
+const FILA_12_DEL_V2 = armarItemDePlanificacion({
+  renglon: 1,
+  item: '2.8',
+  descripcion: 'Demolición de estructuras (Concreto reforzado).',
+  unidad: 'm3',
+  grupo: 'BERRIO',
+  capitulo: 'CONSTRUCCIÓN DE ALCANTARILLAS',
+  precioContractual: 242_062,
+  precioCosto: 1e-9,
+  medidaReal: 75.96,
+  medidaContractual: 42,
+  medidaCoste: 75.96,
+  mesInicio: null,
+  tiempoEjecucion: null,
+  programacion: [],
+});
+/** L69 y M71 del libro: el costo de Berrio y sus indirectos, con los que G6 da 2,921. */
+const L69_DEL_V2 = 10_803_670_516.950546;
+const M71_DEL_V2 = 20_754_337_162.68121;
+const G6_DEL_V2 = 2.9210449939322425;
+
+function estructura045(parcial: Partial<EstructuraDePlanificacion>): EstructuraDePlanificacion {
+  return {
+    esquema: ESQUEMA_DE_PLANIFICACION,
+    plazo: { meses: 4, arranque: '2026-01' },
+    factorPrestacional: 1.2295,
+    recargoHorasExtras: 0.16,
+    items: [],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [],
+    renglonesIndirectos: [],
+    supuestos: '',
+    objetivos: '',
+    ...parcial,
+  };
+}
+
+const cerca = (a: number | null, b: number, nombre: string) => assert.ok(a !== null && Math.abs(a - b) < 1, `${nombre}: ${a} contra ${b}`);
+
+prueba('045/RF-65 a RF-72: la fila 12 del V2 da sus columnas J, K, L, M y N con el factor del libro', () => {
+  const conCosto = { ...FILA_12_DEL_V2, item: '2.9', precioCosto: 100_000, medidaCoste: 70 };
+  const { calculo } = recalcularPlanificacion(
+    estructura045({
+      items: [FILA_12_DEL_V2, conCosto],
+      // El resto del costo del libro, para que el factor sea el de G6.
+      rubros: [{ nombre: 'Resto del costo', valor: 0, costo: L69_DEL_V2 - 7_000_000, programacion: [] }],
+      renglonesIndirectos: [
+        { ...renglonesDelV2[1].renglon, id: 'ci', valor: M71_DEL_V2, tiempoEjecucion: 4 } as RenglonIndirecto,
+      ],
+    }),
+  );
+  assert.ok(calculo.factorDeIndirectos !== null && Math.abs(calculo.factorDeIndirectos - G6_DEL_V2) < 1e-9);
+  const [fila12, fila12ConCosto] = calculo.items;
+  cerca(fila12.importeContractual, 10_166_604, 'J12');
+  cerca(fila12.importeReal, 18_387_029.52, 'K12');
+  cerca(fila12.importeCosto, 7.596e-8, 'L12');
+  cerca(fila12.importeCostoConIndirectos, 2.2188257773909313e-7, 'M12');
+  cerca(fila12.resultado, 18_387_029.519999776, 'N12');
+  // Con un costo de verdad y la medida para costo propia (RF-67): L = I × F, M = L × G6.
+  cerca(fila12ConCosto.importeCosto, 7_000_000, 'L con costo');
+  cerca(fila12ConCosto.importeCostoConIndirectos, 7_000_000 * G6_DEL_V2, 'M con costo');
+  cerca(fila12ConCosto.resultado, 18_387_029.52 - 7_000_000 * G6_DEL_V2, 'N con costo');
+  // RF-69: el importe real total suma ítems y rubros.
+  cerca(calculo.importeRealTotal, 2 * 18_387_029.52, 'importe real total');
+});
+
+prueba('045/RF-70: con los totales del libro el factor de indirectos da 2,92', () => {
+  const { calculo } = recalcularPlanificacion(
+    estructura045({
+      rubros: [{ nombre: 'Costo del libro', valor: 0, costo: L69_DEL_V2, programacion: [] }],
+      renglonesIndirectos: [{ ...renglonesDelV2[1].renglon, id: 'ci', valor: M71_DEL_V2 } as RenglonIndirecto],
+    }),
+  );
+  assert.equal(calculo.factorDeIndirectos?.toFixed(2), '2.92');
+});
+
+prueba('045/RF-73: con costo total 0 el factor es «sin dato», no un número', () => {
+  const { calculo } = recalcularPlanificacion(
+    estructura045({
+      items: [FILA_12_DEL_V2],
+      renglonesIndirectos: [{ ...renglonesDelV2[1].renglon, id: 'ci', tiempoEjecucion: 4 } as RenglonIndirecto],
+    }),
+  );
+  assert.equal(calculo.factorDeIndirectos, null);
+  assert.equal(calculo.items[0].importeCostoConIndirectos, null);
+  assert.equal(calculo.items[0].resultado, null);
+});
+
+prueba('045/RF-96, RF-108, RF-109: la programación del ítem sale del reparto, con cantidades y costo por mes', () => {
+  const item = { ...FILA_12_DEL_V2, precioContractual: 100, medidaReal: 12, precioCosto: 50, medidaCoste: 12, mesInicio: '2026-01', tiempoEjecucion: 3 };
+  const { estructura, calculo } = recalcularPlanificacion(
+    estructura045({ items: [{ ...item, fijados: [{ mes: '2026-02', valor: 600 }] }] }),
+  );
+  assert.deepEqual(estructura.items[0].programacion, [
+    { mes: '2026-01', valor: 300, cantidad: 3 },
+    { mes: '2026-02', valor: 600, cantidad: 6 },
+    { mes: '2026-03', valor: 300, cantidad: 3 },
+  ]);
+  assert.deepEqual(calculo.items[0].costoPorMes.map((m) => m.valor), [150, 300, 150]);
+});
+
+prueba('045/RF-163, RF-164: la línea de rubros con meses fijados es la programación de sus rubros', () => {
+  const { estructura, calculo } = recalcularPlanificacion(
+    estructura045({
+      rubros: [
+        { nombre: 'Componente A', valor: 600, costo: 300, programacion: [] },
+        { nombre: 'Componente B', valor: 400, costo: 200, programacion: [] },
+      ],
+      lineaDeRubros: {
+        nombre: 'Componentes',
+        valores: [],
+        fijados: [
+          { mes: '2026-01', valor: 700 },
+          { mes: '2026-02', valor: 300 },
+        ],
+      },
+      renglonesIndirectos: [
+        { id: 'p', concepto: 'impuestos', descripcion: 'Retención', forma: 'porcentaje', porcentaje: 0.1, revisar: false },
+      ],
+    }),
+  );
+  assert.deepEqual(estructura.lineaDeRubros?.valores, [
+    { mes: '2026-01', valor: 700 },
+    { mes: '2026-02', valor: 300 },
+  ]);
+  assert.ok(estructura.rubros.every((r) => r.programacion.length === 0), 'el mes no se cuenta dos veces');
+  // El porcentaje sigue a la línea: 10 % de 1 000, 70 y 30.
+  assert.deepEqual(estructura.indirectos, [
+    { mes: '2026-01', valor: 70 },
+    { mes: '2026-02', valor: 30 },
+  ]);
+  assert.equal(calculo.hallazgosDeReparto.length, 0);
+  // El costo de cada rubro sigue a la línea.
+  assert.deepEqual(calculo.rubros[0].costoPorMes.map((m) => m.valor), [210, 90]);
+});
+
+prueba('045/RF-94, RF-95, RF-157: `indirectos` es la suma de los siete conceptos por mes', () => {
+  const seguros = { ...renglonesDelV2[1].renglon, id: 's', valor: 1200, mesInicio: '2026-01', tiempoEjecucion: 4 } as RenglonIndirecto;
+  const camioneta = { ...renglonesDelV2[3].renglon, id: 'c', mesInicio: '2026-03', tiempoEjecucion: 2, valorMensual: 50 } as RenglonIndirecto;
+  const { estructura, calculo } = recalcularPlanificacion(estructura045({ renglonesIndirectos: [seguros, camioneta] }));
+  assert.deepEqual(estructura.indirectosPorConcepto?.seguros_garantias.map((m) => m.valor), [300, 300, 300, 300]);
+  assert.deepEqual(estructura.indirectosPorConcepto?.maquinaria_general, [
+    { mes: '2026-03', valor: 50 },
+    { mes: '2026-04', valor: 50 },
+  ]);
+  assert.deepEqual(estructura.indirectosPorConcepto?.impuestos, []);
+  assert.deepEqual(estructura.indirectos.map((m) => m.valor), [300, 300, 350, 350]);
+  assert.equal(calculo.indirectosTotal, 1300);
+  assert.equal(calculo.indirectosPorConcepto.maquinaria_general, 100);
+});
+
+prueba('045/RF-146: una estructura de la 043 mide lo mismo antes y después de recalcular', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [
+      armarItemDePlanificacion({
+        ...FILA_12_DEL_V2,
+        precioContractual: 242_062,
+        mesInicio: '2026-01',
+        tiempoEjecucion: 3,
+        programacion: [
+          { mes: '2026-01', valor: 6_000_000.4 },
+          { mes: '2026-03', valor: 12_387_029.12 },
+        ],
+      }),
+    ],
+    rubros: [{ nombre: 'Componentes', valor: 1000, costo: null, programacion: [] }],
+    lineaDeRubros: { nombre: 'Componentes', valores: [{ mes: '2026-02', valor: 1000 }] },
+    indirectos: [
+      { mes: '2026-01', valor: 100 },
+      { mes: '2026-04', valor: 50 },
+    ],
+    supuestos: '',
+    objetivos: '',
+  };
+  const medir = (e: EstructuraDePlanificacion) =>
+    versionMedible({ id: 'v', numeroVersion: 1, rigeDesde: '2026-01-01', rigeHasta: null }, e.items, e);
+  const { estructura, calculo } = recalcularPlanificacion(de043);
+  assert.deepEqual(medir(estructura), medir(de043));
+  assert.equal(estructura, de043, 'lo guardado de la 043 no se recalcula');
+  assert.equal(calculo.indirectosTotal, 150);
+
+  // Y si se normaliza para copiarla, el reparto reproduce los mismos meses.
+  const copia = recalcularPlanificacion({ ...normalizarLegada(de043), esquema: ESQUEMA_DE_PLANIFICACION }).estructura;
+  const conValor = (lista: readonly { mes: string; valor: number }[]) => lista.filter((m) => m.valor !== 0);
+  assert.deepEqual(conValor(copia.indirectos), de043.indirectos);
+  assert.deepEqual(conValor(copia.lineaDeRubros?.valores ?? []), de043.lineaDeRubros?.valores);
+  assert.deepEqual(conValor(copia.items[0].programacion).map((m) => m.valor), de043.items[0].programacion.map((m) => m.valor));
+});
+
+/** Un borrador de la 045 completo, que se puede aprobar; cada prueba le quita algo. */
+function borradorCompleto(parcial: Partial<EstructuraDePlanificacion> = {}): EstructuraDePlanificacion {
+  const item = {
+    ...FILA_12_DEL_V2,
+    precioCosto: 150_000,
+    mesInicio: '2026-01',
+    tiempoEjecucion: 2,
+  };
+  return recalcularPlanificacion(
+    estructura045({
+      items: [item],
+      rubros: [{ nombre: 'Señalización', valor: 1000, costo: 800, programacion: [], mesInicio: '2026-02', tiempoEjecucion: 1 }],
+      renglonesIndirectos: [{ ...renglonesDelV2[3].renglon, id: 'cam', mesInicio: '2026-01', tiempoEjecucion: 4 } as RenglonIndirecto],
+      ...parcial,
+    }),
+  ).estructura;
+}
+
+prueba('045/RF-127, RF-133, D12: un costo de relleno impide aprobar, y el impedimento dice qué ítem', () => {
+  assert.deepEqual(impedimentosParaAprobar(borradorCompleto()), []);
+  const conRelleno = borradorCompleto({ items: [{ ...borradorCompleto().items[0], precioCosto: 0.000000001 }] });
+  const [impedimento, ...otros] = impedimentosParaAprobar(conRelleno);
+  assert.equal(otros.length, 0);
+  assert.equal(impedimento.tipo, 'sin_costo');
+  assert.ok(impedimento.de.en === 'item');
+  assert.equal(impedimento.de.item, '2.8');
+  assert.equal(impedimento.de.capitulo, 'CONSTRUCCIÓN DE ALCANTARILLAS');
+  assert.match(impedimento.detalle, /precio de costo/);
+});
+
+prueba('045/RF-128: un rubro con valor y sin costo impide aprobar', () => {
+  const base = borradorCompleto();
+  const [impedimento] = impedimentosParaAprobar({ ...base, rubros: [{ ...base.rubros[0], costo: null }] });
+  assert.equal(impedimento.tipo, 'rubro_sin_costo');
+  assert.ok(impedimento.de.en === 'rubro' && impedimento.de.nombre === 'Señalización');
+  // Un rubro en cero no exige costo.
+  assert.deepEqual(impedimentosParaAprobar({ ...base, rubros: [{ ...base.rubros[0], valor: 0, costo: null }] }), []);
+});
+
+prueba('045/RF-129, RF-130: un ítem sin medida real o con medida real sin programación impide aprobar', () => {
+  const base = borradorCompleto();
+  const sinMedida = impedimentosParaAprobar({ ...base, items: [{ ...base.items[0], medidaReal: null }] });
+  assert.deepEqual(sinMedida.map((i) => i.tipo), ['sin_medida_real']);
+  const sinProgramacion = borradorCompleto({ items: [{ ...base.items[0], mesInicio: null, fijados: [] }] });
+  assert.deepEqual(impedimentosParaAprobar(sinProgramacion).map((i) => i.tipo), ['sin_programacion']);
+  // El rubro con valor y sin calendario, igual.
+  const rubroSinCalendario = borradorCompleto({ rubros: [{ ...base.rubros[0], mesInicio: null }] });
+  assert.deepEqual(impedimentosParaAprobar(rubroSinCalendario).map((i) => i.tipo), ['rubro_sin_programacion']);
+  // Con la línea de rubros programada, los rubros no necesitan calendario propio.
+  const conLinea = borradorCompleto({
+    rubros: [{ ...base.rubros[0], mesInicio: null }],
+    lineaDeRubros: { nombre: 'Componentes', valores: [], fijados: [{ mes: '2026-02', valor: 1000 }] },
+  });
+  assert.deepEqual(impedimentosParaAprobar(conLinea), []);
+});
+
+prueba('045/RF-129, RF-130: un ítem con medida real 0 no exige costo ni programación', () => {
+  const base = borradorCompleto();
+  const enCero = borradorCompleto({ items: [{ ...base.items[0], medidaReal: 0, precioCosto: null, mesInicio: null, fijados: [] }] });
+  assert.deepEqual(impedimentosParaAprobar(enCero), []);
+});
+
+prueba('045/RF-131: un renglón al que le falta un valor impide aprobar; los sumandos vacíos no', () => {
+  const base = borradorCompleto();
+  const camioneta = base.renglonesIndirectos?.[0] as RenglonIndirecto & { forma: 'mensual' };
+  const conRenglon = (renglon: RenglonIndirecto) => impedimentosParaAprobar({ ...base, renglonesIndirectos: [renglon] });
+  const [falta] = conRenglon({ ...camioneta, valorMensual: null });
+  assert.equal(falta.tipo, 'renglon_incompleto');
+  assert.ok(falta.de.en === 'renglon' && falta.de.id === 'cam' && falta.de.descripcion === 'Camioneta Nissan 4x2');
+  assert.deepEqual(conRenglon({ ...camioneta, tiempoEjecucion: null }).map((i) => i.tipo), ['renglon_incompleto']);
+  assert.deepEqual(conRenglon({ ...camioneta, valorMensualAdicional: null }), [], 'el adicional vacío vale cero, como en el libro');
+  const residente = renglonesDelV2.find((r) => r.fila === 189)?.renglon as RenglonIndirecto & { forma: 'personal' };
+  assert.deepEqual(conRenglon({ ...residente, acomodacion: null, viaticos: null }), []);
+  assert.deepEqual(conRenglon({ ...residente, dedicacion: null }).map((i) => i.tipo), ['renglon_incompleto']);
+  assert.deepEqual(
+    conRenglon({ id: 'p', concepto: 'impuestos', descripcion: 'Retención', forma: 'porcentaje', porcentaje: null, revisar: false }).map((i) => i.tipo),
+    ['renglon_incompleto'],
+  );
+});
+
+prueba('045/RF-125, RF-126: programado después del plazo y lo marcado para revisar son hallazgos, no impedimentos', () => {
+  const base = borradorCompleto();
+  const fuera = borradorCompleto({
+    items: [{ ...base.items[0], mesInicio: '2026-04', tiempoEjecucion: 2 }],
+    rubros: [{ ...base.rubros[0], revisar: true }],
+    renglonesIndirectos: [{ ...(base.renglonesIndirectos?.[0] as RenglonIndirecto), tiempoEjecucion: 6, revisar: true } as RenglonIndirecto],
+  });
+  assert.deepEqual(impedimentosParaAprobar(fuera), []);
+  const hallazgos = hallazgosDelBorrador(fuera, null);
+  const tipos = hallazgos.map((h) => h.tipo);
+  assert.equal(tipos.filter((t) => t === 'fuera_del_plazo').length, 2, 'el ítem y el renglón');
+  assert.ok(hallazgos.some((h) => h.tipo === 'fuera_del_plazo' && h.item === '2.8' && /2026-05/.test(h.detalle)));
+  assert.ok(hallazgos.some((h) => h.tipo === 'fuera_del_plazo' && /Camioneta/.test(h.detalle)));
+  assert.equal(hallazgos.filter((h) => h.tipo === 'para_revisar').length, 2, 'el rubro y el renglón');
+  // RF-124: los de la 043 siguen saliendo (aquí, el ítem no está en el presupuesto).
+  assert.ok(tipos.includes('no_existe'));
+  // Un rubro sin costo también es hallazgo, además de impedimento.
+  assert.ok(hallazgosDelBorrador({ ...base, rubros: [{ ...base.rubros[0], costo: null }] }, null).some((h) => h.tipo === 'rubro_sin_costo'));
+});
+
+prueba('045/RF-100, RF-101, RF-107: los hallazgos del reparto salen en los del borrador', () => {
+  const base = borradorCompleto();
+  const conFijados = estructura045({
+    ...base,
+    items: [{ ...base.items[0], fijados: [{ mes: '2026-01', valor: 99_000_000 }] }],
+    renglonesIndirectos: [{ id: 'p', concepto: 'impuestos', descripcion: 'Retención', forma: 'porcentaje', porcentaje: 0.02, revisar: false }],
+  });
+  const { estructura, calculo } = recalcularPlanificacion(conFijados);
+  const tipos = hallazgosDelBorrador(estructura, null, calculo.hallazgosDeReparto).map((h) => h.tipo);
+  assert.ok(tipos.includes('reparto_no_cuadra'));
+  // T26: el hallazgo nombra el ítem por su ítem de pago, no por su llave interna.
+  const delReparto = hallazgosDelBorrador(estructura, null, calculo.hallazgosDeReparto).find((h) => h.tipo === 'reparto_no_cuadra');
+  assert.equal(delReparto?.item, '2.8');
+  assert.ok(delReparto && !delReparto.detalle.includes('|'), delReparto?.detalle);
+  const sinObra = recalcularPlanificacion(estructura045({ renglonesIndirectos: conFijados.renglonesIndirectos }));
+  assert.ok(
+    hallazgosDelBorrador(sinObra.estructura, null, sinObra.calculo.hallazgosDeReparto).some((h) => h.tipo === 'porcentajes_sin_programacion'),
+  );
+});
+
+/** Aplica una edición que tiene que pasar; si no pasa, falla con sus errores. */
+function editar(anterior: EstructuraDePlanificacion, cambio: (e: EdicionDelBorrador) => EdicionDelBorrador) {
+  const resultado = aplicarEdicion(anterior, cambio(edicionDe(anterior)));
+  assert.ok(resultado.ok, resultado.ok ? '' : resultado.errores.join(' · '));
+  return resultado;
+}
+
+prueba('045/RF-61, RF-64: la medida para costo vacía o igual sigue a la medida real', () => {
+  const vacia = borradorCompleto({ items: [{ ...borradorCompleto().items[0], medidaCoste: null }] });
+  const conVacia = editar(vacia, (e) => ({ ...e, items: [{ ...e.items[0], medidaReal: 90 }] }));
+  assert.equal(conVacia.estructura.items[0].medidaReal, 90);
+  assert.equal(conVacia.estructura.items[0].medidaCoste, null);
+  assert.equal(costoConOtraMedida(conVacia.estructura.items[0]), false);
+
+  // Igual a la real (75,96 y 75,96, como en el V2): la pantalla manda la medida para costo de siempre.
+  const igual = editar(borradorCompleto(), (e) => ({ ...e, items: [{ ...e.items[0], medidaReal: 80 }] }));
+  assert.equal(igual.estructura.items[0].medidaCoste, null, 'sigue a la real');
+  const { calculo } = recalcularPlanificacion(igual.estructura);
+  assert.equal(calculo.items[0].importeCosto, 80 * 150_000);
+});
+
+prueba('045/RF-57, T27: los ítems que no están en el presupuesto y no traen ítem de pago no se pisan al editar', () => {
+  // En el V2, tres «Transporte de material por terceros» llegan sin ítem de pago, en el mismo
+  // capítulo y sin cruce: con la misma llave, abrir el borrador les ponía a todos las cifras del último.
+  const base = borradorCompleto().items[0];
+  const sinPago = (renglon: number, medidaCoste: number, precioCosto: number) => ({
+    ...base,
+    item: '',
+    renglon,
+    delPresupuesto: null,
+    medidaReal: 0,
+    medidaCoste,
+    precioCosto,
+  });
+  // Como en el V2: sin renglón, así que ni el «Nº» los separa.
+  const anterior = borradorCompleto({ items: [base, { ...sinPago(901, 155_000, 800), renglon: null }, { ...sinPago(902, 1_435_500, 975), renglon: null }] });
+  const antes = recalcularPlanificacion(anterior).calculo.items.map((i) => i.importeCosto);
+  const vuelta = editar(anterior, (e) => e);
+  assert.deepEqual(recalcularPlanificacion(vuelta.estructura).calculo.items.map((i) => i.importeCosto), antes, 'abrir y guardar no cambia nada');
+  // Y editar uno no toca al otro.
+  const uno = editar(anterior, (e) => ({ ...e, items: e.items.map((i, n) => (n === 1 ? { ...i, precioCosto: 900 } : i)) }));
+  assert.equal(uno.estructura.items[1].precioCosto, 900);
+  assert.equal(uno.estructura.items[2].precioCosto, 975);
+});
+
+prueba('045/RF-62, RF-63: una medida para costo distinta se conserva y el ítem sale marcado', () => {
+  const distinta = borradorCompleto({ items: [{ ...borradorCompleto().items[0], medidaCoste: 70 }] });
+  assert.equal(costoConOtraMedida(distinta.items[0]), true);
+  const editado = editar(distinta, (e) => ({ ...e, items: [{ ...e.items[0], medidaReal: 90 }] }));
+  assert.equal(editado.estructura.items[0].medidaCoste, 70);
+  assert.equal(costoConOtraMedida(editado.estructura.items[0]), true);
+  // Digitada igual a la real, vuelve a seguirla.
+  const otraVez = editar(editado.estructura, (e) => ({ ...e, items: [{ ...e.items[0], medidaCoste: 90 }] }));
+  assert.equal(otraVez.estructura.items[0].medidaCoste, null);
+});
+
+prueba('045/RF-52, RF-53: lo contractual del ítem y el valor del rubro no se cambian desde el pedido', () => {
+  const base = borradorCompleto();
+  const pedido = edicionDe(base) as EdicionDelBorrador & { items: Record<string, unknown>[]; rubros: Record<string, unknown>[] };
+  const tramposo = {
+    ...pedido,
+    items: [{ ...pedido.items[0], precioContractual: 1, medidaContractual: 9_999, descripcion: 'Otra', unidad: 'km' }],
+    rubros: [{ ...pedido.rubros[0], valor: 1, nombre: 'Señalización' }],
+  } as unknown as EdicionDelBorrador;
+  const resultado = aplicarEdicion(base, tramposo);
+  assert.ok(resultado.ok);
+  const [item] = resultado.estructura.items;
+  assert.equal(item.precioContractual, 242_062);
+  assert.equal(item.medidaContractual, 42);
+  assert.equal(item.descripcion, base.items[0].descripcion);
+  assert.equal(item.unidad, 'm3');
+  assert.equal(resultado.estructura.rubros[0].valor, 1000);
+  assert.equal(resultado.estructura.editadoEnPantalla, true, 'RF-45');
+});
+
+prueba('045/RF-54, RF-55: los negativos y los meses que no son enteros se rechazan con su motivo', () => {
+  const base = borradorCompleto();
+  const rechazo = (cambio: (e: EdicionDelBorrador) => EdicionDelBorrador) => {
+    const resultado = aplicarEdicion(base, cambio(edicionDe(base)));
+    assert.ok(!resultado.ok);
+    return resultado.errores.join(' · ');
+  };
+  assert.match(rechazo((e) => ({ ...e, items: [{ ...e.items[0], medidaReal: -5 }] })), /negativ/);
+  assert.match(rechazo((e) => ({ ...e, items: [{ ...e.items[0], precioCosto: -1 }] })), /negativ/);
+  assert.match(rechazo((e) => ({ ...e, rubros: [{ ...e.rubros[0], costo: -800 }] })), /negativ/);
+  assert.match(rechazo((e) => ({ ...e, items: [{ ...e.items[0], tiempoEjecucion: 2.5 }] })), /entero mayor que cero/);
+  assert.match(rechazo((e) => ({ ...e, rubros: [{ ...e.rubros[0], tiempoEjecucion: 0 }] })), /entero mayor que cero/);
+  assert.match(rechazo((e) => ({ ...e, items: [{ ...e.items[0], mesInicio: '2026-13' }] })), /mes de inicio/);
+  assert.match(rechazo((e) => ({ ...e, plazo: { meses: 200, arranque: '2026-01' } })), /entero entre 1 y 120/);
+  assert.match(rechazo((e) => ({ ...e, factorPrestacional: -1 })), /negativ/);
+  assert.match(
+    rechazo((e) => ({ ...e, renglonesIndirectos: [{ ...(e.renglonesIndirectos[0] as RenglonIndirecto), descripcion: '' }] })),
+    /descripción/,
+  );
+  // El mensaje dice cuál: el ítem por su ítem de pago.
+  assert.match(rechazo((e) => ({ ...e, items: [{ ...e.items[0], medidaReal: -5 }] })), /2\.8/);
+});
+
+prueba('045/RF-103, RF-104: cambiar el periodo descarta los fijados que quedan fuera y avisa cuáles', () => {
+  const base = borradorCompleto({ items: [{ ...borradorCompleto().items[0], tiempoEjecucion: 3, fijados: [{ mes: '2026-03', valor: 500 }] }] });
+  const corto = editar(base, (e) => ({ ...e, items: [{ ...e.items[0], tiempoEjecucion: 2 }] }));
+  assert.deepEqual(corto.estructura.items[0].fijados, []);
+  assert.equal(corto.descartados.length, 1);
+  assert.equal(corto.descartados[0].en, 'item');
+  assert.equal(corto.descartados[0].referencia, '2.8');
+  assert.deepEqual(corto.descartados[0].meses, [{ mes: '2026-03', valor: 500 }]);
+});
+
+prueba('045/RF-82, RF-83, RF-90, RF-91: los renglones se cambian, se añaden y se quitan; los factores se cambian', () => {
+  const base = borradorCompleto();
+  const nuevo: RenglonIndirecto = {
+    id: 'nuevo',
+    concepto: 'seguros_garantias',
+    descripcion: 'Póliza nueva',
+    forma: 'fijo',
+    valor: 400,
+    mesInicio: '2026-01',
+    tiempoEjecucion: 4,
+    fijados: [],
+    revisar: false,
+  };
+  const editado = editar(base, (e) => ({ ...e, renglonesIndirectos: [nuevo], factorPrestacional: 1.3, recargoHorasExtras: 0.2 }));
+  assert.deepEqual(editado.estructura.renglonesIndirectos?.map((r) => r.id), ['nuevo'], 'el de la camioneta se quitó');
+  assert.equal(editado.estructura.factorPrestacional, 1.3);
+  assert.equal(editado.estructura.recargoHorasExtras, 0.2);
+  assert.deepEqual(editado.estructura.indirectos.map((m) => m.valor), [100, 100, 100, 100], 'recalculado');
+});
+
+prueba('045/RF-165 a RF-167: la línea de rubros se edita como un renglón y «Programar por rubro» la deshace', () => {
+  const base = borradorCompleto({
+    rubros: [{ ...borradorCompleto().rubros[0], mesInicio: null, tiempoEjecucion: null }],
+    lineaDeRubros: { nombre: 'Componentes', valores: [], fijados: [{ mes: '2026-02', valor: 1000 }] },
+  });
+  const movida = editar(base, (e) => ({ ...e, lineaDeRubros: { fijados: [{ mes: '2026-03', valor: 1000 }] } }));
+  assert.deepEqual(movida.estructura.lineaDeRubros?.valores, [{ mes: '2026-03', valor: 1000 }]);
+  assert.equal(movida.estructura.lineaDeRubros?.nombre, 'Componentes');
+
+  const porRubro = editar(base, (e) => ({ ...e, lineaDeRubros: null }));
+  assert.equal(porRubro.estructura.lineaDeRubros, null);
+  assert.ok(porRubro.estructura.rubros.every((r) => r.programacion.length === 0 && (r.fijados ?? []).length === 0));
+  // Y sin línea, pedir una nueva no la crea: solo el Excel trae línea de rubros (D16).
+  const sinLinea = editar(porRubro.estructura, (e) => ({ ...e, lineaDeRubros: { fijados: [{ mes: '2026-01', valor: 1 }] } }));
+  assert.equal(sinLinea.estructura.lineaDeRubros, null);
+});
+
+prueba('045/RF-6, RF-7: en el borrador se cambian el plazo y el mes de arranque', () => {
+  const desde = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: 'g-berrio' });
+  assert.ok(desde.ok, desde.ok ? '' : desde.error);
+  const otro = editar(desde.estructura, (e) => ({ ...e, plazo: { meses: 20, arranque: '2026-03' } }));
+  assert.deepEqual(otro.estructura.plazo, { meses: 20, arranque: '2026-03' });
+  const malo = aplicarEdicion(desde.estructura, { ...edicionDe(desde.estructura), plazo: { meses: 121, arranque: '2026-03' } });
+  assert.ok(!malo.ok && malo.errores.some((x) => /entero entre 1 y 120/.test(x)));
+});
+
+prueba('045/RF-13 a RF-18: el borrador desde el presupuesto trae los ítems y rubros del grupo, sin costos', () => {
+  const resultado = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: 'g-berrio' });
+  assert.ok(resultado.ok, resultado.ok ? '' : resultado.error);
+  const { estructura } = resultado;
+  assert.equal(estructura.esquema, ESQUEMA_DE_PLANIFICACION);
+  assert.deepEqual(estructura.plazo, { meses: 16, arranque: '2026-01' });
+  // RF-14: los tres ítems de Berrio, con lo del presupuesto tal cual; nada de Yondo.
+  assert.deepEqual(
+    estructura.items.map((i) => [i.capitulo, i.item, i.unidad, i.medidaContractual, i.precioContractual]),
+    [
+      [ALCANTARILLAS_043, '2.8', 'm3', 42, 242062],
+      [ALCANTARILLAS_043, '4.1.8', 'm3', 2006, 55525],
+      [CUNETA_043, '4.1.8', 'm3', 4345, 55525],
+    ],
+  );
+  const [primero] = estructura.items;
+  assert.equal(primero.medidaReal, 42, 'RF-16: la medida real arranca en la contractual');
+  assert.equal(primero.precioCosto, null, 'RF-17');
+  assert.equal(primero.medidaCoste, null, 'sigue a la real');
+  assert.equal(primero.delPresupuesto?.grupoId, 'g-berrio', 'ya cruzado con su renglón');
+  assert.equal(primero.delPresupuesto?.capituloId, 'c-b1');
+  assert.deepEqual(primero.programacion, [], 'sin calendario hasta que la IA lo proponga');
+  // RF-15, RF-18: los de Berrio y los de todo el contrato, con su valor y sin costo.
+  assert.deepEqual(
+    estructura.rubros.map((r) => [r.nombre, r.valor, r.costo, r.delPresupuesto]),
+    [
+      ['CARACTERIZACION VIAL', 1000, null, 'r-b'],
+      ['ACTUALIZACIÓN DE PRECIOS', 1000, null, 'r-t'],
+    ],
+  );
+  // RF-88, RF-89, RF-120: sin copiar indirectos, factores por defecto y ningún renglón.
+  assert.equal(estructura.factorPrestacional, 1.2295);
+  assert.equal(estructura.recargoHorasExtras, 0.16);
+  assert.deepEqual(estructura.renglonesIndirectos, []);
+  assert.equal(estructura.indirectosCopiadosDe, null);
+});
+
+prueba('045/RF-13: con varios grupos y sin escoger, no hay borrador; un plazo inválido tampoco', () => {
+  const sinGrupo = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: null });
+  assert.ok(!sinGrupo.ok);
+  assert.match(sinGrupo.error, /grupo/);
+  const otro = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: 'no-existe' });
+  assert.ok(!otro.ok);
+  const plazo = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 0, arranque: '2026-01' }, grupoId: 'g-berrio' });
+  assert.ok(!plazo.ok);
+  assert.match(plazo.error, /entero entre 1 y 120/);
+  // Con un solo grupo no hay que escoger.
+  const unGrupo = { ...MAGDALENA_043, grupos: [MAGDALENA_043.grupos[1]] };
+  const solo = borradorDesdePresupuesto(unGrupo, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: null });
+  assert.ok(solo.ok);
+  assert.equal(solo.estructura.items.length, 2);
+});
+
+prueba('045/RF-112 a RF-121: el borrador desde el presupuesto copia los indirectos escogidos y dice de dónde', () => {
+  const fuente = borradorCompleto({ factorPrestacional: 1.3 });
+  const resultado = borradorDesdePresupuesto(MAGDALENA_043, {
+    plazo: { meses: 2, arranque: '2027-01' },
+    grupoId: 'g-berrio',
+    copiarIndirectosDe: { id: 'plan-1', obra: 'PRUEBA-043', version: 3, estructura: fuente },
+  });
+  assert.ok(resultado.ok);
+  const [camioneta] = resultado.estructura.renglonesIndirectos ?? [];
+  assert.ok(camioneta.forma === 'mensual');
+  assert.equal(camioneta.mesInicio, '2027-01');
+  assert.equal(camioneta.tiempoEjecucion, 2, 'recortada al plazo nuevo');
+  assert.equal(camioneta.revisar, true);
+  assert.equal(resultado.estructura.factorPrestacional, 1.3);
+  assert.deepEqual(resultado.estructura.indirectosCopiadosDe, { id: 'plan-1', obra: 'PRUEBA-043', version: 3 });
+  // Ya recalculado: la camioneta reparte sus 8 millones en los dos meses.
+  assert.deepEqual(resultado.estructura.indirectos.map((m) => m.valor), [4_000_000, 4_000_000]);
+});
+
+prueba('045/RF-138, RF-139: la versión nueva copia plazo, ítems, fijados, renglones y factores', () => {
+  const vigente = borradorCompleto({
+    factorPrestacional: 1.25,
+    recargoHorasExtras: 0.18,
+    items: [{ ...borradorCompleto().items[0], fijados: [{ mes: '2026-02', valor: 1_000_000 }] }],
+    propuesta: { explicacion: 'Primero la demolición.', fallida: false },
+    editadoEnPantalla: true,
+  });
+  const copia = copiarVersion(vigente);
+  assert.deepEqual(copia.plazo, vigente.plazo);
+  assert.equal(copia.factorPrestacional, 1.25);
+  assert.equal(copia.recargoHorasExtras, 0.18);
+  assert.deepEqual(copia.items[0].fijados, [{ mes: '2026-02', valor: 1_000_000 }]);
+  assert.equal(copia.items[0].precioCosto, vigente.items[0].precioCosto);
+  assert.deepEqual(copia.renglonesIndirectos, vigente.renglonesIndirectos);
+  assert.deepEqual(copia.indirectos, vigente.indirectos);
+  // Lo que era de la otra versión no viaja: la explicación de su IA ni su marca de editada.
+  assert.equal(copia.propuesta, undefined);
+  assert.equal(copia.editadoEnPantalla, false);
+});
+
+prueba('045/RF-140, RF-141: la versión nueva de una de la 043 trae «Indirectos sin desglose» marcado y su plazo', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [
+      armarItemDePlanificacion({
+        ...FILA_12_DEL_V2,
+        mesInicio: '2026-02',
+        tiempoEjecucion: 2,
+        programacion: [
+          { mes: '2026-02', valor: 9_000_000 },
+          { mes: '2026-03', valor: 9_387_029.52 },
+        ],
+      }),
+    ],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [
+      { mes: '2026-01', valor: 100 },
+      { mes: '2026-05', valor: 50 },
+    ],
+    supuestos: 'Lluvias en abril.',
+    objetivos: '',
+  };
+  const copia = copiarVersion(de043);
+  assert.equal(copia.esquema, ESQUEMA_DE_PLANIFICACION);
+  const [renglon, ...otros] = copia.renglonesIndirectos ?? [];
+  assert.equal(otros.length, 0);
+  assert.equal(renglon.descripcion, DESCRIPCION_SIN_DESGLOSE);
+  assert.equal(renglon.revisar, true);
+  // RF-139: el plazo va del primer al último mes que la 043 programó.
+  assert.deepEqual(copia.plazo, { meses: 5, arranque: '2026-01' });
+  assert.equal(copia.supuestos, 'Lluvias en abril.');
+  assert.deepEqual(copia.indirectos.filter((m) => m.valor !== 0), de043.indirectos);
+  assert.deepEqual(copia.items[0].programacion.map((m) => m.valor), de043.items[0].programacion.map((m) => m.valor), 'lo guardado, ya redondeado al peso por la 043');
+});
+
+function borradorDeBerrio() {
+  const resultado = borradorDesdePresupuesto(MAGDALENA_043, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: 'g-berrio' });
+  assert.ok(resultado.ok);
+  return resultado.estructura;
+}
+
+prueba('045/RF-19: a la IA va una lista numerada de ítems y rubros con el plazo en meses relativos', () => {
+  const texto = textoParaElCalendario(borradorDeBerrio());
+  assert.match(texto, /Plazo: 16 meses/);
+  assert.match(texto, /El mes 1 es enero de 2026/);
+  // Tres ítems y dos rubros, numerados del 1 al 5.
+  assert.match(texto, /^1\. Ítem 2\.8 · CONSTRUCCIÓN DE ALCANTARILLAS · .* · 42 m3 · \$ ?10\.166\.604/m);
+  assert.match(texto, /^3\. Ítem 4\.1\.8 · CONSTRUCCIÓN DE CUNETA/m);
+  assert.match(texto, /^4\. Rubro CARACTERIZACION VIAL · \$ ?1\.000/m);
+  assert.match(texto, /^5\. Rubro ACTUALIZACIÓN DE PRECIOS/m);
+  assert.doesNotMatch(texto, /^6\./m);
+  // Nada de fechas en la lista: así la IA no puede equivocarse de año.
+  assert.doesNotMatch(texto.split('\n').slice(1).join('\n'), /20\d\d-\d\d/);
+});
+
+prueba('045/RF-20 a RF-23: lo que empieza antes del mes 1 o termina después del plazo se descarta y se marca', () => {
+  const { estructura, descartados } = validarCalendario(borradorDeBerrio(), {
+    renglones: [
+      { indice: 1, inicio: 0, meses: 3 },
+      { indice: 2, inicio: 15, meses: 3 },
+      { indice: 3, inicio: 2, meses: 4 },
+      { indice: 4, inicio: 1, meses: 16 },
+    ],
+    explicacion: 'Primero las alcantarillas.',
+  });
+  const [demolicion, excavacion, cuneta] = estructura.items;
+  for (const descartado of [demolicion, excavacion]) {
+    assert.equal(descartado.mesInicio, null);
+    assert.equal(descartado.tiempoEjecucion, null);
+    assert.deepEqual(descartado.programacion, [], 'RF-22');
+    assert.equal(descartado.revisar, true, 'RF-23');
+  }
+  assert.deepEqual(descartados, [1, 2, 5], 'el 5 no vino en la respuesta');
+  // RF-19: meses relativos traducidos desde el arranque; ya repartido.
+  assert.equal(cuneta.mesInicio, '2026-02');
+  assert.equal(cuneta.tiempoEjecucion, 4);
+  assert.equal(cuneta.revisar, false);
+  assert.deepEqual(cuneta.programacion.map((m) => m.mes), ['2026-02', '2026-03', '2026-04', '2026-05']);
+  const [caracterizacion, actualizacion] = estructura.rubros;
+  assert.equal(caracterizacion.mesInicio, '2026-01');
+  assert.equal(caracterizacion.tiempoEjecucion, 16);
+  assert.equal(actualizacion.mesInicio, null);
+  assert.equal(actualizacion.revisar, true);
+  assert.deepEqual(estructura.propuesta, { explicacion: 'Primero las alcantarillas.', fallida: false });
+});
+
+prueba('045/RF-20, RF-21: un mes que no es entero o una cantidad de meses en cero también se descartan', () => {
+  const { descartados } = validarCalendario(borradorDeBerrio(), {
+    renglones: [
+      { indice: 1, inicio: 1.5, meses: 2 },
+      { indice: 2, inicio: 1, meses: 0 },
+      { indice: 3, inicio: 16, meses: 1 },
+      { indice: 4, inicio: 1, meses: 1 },
+      { indice: 5, inicio: 1, meses: 1 },
+      { indice: 99, inicio: 1, meses: 1 },
+    ],
+    explicacion: '',
+  });
+  assert.deepEqual(descartados, [1, 2], 'el último mes del plazo vale; un índice que no existe se ignora');
+});
+
+prueba('045/RF-26, RF-27: de la IA solo se toma el calendario y una explicación de a lo sumo 1 000 caracteres', () => {
+  const antes = borradorDeBerrio();
+  const { estructura } = validarCalendario(antes, {
+    renglones: [
+      { indice: 1, inicio: 1, meses: 2, cantidad: 9_999, precioCosto: 1, medidaReal: 0, precio: 5 } as { indice: number; inicio: number; meses: number },
+    ],
+    explicacion: 'x'.repeat(1500),
+    importeTotal: 1,
+  } as Parameters<typeof validarCalendario>[1]);
+  const [item] = estructura.items;
+  assert.equal(item.medidaReal, 42);
+  assert.equal(item.precioCosto, null);
+  assert.equal(item.precioContractual, 242062);
+  assert.equal(item.medidaContractual, 42);
+  assert.equal(LARGO_DE_LA_EXPLICACION, 1000);
+  assert.equal(estructura.propuesta?.explicacion.length, 1000);
+  // La suma de lo programado es su importe real, calculado por regla y no por la IA (RF-160).
+  const programado = item.programacion.reduce((suma, m) => suma + m.valor, 0);
+  assert.ok(Math.abs(programado - 42 * 242062) < 1e-6);
+  // Una explicación que no es texto no rompe nada.
+  const raro = validarCalendario(antes, { renglones: [], explicacion: 42 } as unknown as Parameters<typeof validarCalendario>[1]);
+  assert.equal(raro.estructura.propuesta?.explicacion, '');
+});
+
+/** Un Excel como lo deja la lectura de la 043: dos ítems y su total de indirectos por mes. */
+const EXCEL_043_PARA_045: EstructuraDePlanificacion = {
+  items: [
+    armarItemDePlanificacion({
+      ...FILA_12_DEL_V2,
+      item: 'A',
+      precioContractual: 1000,
+      medidaReal: 100,
+      medidaContractual: 100,
+      medidaCoste: null,
+      precioCosto: 1e-9,
+      mesInicio: '2026-03',
+      tiempoEjecucion: 3,
+      programacion: [
+        { mes: '2026-03', valor: 40_000 },
+        { mes: '2026-04', valor: 0 },
+        { mes: '2026-05', valor: 60_000 },
+      ],
+    }),
+    armarItemDePlanificacion({
+      ...FILA_12_DEL_V2,
+      item: 'B',
+      precioContractual: 500,
+      medidaReal: 10,
+      medidaContractual: 10,
+      medidaCoste: null,
+      precioCosto: 300,
+      mesInicio: '2026-02',
+      tiempoEjecucion: 1,
+      programacion: [{ mes: '2026-02', valor: 5000 }],
+    }),
+  ],
+  rubros: [],
+  lineaDeRubros: null,
+  indirectos: [
+    { mes: '2026-03', valor: 700 },
+    { mes: '2026-04', valor: 300 },
+  ],
+  supuestos: '',
+  objetivos: '',
+};
+
+/** Las hojas enviadas a la IA: «PLANIFIC BERRIO» (1) y la de programación (2), con filas reales del V2. */
+function hojasDeIndirectos(): HojaDelLibro[] {
+  const vacias = (n: number) => Array.from({ length: n }, (): Celda[] => []);
+  const planificacion = vacias(240);
+  const programacion = vacias(20);
+  const fila = (filas: Celda[][], n: number, celdas: Celda[]) => {
+    filas[n - 1] = celdas;
+  };
+  // Columnas como en el libro: A nº, D descripción, E cantidad, G valor, H adicional, J meses, M total.
+  fila(planificacion, 75, [40, null, null, 'Polizas definitivas', null, null, null, null, null, 1, null, null, 115_001_699.5]);
+  fila(planificacion, 79, [42, null, null, 'Retencion en la fuente', 0.02, null, 2100, null, null, 1, null, null, 2100]);
+  fila(planificacion, 160, [115, null, null, 'Aseo baño portatil', 3, null, 250_000, null, null, 0, null, null, 0]);
+  fila(planificacion, 93, [null, null, null, 'MAQUINARIA GENERAL DE OBRA', null, null, null, null, null, null, null, null, 6_189_761_388.32]);
+  fila(planificacion, 94, [55, null, null, 'Camioneta Nissan 4x2', 1, null, 4_000_000, 0, null, 7, null, null, 28_000_000]);
+  fila(planificacion, 139, [96, null, null, 'Oficina berrio', 1, null, 3_900_000, 1_000_000, null, 6.5, null, null, 31_850_000]);
+  fila(planificacion, 204, [148, null, null, 'Contador - cristian', 0.5, null, 1_000_000, null, null, 21, null, null, 10_500_000]);
+  fila(programacion, 10, ['Camioneta', ...Array.from({ length: 7 }, () => 4_000_000)]);
+  fila(programacion, 11, ['Oficina', 4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 2_450_000]);
+  return [
+    { nombre: 'PLANIFIC BERRIO', visible: true, filas: planificacion },
+    { nombre: 'PROGRAMACION', visible: true, filas: programacion },
+  ];
+}
+
+const mesesDesde = (arranque: string, valores: number[]) => valores.map((valor, i) => ({ mes: sumarMeses(arranque, i), valor }));
+const SIN_CIFRAS = {
+  valor: 0,
+  porcentaje: 0,
+  cantidad: 0,
+  valorMensual: 0,
+  valorMensualAdicional: 0,
+  salario: 0,
+  acomodacion: 0,
+  viaticos: 0,
+  dedicacion: 0,
+  meses: 0,
+  operativo: false,
+  programacion: { hoja: 0, fila: 0, meses: [] },
+};
+const leidoCamioneta: RenglonIndirectoLeidoPorLaIa = {
+  ...SIN_CIFRAS,
+  hoja: 1,
+  fila: 94,
+  concepto: 'maquinaria_general',
+  descripcion: 'Camioneta Nissan 4x2',
+  forma: 'mensual',
+  cantidad: 1,
+  valorMensual: 4_000_000,
+  meses: 7,
+  totalDelExcel: 28_000_000,
+  programacion: { hoja: 2, fila: 10, meses: mesesDesde('2026-01', Array(7).fill(4_000_000)) },
+};
+const leidoOficina: RenglonIndirectoLeidoPorLaIa = {
+  ...SIN_CIFRAS,
+  hoja: 1,
+  fila: 139,
+  concepto: 'instalaciones_generales',
+  descripcion: 'Oficina berrio',
+  forma: 'mensual',
+  cantidad: 1,
+  valorMensual: 3_900_000,
+  valorMensualAdicional: 1_000_000,
+  meses: 6.5,
+  totalDelExcel: 31_850_000,
+  programacion: { hoja: 2, fila: 11, meses: mesesDesde('2026-01', [4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 2_450_000]) },
+};
+const leidoRetencion: RenglonIndirectoLeidoPorLaIa = {
+  ...SIN_CIFRAS,
+  hoja: 1,
+  fila: 79,
+  concepto: 'impuestos',
+  descripcion: 'Retencion en la fuente',
+  forma: 'porcentaje',
+  porcentaje: 0.02,
+  totalDelExcel: 2100,
+};
+const leidoContador: RenglonIndirectoLeidoPorLaIa = {
+  ...SIN_CIFRAS,
+  hoja: 1,
+  fila: 204,
+  concepto: 'mano_obra_indirecta',
+  descripcion: 'Contador - cristian',
+  forma: 'personal',
+  salario: 1_000_000,
+  dedicacion: 0.5,
+  meses: 21,
+  totalDelExcel: 10_500_000,
+};
+const lecturaDeIndirectos = (renglones: RenglonIndirectoLeidoPorLaIa[]): LecturaDeIndirectos => ({
+  renglones,
+  totalesPorConcepto: [{ hoja: 1, fila: 93, concepto: 'maquinaria_general', valor: 6_189_761_388.32 }],
+});
+const renglonPorDescripcion = (e: EstructuraDePlanificacion, descripcion: string) =>
+  (e.renglonesIndirectos ?? []).find((r) => r.descripcion === descripcion) as RenglonIndirecto;
+
+prueba('045/RF-35, D11: los meses del Excel entran como fijados, con los ceros dentro del periodo', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, null, []);
+  assert.equal(estructura.esquema, ESQUEMA_DE_PLANIFICACION);
+  const [a] = estructura.items;
+  assert.deepEqual(a.fijados, [
+    { mes: '2026-03', valor: 40_000 },
+    { mes: '2026-04', valor: 0 },
+    { mes: '2026-05', valor: 60_000 },
+  ]);
+  // El reparto no rellena el cero: lo programado queda igual que en el Excel.
+  assert.deepEqual(a.programacion.map((m) => m.valor), [40_000, 0, 60_000]);
+});
+
+prueba('045/RF-33, RF-34: el plazo va del mes de inicio más temprano al último mes programado', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, null, []);
+  assert.deepEqual(estructura.plazo, { meses: 4, arranque: '2026-02' });
+  assert.equal(estructura.factorPrestacional, 1.2295);
+  assert.equal(estructura.recargoHorasExtras, 0.16);
+});
+
+prueba('045/RF-140: sin la lectura de indirectos, el Excel entra con «Indirectos sin desglose»', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, null, []);
+  const [renglon, ...otros] = estructura.renglonesIndirectos ?? [];
+  assert.equal(otros.length, 0);
+  assert.equal(renglon.descripcion, DESCRIPCION_SIN_DESGLOSE);
+  assert.deepEqual(estructura.indirectos.filter((m) => m.valor !== 0), EXCEL_043_PARA_045.indirectos);
+});
+
+prueba('045/RF-36, RF-37: un renglón que cuadra entra con su forma y sus meses del Excel fijados', () => {
+  const { estructura, rechazados } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([leidoCamioneta, leidoRetencion]), hojasDeIndirectos());
+  assert.deepEqual(rechazados, []);
+  const camioneta = renglonPorDescripcion(estructura, 'Camioneta Nissan 4x2');
+  assert.ok(camioneta.forma === 'mensual');
+  assert.equal(camioneta.concepto, 'maquinaria_general');
+  assert.equal(camioneta.mesInicio, '2026-01');
+  assert.equal(camioneta.tiempoEjecucion, 7);
+  assert.equal(camioneta.fijados.length, 7);
+  assert.equal(camioneta.revisar, false);
+  // La retención: 2 % del importe real total (100 000 + 5 000), igual que el libro.
+  const retencion = renglonPorDescripcion(estructura, 'Retencion en la fuente');
+  assert.ok(retencion.forma === 'porcentaje' && retencion.porcentaje === 0.02 && !retencion.revisar);
+  assert.equal(estructura.renglonesIndirectos?.some((r) => r.sinDesglose), false, 'ya no hace falta el total sin desglose');
+});
+
+prueba('045/RF-38 a RF-40: una cifra que no está en su celda se descarta y el renglón queda marcado', () => {
+  const { estructura, rechazados } = borradorDelExcel(
+    EXCEL_043_PARA_045,
+    lecturaDeIndirectos([{ ...leidoCamioneta, valorMensual: 5_000_000 }]),
+    hojasDeIndirectos(),
+  );
+  assert.ok(rechazados.some((r) => r.fila === 94 && /valor mensual/.test(r.que)));
+  const camioneta = renglonPorDescripcion(estructura, 'Camioneta Nissan 4x2');
+  assert.equal(camioneta.revisar, true);
+  // Sin esa cifra la fórmula no se puede rehacer: queda el total del libro como valor fijo.
+  assert.ok(camioneta.forma === 'fijo' && camioneta.valor === 28_000_000);
+  // Un total del Excel que tampoco está en su fila deja el renglón fuera.
+  const sinTotal = borradorDelExcel(
+    EXCEL_043_PARA_045,
+    lecturaDeIndirectos([{ ...leidoCamioneta, valorMensual: 5_000_000, totalDelExcel: 123_456 }]),
+    hojasDeIndirectos(),
+  );
+  assert.equal(renglonPorDescripcion(sinTotal.estructura, 'Camioneta Nissan 4x2'), undefined);
+  assert.ok(sinTotal.rechazados.some((r) => r.fila === 94 && /total/.test(r.que)));
+});
+
+prueba('045/RF-41, RF-42: un renglón que no reproduce su total pasa a valor fijo con el del libro, marcado', () => {
+  // El contador: el libro no le aplica el factor prestacional (M204 = G × J × E).
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([leidoContador]), hojasDeIndirectos());
+  const contador = renglonPorDescripcion(estructura, 'Contador - cristian');
+  assert.ok(contador.forma === 'fijo');
+  assert.equal(contador.valor, 10_500_000);
+  assert.equal(contador.revisar, true);
+  assert.equal(contador.concepto, 'mano_obra_indirecta');
+  // Una forma que no existe, igual.
+  const rara = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([{ ...leidoContador, forma: 'formula' }]), hojasDeIndirectos());
+  assert.ok(renglonPorDescripcion(rara.estructura, 'Contador - cristian').forma === 'fijo');
+});
+
+prueba('045/RF-41, RF-42, RF-55: un renglón con meses decimales entra como valor fijo con el total y los meses del libro', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([leidoOficina]), hojasDeIndirectos());
+  const oficina = renglonPorDescripcion(estructura, 'Oficina berrio');
+  assert.ok(oficina.forma === 'fijo');
+  assert.equal(oficina.valor, 31_850_000);
+  assert.equal(oficina.revisar, true);
+  assert.equal(oficina.tiempoEjecucion, 7);
+  assert.deepEqual(oficina.fijados.map((m) => m.valor), [4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 4_900_000, 2_450_000]);
+  const delMes7 = estructura.indirectosPorConcepto?.instalaciones_generales.find((m) => m.mes === '2026-07');
+  assert.equal(delMes7?.valor, 2_450_000, 'el reparto es el del libro');
+});
+
+prueba('045/RF-43: la diferencia de cada concepto con el total del libro sale para el resumen', () => {
+  const { estructura, calculo } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([leidoCamioneta]), hojasDeIndirectos());
+  assert.deepEqual(estructura.totalesPorConceptoDelExcel, { maquinaria_general: 6_189_761_388.32 });
+  const diferencias = diferenciasPorConcepto(calculo.indirectosPorConcepto, estructura.totalesPorConceptoDelExcel ?? {});
+  assert.deepEqual(diferencias, [
+    { concepto: 'maquinaria_general', calculado: 28_000_000, delExcel: 6_189_761_388.32, diferencia: 28_000_000 - 6_189_761_388.32 },
+  ]);
+  // Lo que cuadra a menos de un peso no es diferencia, y un concepto sin total del libro no se compara.
+  assert.deepEqual(diferenciasPorConcepto(calculo.indirectosPorConcepto, { maquinaria_general: 28_000_000.4 }), []);
+});
+
+const ENERO_2026 = { tipo: 'mes' as const, desde: '2026-01-01', hasta: '2026-01-31' };
+const indirectosDeEnero = (versiones: Parameters<typeof valoresDelPeriodo>[0]['versiones']) =>
+  valoresDelPeriodo({ periodo: ENERO_2026, items: [], versiones, partesDelPeriodo: [] });
+
+prueba('045/RF-157, RF-158: una versión de la 043 da un solo concepto «sin desglose» y el mismo total', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [{ mes: '2026-01', valor: 1000 }],
+    supuestos: '',
+    objetivos: '',
+  };
+  const version = versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2025-12-01', rigeHasta: null }, [], de043);
+  const valores = indirectosDeEnero([version]);
+  assert.equal(valores.indirectos, 1000);
+  assert.deepEqual(valores.indirectosPorConcepto, [{ concepto: 'sin_desglose', valor: 1000 }]);
+  // En la semana no hay indirectos, ni por concepto.
+  const semana = valoresDelPeriodo({ periodo: { tipo: 'semana', desde: '2026-01-05', hasta: '2026-01-11' }, items: [], versiones: [version], partesDelPeriodo: [] });
+  assert.equal(semana.indirectosPorConcepto, null);
+});
+
+prueba('045/RF-157, RF-158: un mes con dos versiones parte los indirectos por concepto con la misma fracción', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [{ mes: '2026-01', valor: 1000 }],
+    supuestos: '',
+    objetivos: '',
+  };
+  const seguros = { ...renglonesDelV2[1].renglon, id: 's', valor: 600, mesInicio: '2026-01', tiempoEjecucion: 1 } as RenglonIndirecto;
+  const camioneta = { ...renglonesDelV2[3].renglon, id: 'c', valorMensual: 400, mesInicio: '2026-01', tiempoEjecucion: 1 } as RenglonIndirecto;
+  const de045 = recalcularPlanificacion(estructura045({ renglonesIndirectos: [seguros, camioneta] })).estructura;
+  const versiones = [
+    versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2025-12-01', rigeHasta: '2026-01-15' }, [], de043),
+    versionMedible({ id: 'v2', numeroVersion: 2, rigeDesde: '2026-01-16', rigeHasta: null }, [], de045),
+  ];
+  const dias = diasDeReparto('2026-01');
+  const fraccionV1 = dias.filter((d) => d <= '2026-01-15').length / dias.length;
+  const valores = indirectosDeEnero(versiones);
+  // Las dos versiones programan 1 000 en enero: el total del mes es 1 000, igual que antes.
+  assert.equal(valores.indirectos, 1000);
+  assert.deepEqual(valores.indirectosPorConcepto, [
+    { concepto: 'seguros_garantias', valor: Math.round(600 * (1 - fraccionV1)) },
+    { concepto: 'maquinaria_general', valor: Math.round(400 * (1 - fraccionV1)) },
+    { concepto: 'sin_desglose', valor: Math.round(1000 * fraccionV1) },
+  ]);
+});
+
+prueba('045/RF-140, RF-158: el renglón «Indirectos sin desglose» de una versión copiada sale como su propio concepto', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [{ mes: '2026-01', valor: 1000 }],
+    supuestos: '',
+    objetivos: '',
+  };
+  const copia = copiarVersion(de043);
+  const otro = { ...renglonesDelV2[1].renglon, id: 'o', concepto: 'otros', valor: 50, mesInicio: '2026-01', tiempoEjecucion: 1 } as RenglonIndirecto;
+  const conOtro = recalcularPlanificacion({ ...copia, renglonesIndirectos: [...(copia.renglonesIndirectos ?? []), otro] }).estructura;
+  const version = versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2025-12-01', rigeHasta: null }, [], conOtro);
+  assert.deepEqual(indirectosDeEnero([version]).indirectosPorConcepto, [
+    { concepto: 'otros', valor: 50 },
+    { concepto: 'sin_desglose', valor: 1000 },
+  ]);
+});
+
+prueba('045/RF-158: el informe mensual trae los indirectos por concepto, y el del Residente no', () => {
+  const de043: EstructuraDePlanificacion = {
+    items: [],
+    rubros: [],
+    lineaDeRubros: null,
+    indirectos: [{ mes: '2026-01', valor: 1000 }],
+    supuestos: '',
+    objetivos: '',
+  };
+  const version = { ...versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2025-12-01', rigeHasta: null }, [], de043), items: [] };
+  const informe = informeDeCumplimiento({ periodo: ENERO_2026, hoy: '2026-02-01', versiones: [version], partesDelPeriodo: [], partesAcumuladas: [], mesesCumplidos: [] });
+  assert.deepEqual(informe.indirectosPorConcepto, [{ concepto: 'sin_desglose', valor: 1000 }]);
+  assert.ok(!('indirectosPorConcepto' in sinPlata(informe)));
+});
+
+const mensajes = (resultado: { success: boolean; error?: { issues: { message: string }[] } }) =>
+  (resultado.error?.issues ?? []).map((i) => i.message).join(' · ');
+
+prueba('045/RF-4, RF-11, RF-12: el pedido desde el presupuesto exige un plazo válido, con su motivo en español', () => {
+  const bueno = pedidoDesdePresupuesto.parse({ plazo: { meses: 16, arranque: '2026-01' } });
+  assert.deepEqual(bueno, { plazo: { meses: 16, arranque: '2026-01' }, grupoId: null, copiarIndirectosDe: null, sustituir: false });
+  const largo = pedidoDesdePresupuesto.safeParse({ plazo: { meses: 200, arranque: '2026-01' } });
+  assert.equal(largo.success, false);
+  assert.match(mensajes(largo), /El plazo tiene que ser un número entero entre 1 y 120 meses/);
+  const mes13 = pedidoDesdePresupuesto.safeParse({ plazo: { meses: 16, arranque: '2026-13' } });
+  assert.equal(mes13.success, false);
+  assert.match(mensajes(mes13), /El mes de arranque tiene que ser un mes válido/);
+  assert.equal(pedidoDesdePresupuesto.safeParse({ plazo: { meses: 2.5, arranque: '2026-01' } }).success, false);
+  assert.equal(pedidoDesdePresupuesto.safeParse({}).success, false, 'RF-11, RF-12: el plazo y el arranque son obligatorios');
+  // RF-5: un arranque pasado vale.
+  assert.equal(pedidoDesdePresupuesto.safeParse({ plazo: { meses: 16, arranque: '2019-05' }, grupoId: 'g-berrio' }).success, true);
+});
+
+prueba('045/RF-46 a RF-55: el pedido de edición no trae lo contractual y rechaza negativos con su motivo', () => {
+  const base = borradorCompleto();
+  const pedido = { version: 4, ...edicionDe(base) };
+  const leido = edicionDeBorradorPedida.parse({
+    ...pedido,
+    items: pedido.items.map((i) => ({ ...i, precioContractual: 1, medidaContractual: 9, descripcion: 'Otra', unidad: 'km' })),
+    rubros: pedido.rubros.map((r) => ({ ...r, valor: 1 })),
+  });
+  // El esquema no tiene esos campos: lo que el navegador mande de más se cae al validar.
+  for (const campo of ['precioContractual', 'medidaContractual', 'descripcion', 'unidad', 'item']) {
+    assert.ok(!(campo in leido.items[0]), campo);
+  }
+  assert.ok(!('valor' in leido.rubros[0]));
+  assert.ok(!('totales' in leido) && !('resumen' in leido), 'RF-57: ningún total de la pantalla');
+  // Y lo que queda es una edición que la regla entiende.
+  const edicion: EdicionDelBorrador = edicionDelPedido(leido);
+  assert.equal(edicion.items.length, base.items.length);
+  assert.ok(aplicarEdicion(base, edicion).ok);
+
+  const negativo = edicionDeBorradorPedida.safeParse({ ...pedido, items: [{ ...pedido.items[0], medidaReal: -5 }] });
+  assert.equal(negativo.success, false);
+  assert.match(mensajes(negativo), /no puede ser negativ/);
+  const plazo = edicionDeBorradorPedida.safeParse({ ...pedido, plazo: { meses: 200, arranque: '2026-01' } });
+  assert.match(mensajes(plazo), /entre 1 y 120/);
+  const mesMalo = edicionDeBorradorPedida.safeParse({ ...pedido, items: [{ ...pedido.items[0], mesInicio: '2026-13' }] });
+  assert.equal(mesMalo.success, false);
+  assert.equal(edicionDeBorradorPedida.safeParse({ ...pedido, version: undefined }).success, false, 'RF-58: sin versión no hay guardado');
+});
+
+prueba('045/RF-78 a RF-83: los renglones del pedido llevan descripción, una de las cuatro formas y uno de los siete conceptos', () => {
+  const pedido = { version: 0, ...edicionDe(borradorCompleto()) };
+  const [camioneta] = pedido.renglonesIndirectos;
+  const conRenglon = (renglon: unknown) => edicionDeBorradorPedida.safeParse({ ...pedido, renglonesIndirectos: [renglon] });
+  assert.equal(conRenglon(camioneta).success, true);
+  assert.match(mensajes(conRenglon({ ...camioneta, descripcion: '   ' })), /descripción/);
+  assert.equal(conRenglon({ ...camioneta, forma: 'formula' }).success, false);
+  assert.equal(conRenglon({ ...camioneta, concepto: 'viajes' }).success, false);
+  assert.equal(conRenglon({ ...camioneta, valorMensual: -1 }).success, false);
+  // Un porcentaje no lleva periodo, y lo que traiga de más se cae.
+  const porcentaje = conRenglon({ id: 'p', concepto: 'impuestos', descripcion: 'Retención', forma: 'porcentaje', porcentaje: 0.02, revisar: false, mesInicio: '2026-01' });
+  assert.equal(porcentaje.success, true);
+  assert.ok(porcentaje.success && !('mesInicio' in porcentaje.data.renglonesIndirectos[0]));
+  // Unos meses con decimales que vienen del Excel pasan aquí: los rechaza la regla solo si se digitaron (T8).
+  assert.equal(conRenglon({ ...camioneta, tiempoEjecucion: 6.5 }).success, true);
+});
+
+prueba('045/RF-138, RF-142: copiar la vigente pide confirmar si sustituye un borrador', () => {
+  assert.deepEqual(copiaDePlanificacion.parse({}), { sustituir: false });
+  assert.deepEqual(copiaDePlanificacion.parse({ sustituir: true }), { sustituir: true });
+});
+
+// Decisión de Diego (2026-11-16): un indirecto del Excel sin meses del libro arranca con el plazo.
+const sinMeses = (leido: RenglonIndirectoLeidoPorLaIa): RenglonIndirectoLeidoPorLaIa => ({
+  ...leido,
+  programacion: { hoja: 0, fila: 0, meses: [] },
+});
+
+prueba('045/T17: un indirecto sin meses del libro arranca en el mes de arranque, con los meses de su fórmula', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([sinMeses(leidoCamioneta)]), hojasDeIndirectos());
+  const camioneta = renglonPorDescripcion(estructura, 'Camioneta Nissan 4x2');
+  assert.ok(camioneta.forma === 'mensual', 'conserva su forma: su fórmula reproduce el total');
+  assert.equal(camioneta.mesInicio, '2026-02', 'el arranque del plazo deducido');
+  assert.equal(camioneta.tiempoEjecucion, 7);
+  assert.deepEqual(camioneta.fijados, []);
+  // RF-168, RF-169: el periodo lo puso la regla; se avisa como «Periodo deducido», sin marcarlo para revisar.
+  assert.equal(camioneta.revisar, false, 'sus cifras cuadran con el libro');
+  assert.equal(camioneta.periodoDeducido, true);
+  // RF-170: es hallazgo aparte, y no impide aprobar.
+  // (También sale «fuera del plazo»: sus 7 meses pasan del plazo de 4 de este libro de prueba.)
+  const tipos = hallazgosDelBorrador(estructura, null).filter((h) => h.detalle.includes('Camioneta Nissan 4x2')).map((h) => h.tipo);
+  assert.ok(tipos.includes('periodo_deducido') && !tipos.includes('para_revisar'), tipos.join(', '));
+  assert.deepEqual(impedimentosParaAprobar(estructura).filter((i) => i.detalle.includes('deducido')), []);
+  // RF-171: al cambiarle el periodo, la marca se va; sin cambiarlo, se queda, aunque el pedido no la traiga.
+  const edicion = edicionDe(estructura);
+  const sinTocar = aplicarEdicion(estructura, { ...edicion, renglonesIndirectos: edicion.renglonesIndirectos.map((r) => ({ ...r, periodoDeducido: undefined })) });
+  assert.ok(sinTocar.ok && renglonPorDescripcion(sinTocar.estructura, 'Camioneta Nissan 4x2').periodoDeducido === true);
+  const otroPeriodo = aplicarEdicion(estructura, {
+    ...edicion,
+    renglonesIndirectos: edicion.renglonesIndirectos.map((r) => (r.descripcion === 'Camioneta Nissan 4x2' && r.forma !== 'porcentaje' ? { ...r, mesInicio: '2026-03' } : r)),
+  });
+  assert.ok(otroPeriodo.ok && !renglonPorDescripcion(otroPeriodo.estructura, 'Camioneta Nissan 4x2').periodoDeducido);
+  // Un renglón nuevo no la gana por traerla en el pedido.
+  const nuevo = aplicarEdicion(estructura, {
+    ...edicion,
+    renglonesIndirectos: [
+      ...edicion.renglonesIndirectos,
+      { id: 'nuevo', concepto: 'varios', descripcion: 'Nuevo', forma: 'fijo', valor: 1, mesInicio: '2026-02', tiempoEjecucion: 1, fijados: [], revisar: false, periodoDeducido: true },
+    ],
+  });
+  assert.ok(nuevo.ok && !renglonPorDescripcion(nuevo.estructura, 'Nuevo').periodoDeducido);
+  // Ya repartido en partes iguales: 4 millones por mes.
+  assert.deepEqual(
+    estructura.indirectosPorConcepto?.maquinaria_general.map((m) => m.valor),
+    Array(7).fill(4_000_000),
+  );
+});
+
+prueba('045/T17: con meses decimales y sin meses del libro, valor fijo con los meses hacia arriba', () => {
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([sinMeses(leidoOficina)]), hojasDeIndirectos());
+  const oficina = renglonPorDescripcion(estructura, 'Oficina berrio');
+  assert.ok(oficina.forma === 'fijo' && oficina.valor === 31_850_000);
+  assert.equal(oficina.mesInicio, '2026-02');
+  assert.equal(oficina.tiempoEjecucion, 7, '6,5 meses van hacia arriba');
+  assert.equal(oficina.revisar, true, 'RF-42: entró como valor fijo, se sigue marcando');
+  assert.equal(oficina.periodoDeducido, true);
+  const total = estructura.indirectosPorConcepto?.instalaciones_generales.reduce((suma, m) => suma + m.valor, 0) ?? 0;
+  assert.ok(Math.abs(total - 31_850_000) < 1, 'el total del libro, repartido en partes iguales');
+});
+
+prueba('045/T17: un valor fijo sin meses en la fórmula ni en el libro dura todo el plazo', () => {
+  const poliza: RenglonIndirectoLeidoPorLaIa = {
+    ...SIN_CIFRAS,
+    hoja: 1,
+    fila: 75,
+    concepto: 'seguros_garantias',
+    descripcion: 'Polizas definitivas',
+    forma: 'fijo',
+    valor: 115_001_699.5,
+    totalDelExcel: 115_001_699.5,
+  };
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([poliza, leidoRetencion]), hojasDeIndirectos());
+  const renglon = renglonPorDescripcion(estructura, 'Polizas definitivas');
+  assert.ok(renglon.forma === 'fijo');
+  assert.equal(renglon.mesInicio, '2026-02');
+  assert.equal(renglon.tiempoEjecucion, 4, 'el plazo deducido: 2026-02 a 2026-05');
+  assert.equal(renglon.revisar, false, 'su forma reproduce el total: solo el periodo es supuesto');
+  assert.equal(renglon.periodoDeducido, true);
+  // Un porcentaje no tiene periodo: se reparte con la obra y no se marca por eso.
+  const retencion = renglonPorDescripcion(estructura, 'Retencion en la fuente');
+  assert.ok(retencion.forma === 'porcentaje' && !('mesInicio' in retencion));
+  assert.equal(retencion.revisar, false);
+  assert.deepEqual(impedimentosParaAprobar(estructura).filter((i) => i.tipo === 'renglon_incompleto'), [], 'ninguno queda sin periodo');
+});
+
+prueba('045/RF-41, RF-168, T27: un porcentaje que no cuadra entra como valor fijo con el periodo de la regla', () => {
+  // «Liquidaciones» del V2: leído como porcentaje, su cifra no estaba en la fila; entraba como valor
+  // fijo sin mes de inicio ni meses, y el borrador quedaba imposible de aprobar.
+  const raro: RenglonIndirectoLeidoPorLaIa = { ...leidoRetencion, descripcion: 'Liquidaciones', porcentaje: 0.123456 };
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([raro]), hojasDeIndirectos());
+  const renglon = renglonPorDescripcion(estructura, 'Liquidaciones');
+  assert.ok(renglon.forma === 'fijo' && renglon.valor === 2100, 'el total del libro');
+  assert.equal(renglon.mesInicio, '2026-02');
+  assert.equal(renglon.tiempoEjecucion, 4, 'todo el plazo: un porcentaje no trae meses');
+  assert.equal(renglon.revisar, true, 'RF-42');
+  assert.equal(renglon.periodoDeducido, true);
+  assert.deepEqual(impedimentosParaAprobar(estructura).filter((i) => i.tipo === 'renglon_incompleto'), []);
+});
+
+prueba('045/RF-55, T18: un renglón mensual con 0 meses en el libro no queda con 0 meses: pasa a valor fijo', () => {
+  // «Aseo baño portatil» del V2: 3 × 250 000 × 0 meses = 0, igual que su total en el libro.
+  const aseo: RenglonIndirectoLeidoPorLaIa = {
+    ...SIN_CIFRAS,
+    hoja: 1,
+    fila: 160,
+    concepto: 'varios',
+    descripcion: 'Aseo baño portatil',
+    forma: 'mensual',
+    cantidad: 3,
+    valorMensual: 250_000,
+    meses: 0,
+    totalDelExcel: 0,
+  };
+  const { estructura } = borradorDelExcel(EXCEL_043_PARA_045, lecturaDeIndirectos([aseo]), hojasDeIndirectos());
+  const renglon = renglonPorDescripcion(estructura, 'Aseo baño portatil');
+  assert.ok(renglon.forma === 'fijo' && renglon.valor === 0, 'el total del libro, sin la fórmula');
+  assert.equal(renglon.tiempoEjecucion, 4, 'todo el plazo, porque no tiene meses');
+  assert.equal(renglon.revisar, true);
+  // Y el borrador se puede guardar tal cual: ningún renglón con una cantidad de meses inválida.
+  assert.ok(aplicarEdicion(estructura, edicionDe(estructura)).ok);
+  assert.ok(edicionDeBorradorPedida.safeParse({ version: 0, ...edicionDe(estructura) }).success);
+});
+
+prueba('045/RF-112, RF-113, P10: se copian indirectos de vigentes o reemplazadas con renglones desglosados, nunca de la 043', () => {
+  const de045 = borradorCompleto();
+  const copiables = renglonesParaCopiar('vigente', de045);
+  assert.equal(copiables?.length, 1, 'la camioneta');
+  assert.equal(renglonesParaCopiar('reemplazada', de045)?.length, 1);
+  // P10: ni anuladas, ni descartadas, ni borradores.
+  for (const estado of ['anulada', 'descartada', 'borrador'] as const) assert.equal(renglonesParaCopiar(estado, de045), null, estado);
+  // RF-113: una de la 043 solo tiene «Indirectos sin desglose»: no hay de dónde copiar.
+  const de043: EstructuraDePlanificacion = { ...EXCEL_043_PARA_045 };
+  assert.equal(renglonesParaCopiar('vigente', de043), null);
+  // Y tampoco su versión copiada, que solo trae ese renglón.
+  assert.equal(renglonesParaCopiar('vigente', copiarVersion(de043)), null);
+  // Si una de la 045 trae «sin desglose» junto a otros, se copian solo los desglosados.
+  const mixta = { ...de045, renglonesIndirectos: [...(de045.renglonesIndirectos ?? []), ...(copiarVersion(de043).renglonesIndirectos ?? [])] };
+  assert.deepEqual(renglonesParaCopiar('vigente', mixta)?.map((r) => r.id), ['cam']);
+  // Una sin ningún renglón tampoco sirve.
+  assert.equal(renglonesParaCopiar('vigente', { ...de045, renglonesIndirectos: [] }), null);
+});
+
+prueba('045/RF-150 a RF-153: al Director de Obra no le llegan los renglones de mano de obra indirecta, sí su total', () => {
+  const residente = { ...(renglonesDelV2.find((r) => r.fila === 189)?.renglon as RenglonIndirecto), id: 'res', mesInicio: '2026-01', tiempoEjecucion: 4, revisar: true } as RenglonIndirecto;
+  const estructura = borradorCompleto({ renglonesIndirectos: [...(borradorCompleto().renglonesIndirectos ?? []), residente] });
+  const hallazgos = hallazgosDelBorrador(estructura, null);
+  const rechazados = [
+    { hoja: 1, fila: 189, que: 'Residente obra - berrio · salario', motivo: 'no encontrado en la fila 189' },
+    { hoja: 1, fila: 94, que: 'Camioneta Nissan 4x2 · meses', motivo: 'no encontrado en la fila 94' },
+  ];
+  assert.ok(hallazgos.some((h) => h.detalle.includes('Residente obra - berrio')), 'el hallazgo lo nombra');
+
+  const vista = recortarManoDeObraIndirecta({ estructura, hallazgos, rechazados }, 'director_obra');
+  assert.equal(vista.recortada, true);
+  assert.deepEqual(vista.estructura.renglonesIndirectos?.map((r) => r.id), ['cam'], 'solo la camioneta');
+  // RF-151: el total y el reparto del concepto siguen.
+  assert.deepEqual(vista.estructura.indirectosPorConcepto?.mano_obra_indirecta, estructura.indirectosPorConcepto?.mano_obra_indirecta);
+  assert.ok((vista.estructura.indirectosPorConcepto?.mano_obra_indirecta ?? []).length > 0);
+  assert.deepEqual(vista.estructura.indirectos, estructura.indirectos);
+  // RF-152: ni por los hallazgos ni por las cifras descartadas se llega al renglón.
+  const texto = JSON.stringify(vista);
+  assert.ok(!texto.includes('Residente obra'), 'ninguna mención del residente');
+  assert.ok(!texto.includes('4500000') && !texto.includes('4_500_000'), 'ni su salario');
+  assert.equal(vista.rechazados.length, 1);
+  assert.equal(vista.rechazados[0].fila, 94);
+
+  // RF-153: Gerencia y la Dirección de Proyectos lo ven todo.
+  for (const rol of ['admin', 'director_proyectos'] as const) {
+    const completa = recortarManoDeObraIndirecta({ estructura, hallazgos, rechazados }, rol);
+    assert.equal(completa.recortada, false, rol);
+    assert.equal(completa.estructura.renglonesIndirectos?.length, 2, rol);
+    assert.equal(completa.hallazgos.length, hallazgos.length, rol);
+  }
+});
+
+prueba('045/RF-152, RF-158: el Excel y el PDF del informe mensual traen los indirectos por concepto, y el del Residente no', () => {
+  const seguros = { ...renglonesDelV2[1].renglon, id: 's', valor: 600, mesInicio: '2026-01', tiempoEjecucion: 1 } as RenglonIndirecto;
+  const camioneta = { ...renglonesDelV2[3].renglon, id: 'c', valorMensual: 400, mesInicio: '2026-01', tiempoEjecucion: 1 } as RenglonIndirecto;
+  const de045 = recalcularPlanificacion(estructura045({ renglonesIndirectos: [seguros, camioneta] })).estructura;
+  const version = { ...versionMedible({ id: 'v1', numeroVersion: 1, rigeDesde: '2025-12-01', rigeHasta: null }, [], de045), items: [] };
+  const informe = informeDeCumplimiento({ periodo: ENERO_2026, hoy: '2026-02-01', versiones: [version], partesDelPeriodo: [], partesAcumuladas: [], mesesCumplidos: [] });
+  assert.equal(informe.indirectos, 1000);
+
+  const totales = hojasDelInforme(informe).find((h) => h.nombre === 'Totales');
+  const filas = totales?.filas ?? [];
+  const indice = filas.findIndex((f) => f[0] === 'Indirectos programados');
+  assert.ok(indice >= 0);
+  // Justo debajo del total, en el orden del Excel de OCC y con su nombre.
+  assert.deepEqual(filas.slice(indice + 1, indice + 3), [
+    [`Indirectos: ${NOMBRE_DEL_CONCEPTO.seguros_garantias}`, 600],
+    [`Indirectos: ${NOMBRE_DEL_CONCEPTO.maquinaria_general}`, 400],
+  ]);
+  assert.equal(NOMBRE_DEL_CONCEPTO.seguros_garantias, 'Seguros y garantías');
+  assert.equal(NOMBRE_DEL_CONCEPTO.sin_desglose, 'Indirectos sin desglose');
+  // El PDF sale de las mismas hojas.
+  const enPdf = bloquesDelInforme(informe).find((b) => b.tipo === 'tabla' && b.tabla.titulo === 'Totales');
+  assert.ok(enPdf && enPdf.tipo === 'tabla' && enPdf.tabla.filas.some((f) => f[0] === 'Indirectos: Seguros y garantías' && f[1] === 600));
+  // El Residente no ve plata: tampoco los conceptos (RF-88 de la 043).
+  assert.ok(!JSON.stringify(hojasDelInforme(sinPlata(informe))).includes('Indirectos:'));
 });
 
 verificarFirmaS3()

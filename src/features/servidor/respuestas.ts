@@ -164,9 +164,12 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
       // si dos registran el mismo día a la vez.
       return { mensaje: 'Ya hay un corte vigente con esa fecha; anúlalo para registrar otro.', campo: 'fechaCorte' };
     case 'ux_planificacion_lectura_en_curso':
-      // Spec 043, RF-117. `abrirLectura` vence antes las pasadas de tiempo: si choca, es que otra
-      // persona está leyendo un Excel en esa misma obra ahora mismo.
-      return { mensaje: 'Ya se está leyendo una planificación en esta obra. Espere a que termine y vuelva a intentarlo.' };
+      // Spec 043, RF-117; spec 045, RF-29. Antes de reservar se vencen las pasadas de tiempo: si
+      // choca, es que en esa misma obra hay ahora mismo un Excel leyéndose o una propuesta de la IA.
+      return {
+        mensaje:
+          'Ya hay una planificación preparándose en esta obra (un Excel que se está leyendo o una propuesta de la IA). Espere a que termine y vuelva a intentarlo.',
+      };
     case 'ux_plan_semanal_lectura_en_curso':
       // Spec 044, RF-101. `abrirLectura` vence antes las pasadas de tiempo: si choca, es que otra
       // propuesta o lectura de esa misma obra y semana sigue viva.

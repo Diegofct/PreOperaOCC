@@ -28,21 +28,66 @@
  *
  * Un cero se acepta si la fila tiene un cero o una celda vacía: `exceljs` entrega sin resultado las
  * fórmulas que valen cero, y `hojasDelLibro` las deja vacías.
+ *
+ * ── Del Excel al borrador de la 045 ──
+ *
+ * Lo que trae el libro mes a mes entra como meses fijados, ceros incluidos, para que el reparto no
+ * rehaga lo que el Director de Proyectos ya decidió (RF-35, D11). El arranque es el mes de inicio
+ * más temprano de los ítems y el plazo llega hasta el último mes con algo programado (RF-33,
+ * RF-34).
+ *
+ * Los indirectos se leen renglón por renglón en una lectura aparte (RF-36), con la misma regla:
+ * cada cifra en su fila. Un renglón entra con su forma de cálculo solo si con sus cifras la fórmula
+ * reproduce el total del libro a menos de un peso. Si no —le falta una cifra, el libro calcula
+ * distinto (el contador del V2 no lleva factor prestacional) o usa meses con decimales (6,5 en la
+ * oficina de Berrío)—, entra como valor fijo con el total del libro, sus meses del libro fijados y
+ * marcado para revisión (RF-38 a RF-42). Así las cifras del Excel nunca se pierden, y lo que la
+ * regla no pudo reproducir queda a la vista. Lo de los meses con decimales lo decidió Diego el
+ * 2026-11-15: el reparto mes a mes no sabe de medios meses, y el libro ya trae cómo los repartió.
+ *
+ * Un renglón de porcentaje no guarda los meses del libro: se reparte en proporción a lo programado
+ * (RF-105), que es como lo calcula el libro.
+ *
+ * Un renglón para el que el libro no trae meses —el V2 solo los tiene en un flujo de caja que mezcla
+ * frentes, y ese no se usa— arranca en el mes de arranque del plazo, dura los meses de su fórmula
+ * (hacia arriba si traen decimales) o, si no tiene, todo el plazo, y se reparte en partes iguales,
+ * marcado para revisión porque ese periodo lo puso la regla y no el libro. Lo decidió Diego el
+ * 2026-11-16: sin esto, los 160 renglones del V2 quedaban sin periodo e impedían aprobar. Si la lectura de indirectos falla o no deja ningún
+ * renglón, el borrador entra igual con «Indirectos sin desglose» (plan, paso 4).
  */
 import { FILAS_MAXIMAS_PARA_LA_IA, type RechazadoPorIa } from './formulario-presupuesto-ia';
 import { numero, texto, type Celda } from './formulario-presupuesto';
 import {
   armarItemDePlanificacion,
+  CONCEPTOS_INDIRECTOS,
+  ESQUEMA_DE_PLANIFICACION,
+  FORMAS_DE_INDIRECTO,
   notasEnTexto,
   programacionDeRubros,
   valoresPorMes,
+  type ConceptoIndirecto,
   type EstructuraDePlanificacion,
   type HallazgoDePlanificacion,
   type ItemDeLaPlanificacion,
+  type PlazoDeLaPlanificacion,
+  type RenglonIndirecto,
   type RubroLeidoDePlanificacion,
   type TipoDeHallazgo,
   type ValorDelMes,
 } from './planificacion';
+import {
+  normalizarLegada,
+  plazoDeducido,
+  recalcularPlanificacion,
+  type CalculoDeLaPlanificacion,
+} from './planificacion-borrador';
+import {
+  FACTOR_PRESTACIONAL_POR_DEFECTO,
+  RECARGO_HORAS_EXTRAS_POR_DEFECTO,
+  totalDelRenglon,
+  type ContextoDeIndirectos,
+} from './planificacion-indirectos';
+import { fijadosDeLosValores } from './planificacion-reparto';
 
 export interface HojaDelLibro {
   nombre: string;
@@ -450,4 +495,267 @@ export function observacionesValidas(
   hallazgos: readonly HallazgoDePlanificacion[],
 ): ObservacionDeLaIa[] {
   return observaciones.filter((o) => hallazgos.some((h) => h.tipo === o.tipo && h.item === o.item && h.capitulo === o.capitulo));
+}
+
+// ── Spec 045: del Excel al borrador, con los indirectos por renglón ──
+
+/**
+ * RF-36, RF-38: un renglón indirecto tal como lo lee la IA. Sin nulos (el esquema de la API): lo
+ * que la forma no usa va en cero. `meses` es la cantidad de meses de la fórmula (columna J del V2).
+ */
+export interface RenglonIndirectoLeidoPorLaIa extends CitaDeLectura {
+  concepto: string;
+  descripcion: string;
+  forma: string;
+  valor: number;
+  porcentaje: number;
+  cantidad: number;
+  valorMensual: number;
+  valorMensualAdicional: number;
+  salario: number;
+  acomodacion: number;
+  viaticos: number;
+  dedicacion: number;
+  meses: number;
+  operativo: boolean;
+  /** El total del renglón en el libro (columna M del V2). */
+  totalDelExcel: number;
+  /** Su fila en la hoja de programación; `hoja: 0` si no la tiene. */
+  programacion: MesesCitados;
+}
+
+export interface LecturaDeIndirectos {
+  renglones: RenglonIndirectoLeidoPorLaIa[];
+  /** RF-43: el total de cada concepto en el libro (M73, M78… del V2). */
+  totalesPorConcepto: (CitaDeLectura & { concepto: string; valor: number })[];
+}
+
+/** Las cifras que usa cada forma, con su nombre para el rechazo. */
+const CIFRAS_DE_LA_FORMA: Record<RenglonIndirecto['forma'], readonly [keyof RenglonIndirectoLeidoPorLaIa, string][]> = {
+  fijo: [['valor', 'valor']],
+  porcentaje: [['porcentaje', 'porcentaje']],
+  mensual: [
+    ['cantidad', 'cantidad'],
+    ['valorMensual', 'valor mensual'],
+    ['valorMensualAdicional', 'valor mensual adicional'],
+    ['meses', 'meses'],
+  ],
+  personal: [
+    ['salario', 'salario'],
+    ['acomodacion', 'acomodación'],
+    ['viaticos', 'viáticos'],
+    ['dedicacion', 'dedicación'],
+    ['meses', 'meses'],
+  ],
+};
+
+/** El renglón con su forma, armado con lo leído; `null` si la forma no existe. */
+function renglonConSuForma(
+  leido: RenglonIndirectoLeidoPorLaIa,
+  base: { id: string; concepto: ConceptoIndirecto; descripcion: string; revisar: boolean },
+  periodo: { mesInicio: string | null; fijados: ValorDelMes[]; tiempoDelLibro: number | null },
+): RenglonIndirecto | null {
+  const conPeriodo = (tiempoEjecucion: number | null) => ({ mesInicio: periodo.mesInicio, tiempoEjecucion, fijados: periodo.fijados });
+  switch (leido.forma) {
+    case 'fijo':
+      return { ...base, forma: 'fijo', valor: leido.valor, ...conPeriodo(periodo.tiempoDelLibro) };
+    case 'porcentaje':
+      return { ...base, forma: 'porcentaje', porcentaje: leido.porcentaje };
+    case 'mensual':
+      return {
+        ...base,
+        forma: 'mensual',
+        cantidad: leido.cantidad,
+        valorMensual: leido.valorMensual,
+        valorMensualAdicional: leido.valorMensualAdicional,
+        ...conPeriodo(leido.meses),
+      };
+    case 'personal':
+      return {
+        ...base,
+        forma: 'personal',
+        salario: leido.salario,
+        acomodacion: leido.acomodacion,
+        viaticos: leido.viaticos,
+        dedicacion: leido.dedicacion,
+        operativo: leido.operativo,
+        ...conPeriodo(leido.meses),
+      };
+    default:
+      return null;
+  }
+}
+
+/** RF-36 a RF-42: cada renglón comprobado contra su fila; `null` si no queda nada que creerle. */
+function indirectoComprobado(
+  leido: RenglonIndirectoLeidoPorLaIa,
+  id: string,
+  hojas: Hojas,
+  contexto: ContextoDeIndirectos,
+  plazo: PlazoDeLaPlanificacion | null,
+  rechazados: RechazadoPorIa[],
+): RenglonIndirecto | null {
+  const descripcion = texto(leido.descripcion);
+  if (!descripcion) {
+    rechazados.push({ hoja: leido.hoja, fila: leido.fila, que: 'Renglón indirecto sin descripción', motivo: 'no dice qué renglón es' });
+    return null;
+  }
+  const rechazar = (que: string, cita: CitaDeLectura = leido) =>
+    rechazados.push({ hoja: cita.hoja, fila: cita.fila, que: `${descripcion} · ${que}`, motivo: `no encontrado en la fila ${cita.fila}` });
+  const fila = filaCitada(hojas, leido);
+
+  const conceptoValido = (CONCEPTOS_INDIRECTOS as readonly string[]).includes(leido.concepto);
+  const concepto = (conceptoValido ? leido.concepto : 'otros') as ConceptoIndirecto;
+  let revisar = !conceptoValido;
+
+  const totalLeido = estaEnLaFila(fila, leido.totalDelExcel, tolPesos);
+  if (!totalLeido) rechazar('total');
+
+  // RF-37: los meses del libro, comprobados en su fila de programación.
+  let valores: ValorDelMes[] = [];
+  if (leido.programacion.hoja !== 0 || leido.programacion.fila !== 0) {
+    const comprobados = mesesComprobados(hojas, leido.programacion, descripcion, rechazados);
+    valores = comprobados.valores;
+    revisar ||= comprobados.descarto;
+  }
+  const delLibro = fijadosDeLosValores(valores);
+  const periodo = { mesInicio: delLibro.mesInicio, fijados: delLibro.fijados, tiempoDelLibro: delLibro.tiempoEjecucion };
+  // RF-168, RF-169: sin meses del libro, el periodo lo pone la regla —desde el arranque, los meses de
+  // su fórmula— y se avisa como deducido, sin marcarlo para revisar por eso. También si se leyó como
+  // porcentaje: si no cuadra entra como valor fijo (RF-41), y ese sí necesita periodo; si cuadra,
+  // sigue siendo porcentaje y el periodo no se usa.
+  const periodoDeLaRegla = valores.length === 0 && plazo !== null;
+  if (periodoDeLaRegla) {
+    periodo.mesInicio = plazo.arranque;
+    periodo.tiempoDelLibro = leido.meses > 0 ? Math.ceil(leido.meses) : plazo.meses;
+  }
+  const conAviso = (r: RenglonIndirecto | null): RenglonIndirecto | null =>
+    r && periodoDeLaRegla && r.forma !== 'porcentaje' ? { ...r, periodoDeducido: true } : r;
+
+  const formaValida = (FORMAS_DE_INDIRECTO as readonly string[]).includes(leido.forma);
+  let cifrasCompletas = formaValida;
+  if (formaValida) {
+    for (const [campo, nombre] of CIFRAS_DE_LA_FORMA[leido.forma as RenglonIndirecto['forma']]) {
+      const cifra = leido[campo] as number;
+      if (!estaEnLaFila(fila, cifra, campo === 'meses' || campo === 'dedicacion' || campo === 'porcentaje' ? tolCantidad : tolPesos)) {
+        rechazar(nombre);
+        cifrasCompletas = false;
+      }
+    }
+  }
+  revisar ||= !cifrasCompletas;
+
+  const base = { id, concepto, descripcion, revisar };
+  const conForma = cifrasCompletas ? renglonConSuForma(leido, base, periodo) : null;
+  const conMeses = leido.forma === 'mensual' || leido.forma === 'personal';
+  // RF-55: un periodo es de un mes o más. Un renglón con 0 meses en el libro da 0 con cualquier
+  // cantidad y «reproduce» su total, pero dejarlo con 0 meses haría el borrador imposible de guardar.
+  const mesesQueSirven =
+    !conMeses ||
+    (Number.isInteger(leido.meses) && leido.meses >= 1 && (valores.length === 0 || leido.meses === periodo.tiempoDelLibro));
+  const reproduce = conForma !== null && totalLeido && Math.abs(totalDelRenglon(conForma, contexto) - leido.totalDelExcel) <= 1;
+
+  if (conForma && reproduce && mesesQueSirven) {
+    if (conForma.forma === 'porcentaje') return conForma;
+    return conAviso({ ...conForma, revisar: conForma.revisar || conForma.mesInicio === null });
+  }
+  // RF-41, RF-42: el total del libro como valor fijo, con sus meses.
+  if (totalLeido) {
+    return conAviso({ ...base, forma: 'fijo', valor: leido.totalDelExcel, ...periodo, tiempoEjecucion: periodo.tiempoDelLibro, revisar: true });
+  }
+  // Sin un total que creerle, solo la forma si sus cifras están todas.
+  return conAviso(conForma && mesesQueSirven ? { ...conForma, revisar: true } : null);
+}
+
+/** RF-33, RF-34: del mes de inicio más temprano de los ítems al último mes con algo programado. */
+function plazoDelExcel(estructura: EstructuraDePlanificacion): PlazoDeLaPlanificacion | null {
+  const conValor = (lista: readonly ValorDelMes[] | undefined) => (lista ?? []).filter((m) => m.valor !== 0).map((m) => m.mes);
+  const inicios = estructura.items.flatMap((item) => {
+    const inicio = item.mesInicio ?? conValor(item.programacion).sort()[0];
+    return inicio ? [inicio] : [];
+  });
+  const programados = [
+    ...estructura.items.flatMap((i) => conValor(i.programacion)),
+    ...estructura.rubros.flatMap((r) => conValor(r.programacion)),
+    ...conValor(estructura.lineaDeRubros?.valores),
+    ...conValor(estructura.indirectos),
+  ].sort();
+  if (inicios.length === 0 || programados.length === 0) return plazoDeducido(estructura);
+  const arranque = inicios.sort()[0];
+  const ultimo = programados[programados.length - 1];
+  const [a1, m1] = arranque.split('-').map(Number);
+  const [a2, m2] = ultimo.split('-').map(Number);
+  return { arranque, meses: Math.max(1, (a2 - a1) * 12 + (m2 - m1) + 1) };
+}
+
+/**
+ * RF-32 a RF-43: la estructura que lee la 043, como borrador de la 045 ya recalculado. Sin lectura
+ * de indirectos (o si no dejó ningún renglón), con «Indirectos sin desglose».
+ */
+export function borradorDelExcel(
+  leida: EstructuraDePlanificacion,
+  lecturaDeIndirectos: LecturaDeIndirectos | null,
+  hojas: Hojas,
+): { estructura: EstructuraDePlanificacion; calculo: CalculoDeLaPlanificacion; rechazados: RechazadoPorIa[] } {
+  const normalizada = normalizarLegada({ ...leida, esquema: undefined });
+  const base: EstructuraDePlanificacion = {
+    ...normalizada,
+    esquema: ESQUEMA_DE_PLANIFICACION,
+    plazo: plazoDelExcel(normalizada) ?? undefined,
+    factorPrestacional: FACTOR_PRESTACIONAL_POR_DEFECTO,
+    recargoHorasExtras: RECARGO_HORAS_EXTRAS_POR_DEFECTO,
+    editadoEnPantalla: false,
+  };
+  const rechazados: RechazadoPorIa[] = [];
+  if (!lecturaDeIndirectos) return { ...recalcularPlanificacion(base), rechazados };
+
+  // Los porcentajes se calculan sobre el importe real total, que no depende de los indirectos.
+  const { importeRealTotal } = recalcularPlanificacion({ ...base, renglonesIndirectos: [] }).calculo;
+  const contexto: ContextoDeIndirectos = {
+    importeRealTotal,
+    factorPrestacional: FACTOR_PRESTACIONAL_POR_DEFECTO,
+    recargoHorasExtras: RECARGO_HORAS_EXTRAS_POR_DEFECTO,
+  };
+  const renglones = lecturaDeIndirectos.renglones.flatMap((leido, i) => {
+    const renglon = indirectoComprobado(leido, `excel-${leido.hoja}-${leido.fila}-${i + 1}`, hojas, contexto, base.plazo ?? null, rechazados);
+    return renglon ? [renglon] : [];
+  });
+
+  const totalesPorConceptoDelExcel: Partial<Record<ConceptoIndirecto, number>> = {};
+  for (const total of lecturaDeIndirectos.totalesPorConcepto) {
+    const valido = (CONCEPTOS_INDIRECTOS as readonly string[]).includes(total.concepto);
+    if (valido && estaEnLaFila(filaCitada(hojas, total), total.valor, tolPesos)) {
+      totalesPorConceptoDelExcel[total.concepto as ConceptoIndirecto] = total.valor;
+    } else {
+      rechazados.push({ hoja: total.hoja, fila: total.fila, que: `Total de ${total.concepto} del Excel`, motivo: `no encontrado en la fila ${total.fila}` });
+    }
+  }
+
+  const resultado = recalcularPlanificacion({
+    ...base,
+    renglonesIndirectos: renglones.length > 0 ? renglones : base.renglonesIndirectos,
+    totalesPorConceptoDelExcel,
+  });
+  return { ...resultado, rechazados };
+}
+
+export interface DiferenciaPorConcepto {
+  concepto: ConceptoIndirecto;
+  calculado: number;
+  delExcel: number;
+  /** Lo calculado menos lo del libro. */
+  diferencia: number;
+}
+
+/** RF-43: los conceptos cuyo total difiere del libro en más de un peso. */
+export function diferenciasPorConcepto(
+  calculados: Readonly<Record<ConceptoIndirecto, number>>,
+  delExcel: Readonly<Partial<Record<ConceptoIndirecto, number>>>,
+): DiferenciaPorConcepto[] {
+  return CONCEPTOS_INDIRECTOS.flatMap((concepto) => {
+    const libro = delExcel[concepto];
+    if (libro === undefined) return [];
+    const diferencia = calculados[concepto] - libro;
+    return Math.abs(diferencia) <= tolPesos() ? [] : [{ concepto, calculado: calculados[concepto], delExcel: libro, diferencia }];
+  });
 }

@@ -2,9 +2,14 @@
  * Las versiones de la planificación de una obra y su detalle (spec 043, RF-40 a RF-45, RF-49,
  * RF-86, RF-91, RF-97). **Solo servidor.**
  *
- * Aquí no hay nada que edite una planificación: ni un `PUT` ni un campo suelto. Un borrador se
- * corrige arreglando el Excel y volviéndolo a subir (RF-51), y una aprobada no se toca (RF-45);
- * lo único que cambia una versión son aprobar y anular, en `versiones.ts`.
+ * Aquí no hay nada que edite una planificación. Desde la spec 045 un borrador se corrige en
+ * pantalla (`borradores.ts`), y una aprobada sigue sin tocarse (RF-45); lo único que cambia una
+ * versión aprobada son aprobar y anular, en `versiones.ts`.
+ *
+ * Spec 045: el detalle de una planificación de la 043 se ve normalizado —sus indirectos como
+ * «Indirectos sin desglose» (RF-145)— sin reescribir lo guardado. Y al Director de Obra se le
+ * recorta la mano de obra indirecta antes de responder (RF-150 a RF-152): renglones, hallazgos y
+ * cifras descartadas que la nombran, y el Excel original, que trae la nómina.
  *
  * El listado no trae las descartadas. Un borrador sustituido conserva su número para que la primera
  * aprobada sea la v1 (RF-44), así que listarlo pondría dos «v1» una encima de otra; se conserva
@@ -24,6 +29,8 @@ import { alcanzaLaObra } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { mesesAnterioresPorMarcar } from '@/shared/rules/cumplimiento-de-obra';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { normalizarLegada } from '@/shared/rules/planificacion-borrador';
+import { recortarManoDeObraIndirecta, veSoloElTotalDeManoDeObraIndirecta } from '@/shared/rules/planificacion-indirectos';
 
 type FilaDePlanificacion = typeof planificaciones.$inferSelect;
 
@@ -62,6 +69,8 @@ export async function planificacionAlAlcance(sesion: PersonaEnSesion, id: string
  * si no está en el almacén. Sale solo por aquí: `media/[id]` no entrega estos archivos (T18).
  */
 export async function excelOriginal(p: FilaDePlanificacion): Promise<{ contenido: Uint8Array<ArrayBuffer>; nombre: string } | null> {
+  // Spec 045, RF-149: una nacida del presupuesto o de una copia no tiene Excel original.
+  if (!p.mediaId) return null;
   const db = baseServidor();
   const [archivo] = await db
     .select({ clave: media.claveR2 })
@@ -75,8 +84,11 @@ export async function excelOriginal(p: FilaDePlanificacion): Promise<{ contenido
   return { contenido: leido.contenido, nombre: `Planificación ${obra?.codigo ?? ''} v${p.numeroVersion}.xlsx`.replace(/\s+/g, ' ') };
 }
 
-/** RF-40, RF-121: el detalle, con el aviso de presupuesto más nuevo y los meses por responder. */
-export async function detalleDePlanificacion(p: FilaDePlanificacion): Promise<PlanificacionDetalle> {
+/**
+ * RF-40, RF-121: el detalle, con el aviso de presupuesto más nuevo y los meses por responder. Spec
+ * 045: normalizado si es de la 043 (RF-145) y recortado para el Director de Obra (RF-150 a RF-152).
+ */
+export async function detalleDePlanificacion(p: FilaDePlanificacion, sesion: PersonaEnSesion): Promise<PlanificacionDetalle> {
   const db = baseServidor();
   const [vigente] = await db
     .select({ id: presupuestos.id })
@@ -94,17 +106,34 @@ export async function detalleDePlanificacion(p: FilaDePlanificacion): Promise<Pl
     if (!aprobadas.some((a) => a.aprobadoEn !== null)) mesesPorMarcar = mesesAnterioresPorMarcar(p.estructura.items, fechaDeJornada());
   }
 
+  const vista = recortarManoDeObraIndirecta(
+    { estructura: normalizarLegada(p.estructura), hallazgos: p.hallazgos, rechazados: p.rechazados },
+    sesion.rol,
+  );
   return {
     ...fila(p),
     obraId: p.obraId,
     version: p.version,
-    estructura: p.estructura,
-    hallazgos: p.hallazgos,
+    estructura: vista.estructura,
+    hallazgos: vista.hallazgos,
     resumen: p.resumen,
-    rechazados: p.rechazados,
+    rechazados: vista.rechazados,
     mesesCumplidos: p.mesesCumplidos,
     // RF-40: sin presupuesto vigente no hay uno más nuevo del que avisar.
     presupuestoDesactualizado: vigente !== undefined && vigente.id !== p.presupuestoId,
     mesesPorMarcar,
+    // Spec 045, RF-147 a RF-149, RF-152: el original solo si nació de un Excel y no hay recorte.
+    origen: p.origen,
+    copiadaDe: p.copiadaDe,
+    tieneExcel: p.mediaId !== null && !vista.recortada,
+    manoDeObraIndirectaRecortada: vista.recortada,
   };
+}
+
+/**
+ * RF-152: el Excel original trae la nómina del personal y no se puede recortar, así que al Director
+ * de Obra no se le entrega. Ve la mano de obra indirecta como total en la planificación.
+ */
+export function puedeBajarElExcelOriginal(sesion: PersonaEnSesion): boolean {
+  return !veSoloElTotalDeManoDeObraIndirecta(sesion.rol);
 }

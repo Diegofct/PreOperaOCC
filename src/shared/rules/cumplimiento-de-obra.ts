@@ -42,15 +42,27 @@
  *
  * `sinPlata` construye otro objeto con una lista de lo que sí puede salir, en vez de borrar lo que
  * no. Si mañana el informe gana un campo con un costo, al Residente no le llega por omisión.
+ *
+ * ── Los indirectos por concepto (spec 045) ──
+ *
+ * El total de indirectos del mes sigue saliendo de `indirectos`, igual que en la 043 (RF-157), y
+ * además se desglosa por concepto (RF-158) con la misma fracción por día. Una versión de la 043 solo
+ * tiene el total: sale como un único concepto «sin desglose». En una versión copiada de la 043, el
+ * renglón «Indirectos sin desglose» está guardado dentro de «otros costos indirectos» con una marca;
+ * aquí se separa por esa marca, para que no parezca que la obra gastó en «otros» lo que en realidad
+ * nadie desglosó.
  */
 import { diaDeLaSemana, esFestivo } from './festivos';
 import { sumarDias } from './jornada';
 import { diasDe, periodoDe } from './periodos';
 import {
+  CONCEPTOS_INDIRECTOS,
+  ESQUEMA_DE_PLANIFICACION,
   llaveDeItemPlanificado,
   llaveDelItem,
   rubrosDelMes,
   sinPrecioDeCosto,
+  type ConceptoIndirecto,
   type EstructuraDePlanificacion,
   type ItemDeLaPlanificacion,
   type ProgramacionDeRubros,
@@ -128,6 +140,22 @@ export function diasDeReparto(mes: string): string[] {
 // Vive en `planificacion.ts` desde la spec 044, que también la usa; aquí se sigue ofreciendo igual.
 export { llaveDeItemPlanificado };
 
+/** RF-158: los siete conceptos y, para lo que la 043 no desglosó, uno más. */
+export type ConceptoDelInforme = ConceptoIndirecto | 'sin_desglose';
+export const CONCEPTOS_DEL_INFORME: readonly ConceptoDelInforme[] = [...CONCEPTOS_INDIRECTOS, 'sin_desglose'];
+
+/** Como los nombra el Excel de OCC. Uno solo para pantalla, Excel y PDF (RF-158). */
+export const NOMBRE_DEL_CONCEPTO: Record<ConceptoDelInforme, string> = {
+  seguros_garantias: 'Seguros y garantías',
+  impuestos: 'Impuestos',
+  maquinaria_general: 'Maquinaria general de obra',
+  instalaciones_generales: 'Instalaciones generales',
+  varios: 'Varios',
+  mano_obra_indirecta: 'Mano de obra indirecta',
+  otros: 'Otros costos indirectos',
+  sin_desglose: 'Indirectos sin desglose',
+};
+
 export interface VersionMedible extends VersionAprobada {
   /** La cantidad programada: `llave → mes → cantidad`. */
   cantidades: ReadonlyMap<string, ReadonlyMap<string, number>>;
@@ -135,7 +163,42 @@ export interface VersionMedible extends VersionAprobada {
   precios: ReadonlyMap<string, { costo: number | null; contractual: number | null }>;
   /** `mes → pesos`. */
   indirectos: ReadonlyMap<string, number>;
+  /** RF-158: `concepto → mes → pesos`; solo los conceptos con algo. */
+  indirectosPorConcepto: ReadonlyMap<ConceptoDelInforme, ReadonlyMap<string, number>>;
   programacionDeRubros: ProgramacionDeRubros;
+}
+
+type ExtrasDeLaVersion = Partial<
+  Pick<EstructuraDePlanificacion, 'indirectos' | 'rubros' | 'lineaDeRubros' | 'esquema' | 'indirectosPorConcepto' | 'renglonesIndirectos'>
+>;
+
+/** RF-158: los indirectos del mes por concepto. La 043 solo tiene su total: «sin desglose». */
+function indirectosPorConceptoDe(extras: ExtrasDeLaVersion): Map<ConceptoDelInforme, Map<string, number>> {
+  const porConcepto = new Map<ConceptoDelInforme, Map<string, number>>();
+  const poner = (concepto: ConceptoDelInforme, mes: string, valor: number) => {
+    if (valor === 0) return;
+    const delConcepto = porConcepto.get(concepto) ?? new Map<string, number>();
+    delConcepto.set(mes, (delConcepto.get(mes) ?? 0) + valor);
+    porConcepto.set(concepto, delConcepto);
+  };
+  if (extras.esquema !== ESQUEMA_DE_PLANIFICACION || !extras.indirectosPorConcepto) {
+    for (const { mes, valor } of extras.indirectos ?? []) poner('sin_desglose', mes, valor);
+    return porConcepto;
+  }
+  // El renglón sin desglose está dentro de «otros»: sus meses fijados, sacados de ahí.
+  const sinDesglose = new Map<string, number>();
+  for (const renglon of extras.renglonesIndirectos ?? []) {
+    if (!renglon.sinDesglose || renglon.forma === 'porcentaje') continue;
+    for (const { mes, valor } of renglon.fijados) sinDesglose.set(mes, (sinDesglose.get(mes) ?? 0) + valor);
+  }
+  for (const concepto of CONCEPTOS_INDIRECTOS) {
+    for (const { mes, valor } of extras.indirectosPorConcepto[concepto] ?? []) {
+      const aparte = concepto === 'otros' ? Math.min(sinDesglose.get(mes) ?? 0, valor) : 0;
+      poner(concepto, mes, valor - aparte);
+      poner('sin_desglose', mes, aparte);
+    }
+  }
+  return porConcepto;
 }
 
 /** Una versión lista para medir. Solo cuenta lo programado con cantidad mayor que cero. */
@@ -145,7 +208,7 @@ export function versionMedible(
     ItemDeLaPlanificacion,
     'delPresupuesto' | 'grupo' | 'capitulo' | 'item' | 'programacion' | 'precioCosto' | 'precioContractual'
   >[],
-  extras: Partial<Pick<EstructuraDePlanificacion, 'indirectos' | 'rubros' | 'lineaDeRubros'>> = {},
+  extras: ExtrasDeLaVersion = {},
 ): VersionMedible {
   const cantidades = new Map<string, Map<string, number>>();
   const precios = new Map<string, { costo: number | null; contractual: number | null }>();
@@ -162,6 +225,7 @@ export function versionMedible(
     cantidades,
     precios,
     indirectos: new Map((extras.indirectos ?? []).map(({ mes, valor }) => [mes, valor])),
+    indirectosPorConcepto: indirectosPorConceptoDe(extras),
     programacionDeRubros: { rubros: extras.rubros ?? [], lineaDeRubros: extras.lineaDeRubros ?? null },
   };
 }
@@ -454,6 +518,8 @@ export interface ValoresDelPeriodo {
   avisoSinCosto: boolean;
   /** RF-83: solo en el mensual. */
   indirectos: number | null;
+  /** RF-158 (045): solo en el mensual; los conceptos con algo, en el orden del Excel. */
+  indirectosPorConcepto: { concepto: ConceptoDelInforme; valor: number }[] | null;
   /** RF-133: solo en el mensual. */
   rubros: { nombre: string; valor: number }[];
 }
@@ -560,6 +626,13 @@ export function valoresDelPeriodo(pedido: PedidoDeValores): ValoresDelPeriodo {
   const diferencia = totalEjecutado - totalProgramado;
 
   const indirectos = esMes ? Math.round(dias.reduce((suma, d) => suma + (d.version.indirectos.get(d.mes) ?? 0) * d.fraccion, 0)) : null;
+  // RF-158: con la misma fracción por día que el total; el total no sale de esta suma.
+  const indirectosPorConcepto = esMes
+    ? CONCEPTOS_DEL_INFORME.flatMap((concepto) => {
+        const valor = dias.reduce((suma, d) => suma + (d.version.indirectosPorConcepto.get(concepto)?.get(d.mes) ?? 0) * d.fraccion, 0);
+        return Math.round(valor) === 0 ? [] : [{ concepto, valor: Math.round(valor) }];
+      })
+    : null;
   const rubros = new Map<string, number>();
   if (esMes) {
     for (const { version, mes, fraccion } of dias) {
@@ -582,6 +655,7 @@ export function valoresDelPeriodo(pedido: PedidoDeValores): ValoresDelPeriodo {
     sinPrecioDeCosto: [...sinCosto.values()],
     avisoSinCosto,
     indirectos,
+    indirectosPorConcepto,
     rubros: [...rubros].map(([nombre, valor]) => ({ nombre, valor: Math.round(valor) })),
   };
 }
@@ -654,6 +728,8 @@ export interface InformeDeCumplimiento extends Omit<InformeEnCantidades, 'filas'
   sinPrecioDeCosto: ValoresDelPeriodo['sinPrecioDeCosto'];
   avisoSinCosto: boolean;
   indirectos: number | null;
+  /** RF-158 (045). */
+  indirectosPorConcepto: ValoresDelPeriodo['indirectosPorConcepto'];
   rubros: { nombre: string; valor: number }[];
 }
 
@@ -721,6 +797,7 @@ export function informeDeCumplimiento(pedido: PedidoDeInforme): InformeDeCumplim
     sinPrecioDeCosto: valores.sinPrecioDeCosto,
     avisoSinCosto: valores.avisoSinCosto,
     indirectos: valores.indirectos,
+    indirectosPorConcepto: valores.indirectosPorConcepto,
     rubros: valores.rubros,
   };
 }
