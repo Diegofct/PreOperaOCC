@@ -1,0 +1,6 @@
+DROP INDEX "ux_solicitud_compra_renglon_orden";--> statement-breakpoint
+ALTER TABLE "solicitud_compra_renglones" ADD COLUMN "reemplazado_en" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "solicitud_compra_renglones" ADD COLUMN "reemplazado_por_evento" text;--> statement-breakpoint
+ALTER TABLE "solicitud_compra_renglones" ADD CONSTRAINT "solicitud_compra_renglones_reemplazado_por_evento_solicitud_compra_eventos_id_fk" FOREIGN KEY ("reemplazado_por_evento") REFERENCES "public"."solicitud_compra_eventos"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "ux_solicitud_compra_renglon_orden" ON "solicitud_compra_renglones" USING btree ("solicitud_id","orden") WHERE "solicitud_compra_renglones"."reemplazado_en" is null;--> statement-breakpoint
+ALTER TABLE "solicitud_compra_renglones" ADD CONSTRAINT "ck_solicitud_compra_renglon_reemplazo" CHECK (("solicitud_compra_renglones"."reemplazado_en" is null) = ("solicitud_compra_renglones"."reemplazado_por_evento" is null));

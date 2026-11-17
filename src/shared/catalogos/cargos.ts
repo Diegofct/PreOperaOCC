@@ -136,6 +136,13 @@ export const CARGOS = [
     rolSugerido: 'auxiliar_administrativa',
     operaVehiculos: false,
   },
+  // Spec 046, RF-57: el último paso de la cadena de las requisiciones de obra y de GeoLab.
+  {
+    id: 'administradora_elemental',
+    nombre: 'Administradora de Elemental',
+    rolSugerido: 'administradora_elemental',
+    operaVehiculos: false,
+  },
 ] as const satisfies readonly DefinicionCargo[];
 
 export type Cargo = (typeof CARGOS)[number]['id'];

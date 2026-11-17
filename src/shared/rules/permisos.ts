@@ -58,6 +58,11 @@ export const ROLES = [
   // adscrito a ninguna; el Director de Obra, las que tiene asignadas, una o varias.
   'director_proyectos',
   'director_obra',
+  // Spec 046, RF-57 a RF-61: último paso de la cadena de las requisiciones de obra y de GeoLab;
+  // aprueba, devuelve, rechaza, cancela, registra las compras y anula. En Elemental lleva lo
+  // mismo que la Auxiliar Administrativa, que desde la 046 solo paga. Es un rol y no un cargo
+  // porque cambia lo que alguien puede hacer.
+  'administradora_elemental',
 ] as const;
 export type Rol = (typeof ROLES)[number];
 
@@ -79,6 +84,7 @@ export const ETIQUETA_ROL: Record<Rol, string> = {
   auxiliar_administrativa: 'Auxiliar Administrativa',
   director_proyectos: 'Director de Proyectos',
   director_obra: 'Director de Obra',
+  administradora_elemental: 'Administradora de Elemental',
 };
 
 /** Los módulos del panel, en el orden en que se muestran. */
@@ -139,6 +145,9 @@ export const MODULOS_DE_EMPRESA = [
   'cumplimiento',
   // Spec 044. Solo en el menú de una obra, como los dos de arriba.
   'plan_semanal',
+  // Spec 046, RF-47: la bandeja de Elemental donde se aprueban las requisiciones del grupo. Aparte
+  // de `compras` y `tesoreria` porque la Auxiliar entra a esos dos para pagar y no aprueba (RF-84).
+  'aprobaciones',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -233,6 +242,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver'],
     director_proyectos: ['ver'],
+    administradora_elemental: NADA,
   },
   obras: {
     admin: ['ver', 'listar', 'escribir'],
@@ -245,6 +255,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar'],
     director_obra: NADA,
     director_proyectos: ['ver', 'listar', 'escribir'],
+    administradora_elemental: ['ver', 'listar'],
   },
   personas: {
     admin: ['ver', 'listar', 'escribir', 'activar'],
@@ -257,6 +268,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar', 'escribir'],
     director_obra: ['ver', 'listar', 'escribir', 'activar'],
     director_proyectos: ['ver', 'listar', 'escribir', 'activar'],
+    administradora_elemental: ['ver', 'listar', 'escribir'],
   },
   vehiculos: {
     admin: ['ver', 'listar', 'escribir'],
@@ -269,6 +281,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['listar'],
     director_proyectos: ['ver', 'listar', 'escribir'],
+    administradora_elemental: NADA,
   },
   asignaciones: {
     admin: ['ver', 'listar', 'escribir'],
@@ -281,6 +294,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir'],
     director_proyectos: ['ver', 'listar', 'escribir'],
+    administradora_elemental: NADA,
   },
   bitacoras: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -294,6 +308,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
+    administradora_elemental: NADA,
   },
   preoperacionales: {
     // Anular es corregir evidencia firmada por otro: hasta la 041 era solo de la gerencia;
@@ -309,6 +324,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'anular'],
     director_proyectos: ['ver', 'listar', 'anular'],
+    administradora_elemental: NADA,
   },
   // El residente consulta el almacén y la cantera de su obra, pero no registra ni
   // anula (spec 008, RF-12 y RF-13): es el trabajo de otro oficio.
@@ -334,6 +350,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'anular', 'importar'],
     director_proyectos: ['ver', 'listar', 'escribir', 'anular', 'importar'],
+    administradora_elemental: NADA,
   },
   cantera: {
     admin: ['ver', 'listar', 'escribir', 'anular'],
@@ -346,6 +363,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
+    administradora_elemental: NADA,
   },
   // Spec 018. El laboratorista registra, envía y descarta —todo eso es escribir—,
   // pero no aprueba ni anula (RF-92): quien hace el ensayo no es quien lo da por
@@ -363,6 +381,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'aprobar', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    administradora_elemental: NADA,
   },
   // Spec 021. La bandeja de WhatsApp es del residente y de la gerencia (RF-14,
   // RF-15): corregir es escribir, y aprobar crea registros en la bitácora y en
@@ -381,6 +400,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir', 'aprobar'],
     director_proyectos: ['ver', 'listar', 'escribir', 'aprobar'],
+    administradora_elemental: NADA,
   },
   // Spec 030, RF-1 y RF-2. Los reportes son de la gerencia y del residente; escribir es
   // registrar o resolver un mantenimiento, y anularlo va aparte desde la 041: el residente
@@ -397,6 +417,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'anular'],
+    administradora_elemental: NADA,
   },
   // Spec 031, RF-2 y RF-3. El residente arma los borradores de su obra —contrato,
   // pólizas, documentos, presupuesto y versiones—, pero **aprobar es de la gerencia y del
@@ -414,6 +435,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    administradora_elemental: NADA,
   },
   // Spec 028, RF-1, RF-2 y RF-59. Lo usan los roles del panel; lo que alcanza cada
   // uno lo decide `alcanceDelAsistente` (rules/asistente.ts) con sus módulos y su obra.
@@ -431,6 +453,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar'],
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar'],
+    administradora_elemental: ['ver', 'listar'],
   },
   // Spec 033, RF-32. Los datos de la empresa y de la obra: solo la gerencia, que es la que
   // los conoce y la única que ve las tarjetas. Los demás roles siguen con lo de hoy (RF-21).
@@ -445,6 +468,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: NADA,
     director_proyectos: NADA,
+    administradora_elemental: NADA,
   },
   // Spec 033, RF-34, RF-39 y RF-44. Los cortes financieros y el consolidado: solo la
   // gerencia. `anular` es anular un corte con su motivo; no hay corregir (RF-40).
@@ -462,6 +486,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
     director_obra: NADA,
     director_proyectos: NADA,
+    administradora_elemental: ['ver', 'listar', 'escribir', 'anular'],
   },
   // Cambio del 2026-10-27 (menús definitivos). Recursos Humanos lo lleva Elemental; el
   // residente consulta el de su obra (spec 035).
@@ -479,6 +504,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar'],
+    administradora_elemental: ['ver', 'listar', 'escribir', 'anular'],
   },
   // Compras y Tesorería de Elemental: donde se aprueban las solicitudes del grupo (RF-51).
   // Spec 036, RF-5: la gerencia además registra y anula las compras.
@@ -490,10 +516,13 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
-    // Spec 040, RF-4, RF-5: aprueba, registra y anula como la gerencia (D2: sin tope).
-    auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
+    // Spec 046, RF-62, RF-63: ya no aprueba, ni registra ni anula compras. Entra para consultar y,
+    // con `listar`, marcar lo recibido (RF-85). Hasta la 046 tenía lo mismo que la gerencia (040).
+    auxiliar_administrativa: ['ver', 'listar'],
     director_obra: NADA,
     director_proyectos: NADA,
+    // Spec 046, RF-39, RF-55, RF-66: aprueba las anteriores y las de OCC, registra y anula compras.
+    administradora_elemental: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
   },
   tesoreria: {
     admin: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
@@ -503,10 +532,12 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     encargado_planta: NADA,
     laboratorista: NADA,
     encargado_occ: NADA,
-    // Spec 040, RF-6.
-    auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
+    // Spec 046, RF-41, RF-42, RF-62: registra los pagos y nada más; no aprueba ni anula pagos.
+    auxiliar_administrativa: ['ver', 'listar', 'escribir'],
     director_obra: NADA,
     director_proyectos: NADA,
+    // Spec 046, RF-41, RF-42: aprueba las anteriores y las de OCC, paga y anula pagos.
+    administradora_elemental: ['ver', 'listar', 'escribir', 'anular', 'aprobar'],
   },
   // Spec 034, RF-4 a RF-10. Cada quien ve y sube los de lo suyo —el residente, los de su
   // obra; el laboratorista, los de Geolab; el Encargado de OCC, los de OCC—, y la gerencia
@@ -526,6 +557,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver', 'listar', 'escribir', 'anular'],
     director_obra: ['ver', 'listar', 'escribir'],
     director_proyectos: ['ver', 'listar', 'escribir'],
+    administradora_elemental: ['ver', 'listar', 'escribir', 'anular'],
   },
   // El acceso directo a LicitApp (RF-49): el permiso es solo verlo en el menú.
   licitaciones: {
@@ -539,6 +571,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: ['ver'],
     director_obra: NADA,
     director_proyectos: NADA,
+    administradora_elemental: ['ver'],
   },
   // Pedir compras y pagos (RF-51): el residente y el almacenista en su obra, el
   // laboratorista en Geolab y la gerencia en nombre de OCC, Geolab o cualquier obra.
@@ -553,6 +586,8 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir'],
     director_proyectos: ['ver', 'listar', 'escribir'],
+    // Spec 046, RF-2, RF-3, RF-8: ve las requisiciones de todos los lugares y no pide.
+    administradora_elemental: ['ver', 'listar'],
   },
   /*
    * Spec 038 (RF-18, RF-20, RF-29). La Bitácora de una empresa, aparte de `bitacoras`:
@@ -572,6 +607,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: NADA,
     director_proyectos: NADA,
+    administradora_elemental: NADA,
   },
   // Spec 043, RF-1, RF-36, RF-48, RF-86. La suben, la aprueban y la anulan el Director de
   // Proyectos y la Gerencia; el Director de Obra la consulta en sus obras y baja su Excel (RF-50).
@@ -587,6 +623,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    administradora_elemental: NADA,
   },
   // Spec 043, RF-87, RF-88, RF-90. El informe es de consulta. Quién ve la plata no se decide
   // aquí: al Residente el servidor le arma otro informe, solo con cantidades y porcentajes.
@@ -601,6 +638,7 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar'],
     director_proyectos: ['ver', 'listar'],
+    administradora_elemental: NADA,
   },
   // Spec 044, RF-54, RF-59. Lo arman la Gerencia, los dos directores y el Residente; aprobar y anular
   // no son del Residente. Quién aprueba qué plan depende además de quién lo creó (RF-56 a RF-58):
@@ -616,6 +654,23 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     auxiliar_administrativa: NADA,
     director_obra: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
     director_proyectos: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    administradora_elemental: NADA,
+  },
+  // Spec 046, RF-47, RF-83: la bandeja de Elemental. La ven quienes aprueban en el último paso.
+  aprobaciones: {
+    admin: ['ver', 'listar', 'aprobar'],
+    residente: NADA,
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    // Spec 046, RF-92 (cambio del 17-nov): la Auxiliar ve Requisiciones de Elemental para marcar
+    // lo recibido, sin aprobar.
+    auxiliar_administrativa: ['ver', 'listar'],
+    director_proyectos: NADA,
+    director_obra: NADA,
+    administradora_elemental: ['ver', 'listar', 'aprobar'],
   },
 };
 
@@ -680,6 +735,9 @@ const PUEDE_DAR: Record<Rol, readonly Rol[]> = {
   auxiliar_administrativa: ['operador'],
   director_proyectos: [...ACCESOS_DE_OBRA, 'director_obra'],
   director_obra: ACCESOS_DE_OBRA,
+  // Spec 046, RF-58, RF-60, RF-61: como la Auxiliar, registra personas sin acceso al panel; su
+  // propio acceso solo lo da la gerencia (`admin: ROLES`).
+  administradora_elemental: ['operador'],
 };
 
 /** ¿Puede dar este acceso a alguien? */
@@ -811,6 +869,12 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
     ver: 'ver el cumplimiento de la obra',
     listar: 'ver el cumplimiento de la obra',
   },
+  // Spec 046.
+  aprobaciones: {
+    ver: 'ver las requisiciones por aprobar',
+    listar: 'ver las requisiciones por aprobar',
+    aprobar: 'aprobar requisiciones en el último paso',
+  },
   // Spec 044.
   plan_semanal: {
     ver: 'ver el plan semanal de la obra',
@@ -833,6 +897,7 @@ const QUIEN_ES: Record<Rol, string> = {
   auxiliar_administrativa: 'la auxiliar administrativa',
   director_proyectos: 'el director de proyectos',
   director_obra: 'el director de obra',
+  administradora_elemental: 'la administradora de Elemental',
 };
 
 /**
@@ -869,6 +934,8 @@ export function rolVeTodasLasObras(rol: Rol): boolean {
     rol === 'admin' ||
     rol === 'encargado_occ' ||
     rol === 'auxiliar_administrativa' ||
+    // Spec 046: lleva las requisiciones de todas las obras y de GeoLab.
+    rol === 'administradora_elemental' ||
     // Spec 041, RF-5: responde por todas las obras, sin que se le asigne ninguna.
     rol === 'director_proyectos'
   );
@@ -933,6 +1000,7 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   planificacion: 'Planificación',
   cumplimiento: 'Cumplimiento de obra',
   plan_semanal: 'Plan semanal',
+  aprobaciones: 'Requisiciones por aprobar',
 };
 
 /**
@@ -970,6 +1038,7 @@ const MODULO_DEL_ROL: Record<Rol, Modulo | null> = {
   auxiliar_administrativa: null,
   director_proyectos: null,
   director_obra: null,
+  administradora_elemental: null,
 };
 
 /**

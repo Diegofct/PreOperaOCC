@@ -41,7 +41,8 @@ export type LugarDelCorte = { empresaId: EmpresaId; obraId?: undefined } | { obr
  * `alcanzaLaEmpresa` en Documentos. Partir `finanzas` en dos módulos habría duplicado cada fila.
  */
 export function porQueNoPuedeTocarElCorte(rol: Rol, lugar: LugarDelCorte): string | null {
-  if (rol !== 'auxiliar_administrativa') return null;
+  // Spec 046, RF-60: la Administradora de Elemental, lo mismo que la Auxiliar.
+  if (rol !== 'auxiliar_administrativa' && rol !== 'administradora_elemental') return null;
   if (lugar.empresaId === 'elemental') return null;
   const de = lugar.empresaId ? nombreDeEmpresa(lugar.empresaId) : 'las obras';
   return `Solo la gerencia registra o anula los cortes de ${de}.`;

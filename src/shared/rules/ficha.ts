@@ -122,9 +122,12 @@ export function faltasDeFichaCompleta(
   return CAMPOS_DE_LA_FICHA_COMPLETA.filter(([campo]) => !ficha?.[campo]?.trim()).map(([, nombre]) => nombre);
 }
 
-/** ¿Este rol ve y cambia el salario? (RF-13; 040/D4): la gerencia y la Auxiliar Administrativa. */
+/**
+ * ¿Este rol ve y cambia el salario? (RF-13; 040/D4): la gerencia y la Auxiliar Administrativa;
+ * desde la 046 (RF-60), también la Administradora de Elemental.
+ */
 export function veElSalario(rol: Rol): boolean {
-  return rol === 'admin' || rol === 'auxiliar_administrativa';
+  return rol === 'admin' || rol === 'auxiliar_administrativa' || rol === 'administradora_elemental';
 }
 
 /**

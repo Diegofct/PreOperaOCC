@@ -9,6 +9,11 @@
  * solicitud, porque son suyos (`?solicitudId=`): si uno falla, la solicitud ya quedó y se
  * dice cuál no subió. Al almacenista no se le ofrece el valor estimado ni las clases con
  * precio (RF-31): no los vería después.
+ *
+ * Spec 046: con `requisicion` es una requisición de compra de una obra o de GeoLab. Cada renglón
+ * pide para cuándo y para qué (RF-10, RF-11); la cabecera ya no pide fecha —es la más cercana de
+ * los renglones— y su «para qué» pasa a ser una nota general opcional (RF-9). Se crea por
+ * Requisiciones y, devuelta, se corrige por la ruta de la 036, que la vuelve a la cadena.
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -16,6 +21,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
+import type { LugarDeRequisiciones } from '@/features/panel/requisiciones';
 import {
   AccionesFormulario,
   Aviso,
@@ -46,9 +52,12 @@ interface RenglonEscrito {
   cantidad: string;
   unidad: string;
   materialId: string | null;
+  /** Spec 046: en una requisición, para cuándo y para qué es este renglón. */
+  necesitaEl: string;
+  paraQue: string;
 }
 
-const RENGLON_VACIO: RenglonEscrito = { descripcion: '', cantidad: '', unidad: '', materialId: null };
+const RENGLON_VACIO: RenglonEscrito = { descripcion: '', cantidad: '', unidad: '', materialId: null, necesitaEl: '', paraQue: '' };
 
 /** «2,5» y «2.5» son lo mismo; vacío no es cero, es que falta. */
 const aNumero = (texto: string) => (texto.trim() ? Number(texto.trim().replace(',', '.')) : Number.NaN);
@@ -61,8 +70,11 @@ export function FormularioDeSolicitud({
   inicial,
   alCerrar,
   alGuardar,
+  requisicion = false,
 }: {
   lugar: LugarDeLasSolicitudes;
+  /** Spec 046: es una requisición de compra (fecha y para qué por renglón). */
+  requisicion?: boolean;
   /** Para corregir: la solicitud como está, con su versión. Sin ella, es una nueva. */
   inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitud };
   alCerrar: () => void;
@@ -75,7 +87,12 @@ export function FormularioDeSolicitud({
 
   const [renglones, setRenglones] = useState<RenglonEscrito[]>(
     inicial
-      ? inicial.datos.renglones.map((r) => ({ ...r, cantidad: String(r.cantidad).replace('.', ',') }))
+      ? inicial.datos.renglones.map((r) => ({
+          ...r,
+          cantidad: String(r.cantidad).replace('.', ','),
+          necesitaEl: r.necesitaEl ?? '',
+          paraQue: r.paraQue ?? '',
+        }))
       : [RENGLON_VACIO],
   );
   const [paraCuando, setParaCuando] = useState(inicial?.datos.paraCuando ?? '');
@@ -99,6 +116,7 @@ export function FormularioDeSolicitud({
       cantidad: aNumero(r.cantidad),
       unidad: r.unidad,
       materialId: r.materialId,
+      ...(requisicion ? { necesitaEl: r.necesitaEl || null, paraQue: r.paraQue } : {}),
     })),
     paraCuando,
     urgente,
@@ -106,12 +124,12 @@ export function FormularioDeSolicitud({
     proveedorSugerido: proveedor,
     valorEstimado: conValores ? aPesos(valor) : null,
   };
-  const faltas = faltasPorCampo(datos);
+  const faltas = faltasPorCampo(datos, undefined, { requisicion });
   const hayFaltas =
     faltas.renglones !== null ||
     faltas.paraCuando !== null ||
     faltas.valorEstimado !== null ||
-    faltas.porRenglon.some((r) => r.descripcion || r.cantidad || r.unidad) ||
+    faltas.porRenglon.some((r) => r.descripcion || r.cantidad || r.unidad || r.necesitaEl || r.paraQue) ||
     adjuntos.some((a) => !a.clase);
   const ver = (falta: string | null) => (intentado ? (falta ?? undefined) : undefined);
 
@@ -154,6 +172,23 @@ export function FormularioDeSolicitud({
       if (inicial) {
         await api.compras.corregir(inicial.id, { ...datos, version: inicial.version });
         guardada = { id: inicial.id, codigo: inicial.codigo };
+      } else if (requisicion) {
+        // Spec 046: por Requisiciones, con la nota general en la cabecera.
+        guardada = await api.requisiciones.crear(lugar as LugarDeRequisiciones, {
+          tipo: 'compra',
+          urgente,
+          nota: paraQue,
+          proveedorSugerido: proveedor,
+          valorEstimado: datos.valorEstimado,
+          renglones: renglones.map((r) => ({
+            descripcion: r.descripcion,
+            cantidad: aNumero(r.cantidad),
+            unidad: r.unidad,
+            materialId: r.materialId,
+            necesitaEl: r.necesitaEl,
+            paraQue: r.paraQue,
+          })),
+        });
       } else {
         guardada = await api.compras.crear(lugar, datos);
       }
@@ -177,12 +212,17 @@ export function FormularioDeSolicitud({
       }
     }
     setEnviando(false);
-    const hecho = inicial ? `Solicitud ${guardada.codigo} corregida y enviada otra vez.` : `Solicitud ${guardada.codigo} enviada.`;
+    const cual = requisicion ? 'Requisición' : 'Solicitud';
+    const hecho = inicial ? `${cual} ${guardada.codigo} corregida y enviada otra vez.` : `${cual} ${guardada.codigo} enviada.`;
     alGuardar(sinSubir.length ? `${hecho} No se pudo adjuntar: ${sinSubir.join(', ')}.` : hecho);
   }
 
   return (
-    <Modal titulo={inicial ? `Corregir ${inicial.codigo}` : 'Nueva solicitud de compra'} onCerrar={alCerrar} amplia>
+    <Modal
+      titulo={inicial ? `Corregir ${inicial.codigo}` : requisicion ? 'Nueva requisición de compra' : 'Nueva solicitud de compra'}
+      onCerrar={alCerrar}
+      amplia
+    >
       <Text style={estilos.subtitulo}>Qué se necesita</Text>
       {renglones.map((r, i) => {
         const f = faltas.porRenglon[i];
@@ -226,6 +266,26 @@ export function FormularioDeSolicitud({
               ayuda={i === 0 ? 'Bulto, kg, m3, caja, u…' : undefined}
               ancho={130}
             />
+            {requisicion ? (
+              <>
+                <CampoDeFecha
+                  etiqueta="Para cuándo *"
+                  valor={r.necesitaEl}
+                  onChange={(v) => cambiarRenglon(i, { necesitaEl: v })}
+                  min={fechaDeJornada()}
+                  error={ver(f?.necesitaEl ? (r.necesitaEl ? 'No puede ser antes de hoy.' : 'Diga para cuándo.') : null)}
+                />
+                <Campo
+                  etiqueta="Para qué"
+                  obligatorio
+                  valor={r.paraQue}
+                  onChange={(v) => cambiarRenglon(i, { paraQue: v })}
+                  error={ver(f?.paraQue ? 'Diga para qué.' : null)}
+                  ayuda={i === 0 ? 'Por ejemplo: andenes del K2.' : undefined}
+                  ancho={240}
+                />
+              </>
+            ) : null}
             {renglones.length > 1 ? (
               <Boton titulo="Quitar" tono="secundario" onPress={() => setRenglones((todos) => todos.filter((_, j) => j !== i))} />
             ) : null}
@@ -237,20 +297,29 @@ export function FormularioDeSolicitud({
         <Boton titulo="Agregar renglón" tono="secundario" onPress={() => setRenglones((todos) => [...todos, RENGLON_VACIO])} />
       </View>
 
-      <Text style={estilos.subtitulo}>Para cuándo y para qué</Text>
+      <Text style={estilos.subtitulo}>{requisicion ? 'Urgencia y nota' : 'Para cuándo y para qué'}</Text>
       <View style={estilos.fila}>
-        <CampoDeFecha
-          etiqueta="Para cuándo *"
-          valor={paraCuando}
-          onChange={setParaCuando}
-          min={fechaDeJornada()}
-          error={ver(faltas.paraCuando)}
-        />
+        {requisicion ? null : (
+          <CampoDeFecha
+            etiqueta="Para cuándo *"
+            valor={paraCuando}
+            onChange={setParaCuando}
+            min={fechaDeJornada()}
+            error={ver(faltas.paraCuando)}
+          />
+        )}
         <View style={estilos.casilla}>
           <Casilla etiqueta="Es urgente" marcada={urgente} onChange={setUrgente} />
         </View>
       </View>
-      <Campo etiqueta="Para qué" valor={paraQue} onChange={setParaQue} multilinea compacto ayuda="Por ejemplo: fundir la placa del segundo piso." />
+      <Campo
+        etiqueta={requisicion ? 'Nota general' : 'Para qué'}
+        valor={paraQue}
+        onChange={setParaQue}
+        multilinea
+        compacto
+        ayuda={requisicion ? 'Opcional: lo que valga para toda la requisición.' : 'Por ejemplo: fundir la placa del segundo piso.'}
+      />
       <View style={estilos.fila}>
         <Campo etiqueta="Proveedor sugerido" valor={proveedor} onChange={setProveedor} ayuda="Opcional." ancho={280} />
         {conValores ? (
@@ -295,7 +364,7 @@ export function FormularioDeSolicitud({
       <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
         <Boton
-          titulo={enviando ? 'Enviando…' : inicial ? 'Corregir y enviar' : 'Enviar solicitud'}
+          titulo={enviando ? 'Enviando…' : inicial ? 'Corregir y enviar' : requisicion ? 'Enviar requisición' : 'Enviar solicitud'}
           onPress={enviar}
           deshabilitado={enviando}
         />

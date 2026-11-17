@@ -6,6 +6,9 @@
  * intento, y los adjuntos (la cuenta de cobro, la factura, el RUT, la certificación
  * bancaria) se suben después de guardar, porque son de la solicitud. El comprobante de pago
  * no se ofrece aquí: lo sube Tesorería al pagar.
+ *
+ * Spec 046: con `requisicion` es una requisición de pago de una obra o de GeoLab: los mismos
+ * campos (RF-14), creada por Requisiciones.
  */
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -13,6 +16,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
+import type { LugarDeRequisiciones } from '@/features/panel/requisiciones';
 import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Casilla, Modal, Selector } from '@/features/panel/componentes';
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, clasesDe, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -29,8 +33,11 @@ export function FormularioDePago({
   inicial,
   alCerrar,
   alGuardar,
+  requisicion = false,
 }: {
   lugar: LugarDeLasSolicitudes;
+  /** Spec 046: es una requisición de pago. */
+  requisicion?: boolean;
   /** Para corregir: la solicitud como está, con su versión. Sin ella, es una nueva. */
   inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitudDePago };
   alCerrar: () => void;
@@ -87,7 +94,9 @@ export function FormularioDePago({
         await api.tesoreria.corregir(inicial.id, { ...datos, version: inicial.version });
         guardada = { id: inicial.id, codigo: inicial.codigo };
       } else {
-        guardada = await api.tesoreria.crear(lugar, datos);
+        guardada = requisicion
+          ? await api.requisiciones.crear(lugar as LugarDeRequisiciones, { tipo: 'pago', ...datos })
+          : await api.tesoreria.crear(lugar, datos);
       }
     } catch (fallo) {
       setError(mensajeDe(fallo));
@@ -116,12 +125,17 @@ export function FormularioDePago({
       }
     }
     setEnviando(false);
-    const hecho = inicial ? `Solicitud ${guardada.codigo} corregida y enviada otra vez.` : `Solicitud ${guardada.codigo} enviada.`;
+    const cual = requisicion ? 'Requisición' : 'Solicitud';
+    const hecho = inicial ? `${cual} ${guardada.codigo} corregida y enviada otra vez.` : `${cual} ${guardada.codigo} enviada.`;
     alGuardar(sinSubir.length ? `${hecho} No se pudo adjuntar: ${sinSubir.join(', ')}.` : hecho);
   }
 
   return (
-    <Modal titulo={inicial ? `Corregir ${inicial.codigo}` : 'Nueva solicitud de pago'} onCerrar={alCerrar} amplia>
+    <Modal
+      titulo={inicial ? `Corregir ${inicial.codigo}` : requisicion ? 'Nueva requisición de pago' : 'Nueva solicitud de pago'}
+      onCerrar={alCerrar}
+      amplia
+    >
       <View style={estilos.fila}>
         <Campo etiqueta="A quién se le paga" obligatorio valor={beneficiario} onChange={setBeneficiario} error={ver(faltas.beneficiario)} ancho={320} />
         <Campo etiqueta="NIT o cédula" valor={documento} onChange={setDocumento} ayuda="Opcional." ancho={200} />
@@ -183,7 +197,11 @@ export function FormularioDePago({
       {intentado && hayFaltas ? <Aviso tono="error">Revise lo marcado en rojo.</Aviso> : null}
       <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-        <Boton titulo={enviando ? 'Enviando…' : inicial ? 'Corregir y enviar' : 'Enviar solicitud'} onPress={enviar} deshabilitado={enviando} />
+        <Boton
+          titulo={enviando ? 'Enviando…' : inicial ? 'Corregir y enviar' : requisicion ? 'Enviar requisición' : 'Enviar solicitud'}
+          onPress={enviar}
+          deshabilitado={enviando}
+        />
       </AccionesFormulario>
     </Modal>
   );

@@ -1,6 +1,5 @@
-import { solicitudDePagoPedida } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
+import { ok, responder } from '@/features/servidor/respuestas';
 import {
   crearSolicitudDePago,
   lugarDeLosPagos,
@@ -30,12 +29,8 @@ export async function POST(peticion: Request) {
     const sesion = await requerirPermiso(peticion, 'solicitudes', 'escribir');
     if (sesion instanceof Response) return sesion;
 
-    const lugar = await lugarDeLosPagos(sesion, lugarDeLaPeticion(peticion));
-    if (lugar instanceof Response) return lugar;
-
-    const pedido = await cuerpoJson(peticion, solicitudDePagoPedida);
-    const resultado = await crearSolicitudDePago(sesion, lugar, pedido);
-    return resultado instanceof Response ? resultado : ok(resultado, 201);
+    // Spec 046 (RF-86): ya no se crean SP; se pide con una requisición.
+    return crearSolicitudDePago();
   });
 }
 

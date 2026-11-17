@@ -14,12 +14,14 @@
  * Módulo puro —solo Zod— para que lo importen las dos mitades sin arrastrar nada
  * de una a la otra.
  */
+import type { RequisicionEnElDetalle } from '@/features/panel/requisiciones';
 import { z } from 'zod';
 
 import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
 import type { CatalogoDeActividades } from '@/shared/rules/actividades-de-obra';
 import type { EstadoDeSolicitud, PasoDeSolicitud } from '@/shared/rules/compras';
 import type { EstadoDePago, PasoDePago } from '@/shared/rules/pagos';
+import { cambiaDeClaseAlCorregir, NO_CAMBIA_DE_CLASE } from '@/shared/rules/requisiciones';
 import type { ValoresDelCorte } from '@/shared/rules/cortes';
 import type { AvisoDeVencimiento } from '@/shared/rules/documentos';
 import type { AvisoDePersona, DatosDeLaFicha, ResumenDelPersonal } from '@/shared/rules/ficha';
@@ -3483,10 +3485,25 @@ export const solicitudPedida = z.object({
           .max(64)
           .nullish()
           .transform((v) => (v ? v : null)),
+        // Spec 046, RF-10: en una requisición, la fecha y el para qué de cada renglón. Opcionales
+        // aquí porque una SC de antes no los lleva; los exige la regla para una RQ.
+        necesitaEl: z
+          .string()
+          .trim()
+          .max(20)
+          .nullish()
+          .transform((v) => (v ? v : null)),
+        paraQue: z
+          .string()
+          .trim()
+          .max(500)
+          .nullish()
+          .transform((v) => (v ? v : null)),
       }),
     )
     .max(100),
-  paraCuando: z.string().trim().max(20),
+  // En una RQ es la fecha más cercana de los renglones; la pone el servidor.
+  paraCuando: z.string().trim().max(20).default(''),
   urgente: z.boolean().default(false),
   paraQue: z.string().trim().max(1000).default(''),
   proveedorSugerido: z.string().trim().max(200).default(''),
@@ -3536,9 +3553,14 @@ export interface SolicitudesDelLugar {
 }
 
 /** Corregir una solicitud enviada o devuelta (RF-11): la misma forma, con su versión. */
-export const solicitudCorregida = solicitudPedida.extend({ version: z.number().int().min(1) });
+const solicitudDeCompraCorregida = solicitudPedida.extend({ version: z.number().int().min(1) });
 
-export type SolicitudCorregida = z.input<typeof solicitudCorregida>;
+/** Spec 046 (RF-78): primero, que la corrección sea de compra; si no, lo dice antes que cualquier otra falta. */
+export const solicitudCorregida = z
+  .custom<unknown>((cuerpo) => !cambiaDeClaseAlCorregir('compra', cuerpo), { error: NO_CAMBIA_DE_CLASE })
+  .pipe(solicitudDeCompraCorregida);
+
+export type SolicitudCorregida = z.input<typeof solicitudDeCompraCorregida>;
 
 /**
  * Un paso sobre la solicitud (RF-11, RF-13 a RF-15). `cantidades`, solo al aprobar: las que
@@ -3574,6 +3596,9 @@ export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones'
     unidad: string;
     /** La suma de lo recibido (RF-20). */
     recibido: number;
+    /** Spec 046, RF-10: en una requisición, para cuándo y para qué. */
+    necesitaEl: string | null;
+    paraQue: string | null;
   }[];
   compras: {
     id: string;
@@ -3600,6 +3625,8 @@ export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones'
   }[];
   historia: { paso: string; motivo: string | null; cambios: unknown[]; por: string; en: string }[];
   pasos: PasoDeSolicitud[];
+  /** Spec 046: si es una requisición, su número RQ, su estado y su cadena. */
+  requisicion?: RequisicionEnElDetalle;
 }
 
 /**
@@ -3712,9 +3739,14 @@ export interface SolicitudesDePagoDelLugar {
 }
 
 /** Corregir una solicitud de pago enviada o devuelta (RF-9): la misma forma, con su versión. */
-export const solicitudDePagoCorregida = solicitudDePagoPedida.extend({ version: z.number().int().min(1) });
+const solicitudDePagoDeSuClase = solicitudDePagoPedida.extend({ version: z.number().int().min(1) });
 
-export type SolicitudDePagoCorregida = z.input<typeof solicitudDePagoCorregida>;
+/** Spec 046 (RF-78): primero, que la corrección sea de pago; si no, lo dice antes que cualquier otra falta. */
+export const solicitudDePagoCorregida = z
+  .custom<unknown>((cuerpo) => !cambiaDeClaseAlCorregir('pago', cuerpo), { error: NO_CAMBIA_DE_CLASE })
+  .pipe(solicitudDePagoDeSuClase);
+
+export type SolicitudDePagoCorregida = z.input<typeof solicitudDePagoDeSuClase>;
 
 /** Un paso sobre la solicitud de pago (RF-9, RF-11, RF-12). `valorAprobado`, solo al aprobar por menos. */
 export const pasoDePagoPedido = z.object({
@@ -3751,6 +3783,8 @@ export interface SolicitudDePagoDetallada extends Omit<SolicitudDePagoEnElLugar,
   pagos?: PagoRegistrado[];
   historia: { paso: string; motivo: string | null; cambios: unknown[]; por: string; en: string }[];
   pasos: PasoDePago[];
+  /** Spec 046: si es una requisición, su número RQ, su estado y su cadena. */
+  requisicion?: RequisicionEnElDetalle;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
 import { personaEditada } from '@/features/panel/contratos';
 import { alcanzaLaObra, veTodasLasObras } from '@/features/servidor/alcance';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { reacomodarTodo } from '@/features/requisiciones/servidor/requisiciones';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import {
   cuerpoJson,
@@ -199,6 +200,9 @@ export async function PATCH(peticion: Request, { id }: { id: string }) {
         : []),
     ]);
 
+    // Spec 046, RF-71: si dejó vacío un paso de la cadena (cargo, activo u obra), lo que lo esperaba pasa al siguiente.
+    await reacomodarTodo(sesion.id);
+
     const [fila] = await db
       .select(COLUMNAS)
       .from(usuarios)
@@ -279,6 +283,8 @@ export async function DELETE(peticion: Request, { id }: { id: string }) {
     ]);
 
     const [fila] = dada;
+    // Spec 046, RF-71: una baja puede dejar vacío un paso de la cadena.
+    if (fila) await reacomodarTodo(sesion.id);
     return fila ? ok(fila) : noEncontrado('esa persona');
   });
 }

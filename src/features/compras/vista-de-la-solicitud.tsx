@@ -34,8 +34,10 @@ import {
 import type { SolicitudDetallada } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
+import { BotonesDeDecision, CadenaDeLaRequisicionVista } from '@/features/requisiciones/cadena-y-decision';
 import { veLosValores } from '@/shared/rules/compras';
 import { NOMBRE_DEL_PAGO_DE_LA_COMPRA, pagoDeLaCompra } from '@/shared/rules/pagos';
+import { separarElPaso, textoDelEventoDeLaCadena } from '@/shared/rules/requisiciones';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
@@ -54,7 +56,10 @@ const cantidad = (n: number) => n.toLocaleString('es-CO');
 
 /** Lo que dice la historia de cada paso (RF-23), con lo que cambió. */
 export function textoDelEvento(e: Evento, renglones: Renglon[]): string {
-  const cambios = e.cambios as Record<string, unknown>[];
+  // Spec 046 (RF-33): los eventos de la cadena, y el paso que va primero en los cambios de una RQ.
+  const deLaCadena = textoDelEventoDeLaCadena(e);
+  if (deLaCadena) return deLaCadena;
+  const cambios = separarElPaso(e.cambios).resto as Record<string, unknown>[];
   const ordenes = (lista: unknown) =>
     Array.isArray(lista) ? `${lista.length === 1 ? 'renglón' : 'renglones'} ${lista.join(', ')}` : '';
   switch (e.paso) {
@@ -293,9 +298,17 @@ export function VistaDeLaSolicitud({
     .filter((d) => !d.anulado && (d.clase === 'remision' || d.clase === 'foto'))
     .map((d) => ({ id: d.id, nombre: `${d.claseNombre}: ${d.nombre}` }));
 
+  // Spec 046: en una requisición, cada renglón trae para cuándo y para qué (RF-10). Con ellas caben
+  // en 1 280: 40 + 230 + 110 + 110 + 150 + 180 + 110 + 180 = 1 110, más 7 × 16 y 32: 1 254.
+  const deRequisicion: Columna<Renglon>[] = s.requisicion
+    ? [
+        { clave: 'necesitaEl', titulo: 'Para cuándo', ancho: 110, pintar: (r) => <Celda>{r.necesitaEl ? fechaDelCorte(r.necesitaEl) : '—'}</Celda> },
+        { clave: 'paraQue', titulo: 'Para qué', ancho: 180, pintar: (r) => <Celda>{r.paraQue ?? '—'}</Celda> },
+      ]
+    : [];
   const columnasRenglones: Columna<Renglon>[] = [
     { clave: 'orden', titulo: '#', ancho: 40, pintar: (r) => <Celda>{String(r.orden)}</Celda> },
-    { clave: 'que', titulo: 'Qué se pide', ancho: 260, pintar: (r) => <Celda>{r.descripcion}</Celda> },
+    { clave: 'que', titulo: 'Qué se pide', ancho: s.requisicion ? 230 : 260, pintar: (r) => <Celda>{r.descripcion}</Celda> },
     { clave: 'pedido', titulo: 'Pedido', ancho: 110, pintar: (r) => <Celda>{`${cantidad(r.cantidad)} ${r.unidad}`}</Celda> },
     {
       clave: 'aprobado',
@@ -324,6 +337,7 @@ export function VistaDeLaSolicitud({
       ),
     },
     { clave: 'compra', titulo: 'Comprado a', ancho: 180, pintar: (r) => <Celda>{compraDe(r.id)?.proveedor ?? '—'}</Celda> },
+    ...deRequisicion,
   ];
 
   const columnasCompras: Columna<Compra>[] = [
@@ -411,7 +425,7 @@ export function VistaDeLaSolicitud({
 
   return (
     <MarcoPantalla
-      titulo={`Solicitud ${s.codigo}`}
+      titulo={`${s.requisicion ? 'Requisición' : 'Solicitud'} ${s.codigo}`}
       descripcion={`${s.lugar.nombre} · pedida por ${s.pedidaPor.nombre} el ${cuando(s.pedidaEn)}`}
       error={cargada.error}
       cargando={cargada.cargando}
@@ -420,19 +434,35 @@ export function VistaDeLaSolicitud({
         {volver}
         {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
         {s.pasos.includes('recibir') ? <Boton titulo="Recibir lo que llegó" onPress={() => setVentana('recibir')} /> : null}
+        {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
+        {s.requisicion ? (
+          <BotonesDeDecision
+            tipo="compra"
+            id={s.id}
+            codigo={s.codigo}
+            version={s.version}
+            requisicion={s.requisicion}
+            recorte={{ tipo: 'compra', renglones: s.renglones }}
+            listo={listo}
+          />
+        ) : null}
         {accionesExtra?.(s, listo)}
         {s.pasos.includes('cancelar') ? (
-          <Boton titulo="Cancelar la solicitud" tono="peligro" onPress={() => setVentana('cancelar')} />
+          <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} />
         ) : null}
       </Acciones>
       <Confirmado mensaje={hecho} />
       {devolucion ? <Aviso tono="error">{`Devuelta para corregir: ${devolucion.motivo ?? ''}`}</Aviso> : null}
 
-      <Seccion titulo="La solicitud">
+      <Seccion titulo={s.requisicion ? 'La requisición' : 'La solicitud'}>
         <View style={estilos.datos}>
           <Dato titulo="Estado">
             <View style={estilos.marcas}>
-              {s.estado === 'devuelta' ? null : <EstadoDeLaSolicitud estado={s.estado} />}
+              {s.estado === 'devuelta' ? null : s.requisicion && s.estado === 'enviada' ? (
+                <Etiqueta tono="atencion">{s.requisicion.estadoQueSeVe}</Etiqueta>
+              ) : (
+                <EstadoDeLaSolicitud estado={s.estado} />
+              )}
               {/* «Corrígela» le habla a quien puede corregirla; a los demás basta «Devuelta». */}
               {s.marcas.map((m) => (
                 <Etiqueta key={m} tono="malo">
@@ -443,12 +473,14 @@ export function VistaDeLaSolicitud({
             </View>
           </Dato>
           <Dato titulo="Para cuándo">{fechaDelCorte(s.paraCuando)}</Dato>
-          <Dato titulo="Para qué">{s.paraQue || '—'}</Dato>
+          <Dato titulo={s.requisicion ? 'Nota' : 'Para qué'}>{s.paraQue || '—'}</Dato>
           <Dato titulo="Proveedor sugerido">{s.proveedorSugerido || '—'}</Dato>
           {conValores ? <Dato titulo="Valor estimado">{s.valorEstimado ? enPesos(s.valorEstimado) : '—'}</Dato> : null}
         </View>
         <Tabla columnas={columnasRenglones} filas={s.renglones} vacio="Sin renglones." />
       </Seccion>
+
+      {s.requisicion ? <CadenaDeLaRequisicionVista requisicion={s.requisicion} /> : null}
 
       {s.compras.length ? (
         <Seccion titulo="Compras">
@@ -480,6 +512,7 @@ export function VistaDeLaSolicitud({
       {ventana === 'corregir' ? (
         <FormularioDeSolicitud
           lugar={lugar}
+          requisicion={Boolean(s.requisicion)}
           inicial={{
             id: s.id,
             codigo: s.codigo,
@@ -490,6 +523,8 @@ export function VistaDeLaSolicitud({
                 cantidad: r.cantidad,
                 unidad: r.unidad,
                 materialId: r.materialId,
+                necesitaEl: r.necesitaEl,
+                paraQue: r.paraQue,
               })),
               paraCuando: s.paraCuando,
               urgente: s.urgente,
@@ -506,7 +541,7 @@ export function VistaDeLaSolicitud({
         <VentanaDeMotivo
           titulo={`Cancelar ${s.codigo}`}
           aviso="La solicitud queda cancelada y no se puede volver a abrir. Si hace falta, se pide otra."
-          accion="Cancelar la solicitud"
+          accion={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'}
           alCerrar={() => setVentana(null)}
           alConfirmar={async (motivo) => {
             await api.compras.paso(s.id, { paso: 'cancelar', version: s.version, motivo });

@@ -17,8 +17,10 @@ import { Acciones, Aviso, Boton, Celda, Confirmado, Etiqueta, Seccion, Tabla, ty
 import type { PagoRegistrado, SolicitudDePagoDetallada } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
+import { BotonesDeDecision, CadenaDeLaRequisicionVista } from '@/features/requisiciones/cadena-y-decision';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { nombreDeConcepto, nombreDeMedio } from '@/shared/rules/pagos';
+import { separarElPaso, textoDelEventoDeLaCadena } from '@/shared/rules/requisiciones';
 import { alcanza } from '@/shared/rules/permisos';
 import { enPesos } from '@/shared/rules/pesos';
 
@@ -34,7 +36,10 @@ const cuando = (iso: string) => new Date(iso).toLocaleString('es-CO', { dateStyl
  * cambios llegan vacíos: la historia dice qué pasó, sin cifras.
  */
 export function textoDelEventoDePago(e: Evento): string {
-  const c = (e.cambios as Record<string, unknown>[])[0];
+  // Spec 046 (RF-33): los eventos de la cadena, y el paso que va primero en los cambios de una RQ.
+  const deLaCadena = textoDelEventoDeLaCadena(e);
+  if (deLaCadena) return deLaCadena;
+  const c = separarElPaso(e.cambios).resto[0] as Record<string, unknown> | undefined;
   switch (e.paso) {
     case 'enviada':
       return 'Pidió el pago.';
@@ -167,7 +172,7 @@ export function VistaDelPago({
 
   return (
     <MarcoPantalla
-      titulo={`Solicitud ${s.codigo}`}
+      titulo={`${s.requisicion ? 'Requisición' : 'Solicitud'} ${s.codigo}`}
       descripcion={`${s.lugar.nombre} · pedida por ${s.pedidaPor.nombre} el ${cuando(s.pedidaEn)}`}
       error={cargada.error}
       cargando={cargada.cargando}
@@ -175,17 +180,33 @@ export function VistaDelPago({
       <Acciones>
         {volver}
         {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
+        {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
+        {s.requisicion ? (
+          <BotonesDeDecision
+            tipo="pago"
+            id={s.id}
+            codigo={s.codigo}
+            version={s.version}
+            requisicion={s.requisicion}
+            recorte={{ tipo: 'pago', valor: s.valor }}
+            listo={listo}
+          />
+        ) : null}
         {accionesExtra?.(s, listo)}
-        {s.pasos.includes('cancelar') ? <Boton titulo="Cancelar la solicitud" tono="peligro" onPress={() => setVentana('cancelar')} /> : null}
+        {s.pasos.includes('cancelar') ? <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} /> : null}
       </Acciones>
       <Confirmado mensaje={hecho} />
       {devolucion ? <Aviso tono="error">{`Devuelta para corregir: ${devolucion.motivo ?? ''}`}</Aviso> : null}
 
-      <Seccion titulo="La solicitud">
+      <Seccion titulo={s.requisicion ? 'La requisición' : 'La solicitud'}>
         <View style={estilos.datos}>
           <Dato titulo="Estado">
             <View style={estilos.marcas}>
-              {s.estado === 'devuelta' ? null : <EstadoDelPago estado={s.estado} />}
+              {s.estado === 'devuelta' ? null : s.requisicion && s.estado === 'enviada' ? (
+                <Etiqueta tono="atencion">{s.requisicion.estadoQueSeVe}</Etiqueta>
+              ) : (
+                <EstadoDelPago estado={s.estado} />
+              )}
               {/* «Corrígela» le habla a quien puede corregirla; a los demás basta «Devuelta». */}
               {s.marcas.map((m) => (
                 <Etiqueta key={m} tono="malo">
@@ -212,6 +233,8 @@ export function VistaDelPago({
         )}
       </Seccion>
 
+      {s.requisicion ? <CadenaDeLaRequisicionVista requisicion={s.requisicion} /> : null}
+
       {pagos.length ? (
         <Seccion titulo="Pagos">
           <Tabla columnas={columnasPagos} filas={pagos} vacio="" />
@@ -237,6 +260,7 @@ export function VistaDelPago({
       {ventana === 'corregir' ? (
         <FormularioDePago
           lugar={lugar}
+          requisicion={Boolean(s.requisicion)}
           inicial={{
             id: s.id,
             codigo: s.codigo,
@@ -259,7 +283,7 @@ export function VistaDelPago({
         <VentanaDeMotivo
           titulo={`Cancelar ${s.codigo}`}
           aviso="La solicitud queda cancelada y no se puede volver a abrir. Si hace falta, se pide otra."
-          accion="Cancelar la solicitud"
+          accion={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'}
           alCerrar={() => setVentana(null)}
           alConfirmar={async (motivo) => {
             await api.tesoreria.paso(s.id, { paso: 'cancelar', version: s.version, motivo });

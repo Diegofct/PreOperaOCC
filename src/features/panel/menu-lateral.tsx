@@ -77,6 +77,8 @@ const ICONOS: Record<string, NombreDeIcono> = {
   calidad: 'laboratorio',
   'solicitudes-compra': 'compras',
   'solicitudes-pago': 'finanzas',
+  // Spec 046: compras y pagos en un solo módulo.
+  requisiciones: 'compras',
   elemental: 'empresa',
   occ: 'empresa',
   geolab: 'empresa',
