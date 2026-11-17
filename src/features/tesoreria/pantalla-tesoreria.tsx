@@ -47,6 +47,7 @@ import { ESTADOS_DE_PAGO, nombreDeConcepto, pasaLosFiltrosDePago, veLosPagos, ty
 import { enPesos } from '@/shared/rules/pesos';
 
 import { PantallaComprasPorPagar } from './pantalla-compras-por-pagar';
+import { PantallaOccPorPagar } from './pantalla-occ-por-pagar';
 import { PantallaCortes } from './pantalla-cortes';
 import { PantallaPagos } from './pantalla-pagos';
 import { EstadoDelPago, textoDelPago, valorDelPago } from './partes';
@@ -56,6 +57,8 @@ import { VistaDelPago } from './vista-del-pago';
 const PESTANAS = [
   { clave: 'solicitudes', titulo: 'Solicitudes de pago' },
   { clave: 'compras', titulo: 'Compras por pagar' },
+  // Spec 047, RF-43: lo autorizado de las requisiciones de pagos de OCC, línea por línea.
+  { clave: 'occ', titulo: 'OCC por viernes' },
   { clave: 'pagos', titulo: 'Pagos' },
   { clave: 'cortes', titulo: 'Cortes' },
   // Spec 046, RF-93: el gasto que antes mostraba Compras, para quien lo ve (`veElGasto`).
@@ -91,6 +94,8 @@ export default function PantallaTesoreria() {
       </View>
       {elegida === 'compras' ? (
         <PantallaComprasPorPagar />
+      ) : elegida === 'occ' ? (
+        <PantallaOccPorPagar />
       ) : elegida === 'pagos' ? (
         <PantallaPagos alAbrir={setAbierta} />
       ) : elegida === 'cortes' ? (

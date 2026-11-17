@@ -1,7 +1,17 @@
 import { eq } from 'drizzle-orm';
 
 import { baseServidor } from '@/db/servidor/cliente';
-import { almacenImportaciones, asistenteConversaciones, bitacoras, contratos, media, partesDeObra, preoperacionales } from '@/db/servidor/esquema';
+import {
+  almacenImportaciones,
+  asistenteConversaciones,
+  bitacoras,
+  contratos,
+  media,
+  partesDeObra,
+  preoperacionales,
+  requisicionesOcc,
+  requisicionOccImportaciones,
+} from '@/db/servidor/esquema';
 import { archivoGeneradoAlAlcance } from '@/features/asistente/servidor/conversaciones';
 import { disposicionDelArchivo, documentoAlAlcance } from '@/features/documentos/servidor/documentos';
 import { leer } from '@/features/media/servidor/almacen';
@@ -11,6 +21,7 @@ import { requerirSesion, type PersonaEnSesion } from '@/features/servidor/guardi
 import { errorDePeticion, noEncontrado, responder } from '@/features/servidor/respuestas';
 import { obraDeUnMensaje } from '@/features/whatsapp/servidor/obra';
 import { alcanza, type ModuloConPermiso } from '@/shared/rules/permisos';
+import { veRequisicionesOcc } from '@/shared/rules/requisicion-occ';
 
 /**
  * Sirve una imagen al panel. `GET /api/panel/media/:id`.
@@ -91,6 +102,10 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       const importacion = await importacionConfirmadaAlAlcance(sesion, fila.duenoId);
       if (!importacion) return noEncontrado('ese archivo');
       nombreArchivo = importacion.nombreArchivo;
+    } else if (fila.duenoTipo === 'requisicion_occ') {
+      // Spec 047, RF-15, RF-68, RF-73: el RUT, la cuenta y la planilla importada, a quien ve las
+      // requisiciones de OCC; una planilla sin confirmar, solo a quien la subió.
+      if (!(await alcanzaLaRequisicionOcc(sesion, fila.duenoId))) return noEncontrado('ese archivo');
     } else if (
       !alcanzaLaImagen(sesion, await duenoDeLaImagen(fila.duenoTipo, fila.duenoId), MODULO_DEL_DUENO[fila.duenoTipo])
     ) {
@@ -232,4 +247,23 @@ async function esSuConversacion(sesion: PersonaEnSesion, conversacionId: string)
     .where(eq(asistenteConversaciones.id, conversacionId))
     .limit(1);
   return fila?.usuarioId === sesion.id;
+}
+
+/**
+ * Spec 047: el dueño de un archivo de OCC es la requisición (RUT y cuenta de sus líneas) o la
+ * importación (la planilla). Una importación confirmada se ve como su requisición; una pendiente,
+ * solo quien la subió.
+ */
+async function alcanzaLaRequisicionOcc(sesion: PersonaEnSesion, duenoId: string): Promise<boolean> {
+  if (!veRequisicionesOcc(sesion.rol)) return false;
+  const db = baseServidor();
+  const [requisicion] = await db.select({ id: requisicionesOcc.id }).from(requisicionesOcc).where(eq(requisicionesOcc.id, duenoId)).limit(1);
+  if (requisicion) return true;
+  const [importacion] = await db
+    .select({ estado: requisicionOccImportaciones.estado, creadoPor: requisicionOccImportaciones.creadoPor })
+    .from(requisicionOccImportaciones)
+    .where(eq(requisicionOccImportaciones.id, duenoId))
+    .limit(1);
+  if (!importacion) return false;
+  return importacion.estado === 'confirmada' || importacion.creadoPor === sesion.id;
 }

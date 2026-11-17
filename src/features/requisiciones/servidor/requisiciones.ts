@@ -64,6 +64,7 @@ import { nombreDeEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { aprobacionDelPago, faltasDeLaSolicitudDePago, nombreDeConcepto, veElValorDelPago } from '@/shared/rules/pagos';
 import { alcanza } from '@/shared/rules/permisos';
+import { ordenDeLaBandejaOcc, puedeCrearRequisicionOcc } from '@/shared/rules/requisicion-occ';
 import {
   esperaElUltimoPaso,
   esperaMiAprobacion,
@@ -89,6 +90,7 @@ import {
 } from '@/shared/rules/requisiciones';
 
 import { ocupantesDeLaCadena, type LugarDeLaCadena } from './cadena';
+import { listarRequisicionesOcc } from './requisicion-occ';
 
 /** Un lugar de requisiciones ya comprobado: una obra, GeoLab u OCC (RF-86). */
 export type LugarDeRequisiciones = LugarDeLaSolicitud;
@@ -125,6 +127,10 @@ export async function crearRequisicion(
 ): Promise<RequisicionCreada | Response> {
   if (lugar.tipo === 'obra' && !lugar.activa) {
     return errorDePeticion('La obra no está activa: no recibe requisiciones nuevas.', 409);
+  }
+  // Spec 047, RF-1: OCC pide con la requisición de pagos del viernes, no con esta.
+  if (lugar.tipo === 'empresa' && lugar.empresaId === 'occ') {
+    return errorDePeticion('En OCC se pide con la requisición de pagos del viernes.', 422);
   }
 
   if (pedido.tipo === 'compra') {
@@ -292,7 +298,12 @@ export async function requisicionesDelLugar(sesion: PersonaEnSesion, lugar: Luga
       filas.map((f, i) => ({ ...f.regla, lista: conMarca[i] })),
       (f) => f.lista.esperaMiAprobacion,
     ).map((f) => f.lista),
-    sePuedePedir: alcanza(sesion.rol, 'solicitudes', 'escribir') && (lugar.tipo === 'empresa' || lugar.activa),
+    // Spec 047, RF-1: en OCC no se pide la de la 046; se pide la de pagos del viernes.
+    sePuedePedir: alcanza(sesion.rol, 'solicitudes', 'escribir') && (lugar.tipo === 'empresa' ? lugar.empresaId !== 'occ' : lugar.activa),
+    // Spec 047, RF-3: en OCC, también las de pagos del viernes.
+    ...(lugar.tipo === 'empresa' && lugar.empresaId === 'occ'
+      ? { pagosOcc: await listarRequisicionesOcc(sesion), sePuedePedirOcc: puedeCrearRequisicionOcc(sesion.rol) }
+      : {}),
   };
 }
 
@@ -673,12 +684,25 @@ export async function bandejaDeRequisiciones(sesion: PersonaEnSesion): Promise<B
     }
     return { regla: f.regla, lista };
   });
+  // Spec 047, RF-49 a RF-51: las de pagos de OCC que esperan autorización, con «OCC», por viernes.
+  const pagosOcc = ordenDeLaBandejaOcc(
+    (await listarRequisicionesOcc(sesion))
+      .filter((r) => r.estado === 'en_autorizacion')
+      .map((r) => ({ ...r, marcas: ['OCC', ...r.marcas] })),
+  );
+  const resumen = resumenDeRequisiciones(conMarca.map((f) => f.regla).filter(esperaElUltimoPaso));
   return {
     requisiciones: ordenDeRequisiciones(
       conMarca.map((f) => ({ ...f.regla, lista: f.lista })),
       (f) => f.lista.esperaMiAprobacion,
     ).map((f) => f.lista),
-    resumen: resumenDeRequisiciones(conMarca.map((f) => f.regla).filter(esperaElUltimoPaso)),
+    pagosOcc,
+    // Las de OCC esperan el mismo último paso: cuentan en el resumen; no tienen urgencia.
+    resumen: {
+      ...resumen,
+      esperan: resumen.esperan + pagosOcc.length,
+      vencidas: resumen.vencidas + pagosOcc.filter((r) => r.marcas.includes('Vencida')).length,
+    },
     sinAdministradora: ocupantes.administradora.length === 0,
   };
 }

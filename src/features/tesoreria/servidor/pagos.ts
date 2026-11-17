@@ -22,13 +22,17 @@ import {
   solicitudesCompra,
   solicitudesPago,
   solicitudPagoEventos,
+  requisicionesOcc,
+  requisicionOccLineas,
 } from '@/db/servidor/esquema';
 import { solicitudAlAlcance } from '@/features/compras/servidor/solicitudes';
 import type { BandejaDeTesoreria, CompraPorPagar, PagosDelRango } from '@/features/panel/contratos';
+import { anularPagoDeLineaOcc } from '@/features/requisiciones/servidor/requisicion-occ';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { conReintentoSiChoca, errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { numeroDeSolicitud } from '@/shared/rules/compras';
 import { nombreDeEmpresa, type EmpresaId } from '@/shared/rules/empresas';
+import { numeroDeRequisicionOcc } from '@/shared/rules/requisicion-occ';
 import {
   estadoTrasPagos,
   faltaDelMotivoDePago,
@@ -152,6 +156,8 @@ export async function anularPago(
   const [pago] = await baseServidor().select().from(pagos).where(eq(pagos.id, pagoId)).limit(1);
   if (!pago) return noEncontrado('ese pago');
   if (pago.compraId) return anularPagoDeCompra(sesion, pago, pedido.motivo);
+  // Spec 047, RF-48: el de una línea de una requisición de pagos de OCC, con la versión de esa requisición.
+  if (pago.requisicionOccLineaId) return anularPagoDeLineaOcc(sesion, pago, pedido);
 
   const fila = await solicitudDePagoAlAlcance(sesion, pago.solicitudPagoId as string);
   if (!fila) return noEncontrado('ese pago');
@@ -347,7 +353,7 @@ export async function bandejaDeTesoreria(
 export async function pagosDelRango(rango: { desde: string; hasta: string }): Promise<PagosDelRango> {
   const db = baseServidor();
   const dentro = and(isNull(pagos.anuladoEn), gte(pagos.fecha, rango.desde), lte(pagos.fecha, rango.hasta));
-  const [deSolicitudes, deCompras] = await Promise.all([
+  const [deSolicitudes, deCompras, deOcc] = await Promise.all([
     db
       .select({
         id: pagos.id,
@@ -386,6 +392,22 @@ export async function pagosDelRango(rango: { desde: string; hasta: string }): Pr
       .innerJoin(solicitudesCompra, eq(solicitudesCompra.id, compras.solicitudId))
       .leftJoin(obras, eq(obras.id, solicitudesCompra.obraId))
       .where(dentro),
+    // Spec 047: los de las líneas de las requisiciones de pagos de OCC.
+    db
+      .select({
+        id: pagos.id,
+        fecha: pagos.fecha,
+        valor: pagos.valor,
+        medio: pagos.medio,
+        referencia: pagos.referencia,
+        requisicionId: requisicionesOcc.id,
+        numero: requisicionesOcc.numeroRequisicion,
+        quien: requisicionOccLineas.beneficiario,
+      })
+      .from(pagos)
+      .innerJoin(requisicionOccLineas, eq(requisicionOccLineas.id, pagos.requisicionOccLineaId))
+      .innerJoin(requisicionesOcc, eq(requisicionesOcc.id, requisicionOccLineas.requisicionId))
+      .where(dentro),
   ]);
 
   const lugarDe = (f: { empresaId: string | null; obraId: string | null; obraNombre: string | null }) =>
@@ -410,6 +432,15 @@ export async function pagosDelRango(rango: { desde: string; hasta: string }): Pr
       referencia: f.referencia,
       lugar: lugarDe(f),
       origen: { tipo: 'compra' as const, id: f.solicitudId, codigo: numeroDeSolicitud(f.numero), quien: f.quien, compraAnulada: f.compraAnulada !== null },
+    })),
+    ...deOcc.map((f) => ({
+      id: f.id,
+      fecha: f.fecha,
+      valor: f.valor,
+      medio: f.medio,
+      referencia: f.referencia,
+      lugar: { tipo: 'empresa' as const, id: 'occ', nombre: nombreDeEmpresa('occ') },
+      origen: { tipo: 'occ' as const, id: f.requisicionId, codigo: numeroDeRequisicionOcc(f.numero), quien: f.quien, compraAnulada: false },
     })),
   ].sort((a, b) => (a.fecha === b.fecha ? 0 : a.fecha < b.fecha ? 1 : -1));
 

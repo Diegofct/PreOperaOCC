@@ -47,6 +47,19 @@ import type {
   RequisicionesDelLugar,
 } from '@/features/panel/requisiciones';
 import type {
+  ImportacionOccConfirmada,
+  ImportacionOccDetalle,
+  ImportacionOccIniciada,
+  LineaOccPedida,
+  LineaOccPorPagar,
+  PagoDeLineaOccPedido,
+  PasoOccPedido,
+  RequisicionOccCreada,
+  RequisicionOccDetallada,
+  RequisicionOccEnLaLista,
+  RespuestasOccPedidas,
+} from '@/features/panel/requisiciones-occ';
+import type {
   EstadoDeLecturaDePlanRespuesta,
   GuardadoDePlanSemanal,
   LecturaDePlanIniciada,
@@ -727,6 +740,86 @@ export const api = {
         'POST',
         pedido,
       ),
+
+    /** Spec 047: la requisición de pagos de OCC, una por viernes, autorizada línea por línea. */
+    occ: {
+      listar: () => panel<RequisicionOccEnLaLista[]>('/requisiciones-occ'),
+      /** RF-5 a RF-8: 409 con `existente` si ya hay una abierta para ese viernes. */
+      crear: (viernes: string) => panelEnviar<RequisicionOccCreada>('/requisiciones-occ', 'POST', { viernes }),
+      detalle: (id: string) => panel<RequisicionOccDetallada>(`/requisiciones-occ/${encodeURIComponent(id)}`),
+      agregarLinea: (id: string, linea: LineaOccPedida) =>
+        panelEnviar<{ lineaId: string; version: number }>(`/requisiciones-occ/${encodeURIComponent(id)}/lineas`, 'POST', linea),
+      /** RF-37: la línea de antes queda marcada como reemplazada; responde el id de la nueva. */
+      cambiarLinea: (id: string, lineaId: string, linea: LineaOccPedida) =>
+        panelEnviar<{ lineaId: string; version: number }>(
+          `/requisiciones-occ/${encodeURIComponent(id)}/lineas/${encodeURIComponent(lineaId)}`,
+          'PUT',
+          linea,
+        ),
+      quitarLinea: (id: string, lineaId: string, version: number) =>
+        panelEnviar<{ version: number }>(
+          `/requisiciones-occ/${encodeURIComponent(id)}/lineas/${encodeURIComponent(lineaId)}/quitar`,
+          'POST',
+          { version },
+        ),
+      /** RF-15: el RUT o la cuenta bancaria de una línea, tal cual; el nombre va codificado en una cabecera. */
+      adjuntar: (id: string, lineaId: string, clase: 'rut' | 'cuenta', archivo: File, version: number) =>
+        pedir<{ lineaId: string; version: number }>(
+          `/api/panel/requisiciones-occ/${encodeURIComponent(id)}/lineas/${encodeURIComponent(lineaId)}/adjunto?${new URLSearchParams({ clase, version: String(version) })}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name) },
+            body: archivo,
+          },
+        ),
+      paso: (id: string, pedido: PasoOccPedido) =>
+        panelEnviar<{ estado: string; version: number }>(`/requisiciones-occ/${encodeURIComponent(id)}/paso`, 'POST', pedido),
+      responder: (id: string, pedido: RespuestasOccPedidas) =>
+        panelEnviar<{ estado: string; version: number; faltan: number }>(
+          `/requisiciones-occ/${encodeURIComponent(id)}/respuestas`,
+          'POST',
+          pedido,
+        ),
+      /** RF-44, RF-80: un pago de una línea autorizada, nunca de más. */
+      pagar: (id: string, lineaId: string, pago: PagoDeLineaOccPedido) =>
+        panelEnviar<{ estado: string; version: number }>(
+          `/requisiciones-occ/${encodeURIComponent(id)}/lineas/${encodeURIComponent(lineaId)}/pagos`,
+          'POST',
+          pago,
+        ),
+      /** RF-44: el comprobante de un pago, antes de registrarlo; responde su archivo. */
+      subirComprobante: (id: string, archivo: File) =>
+        pedir<{ mediaId: string }>(`/api/panel/requisiciones-occ/${encodeURIComponent(id)}/comprobante`, {
+          method: 'POST',
+          headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name) },
+          body: archivo,
+        }),
+      /** RF-43: lo autorizado por pagar de todas, por viernes. */
+      porPagar: () => panel<LineaOccPorPagar[]>('/requisiciones-occ/por-pagar'),
+      /** RF-52: el `.xlsx` con el formato de OCC. */
+      excel: (id: string) => descargar(`/api/panel/requisiciones-occ/${encodeURIComponent(id)}/excel`),
+      importaciones: {
+        /** RF-59, RF-78: la planilla tal cual; sin `requisicionId`, crea una nueva al confirmar. */
+        subir: (archivo: File, requisicionId?: string) =>
+          pedir<ImportacionOccIniciada>(
+            `/api/panel/requisiciones-occ/importaciones${requisicionId ? `?${new URLSearchParams({ requisicionId })}` : ''}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': archivo.type || 'application/octet-stream', 'X-Nombre-Archivo': encodeURIComponent(archivo.name) },
+              body: archivo,
+            },
+          ),
+        de: (id: string) => panel<ImportacionOccDetalle>(`/requisiciones-occ/importaciones/${encodeURIComponent(id)}`),
+        confirmar: (id: string, datos: ImportacionOccConfirmada) =>
+          panelEnviar<{ requisicionId: string; version: number }>(
+            `/requisiciones-occ/importaciones/${encodeURIComponent(id)}/confirmar`,
+            'POST',
+            datos,
+          ),
+        descartar: (id: string) =>
+          panelEnviar<{ id: string }>(`/requisiciones-occ/importaciones/${encodeURIComponent(id)}/descartar`, 'POST', {}),
+      },
+    },
   },
 
   /** Spec 036: las solicitudes de compra de una obra, OCC o Geolab. */

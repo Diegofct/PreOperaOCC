@@ -3769,6 +3769,8 @@ export interface PagoRegistrado {
   medio: string;
   referencia: string;
   documentoId: string | null;
+  /** Spec 047: el comprobante del pago de una línea de OCC, como archivo de su requisición. */
+  comprobanteMediaId?: string | null;
   registradoPor: string;
   registradoEn: string;
   anulado: { en: string; por: string; motivo: string } | null;
@@ -3847,9 +3849,10 @@ export interface PagosDelRango {
     lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string };
     /**
      * `SP-…` con el beneficiario, o `SC-…` con el proveedor; `id` es el de la solicitud (de pago
-     * o de compra); `compraAnulada` marca el caso límite.
+     * o de compra); `compraAnulada` marca el caso límite. Spec 047: `occ` es una línea de una
+     * requisición de pagos de OCC, con su `RQ-…`, el beneficiario y el id de la requisición.
      */
-    origen: { tipo: 'solicitud' | 'compra'; id: string; codigo: string; quien: string; compraAnulada: boolean };
+    origen: { tipo: 'solicitud' | 'compra' | 'occ'; id: string; codigo: string; quien: string; compraAnulada: boolean };
   }[];
   lugares: { lugar: { tipo: 'empresa' | 'obra'; id: string; nombre: string }; total: number; pagos: number }[];
   total: number;

@@ -99,6 +99,9 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
       pintar: (p) =>
         p.origen.tipo === 'solicitud' ? (
           <Boton titulo="Abrir" tono="secundario" onPress={() => alAbrir(p.origen.id)} />
+        ) : p.origen.tipo === 'occ' ? (
+          // Spec 047, RF-48: el de una línea de OCC se anula en su requisición, con su versión.
+          <Celda>{`En ${p.origen.codigo}`}</Celda>
         ) : (
           <Boton titulo="Anular" tono="peligro" onPress={() => setAnulando(p)} />
         ),

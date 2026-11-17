@@ -1,0 +1,2 @@
+ALTER TABLE "pagos" ADD COLUMN "comprobante_media_id" text;--> statement-breakpoint
+ALTER TABLE "pagos" ADD CONSTRAINT "pagos_comprobante_media_id_media_id_fk" FOREIGN KEY ("comprobante_media_id") REFERENCES "public"."media"("id") ON DELETE no action ON UPDATE no action;
