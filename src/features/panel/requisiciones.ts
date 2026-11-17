@@ -10,7 +10,43 @@
 import { z } from 'zod';
 
 import type { RequisicionOccEnLaLista } from '@/features/panel/requisiciones-occ';
+import type {
+  AvisoDelRenglon,
+  CifrasDeLaOpcion,
+  ImputacionDelRenglon,
+  MarcaDePlanificacion,
+  OpcionParaImputar,
+  ResumenDeLoComprometido,
+} from '@/shared/rules/requisicion-planificacion';
 import { DECISIONES, type PasoDeLaCadena, type TipoDeRequisicion } from '@/shared/rules/requisiciones';
+
+/**
+ * Spec 048: a qué parte de la planificación va un renglón: la llave de una opción, o `llave` nula
+ * con la explicación de por qué va «Fuera de lo planeado». Aquí solo la forma; lo que falta (sin
+ * imputar, sin explicación, una opción que ya no está) lo dice `resolverImputacion` con un 422 y
+ * el número del renglón. Ausente en GeoLab, en una obra sin planificación y en lo de antes.
+ */
+export const imputacionPedida = z
+  .object({
+    llave: z.string().max(500).nullable(),
+    // Vacía no es lo mismo que ausente: «Fuera de lo planeado» sin explicación tiene su propia falta (RF-4).
+    explicacion: z
+      .string()
+      .trim()
+      .max(500)
+      .nullish()
+      .transform((v) => v ?? null),
+  })
+  .nullish()
+  .transform((v) => v ?? null);
+
+/** Pesos: enteros. Que sean mayores que cero lo dice la regla, junto a su campo. */
+const pesosPedidos = (mensaje: string) => z.number({ error: mensaje }).int({ error: mensaje });
+
+/** Spec 048, RF-11: el valor estimado de un renglón; el Almacenista no lo manda (RF-13). */
+export const valorEstimadoDelRenglon = pesosPedidos('El valor estimado va en pesos, sin decimales.')
+  .nullish()
+  .transform((v) => v ?? null);
 
 /** Un renglón de una requisición de compra (RF-10): lo de la 036 más la fecha y el para qué. */
 const renglonDeRequisicion = z.object({
@@ -25,6 +61,8 @@ const renglonDeRequisicion = z.object({
     .transform((v) => (v ? v : null)),
   necesitaEl: z.string({ error: 'Diga para cuándo se necesita cada renglón.' }).trim().max(20),
   paraQue: z.string({ error: 'Diga para qué es cada renglón.' }).trim().max(500),
+  valorEstimado: valorEstimadoDelRenglon,
+  imputacion: imputacionPedida,
 });
 
 /** Una requisición de compra al pedirla (RF-9, RF-10, RF-13). `nota` es la nota general opcional. */
@@ -50,6 +88,8 @@ export const requisicionDePagoPedida = z.object({
   paraQue: z.string().trim().max(1000),
   valor: z.number({ error: 'El valor va en pesos, sin decimales y mayor que cero.' }),
   paraCuando: z.string().trim().max(20),
+  /** Spec 048, RF-3. */
+  imputacion: imputacionPedida,
   // Una de pago no lleva renglones: si llegan, es que se mandó la clase equivocada.
   renglones: z.undefined({ error: 'Una requisición de pago no lleva renglones: es un beneficiario y un valor.' }).optional(),
 });
@@ -80,6 +120,19 @@ export const decisionPedida = z.object({
     .number({ error: 'El valor aprobado va en pesos, sin decimales.' })
     .nullish()
     .transform((v) => v ?? null),
+  /** Spec 048, RF-14: los valores estimados que completa el primer paso en lo del Almacenista. */
+  valoresEstimados: z
+    .array(z.object({ renglonId: z.string().max(64), valor: pesosPedidos('El valor estimado va en pesos, sin decimales.') }))
+    .max(100)
+    .default([]),
+  /**
+   * Spec 048, RF-36, RF-64: las imputaciones que cambia la Administradora en su paso o la Gerencia.
+   * `renglonId` nulo es la de una requisición de pago.
+   */
+  imputaciones: z
+    .array(z.object({ renglonId: z.string().max(64).nullable(), imputacion: imputacionPedida }))
+    .max(100)
+    .default([]),
 });
 
 export type DecisionPedida = z.input<typeof decisionPedida>;
@@ -117,6 +170,8 @@ export interface RequisicionEnLaLista {
   /** RF-45: arriba de la lista. */
   esperaMiAprobacion: boolean;
   version: number;
+  /** Spec 048, RF-31: «Se pasa de lo planeado» o «Fuera de lo planeado»; ausente para quien no ve valores. */
+  marcaDePlanificacion?: MarcaDePlanificacion;
 }
 
 /** Requisiciones de una obra o de GeoLab (RF-1, RF-45, RF-49). */
@@ -168,6 +223,27 @@ export interface CadenaDeLaRequisicion {
   }[];
   puedeDecidir: boolean;
   puedeRecortar: boolean;
+}
+
+/**
+ * Spec 048: la imputación de un renglón (o de la requisición de pago) en el detalle, con sus
+ * cifras y su aviso. `cifras` y el aviso de exceso no existen para quien no ve valores (RF-9).
+ */
+export interface PlanificacionDelRenglon {
+  imputacion: ImputacionDelRenglon | null;
+  cifras?: CifrasDeLaOpcion | null;
+  aviso: AvisoDelRenglon | null;
+}
+
+/** Spec 048, RF-6, RF-7: las opciones para imputar en una obra. Sin cifras para quien no ve valores (RF-9). */
+export interface OpcionesParaImputar {
+  hayPlanificacion: boolean;
+  opciones: (Omit<OpcionParaImputar, 'planeado'> & { planeado?: number | null; comprometido?: number })[];
+}
+
+/** Spec 048, RF-42, RF-52: el resumen de lo comprometido, con el código de cada requisición para abrirla. */
+export interface ResumenComprometidoRespuesta extends ResumenDeLoComprometido {
+  requisiciones: Record<string, { tipo: TipoDeRequisicion; codigo: string }>;
 }
 
 /** Lo de requisición que trae el detalle de una RQ de compra o de pago (RF-5, RF-46, RF-82). */

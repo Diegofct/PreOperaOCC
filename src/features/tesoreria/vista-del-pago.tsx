@@ -18,8 +18,10 @@ import type { PagoRegistrado, SolicitudDePagoDetallada } from '@/features/panel/
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { BotonesDeDecision, CadenaDeLaRequisicionVista } from '@/features/requisiciones/cadena-y-decision';
+import { TablaDePlanificacion } from '@/features/requisiciones/tabla-de-planificacion';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { nombreDeConcepto, nombreDeMedio } from '@/shared/rules/pagos';
+import { textosDeLaPlanificacion } from '@/shared/rules/requisicion-planificacion';
 import { separarElPaso, textoDelEventoDeLaCadena } from '@/shared/rules/requisiciones';
 import { alcanza } from '@/shared/rules/permisos';
 import { enPesos } from '@/shared/rules/pesos';
@@ -39,7 +41,8 @@ export function textoDelEventoDePago(e: Evento): string {
   // Spec 046 (RF-33): los eventos de la cadena, y el paso que va primero en los cambios de una RQ.
   const deLaCadena = textoDelEventoDeLaCadena(e);
   if (deLaCadena) return deLaCadena;
-  const c = separarElPaso(e.cambios).resto[0] as Record<string, unknown> | undefined;
+  // El valor aprobado es el cambio con `antes` y `despues`; lo de la 048 lo pinta `textosDeLaPlanificacion`.
+  const c = (separarElPaso(e.cambios).resto as Record<string, unknown>[]).find((x) => 'antes' in x && 'despues' in x);
   switch (e.paso) {
     case 'enviada':
       return 'Pidió el pago.';
@@ -162,6 +165,12 @@ export function VistaDelPago({
       pintar: (e) => (
         <View style={estilos.celdaDoble}>
           <Text style={estilos.texto}>{textoDelEventoDePago(e)}</Text>
+          {/* Spec 048 (RF-37, RF-63): imputación cambiada y avisos al aprobar. */}
+          {textosDeLaPlanificacion(e.cambios, enPesos).map((linea) => (
+            <Text key={linea} style={estilos.apoyo}>
+              {linea}
+            </Text>
+          ))}
           {e.motivo ? <Text style={estilos.apoyo}>{`Motivo: ${e.motivo}`}</Text> : null}
         </View>
       ),
@@ -188,7 +197,7 @@ export function VistaDelPago({
             codigo={s.codigo}
             version={s.version}
             requisicion={s.requisicion}
-            recorte={{ tipo: 'pago', valor: s.valor }}
+            recorte={{ tipo: 'pago', valor: s.valor, imputacion: s.planificacion?.imputacion ?? null, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
             listo={listo}
           />
         ) : null}
@@ -234,6 +243,12 @@ export function VistaDelPago({
       </Seccion>
 
       {s.requisicion ? <CadenaDeLaRequisicionVista requisicion={s.requisicion} /> : null}
+      {s.planificacion ? (
+        <TablaDePlanificacion
+          filas={[{ id: s.id, orden: '', valorEstimado: s.valorAprobado ?? s.valor, planificacion: s.planificacion }]}
+          conValores={'cifras' in s.planificacion}
+        />
+      ) : null}
 
       {pagos.length ? (
         <Seccion titulo="Pagos">
@@ -274,6 +289,8 @@ export function VistaDelPago({
               paraCuando: s.paraCuando,
               urgente: s.urgente,
             },
+            // Spec 048, RF-10: la corrección propone a qué iba.
+            imputacion: s.planificacion?.imputacion ?? null,
           }}
           alCerrar={() => setVentana(null)}
           alGuardar={listo}

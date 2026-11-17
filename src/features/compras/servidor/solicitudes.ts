@@ -55,11 +55,14 @@ import {
   resumenDeLaBandeja,
   veLosValores,
   yaLaDecidioOtro,
+  valorEstimadoDeLosRenglones,
   type DatosDeLaSolicitud,
   type EstadoDeSolicitud,
   type FiltrosDeLaBandeja,
 } from '@/shared/rules/compras';
 import { ocupantesDeLaCadena, requisicionEnElDetalle } from '@/features/requisiciones/servidor/cadena';
+import { imputarLaCompra, planificacionDeLosRenglones } from '@/features/requisiciones/servidor/planificacion';
+import { cambiosSinValores, type ImputacionPedida } from '@/shared/rules/requisicion-planificacion';
 import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, esEmpresa, nombreDeEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
@@ -333,7 +336,7 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
       .orderBy(asc(solicitudCompraRenglones.orden)),
     db.select().from(compras).where(eq(compras.solicitudId, fila.id)).orderBy(asc(compras.registradaEn)),
     db
-      .select({ compraId: compraRenglones.compraId, renglonId: compraRenglones.renglonId })
+      .select({ compraId: compraRenglones.compraId, renglonId: compraRenglones.renglonId, valor: compraRenglones.valor })
       .from(compraRenglones)
       .innerJoin(compras, eq(compras.id, compraRenglones.compraId))
       .where(eq(compras.solicitudId, fila.id)),
@@ -368,6 +371,16 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
   );
 
   const conValores = veLosValores(sesion.rol);
+  // Spec 048: en una RQ de obra, a qué parte de la planificación va cada renglón, con sus cifras.
+  const planificacion =
+    fila.obraId && fila.numeroRequisicion !== null
+      ? await planificacionDeLosRenglones(
+          fila.obraId,
+          fila.id,
+          renglones.map((r) => ({ renglonId: r.id, imputacion: r.imputacion })),
+          conValores,
+        )
+      : null;
   const compraVigente = filasDeCompras.some((c) => !c.anuladaEn);
   // Spec 037, RF-19: lo pagado de cada compra, para quien ve los valores.
   const pagadoPorCompra = new Map<string, number>();
@@ -405,6 +418,8 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
       recibido: recepciones.filter((x) => x.renglonId === r.id).reduce((suma, x) => suma + Number(x.cantidad), 0),
       necesitaEl: r.necesitaEl,
       paraQue: r.paraQue,
+      ...(conValores ? { valorEstimado: r.valorEstimado } : {}),
+      ...(planificacion ? { planificacion: planificacion.get(r.id) } : {}),
     })),
     compras: filasDeCompras.map((c) => {
       const compra: SolicitudDetallada['compras'][number] = {
@@ -423,6 +438,9 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
       if (conValores) {
         compra.valor = c.valor;
         compra.pagado = pagadoPorCompra.get(c.id) ?? 0;
+        // Spec 048, RF-47: el valor de cada renglón, si la compra lo lleva.
+        const valores = enlaces.filter((e) => e.compraId === c.id && e.valor !== null).map((e) => ({ renglonId: e.renglonId, valor: e.valor as number }));
+        if (valores.length) compra.valores = valores;
       }
       return compra;
     }),
@@ -439,8 +457,9 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
     historia: eventos.map((e) => ({
       paso: e.paso,
       motivo: e.motivo,
-      // Al aprobar, lo que cambió lleva cantidades, no valores: se muestra a todos.
-      cambios: e.cambios,
+      // Al aprobar, lo que cambió lleva cantidades, que ven todos; los valores y los avisos de
+      // exceso de la 048, solo quien ve valores (RF-9).
+      cambios: conValores ? e.cambios : cambiosSinValores(e.cambios),
       por: nombreDe(nombres, e.por),
       en: e.en.toISOString(),
     })),
@@ -518,7 +537,7 @@ export async function tomarLaVersion(
 export async function corregirSolicitud(
   sesion: PersonaEnSesion,
   id: string,
-  pedido: DatosDeLaSolicitud & { version: number },
+  pedido: DatosDeLaSolicitud & { version: number; renglones: { imputacion?: ImputacionPedida | null }[] },
 ): Promise<{ version: number } | Response> {
   const fila = await solicitudAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
@@ -530,9 +549,25 @@ export async function corregirSolicitud(
   const lugar: LugarDeLaSolicitud = fila.empresaId
     ? { tipo: 'empresa', empresaId: fila.empresaId as 'occ' | 'geolab' }
     : { tipo: 'obra', obraId: fila.obraId as string, activa: true };
+  // Spec 048: una RQ de obra se vuelve a imputar renglón por renglón (RF-10, RF-55), con valores
+  // salvo si la corrige el Almacenista (RF-13); la cabecera es la suma de los renglones (RF-18).
+  const deObra = requisicion && fila.obraId !== null;
+  const delAlmacenista = sesion.rol === 'almacenista';
+  const conValores = deObra && !delAlmacenista;
   // En una RQ la fecha de la cabecera es la más cercana de los renglones (046, RF-10).
-  const datos = requisicion ? { ...pedido, paraCuando: fechaMasCercana(pedido.renglones) ?? '' } : pedido;
-  const faltas = [...faltasDeLaSolicitud(datos, undefined, { requisicion }), ...(await faltasDeLosMateriales(lugar, datos))];
+  const datos = requisicion
+    ? {
+        ...pedido,
+        paraCuando: fechaMasCercana(pedido.renglones) ?? '',
+        valorEstimado: conValores ? valorEstimadoDeLosRenglones(pedido.renglones) : pedido.valorEstimado,
+      }
+    : pedido;
+  const faltas = [
+    ...faltasDeLaSolicitud(datos, undefined, { requisicion, deObra, delAlmacenista }),
+    ...(await faltasDeLosMateriales(lugar, datos)),
+  ];
+  const imputados = deObra ? await imputarLaCompra(fila.obraId as string, pedido.renglones, delAlmacenista) : null;
+  if (imputados) faltas.push(...imputados.faltas);
   if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
 
   // Spec 046, RF-31: una RQ reenviada vuelve a empezar la cadena según quién la pidió.
@@ -553,7 +588,7 @@ export async function corregirSolicitud(
     urgente: pedido.urgente,
     paraQue: pedido.paraQue.trim(),
     proveedorSugerido: pedido.proveedorSugerido.trim(),
-    valorEstimado: pedido.valorEstimado,
+    valorEstimado: datos.valorEstimado,
   });
   if (!tomada) return errorDePeticion(MENSAJE_DE_SOLICITUD_CAMBIADA, 409);
 
@@ -596,6 +631,8 @@ export async function corregirSolicitud(
         unidad: r.unidad.trim(),
         necesitaEl: requisicion ? r.necesitaEl : null,
         paraQue: requisicion ? (r.paraQue?.trim() ?? null) : null,
+        valorEstimado: imputados?.renglones[i].valorEstimado ?? null,
+        imputacion: imputados?.renglones[i].imputacion ?? null,
       })),
     ),
   ]);

@@ -103,6 +103,7 @@ import {
   type ResumenDeLaPlanificacion,
 } from '../../shared/rules/planificacion';
 import type { LecturaDeIndirectos, LecturaDePlanificacion, SeleccionDeHojas } from '../../shared/rules/planificacion-ia';
+import type { ImputacionDelRenglon } from '../../shared/rules/requisicion-planificacion';
 import {
   ESTADOS_DE_LECTURA_DE_PLAN,
   ESTADOS_DE_PLAN_SEMANAL,
@@ -2897,8 +2898,22 @@ export const solicitudCompraRenglones = pgTable(
      */
     reemplazadoEn: timestamp('reemplazado_en', { withTimezone: true }),
     reemplazadoPorEvento: text('reemplazado_por_evento').references(() => solicitudCompraEventos.id),
+    /**
+     * Spec 048, RF-11: en una requisición de obra, el valor estimado de este renglón, en pesos. Nulo
+     * en las de antes, en las de GeoLab y, hasta que lo complete el primer paso, en las del
+     * Almacenista (RF-14). Se conserva después de registrar la compra (RF-57).
+     */
+    valorEstimado: bigint('valor_estimado', { mode: 'number' }),
+    /**
+     * Spec 048, RF-2: a qué parte de la planificación va el renglón (`rules/requisicion-planificacion.ts`).
+     * Nula en los renglones de antes de la 048, que no cuentan (RF-25). Su forma la validan el
+     * contrato y la regla; aquí solo se exige que traiga su tipo.
+     */
+    imputacion: jsonb('imputacion').$type<ImputacionDelRenglon>(),
   },
   (t) => [
+    check('ck_solicitud_compra_renglon_valor_estimado', sql`${t.valorEstimado} is null or ${t.valorEstimado} > 0`),
+    check('ck_solicitud_compra_renglon_imputacion', sql`${t.imputacion} is null or ${t.imputacion} ? 'tipo'`),
     // Parcial: los reemplazados conservan su número de orden sin chocar con los vigentes.
     uniqueIndex('ux_solicitud_compra_renglon_orden').on(t.solicitudId, t.orden).where(sql`${t.reemplazadoEn} is null`),
     check('ck_solicitud_compra_renglon_reemplazo', sql`(${t.reemplazadoEn} is null) = (${t.reemplazadoPorEvento} is null)`),
@@ -2995,8 +3010,18 @@ export const compraRenglones = pgTable(
     renglonId: text('renglon_id')
       .notNull()
       .references(() => solicitudCompraRenglones.id),
+    /**
+     * Spec 048, RF-47: cuánto de la compra es de este renglón, cuando la compra cubre renglones de
+     * partes distintas de la planificación. Nulo si van todos a la misma: entonces la compra entera
+     * cuenta contra ella (RF-49).
+     */
+    valor: bigint('valor', { mode: 'number' }),
   },
-  (t) => [primaryKey({ columns: [t.compraId, t.renglonId] }), index('ix_compra_renglones_renglon').on(t.renglonId)],
+  (t) => [
+    primaryKey({ columns: [t.compraId, t.renglonId] }),
+    index('ix_compra_renglones_renglon').on(t.renglonId),
+    check('ck_compra_renglon_valor', sql`${t.valor} is null or ${t.valor} > 0`),
+  ],
 );
 
 /**
@@ -3064,6 +3089,8 @@ export const solicitudesPago = pgTable(
     valor: bigint('valor', { mode: 'number' }).notNull(),
     /** Lo aprobado (RF-11): nulo hasta aprobar; puede ser menos que lo pedido. */
     valorAprobado: bigint('valor_aprobado', { mode: 'number' }),
+    /** Spec 048, RF-3: a qué parte de la planificación va, en una requisición de pago de obra; nula en las de antes. */
+    imputacion: jsonb('imputacion').$type<ImputacionDelRenglon>(),
     paraCuando: date('para_cuando', { mode: 'string' }).notNull(),
     urgente: boolean('urgente').notNull().default(false),
     pedidaPor: text('pedida_por')
@@ -3095,6 +3122,7 @@ export const solicitudesPago = pgTable(
       sql`${t.concepto} in ('proveedor', 'anticipo', 'alquiler', 'transporte', 'servicios', 'caja_menor', 'viaticos', 'otro')`,
     ),
     check('ck_solicitud_pago_valor', sql`${t.valor} > 0`),
+    check('ck_solicitud_pago_imputacion', sql`${t.imputacion} is null or ${t.imputacion} ? 'tipo'`),
     check(
       'ck_solicitud_pago_aprobado',
       sql`${t.valorAprobado} is null or (${t.valorAprobado} > 0 and ${t.valorAprobado} <= ${t.valor})`,

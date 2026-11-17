@@ -59,6 +59,11 @@ export interface RenglonPedido {
    */
   necesitaEl?: string | null;
   paraQue?: string | null;
+  /**
+   * Spec 048, RF-11: en una requisición de obra, el valor estimado de este renglón, en pesos. El
+   * Almacenista no lo pone: lo completa el primer paso de la cadena (RF-13, RF-14).
+   */
+  valorEstimado?: number | null;
 }
 
 /**
@@ -103,6 +108,8 @@ export interface FaltasPorCampo {
     unidad: string | null;
     necesitaEl: string | null;
     paraQue: string | null;
+    /** Spec 048, RF-12: solo en una requisición de obra, y no al Almacenista. */
+    valorEstimado: string | null;
   }[];
   paraCuando: string | null;
   valorEstimado: string | null;
@@ -111,6 +118,21 @@ export interface FaltasPorCampo {
 /** Spec 046: si lo que se valida es una requisición (RQ) y no una SC de antes. */
 export interface OpcionesDeLasFaltas {
   requisicion?: boolean;
+  /**
+   * Spec 048: una requisición de obra lleva valor estimado por renglón (RF-11, RF-12), salvo si la
+   * pide el Almacenista, que no ve valores (RF-13). La cabecera es la suma (RF-18).
+   */
+  deObra?: boolean;
+  delAlmacenista?: boolean;
+}
+
+/** Pesos: entero y mayor que cero. */
+const pesosValidos = (valor: number): boolean => Number.isInteger(valor) && valor > 0 && valor < 1e15;
+
+/** Spec 048, RF-18: el valor estimado de la cabecera de una requisición de obra, la suma de sus renglones. */
+export function valorEstimadoDeLosRenglones(renglones: readonly Pick<RenglonPedido, 'valorEstimado'>[]): number | null {
+  const valores = renglones.map((r) => r.valorEstimado).filter((v): v is number => typeof v === 'number' && v > 0);
+  return valores.length === 0 ? null : valores.reduce((a, b) => a + b, 0);
 }
 
 /**
@@ -127,6 +149,7 @@ export function faltasPorCampo(
   opciones: OpcionesDeLasFaltas = {},
 ): FaltasPorCampo {
   const requisicion = opciones.requisicion === true;
+  const pideValor = requisicion && opciones.deObra === true && opciones.delAlmacenista !== true;
   return {
     renglones: datos.renglones.length === 0 ? 'Agregue al menos un renglón con lo que se necesita.' : null,
     porRenglon: datos.renglones.map((renglon, i) => {
@@ -145,6 +168,11 @@ export function faltasPorCampo(
               ? `La fecha del renglón ${n} no puede ser anterior a hoy.`
               : null,
         paraQue: requisicion && !renglon.paraQue?.trim() ? `Diga para qué es el renglón ${n}.` : null,
+        valorEstimado: !pideValor
+          ? null
+          : typeof renglon.valorEstimado !== 'number' || !pesosValidos(renglon.valorEstimado)
+            ? `Diga el valor estimado del renglón ${n}, en pesos y mayor que cero.`
+            : null,
       };
     }),
     paraCuando: requisicion
@@ -174,7 +202,7 @@ export function faltasDeLaSolicitud(
   const f = faltasPorCampo(datos, hoy, opciones);
   return [
     f.renglones,
-    ...f.porRenglon.flatMap((r) => [r.descripcion, r.cantidad, r.unidad, r.necesitaEl, r.paraQue]),
+    ...f.porRenglon.flatMap((r) => [r.descripcion, r.cantidad, r.unidad, r.necesitaEl, r.paraQue, r.valorEstimado]),
     f.paraCuando,
     f.valorEstimado,
   ].filter((x): x is string => x !== null);
