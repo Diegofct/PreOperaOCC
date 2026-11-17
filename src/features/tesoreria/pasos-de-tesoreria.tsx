@@ -21,6 +21,7 @@ import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, revisarDocumento } from '@/shared/ru
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { aprobacionDelPago, faltasDelPago, MEDIOS_DE_PAGO, nombreDeMedio } from '@/shared/rules/pagos';
 import { enPesos } from '@/shared/rules/pesos';
+import { pasosDeLaPantalla } from '@/shared/rules/requisiciones';
 
 const aPesos = (texto: string) => (texto.trim() ? Number(texto.replace(/[.\s$]/g, '')) : Number.NaN);
 
@@ -212,14 +213,26 @@ function VentanaDeAnularPago({ s, alCerrar, alAnular }: { s: SolicitudDePagoDeta
   );
 }
 
-/** Los botones de la gerencia y sus ventanas, para `accionesExtra` del detalle. */
-export function PasosDeTesoreria({ solicitud: s, listo }: { solicitud: SolicitudDePagoDetallada; listo: (mensaje: string) => void }) {
+/**
+ * Los botones de la gerencia y sus ventanas, para `accionesExtra` del detalle. Spec 046 (T16):
+ * `donde` dice cuáles salen: en Requisiciones de Elemental, decidir las SP de antes; en Tesorería, pagar.
+ */
+export function PasosDeTesoreria({
+  solicitud: s,
+  listo,
+  donde,
+}: {
+  solicitud: SolicitudDePagoDetallada;
+  listo: (mensaje: string) => void;
+  donde: 'requisiciones' | 'tesoreria';
+}) {
   const [ventana, setVentana] = useState<'aprobar' | 'rechazar' | 'devolver' | 'pagar' | 'anular' | null>(null);
   const hecho = (mensaje: string) => {
     setVentana(null);
     listo(mensaje);
   };
-  const puede = (paso: SolicitudDePagoDetallada['pasos'][number]) => s.pasos.includes(paso);
+  const deAqui = pasosDeLaPantalla(s.pasos, donde);
+  const puede = (paso: SolicitudDePagoDetallada['pasos'][number]) => deAqui.includes(paso);
   return (
     <>
       {puede('aprobar') ? <Boton titulo="Aprobar" onPress={() => setVentana('aprobar')} /> : null}

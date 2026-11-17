@@ -1,7 +1,6 @@
 import { crearSolicitud, lugarDeLaSolicitud, solicitudesDelLugar } from '@/features/compras/servidor/solicitudes';
-import { solicitudPedida } from '@/features/panel/contratos';
 import { requerirPermiso } from '@/features/servidor/guardia';
-import { cuerpoJson, ok, responder } from '@/features/servidor/respuestas';
+import { ok, responder } from '@/features/servidor/respuestas';
 
 /**
  * Las solicitudes de compra de una obra, OCC o Geolab (spec 036, RF-1, RF-2, RF-7 a RF-10,
@@ -26,12 +25,8 @@ export async function POST(peticion: Request) {
     const sesion = await requerirPermiso(peticion, 'solicitudes', 'escribir');
     if (sesion instanceof Response) return sesion;
 
-    const lugar = await lugarDeLaSolicitud(sesion, lugarDeLaPeticion(peticion));
-    if (lugar instanceof Response) return lugar;
-
-    const pedido = await cuerpoJson(peticion, solicitudPedida);
-    const resultado = await crearSolicitud(sesion, lugar, pedido);
-    return resultado instanceof Response ? resultado : ok(resultado, 201);
+    // Spec 046 (RF-86): ya no se crean SC; se pide con una requisición.
+    return crearSolicitud();
   });
 }
 

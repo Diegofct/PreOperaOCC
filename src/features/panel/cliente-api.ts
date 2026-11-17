@@ -39,6 +39,14 @@ import type {
   SeleccionDeHojasPedida,
 } from '@/features/panel/planificacion';
 import type {
+  BandejaDeRequisiciones,
+  DecisionPedida,
+  LugarDeRequisiciones,
+  RequisicionCreada,
+  RequisicionPedida,
+  RequisicionesDelLugar,
+} from '@/features/panel/requisiciones';
+import type {
   EstadoDeLecturaDePlanRespuesta,
   GuardadoDePlanSemanal,
   LecturaDePlanIniciada,
@@ -54,6 +62,7 @@ import type {
 } from '@/features/panel/almacen-importacion';
 import type { RangoDeFechas } from '@/shared/rules/rango';
 import type { Periodo } from '@/shared/rules/jornada';
+import type { PasoDeLaCadena, TipoDeRequisicion } from '@/shared/rules/requisiciones';
 
 import type { z } from 'zod';
 
@@ -333,6 +342,10 @@ export type LugarDelPersonal = { empresa: 'elemental' | 'occ' | 'geolab' } | { o
 export type LugarDeLasSolicitudes = { empresa: 'occ' | 'geolab' } | { obraId: string };
 
 const deLasSolicitudes = (lugar: LugarDeLasSolicitudes) =>
+  'empresa' in lugar ? `?empresa=${lugar.empresa}` : `?obraId=${encodeURIComponent(lugar.obraId)}`;
+
+/** Spec 046: `?obraId=…` o `?empresa=geolab`. */
+const deLasRequisiciones = (lugar: LugarDeRequisiciones) =>
   'empresa' in lugar ? `?empresa=${lugar.empresa}` : `?obraId=${encodeURIComponent(lugar.obraId)}`;
 
 /** `?obraId=…` si hay obra, o nada. */
@@ -696,6 +709,24 @@ export const api = {
     /** Con sus documentos de retiro cargados; sin ellos, el servidor dice cuáles faltan. */
     retirar: (id: string, retiro: { version: number; fecha: string; motivo: string }) =>
       panelEnviar<{ version: number }>(`/rrhh/fichas/${encodeURIComponent(id)}/retirar`, 'POST', retiro),
+  },
+
+  /** Spec 046: las requisiciones de una obra o de GeoLab, y la bandeja de Elemental. */
+  requisiciones: {
+    /** RQ, SC y SP del lugar, las que esperan mi aprobación arriba (RF-45, RF-49). */
+    listar: (lugar: LugarDeRequisiciones) => panel<RequisicionesDelLugar>(`/requisiciones${deLasRequisiciones(lugar)}`),
+    /** Pide una requisición de compra o de pago; responde su número RQ y su paso (RF-5). */
+    crear: (lugar: LugarDeRequisiciones, pedido: RequisicionPedida) =>
+      panelEnviar<RequisicionCreada>(`/requisiciones${deLasRequisiciones(lugar)}`, 'POST', pedido),
+    /** Lo que espera el paso de la Administradora, y las anteriores y de OCC (RF-47, RF-83). */
+    bandeja: () => panel<BandejaDeRequisiciones>('/requisiciones/bandeja'),
+    /** Aprobar, devolver o rechazar en el paso, con la versión que se vio (RF-25 a RF-34). */
+    decidir: (tipo: TipoDeRequisicion, id: string, pedido: DecisionPedida) =>
+      panelEnviar<{ estado: string; paso: PasoDeLaCadena | null; version: number }>(
+        `/requisiciones/${tipo}/${encodeURIComponent(id)}/decision`,
+        'POST',
+        pedido,
+      ),
   },
 
   /** Spec 036: las solicitudes de compra de una obra, OCC o Geolab. */

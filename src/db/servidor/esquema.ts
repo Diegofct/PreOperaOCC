@@ -40,6 +40,7 @@ import {
   jsonb,
   numeric,
   pgEnum,
+  pgSequence,
   pgTable,
   primaryKey,
   text,
@@ -78,6 +79,7 @@ import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/r
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
 import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
 import { IDS_DE_ESTADOS_DE_PAGO } from '../../shared/rules/pagos';
+import { PASOS_DE_LA_CADENA } from '../../shared/rules/requisiciones';
 import type {
   AclaracionDelAsistente,
   AdjuntoGuardado,
@@ -2785,6 +2787,21 @@ export const fichaEventos = pgTable(
 export const estadoSolicitudCompra = pgEnum('estado_solicitud_compra', IDS_DE_ESTADOS_DE_SOLICITUD);
 
 /**
+ * Spec 046: el paso de la cadena en que espera una requisición (`rules/requisiciones.ts`). Nulo
+ * cuando no está en la cadena: las SC y SP anteriores, y las RQ ya aprobadas, devueltas,
+ * rechazadas o canceladas. Mientras recorre la cadena el estado es `enviada`: el paso dice dónde.
+ */
+export const pasoRequisicion = pgEnum('paso_requisicion', PASOS_DE_LA_CADENA);
+
+/**
+ * Spec 046, RF-5: el número RQ, uno solo para las requisiciones de compra y de pago, aparte de
+ * la identidad de cada tabla (`numero`, que sigue dando el SC y el SP de antes). Las columnas que
+ * lo guardan no tienen `default`: el número lo pone el `insert` de una requisición con
+ * `nextval`, y así añadir la columna no numera las solicitudes que ya existían (RF-53).
+ */
+export const requisicionNumero = pgSequence('requisicion_numero', { startWith: 1 });
+
+/**
  * Una solicitud de compra (RF-7, RF-8). Es **de un lugar** —una obra, OCC o Geolab—, no de
  * quien la pide: el residente nuevo hereda las de su obra, y quién la ve lo deciden
  * `alcanzaLaEmpresa` y `alcanzaLaObraDeLaRuta`, como en Documentos. Elemental no pide (D1).
@@ -2821,9 +2838,16 @@ export const solicitudesCompra = pgTable(
     actualizadaEn: timestamp('actualizada_en', { withTimezone: true, mode: 'date' })
       .notNull()
       .default(sql`now()`),
+    /** Spec 046: el número RQ; nulo en las SC anteriores (RF-53). Lo pone `nextval('requisicion_numero')`. */
+    numeroRequisicion: integer('numero_requisicion'),
+    /** Spec 046: el paso en que espera; nulo fuera de la cadena (RF-18). */
+    paso: pasoRequisicion('paso'),
   },
   (t) => [
     uniqueIndex('ux_solicitud_compra_numero').on(t.numero),
+    uniqueIndex('ux_solicitud_compra_requisicion').on(t.numeroRequisicion).where(sql`${t.numeroRequisicion} is not null`),
+    // Un paso solo tiene sentido en una requisición que espera en la cadena.
+    check('ck_solicitud_compra_paso', sql`${t.paso} is null or (${t.numeroRequisicion} is not null and ${t.estado} = 'enviada')`),
     check(
       'ck_solicitud_compra_lugar',
       sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int) = 1
@@ -2856,9 +2880,28 @@ export const solicitudCompraRenglones = pgTable(
     /** Nula hasta aprobar; 0 si la gerencia lo quitó al aprobar (RF-13). */
     cantidadAprobada: numeric('cantidad_aprobada', { precision: 14, scale: 2 }),
     unidad: text('unidad').notNull(),
+    /**
+     * Spec 046, RF-10: en una requisición, para cuándo se necesita este renglón y para qué. Nulos en
+     * los renglones de las SC anteriores, que los tenían en la solicitud entera.
+     */
+    necesitaEl: date('necesita_el', { mode: 'string' }),
+    paraQue: text('para_que'),
+    /**
+     * Spec 046, RF-94: al corregir una solicitud, los renglones de antes no se borran (constitución,
+     * principio 4): se marcan con cuándo y con el evento `corregir` que los reemplazó. Toda lectura
+     * de lo que se pide toma solo los vigentes (`reemplazado_en is null`).
+     */
+    reemplazadoEn: timestamp('reemplazado_en', { withTimezone: true }),
+    reemplazadoPorEvento: text('reemplazado_por_evento').references(() => solicitudCompraEventos.id),
   },
   (t) => [
-    uniqueIndex('ux_solicitud_compra_renglon_orden').on(t.solicitudId, t.orden),
+    // Parcial: los reemplazados conservan su número de orden sin chocar con los vigentes.
+    uniqueIndex('ux_solicitud_compra_renglon_orden').on(t.solicitudId, t.orden).where(sql`${t.reemplazadoEn} is null`),
+    check('ck_solicitud_compra_renglon_reemplazo', sql`(${t.reemplazadoEn} is null) = (${t.reemplazadoPorEvento} is null)`),
+    check(
+      'ck_solicitud_compra_renglon_requisicion',
+      sql`(${t.necesitaEl} is null) = (${t.paraQue} is null) and (${t.paraQue} is null or length(trim(${t.paraQue})) > 0)`,
+    ),
     check('ck_solicitud_compra_renglon_cantidad', sql`${t.cantidad} > 0`),
     check(
       'ck_solicitud_compra_renglon_aprobada',
@@ -3029,9 +3072,15 @@ export const solicitudesPago = pgTable(
     actualizadaEn: timestamp('actualizada_en', { withTimezone: true, mode: 'date' })
       .notNull()
       .default(sql`now()`),
+    /** Spec 046: el número RQ (de la misma secuencia que las de compra); nulo en las SP anteriores. */
+    numeroRequisicion: integer('numero_requisicion'),
+    /** Spec 046: el paso en que espera; nulo fuera de la cadena. */
+    paso: pasoRequisicion('paso'),
   },
   (t) => [
     uniqueIndex('ux_solicitud_pago_numero').on(t.numero),
+    uniqueIndex('ux_solicitud_pago_requisicion').on(t.numeroRequisicion).where(sql`${t.numeroRequisicion} is not null`),
+    check('ck_solicitud_pago_paso', sql`${t.paso} is null or (${t.numeroRequisicion} is not null and ${t.estado} = 'enviada')`),
     check(
       'ck_solicitud_pago_lugar',
       sql`((${t.empresaId} is not null)::int + (${t.obraId} is not null)::int) = 1

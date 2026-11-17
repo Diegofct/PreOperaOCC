@@ -23,6 +23,7 @@ import type {
   SolicitudesDePagoDelLugar,
 } from '@/features/panel/contratos';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { ocupantesDeLaCadena, requisicionEnElDetalle } from '@/features/requisiciones/servidor/cadena';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import { yaLaDecidioOtro } from '@/shared/rules/compras';
 import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, nombreDeEmpresa } from '@/shared/rules/empresas';
@@ -43,6 +44,7 @@ import {
   type EstadoDePago,
 } from '@/shared/rules/pagos';
 import { alcanza } from '@/shared/rules/permisos';
+import { numeroQueSeVe, pasoInicial } from '@/shared/rules/requisiciones';
 
 /** El lugar de un pedido de pagos, ya comprobado: las mismas reglas que Compras (RF-2, RF-27). */
 export function lugarDeLosPagos(sesion: PersonaEnSesion, pedido: { empresa: string | null; obraId: string | null }) {
@@ -73,6 +75,7 @@ export async function listarSolicitudesDePago(sesion: PersonaEnSesion, condicion
     .select({
       id: solicitudesPago.id,
       numero: solicitudesPago.numero,
+      numeroRequisicion: solicitudesPago.numeroRequisicion,
       empresaId: solicitudesPago.empresaId,
       obraId: solicitudesPago.obraId,
       obraNombre: obras.nombre,
@@ -101,7 +104,11 @@ export async function listarSolicitudesDePago(sesion: PersonaEnSesion, condicion
     const solicitud: SolicitudDePagoEnElLugar = {
       id: f.id,
       numero: f.numero,
-      codigo: numeroDePago(f.numero),
+      // Spec 046: una RQ se ve con su número RQ (RF-5).
+      codigo:
+        f.numeroRequisicion === null
+          ? numeroDePago(f.numero)
+          : numeroQueSeVe({ tipo: 'pago', numero: f.numero, numeroRequisicion: f.numeroRequisicion }),
       lugar: f.empresaId
         ? { tipo: 'empresa', id: f.empresaId, nombre: nombreDeEmpresa(f.empresaId) }
         : { tipo: 'obra', id: f.obraId as string, nombre: f.obraNombre ?? '' },
@@ -139,40 +146,13 @@ export async function solicitudesDePagoDelLugar(
   };
 }
 
-/** Pide un pago (RF-6 a RF-8): la deja enviada, con su número y el evento `enviada`, juntos. */
-export async function crearSolicitudDePago(
-  sesion: PersonaEnSesion,
-  lugar: LugarDeLaSolicitud,
-  datos: DatosDeLaSolicitudDePago,
-): Promise<{ id: string; numero: number; codigo: string } | Response> {
-  if (lugar.tipo === 'obra' && !lugar.activa) {
-    return errorDePeticion('La obra no está activa: no recibe solicitudes nuevas.', 409);
-  }
-  const faltas = faltasDeLaSolicitudDePago(datos);
-  if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
-
-  const id = uuidv7();
-  const db = baseServidor();
-  const [[creada]] = await db.batch([
-    db
-      .insert(solicitudesPago)
-      .values({
-        id,
-        empresaId: lugar.tipo === 'empresa' ? lugar.empresaId : null,
-        obraId: lugar.tipo === 'obra' ? lugar.obraId : null,
-        beneficiario: datos.beneficiario.trim(),
-        beneficiarioDocumento: datos.beneficiarioDocumento.trim(),
-        concepto: datos.concepto,
-        paraQue: datos.paraQue.trim(),
-        valor: datos.valor,
-        paraCuando: datos.paraCuando,
-        urgente: datos.urgente,
-        pedidaPor: sesion.id,
-      })
-      .returning({ numero: solicitudesPago.numero }),
-    db.insert(solicitudPagoEventos).values({ id: uuidv7(), solicitudPagoId: id, paso: 'enviada', por: sesion.id }),
-  ]);
-  return { id, numero: creada.numero, codigo: numeroDePago(creada.numero) };
+/**
+ * Pedir un pago por la ruta de la 037. Desde la 046 (RF-86, cambio del 2026-11-17) en las obras,
+ * en GeoLab y en OCC se pide con una requisición: esta ruta ya no crea nada y lo dice. Las SP de
+ * antes se siguen leyendo, corrigiendo y decidiendo.
+ */
+export async function crearSolicitudDePago(): Promise<Response> {
+  return errorDePeticion('Ahora se pide con una requisición, en «Requisiciones».', 409);
 }
 
 /* ── Una solicitud de pago (T8) ─────────────────────────────────────────── */
@@ -249,8 +229,15 @@ export async function solicitudDePagoDe(
     version: fila.version,
     // La historia no lleva valores: también la ve el almacenista en las ajenas.
     historia: eventos.map((e) => ({ paso: e.paso, motivo: e.motivo, cambios: conValores ? e.cambios : [], por: nombre(e.por), en: e.en.toISOString() })),
-    pasos: PASOS_DE_PAGO.filter((paso) => puedeDarPaso(paso, sesion, fila)),
+    // Spec 046: una RQ no se decide con estos pasos, sino en su cadena.
+    pasos: PASOS_DE_PAGO.filter((paso) => puedeDarPaso(paso, sesion, { ...fila, requisicion: fila.numeroRequisicion !== null })),
   };
+  // Spec 046 (RF-46, RF-82): con la historia completa, que la cadena no lleva valores.
+  const requisicion = await requisicionEnElDetalle(sesion, { ...fila, tipo: 'pago' }, eventos);
+  if (requisicion) {
+    detalle.requisicion = requisicion;
+    detalle.codigo = requisicion.codigo;
+  }
   if (conValores) {
     detalle.valor = fila.valor;
     detalle.valorAprobado = fila.valorAprobado;
@@ -287,7 +274,12 @@ export async function tomarLaVersionDelPago(
   return Boolean(tomada);
 }
 
-/** Corrige una solicitud enviada o devuelta (RF-9): solo quien la pidió. Una devuelta vuelve a enviada. */
+/**
+ * Corrige una solicitud enviada o devuelta (RF-9): solo quien la pidió. Una devuelta vuelve a enviada.
+ *
+ * Spec 046: una requisición de pago, solo devuelta (RF-36), y al reenviarse vuelve a la cadena
+ * desde su primer paso, con los saltos anotados (RF-31).
+ */
 export async function corregirSolicitudDePago(
   sesion: PersonaEnSesion,
   id: string,
@@ -295,15 +287,24 @@ export async function corregirSolicitudDePago(
 ): Promise<{ version: number } | Response> {
   const fila = await solicitudDePagoAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
-  const rechazo = porQueNoPuedeDarPaso('corregir', sesion, fila);
+  const requisicion = fila.numeroRequisicion !== null;
+  const rechazo = porQueNoPuedeDarPaso('corregir', sesion, { ...fila, requisicion });
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
   if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
   const faltas = faltasDeLaSolicitudDePago(pedido);
   if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
 
+  const inicio = requisicion
+    ? pasoInicial(
+        sesion.rol,
+        fila.obraId ? 'obra' : 'geolab',
+        await ocupantesDeLaCadena(fila.obraId ? { obraId: fila.obraId } : { empresa: 'geolab' }),
+      )
+    : null;
   const campos = camposDelPagoCorregidos(fila, pedido);
   const tomada = await tomarLaVersionDelPago(id, pedido.version, {
     estado: 'enviada',
+    paso: inicio?.paso ?? null,
     beneficiario: pedido.beneficiario.trim(),
     beneficiarioDocumento: pedido.beneficiarioDocumento.trim(),
     concepto: pedido.concepto,
@@ -315,7 +316,17 @@ export async function corregirSolicitudDePago(
   if (!tomada) return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
   await baseServidor()
     .insert(solicitudPagoEventos)
-    .values({ id: uuidv7(), solicitudPagoId: id, paso: 'corregir', cambios: [{ campos }], por: sesion.id });
+    .values([
+      { id: uuidv7(), solicitudPagoId: id, paso: 'corregir', cambios: [{ campos, ...(inicio ? { paso: inicio.paso } : {}) }], por: sesion.id },
+      ...(inicio?.saltos ?? []).map((s) => ({
+        id: uuidv7(),
+        solicitudPagoId: id,
+        paso: 'saltar_paso',
+        motivo: s.motivo,
+        cambios: [{ paso: s.paso }],
+        por: sesion.id,
+      })),
+    ]);
   return { version: pedido.version + 1 };
 }
 
@@ -349,7 +360,8 @@ export async function darPasoDePago(
 ): Promise<{ estado: EstadoDePago; version: number } | Response> {
   const fila = await solicitudDePagoAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
-  const rechazo = porQueNoPuedeDarPaso(pedido.paso, sesion, fila);
+  // Spec 046: una RQ no se decide por aquí, sino en su paso de la cadena.
+  const rechazo = porQueNoPuedeDarPaso(pedido.paso, sesion, { ...fila, requisicion: fila.numeroRequisicion !== null });
   if (rechazo?.estado === 409) return conflictoDePago(id, pedido.paso, sesion.id, rechazo.mensaje);
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
   if (fila.version !== pedido.version) return conflictoDePago(id, pedido.paso, sesion.id, MENSAJE_DE_PAGO_CAMBIADO);
@@ -365,7 +377,8 @@ export async function darPasoDePago(
     valorAprobado = aprobacion.aprobado;
     if (valorAprobado !== fila.valor) cambios = [{ antes: fila.valor, despues: valorAprobado }];
   }
-  if (!(await tomarLaVersionDelPago(id, pedido.version, { estado, ...(valorAprobado ? { valorAprobado } : {}) }))) {
+  // Spec 046: fuera de «enviada» no hay paso en la cadena.
+  if (!(await tomarLaVersionDelPago(id, pedido.version, { estado, paso: null, ...(valorAprobado ? { valorAprobado } : {}) }))) {
     return conflictoDePago(id, pedido.paso, sesion.id, MENSAJE_DE_PAGO_CAMBIADO);
   }
   await baseServidor()

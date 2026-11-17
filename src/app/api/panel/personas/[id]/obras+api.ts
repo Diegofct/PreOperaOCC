@@ -6,6 +6,7 @@ import {
   sentenciasDeObras,
 } from '@/features/auth/servidor/accesos';
 import { obrasDelDirector } from '@/features/panel/contratos';
+import { reacomodarTodo } from '@/features/requisiciones/servidor/requisiciones';
 import { requerirPermiso } from '@/features/servidor/guardia';
 import { cuerpoJson, errorDePeticion, noEncontrado, ok, responder } from '@/features/servidor/respuestas';
 import { motivoParaNoAsignarObras } from '@/shared/rules/cargos-de-obra';
@@ -53,6 +54,8 @@ export async function POST(peticion: Request, { id }: { id: string }) {
 
     const db = baseServidor();
     await ejecutarLote(db, sentenciasDeObras(db, id, { asignar, retirar }, sesion.id, new Date()));
+    // Spec 046, RF-71: si era el único Director de Obra de una obra que retira, su paso queda vacío.
+    if (retirar.length > 0) await reacomodarTodo(sesion.id);
 
     const despues = await personaConObras(id);
     return ok({ obras: despues?.asignadas ?? [] });

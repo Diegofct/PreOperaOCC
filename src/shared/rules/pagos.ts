@@ -7,6 +7,7 @@
  * registran sus pagos, que pueden ser varios (anticipo y saldo) pero nunca de más. El
  * servidor y la pantalla usan estas mismas reglas.
  */
+import { cancelaCualquierRequisicion, porQueNoEnUnaRequisicion } from './compras';
 import { esFechaReal, fechaDeJornada } from './jornada';
 import { alcanza, motivoDeRechazo, type Accion, type ModuloConPermiso, type Rol } from './permisos';
 import { enPesos } from './pesos';
@@ -187,6 +188,8 @@ const QUE_SE_INTENTABA: Record<PasoDePago, string> = {
 export interface SolicitudDePagoParaPaso {
   estado: EstadoDePago;
   pedidaPor: string;
+  /** Spec 046: es una requisición (RQ), no una SP de antes. */
+  requisicion?: boolean;
 }
 
 /**
@@ -199,9 +202,15 @@ export function porQueNoPuedeDarPaso(
   solicitud: SolicitudDePagoParaPaso,
 ): { estado: 403 | 409; mensaje: string } | null {
   const [modulo, accion] = PERMISO[paso];
-  if (!alcanza(persona.rol, modulo, accion)) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
-  const soloQuienPidio = SOLO_QUIEN_PIDIO[paso];
-  if (soloQuienPidio && solicitud.pedidaPor !== persona.id) return { estado: 403, mensaje: soloQuienPidio };
+  // Spec 046 (RF-37): la Administradora y la Gerencia también cancelan una RQ abierta.
+  if (!cancelaCualquierRequisicion(paso, persona.rol, solicitud)) {
+    if (!alcanza(persona.rol, modulo, accion)) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
+    const soloQuienPidio = SOLO_QUIEN_PIDIO[paso];
+    if (soloQuienPidio && solicitud.pedidaPor !== persona.id) return { estado: 403, mensaje: soloQuienPidio };
+  }
+  // Spec 046 (RF-25, RF-36): la misma regla que en las de compra.
+  const deRequisicion = porQueNoEnUnaRequisicion(paso, solicitud);
+  if (deRequisicion) return deRequisicion;
   if (!DESDE[paso].includes(solicitud.estado)) {
     const estado = nombreDeEstadoDePago(solicitud.estado).toLowerCase();
     return { estado: 409, mensaje: `Esta solicitud está ${estado}: no se puede ${QUE_SE_INTENTABA[paso]}.` };
@@ -310,7 +319,8 @@ export function veElValorDelPago(rol: Rol, pedidaPor: string, yo: string): boole
  * Auxiliar Administrativa, que registra y anula pagos: sin la pestaña no tendría dónde anularlos.
  */
 export function veLosPagos(rol: Rol): boolean {
-  return rol === 'admin' || rol === 'auxiliar_administrativa';
+  // Spec 046, RF-59: la Administradora de Elemental, como la Auxiliar.
+  return rol === 'admin' || rol === 'auxiliar_administrativa' || rol === 'administradora_elemental';
 }
 
 /** Lo que hace falta de una solicitud de pago para ordenarla y marcarla en una lista. */

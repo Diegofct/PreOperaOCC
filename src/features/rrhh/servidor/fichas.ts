@@ -34,6 +34,7 @@ import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 
 import { baseServidor } from '@/db/servidor/cliente';
+import { reacomodarTodo } from '@/features/requisiciones/servidor/requisiciones';
 import { documentosDelGrupo, fichaEventos, fichasLaborales, obras, sesionesWeb, usuarios } from '@/db/servidor/esquema';
 import type { EventoDeLaFicha, FichaDeLaPersona, FichaPedida } from '@/features/panel/contratos';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
@@ -294,6 +295,8 @@ export async function retirar(
   if (!nueva) return errorDePeticion(MENSAJE_DE_CHOQUE, 409);
 
   await db.insert(fichaEventos).values({ id: uuidv7(), usuarioId: id, accion: 'retirado', campos: ['estado'], por: sesion.id });
+  // Spec 046, RF-71: retirada, deja de ocupar su paso en la cadena.
+  await reacomodarTodo(sesion.id);
   return { version: nueva.version };
 }
 

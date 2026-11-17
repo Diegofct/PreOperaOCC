@@ -29,6 +29,7 @@ import { aprobacionDeLaSolicitud, faltasDeLaCompra } from '@/shared/rules/compra
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { enPesos } from '@/shared/rules/pesos';
+import { pasosDeLaPantalla } from '@/shared/rules/requisiciones';
 
 import { VentanaDeMotivo } from './vista-de-la-solicitud';
 
@@ -306,13 +307,18 @@ function VentanaDeAnularCompra({
   );
 }
 
-/** Los botones de la gerencia y sus ventanas, para `accionesExtra` del detalle. */
+/**
+ * Los botones de la gerencia y sus ventanas, para `accionesExtra` del detalle. Spec 046 (T16):
+ * `donde` dice cuáles salen: en Requisiciones de Elemental, decidir y comprar (cambio del 17-nov).
+ */
 export function PasosDeGerencia({
   solicitud,
   listo,
+  donde,
 }: {
   solicitud: SolicitudDetallada;
   listo: (mensaje: string) => void;
+  donde: 'requisiciones' | 'tesoreria';
 }) {
   const [ventana, setVentana] = useState<Ventana>(null);
   const hecho = (mensaje: string) => {
@@ -320,7 +326,8 @@ export function PasosDeGerencia({
     listo(mensaje);
   };
   const s = solicitud;
-  const puede = (paso: SolicitudDetallada['pasos'][number]) => s.pasos.includes(paso);
+  const deAqui = pasosDeLaPantalla(s.pasos, donde);
+  const puede = (paso: SolicitudDetallada['pasos'][number]) => deAqui.includes(paso);
   return (
     <>
       {puede('aprobar') ? <Boton titulo="Aprobar" onPress={() => setVentana('aprobar')} /> : null}

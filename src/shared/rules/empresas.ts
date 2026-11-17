@@ -79,11 +79,11 @@ const ASISTENTE = e('asistente', 'Asistente', 'asistente');
 /** LicitApp, en el mismo VPS (RF-49). */
 export const DIRECCION_DE_LICITAPP = 'https://licitapp-elementaling.cloud/';
 
-/** Pedir compras y pagos: en OCC, en Geolab y en cada obra (RF-51). */
-const SOLICITUDES = [
-  e('solicitudes-compra', 'Solicitudes de compra', 'solicitudes'),
-  e('solicitudes-pago', 'Solicitudes de pago', 'solicitudes'),
-];
+/**
+ * Spec 046, RF-1: en cada obra y en GeoLab, compras y pagos se piden en un solo módulo. El
+ * permiso es el mismo de las solicitudes, que lo tienen quienes piden y quienes aprueban.
+ */
+const REQUISICIONES = e('requisiciones', 'Requisiciones', 'solicitudes');
 
 /**
  * RF-13 a RF-15, en el orden de la spec (menús definitivos, cambio del 2026-10-27).
@@ -95,7 +95,9 @@ const SOLICITUDES = [
 const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> = {
   elemental: [
     e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
-    e('compras', 'Compras', 'compras'),
+    // Spec 046, RF-47, RF-89 a RF-92: las requisiciones del grupo, donde se aprueban y se compran.
+    // Compras ya no es un módulo aparte (cambio del 2026-11-17): su trabajo vive aquí.
+    e('requisiciones', 'Requisiciones', 'aprobaciones'),
     e('tesoreria', 'Tesorería', 'tesoreria'),
     e('documentos', 'Documentos', 'documentos'),
     { ...e('licitaciones', 'Licitaciones', 'licitaciones'), externa: DIRECCION_DE_LICITAPP },
@@ -112,7 +114,8 @@ const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> 
     e('vehiculos', 'Vehículos', 'vehiculos'),
     e('preoperacionales', 'Preoperacionales', 'preoperacionales'),
     e('asignaciones', 'Asignaciones', 'asignaciones'),
-    ...SOLICITUDES,
+    // Spec 046, RF-86 (cambio del 2026-11-17): también OCC pide con Requisiciones.
+    REQUISICIONES,
     ASISTENTE,
   ],
   geolab: [
@@ -126,7 +129,8 @@ const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> 
     e('documentos', 'Documentos', 'documentos'),
     // Spec 035, RF-3: el personal de Geolab, de consulta.
     e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
-    ...SOLICITUDES,
+    // Spec 046, RF-1.
+    REQUISICIONES,
     ASISTENTE,
   ],
 };
@@ -158,13 +162,30 @@ const MENU_DE_OBRA: readonly EntradaDelMenu[] = [
   e('cumplimiento', 'Cumplimiento', 'cumplimiento'),
   // Spec 044, RF-78: el plan de trabajo de cada semana, junto a lo que lo mide.
   e('plan-semanal', 'Plan semanal', 'plan_semanal'),
-  ...SOLICITUDES,
+  // Spec 046, RF-1.
+  REQUISICIONES,
   ASISTENTE,
 ];
 
+/**
+ * Spec 046, RF-2, RF-3: la Administradora de Elemental entra a las obras y a GeoLab solo por sus
+ * requisiciones. Fuera de Elemental no ve lo demás que la tabla le abre en Elemental (Recursos
+ * Humanos, Documentos…), que allí es de otros.
+ */
+const FUERA_DE_SU_EMPRESA: Partial<Record<Rol, { suya: EmpresaId; solo: readonly ModuloConPermiso[] }>> = {
+  administradora_elemental: { suya: 'elemental', solo: ['solicitudes'] },
+};
+
+function entraFueraDeSuEmpresa(rol: Rol, empresa: EmpresaId, permiso: ModuloConPermiso): boolean {
+  const regla = FUERA_DE_SU_EMPRESA[rol];
+  return !regla || regla.suya === empresa || regla.solo.includes(permiso);
+}
+
 /** El menú de Elemental, OCC o Geolab que ve este rol (RF-13 a RF-15, RF-21, RF-29). */
 export function menuDeEmpresa(empresa: Exclude<EmpresaId, 'proyectos'>, rol: Rol): EntradaDelMenu[] {
-  return MENUS[empresa].filter((entrada) => alcanza(rol, entrada.permiso, 'ver'));
+  return MENUS[empresa].filter(
+    (entrada) => alcanza(rol, entrada.permiso, 'ver') && entraFueraDeSuEmpresa(rol, empresa, entrada.permiso),
+  );
 }
 
 /**
@@ -174,7 +195,10 @@ export function menuDeEmpresa(empresa: Exclude<EmpresaId, 'proyectos'>, rol: Rol
  */
 export function menuDeObra(rol: Rol, modulos: ModulosDeObra = TODOS_LOS_MODULOS): EntradaDelMenu[] {
   return MENU_DE_OBRA.filter(
-    (entrada) => alcanza(rol, entrada.permiso, 'ver') && !moduloApagado(entrada.permiso, modulos),
+    (entrada) =>
+      alcanza(rol, entrada.permiso, 'ver') &&
+      !moduloApagado(entrada.permiso, modulos) &&
+      entraFueraDeSuEmpresa(rol, 'proyectos', entrada.permiso),
   );
 }
 
@@ -193,6 +217,9 @@ const EMPRESAS_DEL_ROL: Record<Rol, readonly EmpresaId[]> = {
   laboratorista: ['geolab'],
   encargado_occ: ['occ'],
   auxiliar_administrativa: ['elemental'],
+  // Spec 046, RF-2, RF-3, RF-87: a las obras, a GeoLab y a OCC entra por sus requisiciones
+  // (`FUERA_DE_SU_EMPRESA`); OCC, desde el cambio del 17-nov.
+  administradora_elemental: ['elemental', 'geolab', 'proyectos', 'occ'],
   operador: [],
 };
 
@@ -239,6 +266,7 @@ const EMPRESA_DEL_ROL: Record<Rol, EmpresaId> = {
   director_obra: 'proyectos',
   almacenista: 'proyectos',
   encargado_planta: 'proyectos',
+  administradora_elemental: 'elemental',
 };
 
 export function empresaDeLaPersona(empresa: string | null | undefined, rol: Rol): EmpresaId {
@@ -257,6 +285,13 @@ const ACCESOS_SIN_OBRA: Partial<Record<Rol, { empresa: EmpresaId; deEmpresa: str
     deEmpresa: 'Elemental',
     quien: 'La Auxiliar Administrativa',
     porque: 'en Elemental lleva lo administrativo de todas',
+  },
+  // Spec 046, RF-57: de Elemental y sin obra, como la Auxiliar.
+  administradora_elemental: {
+    empresa: 'elemental',
+    deEmpresa: 'Elemental',
+    quien: 'La Administradora de Elemental',
+    porque: 'aprueba las requisiciones de todas',
   },
   // Spec 041, RF-5 y RF-16: responde por todas las obras de Proyectos sin estar en ninguna.
   director_proyectos: {
@@ -357,9 +392,12 @@ export function destinoAlEntrar(persona: { rol: Rol; obras: readonly string[] })
       // Spec 034, RF-14: sin tarjetas; su lugar es OCC, que abre en su primera página.
       return rutaDeEmpresa('occ');
     case 'auxiliar_administrativa':
-      // Spec 035, RF-9: sin tarjetas. Desde la 040 entra a Compras de Elemental y no a Recursos
-      // Humanos: ahí está lo pendiente de aprobar (040, caso límite «Primer arranque»).
-      return rutaDeEmpresa('elemental', 'compras');
+      // Spec 035, RF-9: sin tarjetas. Desde la 046 (RF-92, cambio del 17-nov) entra a Requisiciones
+      // de Elemental, que absorbió Compras: ahí marca lo recibido.
+      return rutaDeEmpresa('elemental', 'requisiciones');
+    case 'administradora_elemental':
+      // Spec 046, RF-47: lo que espera su aprobación, en la bandeja «Requisiciones».
+      return rutaDeEmpresa('elemental', 'requisiciones');
     case 'director_proyectos':
       // Spec 041, RF-5: ve todas las obras; entra a la lista, como la gerencia a Proyectos.
       return rutaDeProyectos();
@@ -477,9 +515,9 @@ export function rutaNueva(
   // El Encargado de OCC no entra a las obras: lo de antes que era de una obra lo lleva a
   // OCC, a la misma página si OCC la tiene.
   // La Auxiliar Administrativa tampoco entra a las obras: lo de antes la lleva a su entrada,
-  // Compras de Elemental (spec 040).
+  // Requisiciones de Elemental (spec 040; 046, RF-92).
   if (persona.rol === 'auxiliar_administrativa') {
-    return conParametros(rutaDeEmpresa('elemental', pagina === 'asistente' ? 'asistente' : 'compras'));
+    return conParametros(rutaDeEmpresa('elemental', pagina === 'asistente' ? 'asistente' : 'requisiciones'));
   }
   if (persona.rol === 'encargado_occ') {
     const enOcc = pagina === 'preoperacionales' || pagina === 'asignaciones';
@@ -632,11 +670,19 @@ export function rutaRenombrada(lugar: LugarDelPanel): string | null {
     if (pagina === 'personas') return `${rutaDeEmpresa('elemental', 'recursos-humanos')}?pestana=personas`;
     if (pagina === 'obras') return `${rutaDeEmpresa('elemental', 'recursos-humanos')}?pestana=obras`;
     if (empresa === 'occ' && pagina === 'maquinaria') return rutaDeEmpresa('occ', 'bitacora');
+    // Spec 046, RF-86: en GeoLab y en OCC las solicitudes pasaron a Requisiciones.
+    if ((empresa === 'geolab' || empresa === 'occ') && (pagina === 'solicitudes-compra' || pagina === 'solicitudes-pago')) {
+      return rutaDeEmpresa(empresa, 'requisiciones');
+    }
+    // RF-90: Compras de Elemental se juntó con Requisiciones.
+    if (empresa === 'elemental' && pagina === 'compras') return rutaDeEmpresa('elemental', 'requisiciones');
     return null;
   }
   if (lugar.pagina === 'obra' || lugar.pagina === 'finanzas') return tesoreria;
   if (lugar.pagina === 'laboratorio') return rutaDeObra(lugar.obraId, 'calidad');
   if (lugar.pagina === 'personas') return rutaDeObra(lugar.obraId, 'recursos-humanos');
+  // Spec 046, RF-1: en las obras las solicitudes pasaron a Requisiciones.
+  if (lugar.pagina === 'solicitudes-compra' || lugar.pagina === 'solicitudes-pago') return rutaDeObra(lugar.obraId, 'requisiciones');
   return null;
 }
 

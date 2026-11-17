@@ -328,7 +328,9 @@ export async function bandejaDeTesoreria(
   sesion: PersonaEnSesion,
   filtros: FiltrosDeLaBandejaDePagos,
 ): Promise<BandejaDeTesoreria> {
-  const todas = await listarSolicitudesDePago(sesion);
+  // Spec 046 (RF-40, RF-84): lo que espera aprobación se decide en la bandeja «Requisiciones»;
+  // Tesorería lleva lo aprobado por pagar y lo cerrado. La Auxiliar no ve lo que recorre la cadena.
+  const todas = (await listarSolicitudesDePago(sesion)).filter((s) => s.estado !== 'enviada' && s.estado !== 'devuelta');
   return {
     solicitudes: ordenDeLaBandejaDePagos(todas.filter((s) => pasaLosFiltrosDePago(s, filtros))),
     resumen: resumenDeLaBandejaDePagos(todas.map((s) => ({ ...s, valorAprobado: s.valorAprobado ?? null, pagado: s.pagado ?? 0 }))),

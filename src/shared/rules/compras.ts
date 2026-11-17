@@ -5,6 +5,11 @@
  * Una solicitud es de un lugar —una obra, OCC o Geolab—, no de quien la pide: la pide quien
  * está allí, la aprueba la gerencia en Compras de Elemental, se registra la compra y se
  * marca lo que llega. El servidor y la pantalla usan estas mismas reglas.
+ *
+ * Spec 046: una **requisición** de compra es una de estas solicitudes con número RQ y un paso en
+ * la cadena de aprobación (`rules/requisiciones.ts`). Aquí cambia poco: cada renglón dice para
+ * cuándo y para qué (RF-10, RF-11), solo se corrige devuelta (RF-36) y no se decide con los pasos
+ * de antes, sino en su paso de la cadena. Las SC anteriores siguen exactamente como estaban.
  */
 import { esFechaReal, fechaDeJornada } from './jornada';
 import { alcanza, motivoDeRechazo, type Accion, type ModuloConPermiso, type Rol } from './permisos';
@@ -48,6 +53,22 @@ export interface RenglonPedido {
   cantidad: number;
   unidad: string;
   materialId: string | null;
+  /**
+   * Spec 046, RF-10: en una requisición, la fecha en que se necesita este renglón (`YYYY-MM-DD`) y
+   * para qué. En las SC anteriores no existen: la fecha y el para qué eran de la solicitud.
+   */
+  necesitaEl?: string | null;
+  paraQue?: string | null;
+}
+
+/**
+ * Spec 046: la fecha más cercana de los renglones de una requisición, que es la que va en la
+ * cabecera (`paraCuando`) para ordenar la bandeja como siempre. `null` si ninguno la tiene.
+ */
+export function fechaMasCercana(renglones: readonly Pick<RenglonPedido, 'necesitaEl'>[]): string | null {
+  const fechas = renglones.map((r) => r.necesitaEl).filter((f): f is string => Boolean(f && esFechaReal(f)));
+  // `YYYY-MM-DD`: el orden del texto es el del calendario.
+  return fechas.length === 0 ? null : fechas.reduce((a, b) => (b < a ? b : a));
 }
 
 /** Lo que se escribe al pedir o al corregir (RF-7). Opcional vacío: `''` o `null`. */
@@ -75,17 +96,37 @@ function cantidadValida(cantidad: number): boolean {
 export interface FaltasPorCampo {
   /** Sin renglones. */
   renglones: string | null;
-  /** Las de cada renglón, en su posición. */
-  porRenglon: { descripcion: string | null; cantidad: string | null; unidad: string | null }[];
+  /** Las de cada renglón, en su posición. `necesitaEl` y `paraQue`, solo en una requisición (046). */
+  porRenglon: {
+    descripcion: string | null;
+    cantidad: string | null;
+    unidad: string | null;
+    necesitaEl: string | null;
+    paraQue: string | null;
+  }[];
   paraCuando: string | null;
   valorEstimado: string | null;
+}
+
+/** Spec 046: si lo que se valida es una requisición (RQ) y no una SC de antes. */
+export interface OpcionesDeLasFaltas {
+  requisicion?: boolean;
 }
 
 /**
  * Lo que impide enviar la solicitud, campo por campo (RF-9, RF-10). `hoy` es la fecha de la
  * jornada en Colombia, para poder probarlo.
+ *
+ * Spec 046 (RF-11, RF-12): en una requisición cada renglón exige su fecha, que no puede ser
+ * anterior a hoy, y su para qué; la fecha de la cabecera no se pide, porque es la más cercana de
+ * los renglones (`fechaMasCercana`).
  */
-export function faltasPorCampo(datos: DatosDeLaSolicitud, hoy: string = fechaDeJornada()): FaltasPorCampo {
+export function faltasPorCampo(
+  datos: DatosDeLaSolicitud,
+  hoy: string = fechaDeJornada(),
+  opciones: OpcionesDeLasFaltas = {},
+): FaltasPorCampo {
+  const requisicion = opciones.requisicion === true;
   return {
     renglones: datos.renglones.length === 0 ? 'Agregue al menos un renglón con lo que se necesita.' : null,
     porRenglon: datos.renglones.map((renglon, i) => {
@@ -96,9 +137,19 @@ export function faltasPorCampo(datos: DatosDeLaSolicitud, hoy: string = fechaDeJ
           ? null
           : `La cantidad del renglón ${n} debe ser mayor que cero, con dos decimales a lo más.`,
         unidad: renglon.unidad.trim() ? null : `El renglón ${n} no tiene unidad.`,
+        necesitaEl: !requisicion
+          ? null
+          : !renglon.necesitaEl || !esFechaReal(renglon.necesitaEl)
+            ? `Diga para cuándo se necesita el renglón ${n}.`
+            : renglon.necesitaEl < hoy
+              ? `La fecha del renglón ${n} no puede ser anterior a hoy.`
+              : null,
+        paraQue: requisicion && !renglon.paraQue?.trim() ? `Diga para qué es el renglón ${n}.` : null,
       };
     }),
-    paraCuando: !esFechaReal(datos.paraCuando)
+    paraCuando: requisicion
+      ? null
+      : !esFechaReal(datos.paraCuando)
       ? 'Diga para cuándo se necesita.'
       : // Las dos son `YYYY-MM-DD`: el orden del texto es el del calendario.
         datos.paraCuando < hoy
@@ -115,11 +166,15 @@ export function faltasPorCampo(datos: DatosDeLaSolicitud, hoy: string = fechaDeJ
  * Lo que impide enviar la solicitud, en el orden del formulario; vacío si está bien (RF-9,
  * RF-10). Es `faltasPorCampo` en una lista, para el servidor.
  */
-export function faltasDeLaSolicitud(datos: DatosDeLaSolicitud, hoy: string = fechaDeJornada()): string[] {
-  const f = faltasPorCampo(datos, hoy);
+export function faltasDeLaSolicitud(
+  datos: DatosDeLaSolicitud,
+  hoy: string = fechaDeJornada(),
+  opciones: OpcionesDeLasFaltas = {},
+): string[] {
+  const f = faltasPorCampo(datos, hoy, opciones);
   return [
     f.renglones,
-    ...f.porRenglon.flatMap((r) => [r.descripcion, r.cantidad, r.unidad]),
+    ...f.porRenglon.flatMap((r) => [r.descripcion, r.cantidad, r.unidad, r.necesitaEl, r.paraQue]),
     f.paraCuando,
     f.valorEstimado,
   ].filter((x): x is string => x !== null);
@@ -180,9 +235,13 @@ const PERMISO: Record<PasoDeSolicitud, [ModuloConPermiso, Accion]> = {
  * (`solicitudes·escribir`), y desde la spec 040 (RF-5) también de Compras de Elemental: la
  * Auxiliar Administrativa marca lo recibido sin poder **pedir** compras, que es lo que le
  * daría `solicitudes·escribir`.
+ *
+ * Spec 046 (RF-63, RF-85): era `compras·escribir`, que es registrar compras, y la Auxiliar lo
+ * perdió. Recibir lo conserva con `compras·listar`, que tienen quienes reciben desde Elemental:
+ * la gerencia, la Administradora y la Auxiliar.
  */
 const TAMBIEN_CON: Partial<Record<PasoDeSolicitud, [ModuloConPermiso, Accion]>> = {
-  recibir: ['compras', 'escribir'],
+  recibir: ['compras', 'listar'],
 };
 
 const SOLO_QUIEN_PIDIO: Partial<Record<PasoDeSolicitud, string>> = {
@@ -212,7 +271,25 @@ export interface SolicitudParaPaso {
   pedidaPor: string;
   /** ¿Tiene alguna compra sin anular? */
   tieneCompraVigente: boolean;
+  /** Spec 046: es una requisición (RQ), no una SC de antes. */
+  requisicion?: boolean;
 }
+
+/** Los pasos que en una requisición no se dan aquí, sino en su paso de la cadena (046, RF-25). */
+const SE_DECIDEN_EN_LA_CADENA: readonly string[] = ['aprobar', 'rechazar', 'devolver'];
+
+/**
+ * Spec 046, RF-37: una requisición abierta la cancelan también la Administradora de Elemental y la
+ * Gerencia, aunque no la pidieran —una que ya no hace falta no tiene por qué esperar a que quien la
+ * pidió se acuerde—. Los demás pasos de la cadena no: si no les cuadra, la devuelven o la rechazan.
+ * Las SC y SP de antes siguen como eran, solo quien las pidió.
+ */
+export function cancelaCualquierRequisicion(paso: string, rol: Rol, solicitud: { requisicion?: boolean }): boolean {
+  return paso === 'cancelar' && Boolean(solicitud.requisicion) && (rol === 'admin' || rol === 'administradora_elemental');
+}
+
+/** Spec 046, RF-36: una requisición se corrige solo devuelta; las SC de antes, también enviadas. */
+export const SE_CORRIGE_DESDE_EN_UNA_REQUISICION = 'devuelta';
 
 /**
  * Por qué esta persona no puede dar este paso, o `null` si puede. 403 si no le toca a ella;
@@ -226,16 +303,39 @@ export function porQueNoPuedeDar(
 ): { estado: 403 | 409; mensaje: string } | null {
   const [modulo, accion] = PERMISO[paso];
   const otro = TAMBIEN_CON[paso];
-  const tienePermiso = alcanza(persona.rol, modulo, accion) || (otro !== undefined && alcanza(persona.rol, otro[0], otro[1]));
-  if (!tienePermiso) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
-  const soloQuienPidio = SOLO_QUIEN_PIDIO[paso];
-  if (soloQuienPidio && solicitud.pedidaPor !== persona.id) return { estado: 403, mensaje: soloQuienPidio };
+  if (!cancelaCualquierRequisicion(paso, persona.rol, solicitud)) {
+    const tienePermiso = alcanza(persona.rol, modulo, accion) || (otro !== undefined && alcanza(persona.rol, otro[0], otro[1]));
+    if (!tienePermiso) return { estado: 403, mensaje: motivoDeRechazo(modulo, accion) };
+    const soloQuienPidio = SOLO_QUIEN_PIDIO[paso];
+    if (soloQuienPidio && solicitud.pedidaPor !== persona.id) return { estado: 403, mensaje: soloQuienPidio };
+  }
+  const deRequisicion = porQueNoEnUnaRequisicion(paso, solicitud);
+  if (deRequisicion) return deRequisicion;
   if (!DESDE[paso].includes(solicitud.estado)) {
     const estado = nombreDeEstadoDeSolicitud(solicitud.estado).toLowerCase();
     return { estado: 409, mensaje: `Esta solicitud está ${estado}: no se puede ${QUE_SE_INTENTABA[paso]}.` };
   }
   if (PIDEN_COMPRA.includes(paso) && !solicitud.tieneCompraVigente) {
     return { estado: 409, mensaje: 'Esta solicitud no tiene compras registradas.' };
+  }
+  return null;
+}
+
+/**
+ * Spec 046: lo que una requisición, de compra o de pago, no admite por los pasos de antes. Decidirla
+ * es de su paso en la cadena (RF-25), y corregirla, solo cuando está devuelta (RF-36). Las
+ * solicitudes de antes no pasan por aquí.
+ */
+export function porQueNoEnUnaRequisicion(
+  paso: string,
+  solicitud: { estado: string; requisicion?: boolean },
+): { estado: 409; mensaje: string } | null {
+  if (!solicitud.requisicion) return null;
+  if (SE_DECIDEN_EN_LA_CADENA.includes(paso)) {
+    return { estado: 409, mensaje: 'Una requisición se aprueba, devuelve o rechaza en su paso de la cadena.' };
+  }
+  if (paso === 'corregir' && solicitud.estado !== SE_CORRIGE_DESDE_EN_UNA_REQUISICION) {
+    return { estado: 409, mensaje: 'Una requisición solo se corrige cuando se la devuelven.' };
   }
   return null;
 }
@@ -619,7 +719,10 @@ export function pasaLosFiltros(
   return coincideLaSolicitud(solicitud, filtros.texto);
 }
 
-/** ¿Este rol ve el gasto por lugar? (RF-27): la gerencia y, desde la spec 040, la Auxiliar Administrativa. */
+/**
+ * ¿Este rol ve el gasto por lugar? (RF-27): la gerencia y, desde la spec 040, la Auxiliar
+ * Administrativa; desde la 046 (RF-59), también la Administradora de Elemental.
+ */
 export function veElGasto(rol: Rol): boolean {
-  return rol === 'admin' || rol === 'auxiliar_administrativa';
+  return rol === 'admin' || rol === 'auxiliar_administrativa' || rol === 'administradora_elemental';
 }

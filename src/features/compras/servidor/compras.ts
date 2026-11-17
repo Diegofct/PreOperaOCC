@@ -44,7 +44,7 @@ async function renglonesConComprasYRecibos(solicitudId: string) {
     db
       .select()
       .from(solicitudCompraRenglones)
-      .where(eq(solicitudCompraRenglones.solicitudId, solicitudId))
+      .where(and(eq(solicitudCompraRenglones.solicitudId, solicitudId), isNull(solicitudCompraRenglones.reemplazadoEn)))
       .orderBy(asc(solicitudCompraRenglones.orden)),
     db
       .select({ renglonId: compraRenglones.renglonId, compraId: compraRenglones.compraId })

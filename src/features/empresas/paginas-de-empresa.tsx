@@ -12,8 +12,6 @@ import { Redirect, useLocalSearchParams, usePathname, type Href } from 'expo-rou
 import type { ComponentType } from 'react';
 
 import PantallaAsistente from '@/features/asistente/pantalla-asistente';
-import PantallaCompras from '@/features/compras/pantalla-compras';
-import PantallaSolicitudes from '@/features/compras/pantalla-solicitudes';
 import PantallaContrato from '@/features/contratos/pantalla-contrato';
 import PantallaDocumentos from '@/features/documentos/pantalla-documentos';
 import PantallaLaboratorio from '@/features/laboratorio/pantalla-laboratorio';
@@ -29,8 +27,8 @@ import PantallaPlanSemanal from '@/features/plan-semanal/pantalla-plan-semanal';
 import PantallaCumplimiento from '@/features/planificacion/pantalla-cumplimiento';
 import PantallaPlanificacion from '@/features/planificacion/pantalla-planificacion';
 import PantallaReportes from '@/features/reportes/pantalla-reportes';
+import PantallaRequisiciones from '@/features/requisiciones/pantalla-requisiciones';
 import PantallaPersonal from '@/features/rrhh/pantalla-personal';
-import PantallaSolicitudesDePago from '@/features/tesoreria/pantalla-solicitudes-pago';
 import PantallaTesoreria from '@/features/tesoreria/pantalla-tesoreria';
 import {
   alcanzaLaEmpresa,
@@ -55,10 +53,11 @@ type EmpresaConMenu = Exclude<EmpresaId, 'proyectos'>;
 const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>> = {
   elemental: {
     'recursos-humanos': PantallaRecursosHumanos,
-    // Spec 036, RF-3.
-    compras: PantallaCompras,
     // Spec 037, RF-3.
     tesoreria: PantallaTesoreria,
+    // Spec 046, RF-47, RF-89 a RF-92: las requisiciones del grupo, donde se aprueban y se compran.
+    // Compras ya no es una página (cambio del 2026-11-17): su dirección lleva aquí.
+    requisiciones: PantallaRequisiciones,
     documentos: PantallaDocumentos,
     asistente: PantallaAsistente,
   },
@@ -74,10 +73,8 @@ const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>
     vehiculos: PantallaVehiculos,
     preoperacionales: PantallaPreoperacionales,
     asignaciones: PantallaAsignaciones,
-    // Spec 036, RF-1.
-    'solicitudes-compra': PantallaSolicitudes,
-    // Spec 037, RF-1.
-    'solicitudes-pago': PantallaSolicitudesDePago,
+    // Spec 046, RF-86 (cambio del 2026-11-17): también OCC pide con Requisiciones.
+    requisiciones: PantallaRequisiciones,
     asistente: PantallaAsistente,
   },
   geolab: {
@@ -88,10 +85,8 @@ const PANTALLAS_DE_EMPRESA: Record<EmpresaConMenu, Record<string, ComponentType>
     reportes: PantallaReportes,
     documentos: PantallaDocumentos,
     'recursos-humanos': PantallaPersonal,
-    // Spec 036, RF-1.
-    'solicitudes-compra': PantallaSolicitudes,
-    // Spec 037, RF-1.
-    'solicitudes-pago': PantallaSolicitudesDePago,
+    // Spec 046, RF-1: las solicitudes de compra y de pago pasaron a Requisiciones.
+    requisiciones: PantallaRequisiciones,
     asistente: PantallaAsistente,
   },
 };
@@ -115,10 +110,8 @@ const PANTALLAS_DE_OBRA: Record<string, ComponentType> = {
   cumplimiento: PantallaCumplimiento,
   // Spec 044, RF-78.
   'plan-semanal': PantallaPlanSemanal,
-  // Spec 036, RF-1.
-    'solicitudes-compra': PantallaSolicitudes,
-  // Spec 037, RF-1.
-    'solicitudes-pago': PantallaSolicitudesDePago,
+  // Spec 046, RF-1: las solicitudes de compra y de pago pasaron a Requisiciones.
+  requisiciones: PantallaRequisiciones,
   asistente: PantallaAsistente,
 };
 

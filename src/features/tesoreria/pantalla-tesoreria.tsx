@@ -3,7 +3,8 @@
  *
  * Pestañas en la dirección (`?pestana=`), como Recursos Humanos: Solicitudes de pago (la
  * bandeja del grupo), Compras por pagar, Pagos (solo la gerencia, `veLosPagos`; RF-23, D9) y
- * Cortes (RF-24, RF-25).
+ * Cortes (RF-24, RF-25). Desde la 046 (RF-93, cambio del 2026-11-17) también el Gasto por obra y por
+ * empresa, que estaba en Compras: Compras se juntó con Requisiciones y lo financiero vive aquí.
  * Con una solicitud abierta no hay pestañas: es su detalle. La abierta la lleva esta pantalla
  * (`?solicitud=`), porque se abre desde la bandeja y desde Pagos: el parámetro de la dirección
  * es estado de quien lo usa, y las pestañas no se enterarían si lo cambiara otra.
@@ -34,11 +35,13 @@ import {
   type Columna,
 } from '@/features/panel/componentes';
 import type { BandejaDeTesoreria, SolicitudDePagoEnElLugar } from '@/features/panel/contratos';
+import { PantallaGasto } from '@/features/compras/pantalla-gasto';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
 import { usePersona } from '@/features/panel/sesion';
 import { useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
+import { veElGasto } from '@/shared/rules/compras';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { ESTADOS_DE_PAGO, nombreDeConcepto, pasaLosFiltrosDePago, veLosPagos, type EstadoDePago } from '@/shared/rules/pagos';
 import { enPesos } from '@/shared/rules/pesos';
@@ -55,6 +58,8 @@ const PESTANAS = [
   { clave: 'compras', titulo: 'Compras por pagar' },
   { clave: 'pagos', titulo: 'Pagos' },
   { clave: 'cortes', titulo: 'Cortes' },
+  // Spec 046, RF-93: el gasto que antes mostraba Compras, para quien lo ve (`veElGasto`).
+  { clave: 'gasto', titulo: 'Gasto' },
 ] as const;
 
 export default function PantallaTesoreria() {
@@ -67,11 +72,13 @@ export default function PantallaTesoreria() {
         id={abierta}
         volverA="Tesorería"
         alVolver={() => setAbierta('')}
-        accionesExtra={(s, listo) => <PasosDeTesoreria solicitud={s} listo={listo} />}
+        accionesExtra={(s, listo) => <PasosDeTesoreria solicitud={s} listo={listo} donde="tesoreria" />}
       />
     );
   }
-  const pestanas = PESTANAS.filter((p) => p.clave !== 'pagos' || veLosPagos(persona.rol));
+  const pestanas = PESTANAS.filter(
+    (p) => (p.clave !== 'pagos' || veLosPagos(persona.rol)) && (p.clave !== 'gasto' || veElGasto(persona.rol)),
+  );
   const elegida = pestanas.some((p) => p.clave === pestana) ? pestana : 'solicitudes';
   return (
     <View style={estilos.pantalla}>
@@ -88,6 +95,8 @@ export default function PantallaTesoreria() {
         <PantallaPagos alAbrir={setAbierta} />
       ) : elegida === 'cortes' ? (
         <PantallaCortes />
+      ) : elegida === 'gasto' ? (
+        <PantallaGasto />
       ) : (
         <BandejaDeSolicitudes alAbrir={setAbierta} />
       )}
@@ -209,13 +218,13 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
   return (
     <MarcoPantalla
       titulo="Tesorería"
-      descripcion="Los pagos que piden OCC, Geolab y las obras: aprobarlos, rechazarlos o devolverlos, y registrar lo que se paga."
+      descripcion="Lo que el grupo ya aprobó para pagar: registrar los pagos y anularlos. Lo que espera aprobación se decide en «Requisiciones»."
       error={cargada.error}
       cargando={cargada.cargando}
     >
-      {/* RF-10: lo que espera a la gerencia, de todo el grupo. */}
+      {/* RF-10. Spec 046 (RF-40, RF-84, T16): sin «Esperan aprobación», que ya no se decide aquí sino
+          en la bandeja «Requisiciones»; Tesorería parte de lo aprobado. */}
       <Cifras>
-        <Cifra titulo="Esperan aprobación" valor={String(resumen.porAprobar)} tono={resumen.porAprobar > 0 ? 'atencion' : 'neutro'} />
         <Cifra
           titulo="Aprobadas sin pagar"
           valor={String(resumen.porPagar)}

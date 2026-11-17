@@ -37,6 +37,8 @@ export const ROLES_DEL_ASISTENTE: readonly Rol[] = [
   // Spec 041.
   'director_proyectos',
   'director_obra',
+  // Spec 046, RF-59: como la Auxiliar.
+  'administradora_elemental',
 ];
 
 /**
@@ -90,6 +92,8 @@ export type ModuloDeObraConsultable = Exclude<ModuloConsultable, ModuloDeEmpresa
 const DE_EMPRESA_DEL_ROL: Record<Rol, readonly ModuloDeEmpresaConsultable[]> = {
   admin: ['solicitudes', 'compras', 'tesoreria', 'finanzas', 'rrhh', 'documentos', 'bitacora_empresa'],
   auxiliar_administrativa: ['compras', 'tesoreria', 'finanzas', 'rrhh', 'documentos'],
+  // Spec 046, RF-59: lo mismo que la Auxiliar. Las requisiciones no las consulta el asistente.
+  administradora_elemental: ['compras', 'tesoreria', 'finanzas', 'rrhh', 'documentos'],
   residente: ['solicitudes'],
   // Spec 041: los directores, lo mismo que el residente (RF-59).
   director_proyectos: ['solicitudes'],

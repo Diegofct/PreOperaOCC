@@ -41,6 +41,7 @@ import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
 import {
   aprobacionDeLaSolicitud,
   camposCorregidos,
+  fechaMasCercana,
   faltaDelMotivo,
   faltasDeLaSolicitud,
   marcasDeLaSolicitud,
@@ -58,9 +59,11 @@ import {
   type EstadoDeSolicitud,
   type FiltrosDeLaBandeja,
 } from '@/shared/rules/compras';
+import { ocupantesDeLaCadena, requisicionEnElDetalle } from '@/features/requisiciones/servidor/cadena';
 import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, esEmpresa, nombreDeEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
+import { numeroQueSeVe, pasoInicial } from '@/shared/rules/requisiciones';
 
 /** El lugar de un pedido, ya comprobado. */
 export type LugarDeLaSolicitud =
@@ -135,6 +138,7 @@ async function listarSolicitudes(sesion: PersonaEnSesion, condicion?: SQL): Prom
     .select({
       id: solicitudesCompra.id,
       numero: solicitudesCompra.numero,
+      numeroRequisicion: solicitudesCompra.numeroRequisicion,
       empresaId: solicitudesCompra.empresaId,
       obraId: solicitudesCompra.obraId,
       obraNombre: obras.nombre,
@@ -165,7 +169,7 @@ async function listarSolicitudes(sesion: PersonaEnSesion, condicion?: SQL): Prom
             unidad: solicitudCompraRenglones.unidad,
           })
           .from(solicitudCompraRenglones)
-          .where(inArray(solicitudCompraRenglones.solicitudId, ids))
+          .where(and(inArray(solicitudCompraRenglones.solicitudId, ids), isNull(solicitudCompraRenglones.reemplazadoEn)))
           .orderBy(asc(solicitudCompraRenglones.orden)),
         db
           .select({ solicitudId: compras.solicitudId, proveedor: compras.proveedor })
@@ -180,7 +184,11 @@ async function listarSolicitudes(sesion: PersonaEnSesion, condicion?: SQL): Prom
     const solicitud: SolicitudEnElLugar = {
       id: f.id,
       numero: f.numero,
-      codigo: numeroDeSolicitud(f.numero),
+      // Spec 046: una RQ se ve con su número RQ (RF-5).
+      codigo:
+        f.numeroRequisicion === null
+          ? numeroDeSolicitud(f.numero)
+          : numeroQueSeVe({ tipo: 'compra', numero: f.numero, numeroRequisicion: f.numeroRequisicion }),
       lugar: f.empresaId
         ? { tipo: 'empresa', id: f.empresaId, nombre: nombreDeEmpresa(f.empresaId) }
         : { tipo: 'obra', id: f.obraId as string, nombre: f.obraNombre ?? '' },
@@ -211,7 +219,9 @@ async function listarSolicitudes(sesion: PersonaEnSesion, condicion?: SQL): Prom
  * lo que espera a la gerencia no desaparece por filtrar.
  */
 export async function bandejaDelGrupo(sesion: PersonaEnSesion, filtros: FiltrosDeLaBandeja): Promise<BandejaDeCompras> {
-  const todas = await listarSolicitudes(sesion);
+  // Spec 046 (RF-38, RF-47): lo que espera aprobación se decide en la bandeja «Requisiciones»;
+  // Compras lleva lo aprobado, para registrar la compra, y lo cerrado.
+  const todas = (await listarSolicitudes(sesion)).filter((s) => s.estado !== 'enviada' && s.estado !== 'devuelta');
   return {
     solicitudes: ordenDeLaBandeja(todas.filter((s) => pasaLosFiltros(s, filtros))),
     resumen: resumenDeLaBandeja(todas),
@@ -254,7 +264,7 @@ export async function gastoPorLugar(rango: { desde: string; hasta: string }): Pr
  * Los materiales del catálogo que se nombraron, si son del Almacén de esa obra y siguen
  * vivos (RF-7). Una solicitud de OCC o Geolab no lleva materiales: el catálogo es de obra.
  */
-async function faltasDeLosMateriales(lugar: LugarDeLaSolicitud, datos: DatosDeLaSolicitud): Promise<string[]> {
+export async function faltasDeLosMateriales(lugar: LugarDeLaSolicitud, datos: DatosDeLaSolicitud): Promise<string[]> {
   const pedidos = [...new Set(datos.renglones.map((r) => r.materialId).filter((m): m is string => Boolean(m)))];
   if (!pedidos.length) return [];
   if (lugar.tipo === 'empresa') return ['Los materiales del catálogo son del Almacén de una obra.'];
@@ -272,51 +282,12 @@ async function faltasDeLosMateriales(lugar: LugarDeLaSolicitud, datos: DatosDeLa
 }
 
 /**
- * Pide una compra (RF-7 a RF-10): la deja enviada, con su número y el evento `enviada`. La
- * solicitud, sus renglones y el evento se escriben juntos.
+ * Pedir una compra por la ruta de la 036 (RF-7 a RF-10). Desde la 046 (RF-86, cambio del
+ * 2026-11-17) en las obras, en GeoLab y en OCC se pide con una requisición: esta ruta ya no crea
+ * nada y lo dice. Las SC de antes se siguen leyendo, corrigiendo y decidiendo.
  */
-export async function crearSolicitud(
-  sesion: PersonaEnSesion,
-  lugar: LugarDeLaSolicitud,
-  datos: DatosDeLaSolicitud,
-): Promise<{ id: string; numero: number; codigo: string } | Response> {
-  if (lugar.tipo === 'obra' && !lugar.activa) {
-    return errorDePeticion('La obra no está activa: no recibe solicitudes nuevas.', 409);
-  }
-  const faltas = [...faltasDeLaSolicitud(datos), ...(await faltasDeLosMateriales(lugar, datos))];
-  if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
-
-  const id = uuidv7();
-  const db = baseServidor();
-  const [[creada]] = await db.batch([
-    db
-      .insert(solicitudesCompra)
-      .values({
-        id,
-        empresaId: lugar.tipo === 'empresa' ? lugar.empresaId : null,
-        obraId: lugar.tipo === 'obra' ? lugar.obraId : null,
-        paraCuando: datos.paraCuando,
-        urgente: datos.urgente,
-        paraQue: datos.paraQue.trim(),
-        proveedorSugerido: datos.proveedorSugerido.trim(),
-        valorEstimado: datos.valorEstimado,
-        pedidaPor: sesion.id,
-      })
-      .returning({ numero: solicitudesCompra.numero }),
-    db.insert(solicitudCompraRenglones).values(
-      datos.renglones.map((r, i) => ({
-        id: uuidv7(),
-        solicitudId: id,
-        orden: i + 1,
-        descripcion: r.descripcion.trim(),
-        materialId: r.materialId,
-        cantidad: String(r.cantidad),
-        unidad: r.unidad.trim(),
-      })),
-    ),
-    db.insert(solicitudCompraEventos).values({ id: uuidv7(), solicitudId: id, paso: 'enviada', por: sesion.id }),
-  ]);
-  return { id, numero: creada.numero, codigo: numeroDeSolicitud(creada.numero) };
+export async function crearSolicitud(): Promise<Response> {
+  return errorDePeticion('Ahora se pide con una requisición, en «Requisiciones».', 409);
 }
 
 /* ── Una solicitud (T8) ─────────────────────────────────────────────────── */
@@ -358,7 +329,7 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
     db
       .select()
       .from(solicitudCompraRenglones)
-      .where(eq(solicitudCompraRenglones.solicitudId, fila.id))
+      .where(and(eq(solicitudCompraRenglones.solicitudId, fila.id), isNull(solicitudCompraRenglones.reemplazadoEn)))
       .orderBy(asc(solicitudCompraRenglones.orden)),
     db.select().from(compras).where(eq(compras.solicitudId, fila.id)).orderBy(asc(compras.registradaEn)),
     db
@@ -432,6 +403,8 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
       cantidadAprobada: r.cantidadAprobada === null ? null : Number(r.cantidadAprobada),
       unidad: r.unidad,
       recibido: recepciones.filter((x) => x.renglonId === r.id).reduce((suma, x) => suma + Number(x.cantidad), 0),
+      necesitaEl: r.necesitaEl,
+      paraQue: r.paraQue,
     })),
     compras: filasDeCompras.map((c) => {
       const compra: SolicitudDetallada['compras'][number] = {
@@ -472,10 +445,22 @@ export async function solicitudDe(sesion: PersonaEnSesion, fila: FilaDeSolicitud
       en: e.en.toISOString(),
     })),
     pasos: PASOS_DE_SOLICITUD.filter((paso) =>
-      puedeDar(paso, sesion, { estado: fila.estado, pedidaPor: fila.pedidaPor, tieneCompraVigente: compraVigente }),
+      puedeDar(paso, sesion, {
+        estado: fila.estado,
+        pedidaPor: fila.pedidaPor,
+        tieneCompraVigente: compraVigente,
+        // Spec 046: una RQ no se decide con estos pasos, sino en su cadena.
+        requisicion: fila.numeroRequisicion !== null,
+      }),
     ),
   };
   if (conValores) detalle.valorEstimado = fila.valorEstimado;
+  // Spec 046 (RF-46, RF-82): el número RQ, el estado que se lee y la cadena.
+  const requisicion = await requisicionEnElDetalle(sesion, { ...fila, tipo: 'compra' }, eventos);
+  if (requisicion) {
+    detalle.requisicion = requisicion;
+    detalle.codigo = requisicion.codigo;
+  }
   return detalle;
 }
 
@@ -484,7 +469,7 @@ async function datosGuardados(fila: FilaDeSolicitud): Promise<DatosDeLaSolicitud
   const renglones = await baseServidor()
     .select()
     .from(solicitudCompraRenglones)
-    .where(eq(solicitudCompraRenglones.solicitudId, fila.id))
+    .where(and(eq(solicitudCompraRenglones.solicitudId, fila.id), isNull(solicitudCompraRenglones.reemplazadoEn)))
     .orderBy(asc(solicitudCompraRenglones.orden));
   return {
     renglones: renglones.map((r) => ({
@@ -492,6 +477,8 @@ async function datosGuardados(fila: FilaDeSolicitud): Promise<DatosDeLaSolicitud
       cantidad: Number(r.cantidad),
       unidad: r.unidad,
       materialId: r.materialId,
+      necesitaEl: r.necesitaEl,
+      paraQue: r.paraQue,
     })),
     paraCuando: fila.paraCuando,
     urgente: fila.urgente,
@@ -523,6 +510,10 @@ export async function tomarLaVersion(
  * Corrige una solicitud enviada o devuelta (RF-11): solo quien la pidió. Una devuelta vuelve
  * a enviada. Los renglones se reemplazan —todavía no hay compras que los nombren— y la
  * historia guarda qué campos cambiaron y los renglones de antes.
+ *
+ * Spec 046: una requisición se corrige solo devuelta (RF-36), sus renglones llevan fecha y para
+ * qué (RF-10, RF-11) y, al reenviarse, vuelve a la cadena desde su primer paso, con los saltos
+ * anotados (RF-31, RF-23, RF-24).
  */
 export async function corregirSolicitud(
   sesion: PersonaEnSesion,
@@ -531,21 +522,34 @@ export async function corregirSolicitud(
 ): Promise<{ version: number } | Response> {
   const fila = await solicitudAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
-  const rechazo = porQueNoPuedeDar('corregir', sesion, { ...fila, tieneCompraVigente: false });
+  const requisicion = fila.numeroRequisicion !== null;
+  const rechazo = porQueNoPuedeDar('corregir', sesion, { ...fila, tieneCompraVigente: false, requisicion });
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
   if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_SOLICITUD_CAMBIADA, 409);
 
   const lugar: LugarDeLaSolicitud = fila.empresaId
     ? { tipo: 'empresa', empresaId: fila.empresaId as 'occ' | 'geolab' }
     : { tipo: 'obra', obraId: fila.obraId as string, activa: true };
-  const faltas = [...faltasDeLaSolicitud(pedido), ...(await faltasDeLosMateriales(lugar, pedido))];
+  // En una RQ la fecha de la cabecera es la más cercana de los renglones (046, RF-10).
+  const datos = requisicion ? { ...pedido, paraCuando: fechaMasCercana(pedido.renglones) ?? '' } : pedido;
+  const faltas = [...faltasDeLaSolicitud(datos, undefined, { requisicion }), ...(await faltasDeLosMateriales(lugar, datos))];
   if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
 
+  // Spec 046, RF-31: una RQ reenviada vuelve a empezar la cadena según quién la pidió.
+  const inicio = requisicion
+    ? pasoInicial(
+        sesion.rol,
+        fila.obraId ? 'obra' : 'geolab',
+        await ocupantesDeLaCadena(fila.obraId ? { obraId: fila.obraId } : { empresa: 'geolab' }),
+      )
+    : null;
+
   const antes = await datosGuardados(fila);
-  const campos = camposCorregidos(antes, pedido);
+  const campos = camposCorregidos(antes, datos);
   const tomada = await tomarLaVersion(id, pedido.version, {
     estado: 'enviada',
-    paraCuando: pedido.paraCuando,
+    paso: inicio?.paso ?? null,
+    paraCuando: datos.paraCuando,
     urgente: pedido.urgente,
     paraQue: pedido.paraQue.trim(),
     proveedorSugerido: pedido.proveedorSugerido.trim(),
@@ -554,8 +558,33 @@ export async function corregirSolicitud(
   if (!tomada) return errorDePeticion(MENSAJE_DE_SOLICITUD_CAMBIADA, 409);
 
   const db = baseServidor();
+  // Spec 046, RF-94: los renglones de antes no se borran (constitución, principio 4): se marcan con
+  // la corrección que los reemplazó. El orden del lote importa: el evento existe antes de que los
+  // renglones lo apunten, y los viejos dejan de ser vigentes antes de insertar los nuevos, que
+  // reutilizan sus números de orden (el índice único es parcial sobre los vigentes).
+  const eventoDeCorregir = uuidv7();
   await db.batch([
-    db.delete(solicitudCompraRenglones).where(eq(solicitudCompraRenglones.solicitudId, id)),
+    db.insert(solicitudCompraEventos).values([
+      {
+        id: eventoDeCorregir,
+        solicitudId: id,
+        paso: 'corregir',
+        cambios: [{ campos, renglonesAntes: campos.includes('lo que se pide') ? antes.renglones : undefined, ...(inicio ? { paso: inicio.paso } : {}) }],
+        por: sesion.id,
+      },
+      ...(inicio?.saltos ?? []).map((s) => ({
+        id: uuidv7(),
+        solicitudId: id,
+        paso: 'saltar_paso',
+        motivo: s.motivo,
+        cambios: [{ paso: s.paso }],
+        por: sesion.id,
+      })),
+    ]),
+    db
+      .update(solicitudCompraRenglones)
+      .set({ reemplazadoEn: new Date(), reemplazadoPorEvento: eventoDeCorregir })
+      .where(and(eq(solicitudCompraRenglones.solicitudId, id), isNull(solicitudCompraRenglones.reemplazadoEn))),
     db.insert(solicitudCompraRenglones).values(
       pedido.renglones.map((r, i) => ({
         id: uuidv7(),
@@ -565,15 +594,10 @@ export async function corregirSolicitud(
         materialId: r.materialId,
         cantidad: String(r.cantidad),
         unidad: r.unidad.trim(),
+        necesitaEl: requisicion ? r.necesitaEl : null,
+        paraQue: requisicion ? (r.paraQue?.trim() ?? null) : null,
       })),
     ),
-    db.insert(solicitudCompraEventos).values({
-      id: uuidv7(),
-      solicitudId: id,
-      paso: 'corregir',
-      cambios: [{ campos, renglonesAntes: campos.includes('lo que se pide') ? antes.renglones : undefined }],
-      por: sesion.id,
-    }),
   ]);
   return { version: pedido.version + 1 };
 }
@@ -615,6 +639,8 @@ export async function darPaso(
   const rechazo = porQueNoPuedeDar(pedido.paso, sesion, {
     ...fila,
     tieneCompraVigente: await tieneCompraVigente(id),
+    // Spec 046: una RQ no se decide por aquí, sino en su paso de la cadena.
+    requisicion: fila.numeroRequisicion !== null,
   });
   if (rechazo?.estado === 409) return conflictoDeSolicitud(id, pedido.paso, sesion.id, rechazo.mensaje);
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
@@ -628,7 +654,7 @@ export async function darPaso(
     const renglones = await db
       .select()
       .from(solicitudCompraRenglones)
-      .where(eq(solicitudCompraRenglones.solicitudId, id));
+      .where(and(eq(solicitudCompraRenglones.solicitudId, id), isNull(solicitudCompraRenglones.reemplazadoEn)));
     aprobacion = aprobacionDeLaSolicitud(
       renglones.map((r) => ({ id: r.id, orden: r.orden, descripcion: r.descripcion, cantidad: Number(r.cantidad) })),
       pedido.cantidades,
@@ -639,7 +665,8 @@ export async function darPaso(
   }
 
   const estado = ESTADO_TRAS_EL_PASO[pedido.paso];
-  if (!(await tomarLaVersion(id, pedido.version, { estado }))) {
+  // Spec 046: fuera de «enviada» no hay paso en la cadena (cancelar una RQ que esperaba).
+  if (!(await tomarLaVersion(id, pedido.version, { estado, paso: null }))) {
     return conflictoDeSolicitud(id, pedido.paso, sesion.id, MENSAJE_DE_SOLICITUD_CAMBIADA);
   }
 

@@ -147,6 +147,37 @@ import {
   type EdicionDelBorrador,
 } from '../src/shared/rules/planificacion-borrador';
 import {
+  cadenaDesdeLaHistoria,
+  separarElPaso,
+  esperaElUltimoPaso,
+  cambiaDeClaseAlCorregir,
+  NO_CAMBIA_DE_CLASE,
+  pasosDeLaPantalla,
+  textoDelEventoDeLaCadena,
+  coincideLaRequisicion,
+  esperaMiAprobacion,
+  estadoEnLaCadena,
+  estadoQueSeVe,
+  estaVencidaLaRequisicion,
+  marcasDeLaRequisicion,
+  numeroQueSeVe,
+  ordenDeRequisiciones,
+  pasaLosFiltrosDeRequisicion,
+  reacomodar,
+  resumenDeRequisiciones,
+  type FilaDeRequisicion,
+  faltaDelMotivoDeLaDecision,
+  NO_RECORTA,
+  pasoInicial,
+  pasoSiguiente,
+  PASOS_DE_LA_CADENA,
+  porQueNoPuedeDecidir,
+  puedeDecidir,
+  puedeRecortar,
+  trasLaDecision,
+  type OcupantesDeLaCadena,
+} from '../src/shared/rules/requisiciones';
+import {
   LARGO_DE_LA_EXPLICACION,
   textoParaElCalendario,
   validarCalendario,
@@ -173,6 +204,8 @@ import {
   pedidoDeInformeDeCumplimiento,
   seleccionDeHojasPedida,
 } from '../src/features/panel/planificacion';
+import { decisionPedida, requisicionPedida } from '../src/features/panel/requisiciones';
+import { solicitudCorregida, solicitudDePagoCorregida } from '../src/features/panel/contratos';
 import {
   anulacionDePlanSemanal,
   aprobacionDePlanSemanal,
@@ -536,6 +569,7 @@ import {
   faltasDelRecibo,
   faltasDeLaSolicitud,
   faltasPorCampo,
+  fechaMasCercana,
   marcasDeLaSolicitud,
   nombreDeEstadoDeSolicitud,
   numeroDeSolicitud,
@@ -4763,15 +4797,16 @@ prueba('la paleta nueva del panel contrasta lo suficiente (022/RNF)', () => {
   assert.ok(contraste(Panel.acento, Panel.fondo) < 4.5);
 });
 
-prueba('están los veinticuatro cargos, con slug y rótulo únicos', () => {
+prueba('están los veinticinco cargos, con slug y rótulo únicos', () => {
   // Quince de la spec 002, más Almacenista y Encargado de Planta (008/RF-14),
   // más Gerente (002/RF-13, añadido el 2026-09-19), más Controlador(a) Vial y
   // Control de Calidad (pedidos por OCC el 2026-09-23), más Laboratorista
   // (018/RF-3), más Encargado de OCC (034/RF-12), más Auxiliar Administrativa
-  // (035/RF-8, renombrada en la 040), más Director de Proyectos (041/RF-3).
-  assert.equal(CARGOS.length, 24);
-  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 24);
-  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 24);
+  // (035/RF-8, renombrada en la 040), más Director de Proyectos (041/RF-3), más
+  // Administradora de Elemental (046/RF-57).
+  assert.equal(CARGOS.length, 25);
+  assert.equal(new Set(CARGOS.map((c) => c.id)).size, 25);
+  assert.equal(new Set(CARGOS.map((c) => c.nombre)).size, 25);
 });
 
 prueba('los cargos nuevos de obra no reciben celular', () => {
@@ -11441,17 +11476,19 @@ prueba('033/RF-1: las cuatro empresas, en el orden de las tarjetas; Proyectos si
 
 prueba('033/RF-13 a RF-15, RF-29: gerencia ve el menú entero de cada empresa, con el asistente', () => {
   // Menús definitivos (cambio del 2026-10-27).
+  // Desde la 046 (RF-47), la bandeja «Requisiciones»; en las obras, en GeoLab y en OCC,
+  // «Requisiciones» en lugar de las dos solicitudes (RF-86), y en Elemental sin Compras (RF-90).
   assert.deepEqual(paginas(menuDeEmpresa('elemental', 'admin')), [
-    'recursos-humanos', 'compras', 'tesoreria', 'documentos', 'licitaciones', 'asistente',
+    'recursos-humanos', 'requisiciones', 'tesoreria', 'documentos', 'licitaciones', 'asistente',
   ]);
   // Con Recursos Humanos de consulta en OCC y Geolab desde la spec 035 (RF-3).
   assert.deepEqual(paginas(menuDeEmpresa('occ', 'admin')), [
     'whatsapp', 'bitacora', 'documentos', 'recursos-humanos', 'reportes', 'vehiculos', 'preoperacionales',
-    'asignaciones', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'asignaciones', 'requisiciones', 'asistente',
   ]);
   assert.deepEqual(paginas(menuDeEmpresa('geolab', 'admin')), [
-    'bitacora', 'whatsapp', 'laboratorio', 'reportes', 'documentos', 'recursos-humanos', 'solicitudes-compra',
-    'solicitudes-pago', 'asistente',
+    'bitacora', 'whatsapp', 'laboratorio', 'reportes', 'documentos', 'recursos-humanos', 'requisiciones',
+    'asistente',
   ]);
   assert.equal(menuDeEmpresa('occ', 'admin')[4].titulo, 'Reportes de vehículos y maquinaria');
   assert.equal(menuDeEmpresa('geolab', 'admin')[3].titulo, 'Reportes de laboratorio');
@@ -11469,14 +11506,14 @@ prueba('033/RF-17, RF-18: el menú de una obra, sin los módulos que la obra tie
   assert.deepEqual(paginas(menuDeObra('admin')), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
     'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
-    'plan-semanal', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'plan-semanal', 'requisiciones', 'asistente',
   ]);
   assert.equal(menuDeObra('admin')[2].titulo, 'Reportes e informes');
   // Calidad es el laboratorio de la obra: se apaga con él.
   const sinCanteraNiLaboratorio = { almacen: true, cantera: false, laboratorio: false };
   assert.deepEqual(paginas(menuDeObra('admin', sinCanteraNiLaboratorio)), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'almacen', 'preoperacionales',
-    'asignaciones', 'contrato', 'documentos', 'planificacion', 'cumplimiento', 'plan-semanal', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'asignaciones', 'contrato', 'documentos', 'planificacion', 'cumplimiento', 'plan-semanal', 'requisiciones', 'asistente',
   ]);
 });
 
@@ -11504,10 +11541,11 @@ prueba('033/RF-49: Licitaciones abre LicitApp en una pestaña nueva', () => {
     externa: true,
   });
   // Las demás son del panel.
-  assert.deepEqual(enlaces.find((e) => e.clave === 'compras'), {
-    clave: 'compras',
-    titulo: 'Compras',
-    ruta: '/panel/elemental/compras',
+  // Desde la 046 (RF-90, cambio del 17-nov) Compras está dentro de Requisiciones.
+  assert.deepEqual(enlaces.find((e) => e.clave === 'requisiciones'), {
+    clave: 'requisiciones',
+    titulo: 'Requisiciones',
+    ruta: '/panel/elemental/requisiciones',
   });
 });
 
@@ -11520,16 +11558,22 @@ prueba('033/RF-51: piden compras y pagos el residente, el almacenista, el labora
   );
   // Documentos dejó de ser solo de la gerencia con la spec 034: su prueba es la de 034/RF-4.
   // La Auxiliar Administrativa ve todo lo de Elemental desde la spec 035 (RF-10).
+  // Desde la 046 (RF-59) también la Administradora de Elemental, que ve lo mismo que la Auxiliar.
   for (const modulo of ['compras', 'tesoreria', 'licitaciones'] as const) {
-    assert.deepEqual(ROLES.filter((r) => alcanza(r, modulo, 'ver')), ['admin', 'auxiliar_administrativa'], modulo);
+    assert.deepEqual(
+      ROLES.filter((r) => alcanza(r, modulo, 'ver')),
+      ['admin', 'auxiliar_administrativa', 'administradora_elemental'],
+      modulo,
+    );
   }
-  // Desde la spec 040 (RF-4, RF-6) aprueba también la Auxiliar Administrativa.
+  // La spec 040 (RF-4, RF-6) le dio aprobar a la Auxiliar; la 046 (RF-62) se lo quitó y se lo dio a
+  // la Administradora de Elemental (RF-55, RF-66).
   for (const modulo of ['compras', 'tesoreria'] as const) {
-    assert.deepEqual(ROLES.filter((r) => alcanza(r, modulo, 'aprobar')), ['admin', 'auxiliar_administrativa'], modulo);
+    assert.deepEqual(ROLES.filter((r) => alcanza(r, modulo, 'aprobar')), ['admin', 'administradora_elemental'], modulo);
   }
   assert.equal(
     motivoDeRechazo('compras', 'aprobar'),
-    'No puede aprobar ni rechazar solicitudes de compra: lo hacen la gerencia y la auxiliar administrativa.',
+    'No puede aprobar ni rechazar solicitudes de compra: lo hacen la gerencia y la administradora de Elemental.',
   );
   // Recursos Humanos: lo llevan gerencia y la Auxiliar Administrativa (035); el residente consulta el de su obra.
   // El Encargado de OCC y el laboratorista consultan el de su empresa (035/RF-4).
@@ -11541,6 +11585,8 @@ prueba('033/RF-51: piden compras y pagos el residente, el almacenista, el labora
     'auxiliar_administrativa',
     'director_proyectos',
     'director_obra',
+    // Spec 046, RF-60: lo mismo que la Auxiliar.
+    'administradora_elemental',
   ]);
   assert.equal(alcanza('residente', 'rrhh', 'escribir'), false);
 });
@@ -11607,7 +11653,7 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   assert.deepEqual(paginas(menuDeObra('director_obra')), [
     'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
     'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
-    'plan-semanal', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'plan-semanal', 'requisiciones', 'asistente',
   ]);
   // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21). Personas, que la
   // 041 le abrió para dar accesos de obra, no es una entrada del menú de la obra: es la pestaña
@@ -11618,22 +11664,23 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
     assert.deepEqual(antes.filter((m) => !ahora.has(m)), [], rol);
   }
   assert.deepEqual(paginas(menuDeObra('almacenista')), [
-    'almacen', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'almacen', 'requisiciones', 'asistente',
   ]);
   assert.deepEqual(paginas(menuDeObra('encargado_planta')), ['cantera', 'asistente']);
   assert.deepEqual(paginas(menuDeObra('almacenista', { almacen: false, cantera: true, laboratorio: true })), [
-    'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'requisiciones', 'asistente',
   ]);
   // Con los documentos de Geolab desde la spec 034 (RF-7), y su Bitácora y sus Reportes de
   // WhatsApp desde la 038 (RF-27 a RF-29).
   assert.deepEqual(paginas(menuDeEmpresa('geolab', 'laboratorista')), [
-    'bitacora', 'whatsapp', 'laboratorio', 'documentos', 'recursos-humanos', 'solicitudes-compra', 'solicitudes-pago', 'asistente',
+    'bitacora', 'whatsapp', 'laboratorio', 'documentos', 'recursos-humanos', 'requisiciones', 'asistente',
   ]);
   for (const rol of ROLES.filter((r) => r !== 'admin')) {
     for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
       // La auxiliar consulta los cortes desde la 037 (D9) y desde la 040 registra y anula los de
       // Elemental (D3): su prueba es la de 040/RF-7.
-      const auxiliar = rol === 'auxiliar_administrativa';
+      // La Administradora de Elemental, lo mismo que la Auxiliar (046/RF-60).
+      const auxiliar = rol === 'auxiliar_administrativa' || rol === 'administradora_elemental';
       assert.equal(alcanza(rol, 'finanzas', accion), auxiliar, `${rol} finanzas/${accion}`);
       assert.equal(alcanza(rol, 'empresa', accion), false, `${rol} empresa/${accion}`);
     }
@@ -11642,7 +11689,7 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   assert.equal(alcanza('admin', 'finanzas', 'aprobar'), false);
   assert.equal(
     motivoDeRechazo('finanzas', 'escribir'),
-    'No puede registrar cortes financieros: lo hacen la gerencia y la auxiliar administrativa.',
+    'No puede registrar cortes financieros: lo hacen la gerencia, la auxiliar administrativa y la administradora de Elemental.',
   );
   assert.equal(motivoDeRechazo('empresa', 'escribir'), 'No puede cambiar los datos de la empresa: lo hace la gerencia.');
 });
@@ -11908,7 +11955,8 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   // Dentro de una empresa: «← Empresas» y su menú, con sus rutas.
   const occ = menuDelLugar({ tipo: 'empresa', empresa: 'occ', pagina: 'vehiculos' }, 'admin');
   assert.deepEqual(occ.navegacion, [{ clave: 'empresas', titulo: '← Empresas', ruta: '/panel' }]);
-  assert.equal(occ.entradas.length, 11);
+  // 10 desde la 046 (RF-86, cambio del 17-nov): «Requisiciones» en lugar de las dos solicitudes.
+  assert.equal(occ.entradas.length, 10);
   assert.deepEqual(occ.entradas[7], { clave: 'asignaciones', titulo: 'Asignaciones', ruta: '/panel/occ/asignaciones' });
 
   // El laboratorista en Geolab: sin «← Empresas», que no tiene a dónde ir.
@@ -11916,7 +11964,7 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   assert.deepEqual(geolab.navegacion, []);
   // Con su Bitácora y sus Reportes de WhatsApp desde la spec 038 (RF-27 a RF-29).
   assert.deepEqual(titulos(geolab.entradas), [
-    'Bitácora', 'Reportes de WhatsApp', 'Laboratorio', 'Documentos', 'Recursos Humanos', 'Solicitudes de compra', 'Solicitudes de pago', 'Asistente',
+    'Bitácora', 'Reportes de WhatsApp', 'Laboratorio', 'Documentos', 'Recursos Humanos', 'Requisiciones', 'Asistente',
   ]);
 
   // En una obra: «Cambiar de obra» para la gerencia, y sin los módulos apagados.
@@ -12147,8 +12195,9 @@ prueba('034/RF-12 a RF-17: el Encargado de OCC entra a OCC y solo a OCC', () => 
     menu.entradas.map((m) => m.titulo),
     menuDeEmpresa('occ', 'admin').map((m) => m.titulo),
   );
-  // Once desde la spec 035: Recursos Humanos de consulta (RF-3).
-  assert.equal(menu.entradas.length, 11);
+  // Once desde la spec 035: Recursos Humanos de consulta (RF-3). Diez desde la 046 (RF-86, cambio
+  // del 17-nov): «Requisiciones» en lugar de las dos solicitudes.
+  assert.equal(menu.entradas.length, 10);
   // RF-16: lo de la gerencia en OCC, menos anular documentos y aprobar compras o pagos.
   assert.ok(alcanza('encargado_occ', 'vehiculos', 'escribir'));
   assert.ok(alcanza('encargado_occ', 'asignaciones', 'escribir'));
@@ -12202,16 +12251,16 @@ prueba('034/RF-2, RF-4 a RF-10: quién ve Documentos y dónde', () => {
   // spec 035, también la Auxiliar Administrativa en los de Elemental (035/RF-10). Nadie más.
   assert.deepEqual(
     ROLES.filter((r) => alcanza(r, 'documentos', 'ver')),
-    // Desde la 041, los tres cargos de obra (RF-59).
-    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra'],
+    // Desde la 041, los tres cargos de obra (RF-59); desde la 046 (RF-60), la Administradora.
+    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra', 'administradora_elemental'],
   );
   assert.deepEqual(
     ROLES.filter((r) => alcanza(r, 'documentos', 'escribir')),
-    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra'],
+    ['admin', 'residente', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'director_proyectos', 'director_obra', 'administradora_elemental'],
   );
   // RF-10: anula la gerencia y, desde la spec 040 (RF-8), la Auxiliar Administrativa en lo
   // de Elemental (el lugar lo cierra `alcanzaLaEmpresa`).
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'documentos', 'anular')), ['admin', 'auxiliar_administrativa']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'documentos', 'anular')), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
   const tiene = (menu: { pagina: string }[]) => menu.some((m) => m.pagina === 'documentos');
   // RF-5: el residente, en su obra.
   assert.ok(tiene(menuDeObra('director_obra')));
@@ -12297,8 +12346,8 @@ prueba('035/RF-11: el selector de Acceso ofrece solo lo que cada rol puede dar',
 
 prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a Elemental', () => {
   const auxiliar = { rol: 'auxiliar_administrativa' as const, obraId: null };
-  // RF-9: sin tarjetas. Desde la 040 entra a Compras (su prueba es la de 040/RF-3).
-  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/compras');
+  // RF-9: sin tarjetas. Desde la 040 entraba a Compras; desde la 046 (RF-92, 046, cambio del 17-nov), a Requisiciones.
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
   assert.ok(alcanzaLaEmpresa('auxiliar_administrativa', 'elemental'));
   for (const empresa of ['occ', 'geolab', 'proyectos'] as const) {
     assert.equal(alcanzaLaEmpresa('auxiliar_administrativa', empresa), false, empresa);
@@ -12309,7 +12358,7 @@ prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a 
   assert.deepEqual(menu.navegacion, []);
   assert.deepEqual(
     menu.entradas.map((m) => m.clave),
-    ['recursos-humanos', 'compras', 'tesoreria', 'documentos', 'licitaciones', 'asistente'],
+    ['recursos-humanos', 'requisiciones', 'tesoreria', 'documentos', 'licitaciones', 'asistente'],
   );
   // La dirección de antes del asistente la lleva al suyo, en Elemental.
   assert.equal(rutaNueva('/panel/asistente', auxiliar), '/panel/elemental/asistente');
@@ -12335,8 +12384,8 @@ prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a 
   assert.equal(sinObraAsignada('auxiliar_administrativa', null), false);
   // Y las fotos de las obras no las alcanza: no tiene sus módulos.
   assert.equal(alcanzaLaImagen(sesionDe('auxiliar_administrativa', null), { existe: true, obraId: 'o1' }, 'bitacoras'), false);
-  // Lo de antes la lleva a su entrada (Compras desde la 040), nunca a una obra.
-  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', auxiliar), '/panel/elemental/compras');
+  // Lo de antes la lleva a su entrada (Requisiciones desde la 046, 046, cambio del 17-nov), nunca a una obra.
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', auxiliar), '/panel/elemental/requisiciones');
 });
 
 prueba('040/RF-1, RF-2: el acceso se llama «Auxiliar Administrativa», y el cargo también', () => {
@@ -12350,20 +12399,32 @@ prueba('040/RF-1, RF-2: el acceso se llama «Auxiliar Administrativa», y el car
   assert.equal(CARGOS.some((c) => /recursos humanos/i.test(c.nombre)), false);
 });
 
-prueba('040/RF-3: entra solo a Elemental, y directo a Compras', () => {
-  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/compras');
+prueba('040/RF-3: entra solo a Elemental, y directo a Requisiciones (antes Compras; 046, RF-92)', () => {
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
   for (const empresa of ['occ', 'geolab', 'proyectos'] as const) {
     assert.equal(alcanzaLaEmpresa('auxiliar_administrativa', empresa), false, empresa);
   }
   const menu = menuDelLugar({ tipo: 'empresa', empresa: 'elemental', pagina: null }, 'auxiliar_administrativa');
-  assert.ok(menu.entradas.some((m) => m.clave === 'compras'));
+  assert.ok(menu.entradas.some((m) => m.clave === 'requisiciones'));
+  assert.equal(menu.entradas.some((m) => m.clave === 'compras'), false);
 });
 
-prueba('040/RF-4 a RF-6, D2: aprueba, registra y anula compras y pagos como la gerencia', () => {
+prueba('040/RF-4 a RF-6, cambiado por la 046 (RF-41, RF-62, RF-63): la Auxiliar solo paga; aprueba la Administradora', () => {
+  // Hasta la 046 la Auxiliar aprobaba, registraba y anulaba compras y pagos como la gerencia (040/D2).
+  // Desde la 046: en Compras consulta (y recibe, RF-85); en Tesorería registra pagos y nada más.
+  assert.deepEqual(
+    (['ver', 'listar', 'escribir', 'anular', 'aprobar'] as const).filter((a) => alcanza('auxiliar_administrativa', 'compras', a)),
+    ['ver', 'listar'],
+  );
+  assert.deepEqual(
+    (['ver', 'listar', 'escribir', 'anular', 'aprobar'] as const).filter((a) => alcanza('auxiliar_administrativa', 'tesoreria', a)),
+    ['ver', 'listar', 'escribir'],
+  );
+  // Lo que la Auxiliar tenía pasa a la Administradora de Elemental, igual que la gerencia.
   for (const modulo of ['compras', 'tesoreria'] as const) {
     for (const accion of ['ver', 'listar', 'escribir', 'anular', 'aprobar'] as const) {
-      assert.equal(alcanza('auxiliar_administrativa', modulo, accion), alcanza('admin', modulo, accion), `${modulo}/${accion}`);
-      assert.ok(alcanza('auxiliar_administrativa', modulo, accion), `${modulo}/${accion}`);
+      assert.equal(alcanza('administradora_elemental', modulo, accion), alcanza('admin', modulo, accion), `${modulo}/${accion}`);
+      assert.ok(alcanza('administradora_elemental', modulo, accion), `${modulo}/${accion}`);
     }
   }
   // No pide compras ni pagos: no es un lugar que compre (plan, decisión de `recibir`).
@@ -12406,11 +12467,16 @@ prueba('040/RF-7, D3: registra y anula los cortes de Elemental; los demás, solo
   assert.equal(alcanza('director_obra', 'finanzas', 'escribir'), false);
 });
 
-prueba('040/RF-5, RF-6: recibe desde Compras sin poder pedir, y ve el gasto y los pagos', () => {
+prueba('040/RF-5, RF-6 y 046/RF-63, RF-85: recibe desde Compras sin poder pedir ni registrar compras, y ve el gasto y los pagos', () => {
   const auxiliar = { id: 'x1', rol: 'auxiliar_administrativa' as const };
   const comprada = { estado: 'comprada' as const, pedidaPor: 'r1', tieneCompraVigente: true };
   assert.ok(puedeDar('recibir', auxiliar, comprada));
-  assert.ok(puedeDar('anular_compra', auxiliar, comprada));
+  // Desde la 046 ya no registra ni anula compras (RF-63); recibir lo conserva (RF-85).
+  assert.equal(puedeDar('anular_compra', auxiliar, comprada), false);
+  assert.equal(puedeDar('registrar_compra', auxiliar, { ...comprada, estado: 'aprobada' }), false);
+  const administradora = { id: 'a1', rol: 'administradora_elemental' as const };
+  assert.ok(puedeDar('anular_compra', administradora, comprada));
+  assert.ok(puedeDar('recibir', administradora, comprada));
   // Corregir y cancelar siguen siendo de quien la pidió, y ella no pide.
   assert.equal(puedeDar('cancelar', auxiliar, { ...comprada, estado: 'enviada' }), false);
   assert.ok(veElGasto('auxiliar_administrativa'));
@@ -12795,8 +12861,9 @@ prueba('035/RF-2 a RF-7: quién ve Recursos Humanos y dónde', () => {
   assert.equal(alcanzaLaEmpresa('encargado_occ', 'geolab'), false);
   assert.equal(alcanzaLaEmpresa('laboratorista', 'occ'), false);
   // RF-6: escriben y anulan solo gerencia y la auxiliar.
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'escribir')), ['admin', 'auxiliar_administrativa']);
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'anular')), ['admin', 'auxiliar_administrativa']);
+  // Desde la 046 (RF-60), también la Administradora de Elemental.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'escribir')), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'rrhh', 'anular')), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
   // RF-4, RF-5: los que consultan.
   for (const rol of ['director_obra', 'encargado_occ', 'laboratorista'] as const) {
     assert.ok(alcanza(rol, 'rrhh', 'ver') && alcanza(rol, 'rrhh', 'listar') && !alcanza(rol, 'rrhh', 'escribir'), rol);
@@ -12850,7 +12917,7 @@ prueba('035/RF-26: la ficha incompleta, por cada uno de sus cuatro campos', () =
 });
 
 prueba('035/RF-13: el salario lo ven la gerencia y la Auxiliar Administrativa, y nadie más', () => {
-  assert.deepEqual(ROLES.filter(veElSalario), ['admin', 'auxiliar_administrativa']);
+  assert.deepEqual(ROLES.filter(veElSalario), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
 });
 
 prueba('035/RF-23: las clases de documento de una persona', () => {
@@ -13115,28 +13182,31 @@ prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué 
   // Auxiliar Administrativa.
   for (const paso of ['aprobar', 'rechazar', 'devolver'] as const) {
     assert.ok(puedeDar(paso, gerencia, enviada), paso);
-    assert.ok(puedeDar(paso, { id: 'x1', rol: 'auxiliar_administrativa' }, enviada), paso);
-    for (const rol of ROLES.filter((r) => r !== 'admin' && r !== 'auxiliar_administrativa')) {
+    // Desde la 046 (RF-55, RF-62) la Administradora de Elemental, y ya no la Auxiliar.
+    assert.ok(puedeDar(paso, { id: 'x1', rol: 'administradora_elemental' }, enviada), paso);
+    for (const rol of ROLES.filter((r) => r !== 'admin' && r !== 'administradora_elemental')) {
       assert.equal(puedeDar(paso, { id: 'r1', rol }, enviada), false, `${paso} ${rol}`);
     }
   }
   assert.deepEqual(porQueNoPuedeDar('aprobar', { id: 'e1', rol: 'encargado_occ' }, enviada), {
     estado: 403,
-    mensaje: 'No puede aprobar ni rechazar solicitudes de compra: lo hacen la gerencia y la auxiliar administrativa.',
+    mensaje: 'No puede aprobar ni rechazar solicitudes de compra: lo hacen la gerencia y la administradora de Elemental.',
   });
   // Una devuelta está en manos de quien la pidió: se rechaza, pero no se aprueba ni se vuelve a devolver.
   assert.ok(puedeDar('rechazar', gerencia, { ...enviada, estado: 'devuelta' }));
   assert.equal(puedeDar('aprobar', gerencia, { ...enviada, estado: 'devuelta' }), false);
   assert.equal(puedeDar('devolver', gerencia, { ...enviada, estado: 'devuelta' }), false);
 
-  // RF-16, RF-19: registrar y anular compras, la gerencia y, desde la 040 (RF-5), la auxiliar.
+  // RF-16, RF-19: registrar y anular compras, la gerencia y, desde la 046 (RF-39), la
+  // Administradora de Elemental (de la 040 a la 046 fue la Auxiliar).
   assert.ok(puedeDar('registrar_compra', gerencia, aprobada));
   assert.ok(puedeDar('registrar_compra', gerencia, { ...comprada, estado: 'recibida_en_parte' }));
   assert.equal(puedeDar('registrar_compra', gerencia, enviada), false);
-  assert.ok(puedeDar('registrar_compra', { id: 'x1', rol: 'auxiliar_administrativa' }, aprobada));
+  assert.ok(puedeDar('registrar_compra', { id: 'x1', rol: 'administradora_elemental' }, aprobada));
+  assert.equal(puedeDar('registrar_compra', { id: 'x2', rol: 'auxiliar_administrativa' }, aprobada), false);
   assert.deepEqual(porQueNoPuedeDar('registrar_compra', { id: 'e1', rol: 'encargado_occ' }, aprobada), {
     estado: 403,
-    mensaje: 'No puede registrar compras: lo hacen la gerencia y la auxiliar administrativa.',
+    mensaje: 'No puede registrar compras: lo hacen la gerencia y la administradora de Elemental.',
   });
   assert.deepEqual(porQueNoPuedeDar('anular_compra', gerencia, aprobada), {
     estado: 409,
@@ -13170,10 +13240,11 @@ prueba('036/RF-5, RF-11, RF-13 a RF-16, RF-20: quién da cada paso y desde qué 
     mensaje: 'Esta solicitud está rechazada: no se puede aprobar.',
   });
 
-  // La tabla de permisos: registrar y anular compras es de la gerencia y de la auxiliar (040).
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'escribir')), ['admin', 'auxiliar_administrativa']);
-  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'anular')), ['admin', 'auxiliar_administrativa']);
-  assert.equal(motivoDeRechazo('compras', 'anular'), 'No puede anular compras: lo hacen la gerencia y la auxiliar administrativa.');
+  // La tabla de permisos: registrar y anular compras era de la gerencia y de la auxiliar (040);
+  // desde la 046 (RF-39, RF-63), de la gerencia y de la Administradora de Elemental.
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'escribir')), ['admin', 'administradora_elemental']);
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'compras', 'anular')), ['admin', 'administradora_elemental']);
+  assert.equal(motivoDeRechazo('compras', 'anular'), 'No puede anular compras: lo hacen la gerencia y la administradora de Elemental.');
 });
 
 prueba('036/RF-16, RF-18, RF-19: lo que impide registrar una compra', () => {
@@ -13448,7 +13519,7 @@ prueba('036/RF-3, RF-26, RF-27: buscar y filtrar la bandeja, y quién ve el gast
   assert.equal(pasaLosFiltros(s, { ...sin, texto: 'arena' }), false);
 
   // RF-27: el gasto, la gerencia y, desde la 040, la Auxiliar Administrativa.
-  assert.deepEqual(ROLES.filter(veElGasto), ['admin', 'auxiliar_administrativa']);
+  assert.deepEqual(ROLES.filter(veElGasto), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
 });
 
 prueba('036/RF-9, RF-10: cada falta de la solicitud, junto a su campo', () => {
@@ -13467,11 +13538,14 @@ prueba('036/RF-9, RF-10: cada falta de la solicitud, junto a su campo', () => {
   assert.deepEqual(faltasPorCampo(datos, hoy), {
     renglones: null,
     porRenglon: [
-      { descripcion: null, cantidad: null, unidad: null },
+      // `necesitaEl` y `paraQue` son de las requisiciones de la 046: en una SC de antes no se piden.
+      { descripcion: null, cantidad: null, unidad: null, necesitaEl: null, paraQue: null },
       {
         descripcion: 'El renglón 2 no dice qué se necesita.',
         cantidad: 'La cantidad del renglón 2 debe ser mayor que cero, con dos decimales a lo más.',
         unidad: 'El renglón 2 no tiene unidad.',
+        necesitaEl: null,
+        paraQue: null,
       },
     ],
     paraCuando: 'La fecha «para cuándo» no puede ser anterior a hoy.',
@@ -13562,14 +13636,15 @@ prueba('037/RF-5, RF-9, RF-11, RF-12, RF-16: quién da cada paso de un pago y de
   // Auxiliar Administrativa; el Encargado no.
   for (const paso of ['aprobar', 'rechazar', 'devolver'] as const) {
     assert.ok(puedeDarPaso(paso, gerencia, enviada), paso);
-    assert.ok(puedeDarPaso(paso, { id: 'x', rol: 'auxiliar_administrativa' }, enviada), paso);
-    for (const rol of ROLES.filter((r) => r !== 'admin' && r !== 'auxiliar_administrativa')) {
+    // Desde la 046 (RF-55, RF-62) la Administradora de Elemental, y ya no la Auxiliar.
+    assert.ok(puedeDarPaso(paso, { id: 'x', rol: 'administradora_elemental' }, enviada), paso);
+    for (const rol of ROLES.filter((r) => r !== 'admin' && r !== 'administradora_elemental')) {
       assert.equal(puedeDarPaso(paso, { id: 'r1', rol }, enviada), false, `${paso} ${rol}`);
     }
   }
   assert.deepEqual(porQueNoPuedeDarPaso('aprobar', { id: 'e1', rol: 'encargado_occ' }, enviada), {
     estado: 403,
-    mensaje: 'No puede aprobar ni rechazar solicitudes de pago: lo hacen la gerencia y la auxiliar administrativa.',
+    mensaje: 'No puede aprobar ni rechazar solicitudes de pago: lo hacen la gerencia y la administradora de Elemental.',
   });
   const aprobada: SolicitudDePagoParaPaso = { ...enviada, estado: 'aprobada' };
   assert.ok(puedeDarPaso('registrar_pago', gerencia, aprobada));
@@ -13578,7 +13653,7 @@ prueba('037/RF-5, RF-9, RF-11, RF-12, RF-16: quién da cada paso de un pago y de
   assert.ok(puedeDarPaso('registrar_pago', { id: 'x', rol: 'auxiliar_administrativa' }, aprobada));
   assert.deepEqual(porQueNoPuedeDarPaso('registrar_pago', { id: 'e1', rol: 'encargado_occ' }, aprobada), {
     estado: 403,
-    mensaje: 'No puede registrar pagos: lo hacen la gerencia y la auxiliar administrativa.',
+    mensaje: 'No puede registrar pagos: lo hacen la gerencia, la auxiliar administrativa y la administradora de Elemental.',
   });
   // RF-16: anular un pago, solo con pagos (pagada en parte o pagada).
   assert.equal(puedeDarPaso('anular_pago', gerencia, aprobada), false);
@@ -13598,7 +13673,7 @@ prueba('037/RF-5, RF-9, RF-11, RF-12, RF-16: quién da cada paso de un pago y de
   assert.equal(faltaDelMotivoDePago('devolver', ' '), 'Diga qué debe corregirse.');
   assert.equal(faltaDelMotivoDePago('anular_pago', ''), 'Diga por qué se anula el pago.');
   assert.equal(faltaDelMotivoDePago('aprobar', ''), null);
-  assert.equal(motivoDeRechazo('tesoreria', 'anular'), 'No puede anular pagos: lo hacen la gerencia y la auxiliar administrativa.');
+  assert.equal(motivoDeRechazo('tesoreria', 'anular'), 'No puede anular pagos: lo hacen la gerencia y la administradora de Elemental.');
 });
 
 prueba('037/RF-11: aprobar un pago por lo pedido o por menos', () => {
@@ -13656,7 +13731,7 @@ prueba('037/RF-5a, RF-23: quién ve el valor de un pago y quién ve Pagos', () =
     assert.ok(veElValorDelPago(rol, 'otro', 'yo'), rol);
   }
   // D9: Pagos, la gerencia y, desde la 040 (RF-6), la Auxiliar Administrativa.
-  assert.deepEqual(ROLES.filter(veLosPagos), ['admin', 'auxiliar_administrativa']);
+  assert.deepEqual(ROLES.filter(veLosPagos), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
 });
 
 prueba('037/RF-10, RF-21, RF-22: vencidas, marcas, orden, resumen y búsqueda de los pagos', () => {
@@ -13724,7 +13799,7 @@ prueba('037/RF-6, RF-13, RF-18, RF-24: los adjuntos de un pago, el comprobante d
   // RF-24, D9: la auxiliar consulta los cortes. Desde la 040 (D3) también registra y anula los
   // de Elemental: el lugar lo cierra `porQueNoPuedeTocarElCorte` (su prueba es la de 040/RF-7).
   for (const accion of ['ver', 'escribir', 'anular'] as const) {
-    assert.deepEqual(ROLES.filter((r) => alcanza(r, 'finanzas', accion)), ['admin', 'auxiliar_administrativa'], accion);
+    assert.deepEqual(ROLES.filter((r) => alcanza(r, 'finanzas', accion)), ['admin', 'auxiliar_administrativa', 'administradora_elemental'], accion);
   }
 });
 
@@ -14782,6 +14857,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     planificacion: [],
     cumplimiento: ['ver', 'listar'],
     plan_semanal: ['ver', 'listar', 'escribir'],
+    // Spec 046: la bandeja de Elemental no es de los cargos de obra.
+    aprobaciones: [],
   },
   director_obra: {
     inicio: ['ver'],
@@ -14810,6 +14887,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     planificacion: ['ver', 'listar'],
     cumplimiento: ['ver', 'listar'],
     plan_semanal: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    // Spec 046: la bandeja de Elemental no es de los cargos de obra.
+    aprobaciones: [],
   },
   director_proyectos: {
     inicio: ['ver'],
@@ -14838,6 +14917,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     planificacion: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
     cumplimiento: ['ver', 'listar'],
     plan_semanal: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
+    // Spec 046: la bandeja de Elemental no es de los cargos de obra.
+    aprobaciones: [],
   },
 };
 
@@ -14930,9 +15011,12 @@ prueba('041/RF-62 a RF-64, RF-68: los demás cargos conservan lo suyo y los dire
   assert.ok(alcanza('encargado_occ', 'preoperacionales', 'anular'));
   assert.ok(alcanza('encargado_occ', 'bitacora_empresa', 'anular'));
   assert.ok(alcanza('encargado_planta', 'cantera', 'anular'));
+  // Aprobar y anular compras y pagos era de la Auxiliar (040); desde la 046 (RF-62, RF-63) es de la
+  // Administradora de Elemental.
   for (const modulo of ['compras', 'tesoreria'] as const) {
-    assert.ok(alcanza('auxiliar_administrativa', modulo, 'aprobar'), modulo);
-    assert.ok(alcanza('auxiliar_administrativa', modulo, 'anular'), modulo);
+    assert.ok(alcanza('administradora_elemental', modulo, 'aprobar'), modulo);
+    assert.ok(alcanza('administradora_elemental', modulo, 'anular'), modulo);
+    assert.equal(alcanza('auxiliar_administrativa', modulo, 'aprobar'), false, modulo);
   }
   for (const rol of ['director_obra', 'director_proyectos'] as const) {
     for (const modulo of ['empresa', 'finanzas', 'compras', 'tesoreria', 'licitaciones', 'bitacora_empresa'] as const) {
@@ -20120,6 +20204,679 @@ prueba('045/RF-152, RF-158: el Excel y el PDF del informe mensual traen los indi
   assert.ok(enPdf && enPdf.tipo === 'tabla' && enPdf.tabla.filas.some((f) => f[0] === 'Indirectos: Seguros y garantías' && f[1] === 600));
   // El Residente no ve plata: tampoco los conceptos (RF-88 de la 043).
   assert.ok(!JSON.stringify(hojasDelInforme(sinPlata(informe))).includes('Indirectos:'));
+});
+
+/* ── Spec 046: Requisición en las obras y en GeoLab, y la Administradora de Elemental ── */
+
+prueba('046/RF-57, RF-58, RF-61: el acceso Administradora de Elemental existe, lo da solo la gerencia y no da accesos al panel', () => {
+  assert.ok(ROLES.includes('administradora_elemental'));
+  // Al final: el enum de la base solo añade al final.
+  assert.equal(ROLES[ROLES.length - 1], 'administradora_elemental');
+  assert.equal(ETIQUETA_ROL.administradora_elemental, 'Administradora de Elemental');
+  assert.equal(nombreDeCargo('administradora_elemental'), 'Administradora de Elemental');
+  assert.equal(cargoPorId('administradora_elemental')?.rolSugerido, 'administradora_elemental');
+  // RF-58: solo la gerencia lo da.
+  assert.deepEqual(ROLES.filter((r) => puedeCambiarRol(r, 'administradora_elemental')), ['admin']);
+  assert.equal(
+    motivoParaNoDarRol('director_proyectos', 'administradora_elemental'),
+    'Solo la gerencia puede dar el acceso de Administradora de Elemental.',
+  );
+  // RF-61: como la Auxiliar, solo registra personas sin acceso al panel.
+  assert.deepEqual(rolesQuePuedeDar('administradora_elemental'), ['operador']);
+  for (const rol of ROLES) assert.equal(puedeGenerarClave('administradora_elemental', rol), false, rol);
+});
+
+prueba('046/RF-57: es de Elemental y no lleva obra; entra a Elemental, a GeoLab y a las obras', () => {
+  assert.equal(empresaDelAccesoSinObra('administradora_elemental'), 'elemental');
+  assert.equal(empresaDeLaPersona(null, 'administradora_elemental'), 'elemental');
+  assert.equal(reparoDelAccesoSinObra({ rol: 'administradora_elemental', obraId: null, empresa: null }), null);
+  assert.equal(
+    reparoDelAccesoSinObra({ rol: 'administradora_elemental', obraId: 'o1', empresa: null })?.campo,
+    'obraId',
+  );
+  assert.equal(
+    reparoDelAccesoSinObra({ rol: 'administradora_elemental', obraId: null, empresa: 'occ' })?.mensaje,
+    'La Administradora de Elemental es de Elemental.',
+  );
+  // RF-2, RF-3, RF-87: ve las requisiciones de todas las obras, de GeoLab y, desde el cambio del
+  // 17-nov, de OCC.
+  for (const empresa of ['elemental', 'geolab', 'proyectos', 'occ'] as const) {
+    assert.ok(alcanzaLaEmpresa('administradora_elemental', empresa), empresa);
+  }
+  assert.ok(rolVeTodasLasObras('administradora_elemental'));
+  assert.ok(alcanzaLaObraDeLaRuta({ rol: 'administradora_elemental', obraId: null, obras: [] }, 'cualquiera'));
+});
+
+prueba('046/RF-2, RF-3, RF-8: fuera de Elemental solo ve lo de solicitudes, y no pide', () => {
+  const paginas = (menu: { pagina: string }[]) => menu.map((m) => m.pagina);
+  // En una obra y en GeoLab, solo Requisiciones.
+  assert.deepEqual(paginas(menuDeObra('administradora_elemental')), ['requisiciones']);
+  assert.deepEqual(paginas(menuDeEmpresa('geolab', 'administradora_elemental')), ['requisiciones']);
+  // En Elemental, lo mismo que la Auxiliar (RF-59); desde el cambio del 17-nov las dos tienen
+  // Requisiciones (RF-47, RF-92).
+  assert.deepEqual(paginas(menuDeEmpresa('elemental', 'administradora_elemental')), paginas(menuDeEmpresa('elemental', 'auxiliar_administrativa')));
+  // En OCC, también solo Requisiciones (RF-86, RF-87).
+  assert.deepEqual(paginas(menuDeEmpresa('occ', 'administradora_elemental')), ['requisiciones']);
+  // RF-8: ve, no pide.
+  assert.ok(alcanza('administradora_elemental', 'solicitudes', 'ver'));
+  assert.ok(alcanza('administradora_elemental', 'solicitudes', 'listar'));
+  assert.equal(alcanza('administradora_elemental', 'solicitudes', 'escribir'), false);
+});
+
+prueba('046/RF-39, RF-41, RF-42, RF-55, RF-66: la Administradora aprueba, registra compras y pagos, y anula; la gerencia también', () => {
+  for (const modulo of ['compras', 'tesoreria'] as const) {
+    for (const accion of ['ver', 'listar', 'escribir', 'anular', 'aprobar'] as const) {
+      assert.ok(alcanza('administradora_elemental', modulo, accion), `${modulo}/${accion}`);
+      assert.ok(alcanza('admin', modulo, accion), `${modulo}/${accion}`);
+    }
+  }
+  // Pasos de la 036 y la 037 sobre una solicitud anterior enviada (RF-55).
+  const administradora = { id: 'a1', rol: 'administradora_elemental' as const };
+  const enviada = { estado: 'enviada' as const, pedidaPor: 'r1', tieneCompraVigente: false };
+  assert.ok(puedeDar('aprobar', administradora, enviada));
+  assert.ok(puedeDarPaso('aprobar', administradora, { estado: 'enviada', pedidaPor: 'r1' }));
+  assert.ok(puedeDarPaso('anular_pago', administradora, { estado: 'pagada', pedidaPor: 'r1' }));
+});
+
+prueba('046/RF-41, RF-62 a RF-64: la Auxiliar registra pagos y conserva lo suyo, pero no aprueba ni registra ni anula compras ni anula pagos', () => {
+  const auxiliar = { id: 'x1', rol: 'auxiliar_administrativa' as const };
+  // RF-62: no aprueba, devuelve ni rechaza, ni las de compra ni las de pago anteriores.
+  for (const paso of ['aprobar', 'devolver', 'rechazar'] as const) {
+    assert.equal(puedeDar(paso, auxiliar, { estado: 'enviada', pedidaPor: 'r1', tieneCompraVigente: false }), false, paso);
+    assert.equal(puedeDarPaso(paso, auxiliar, { estado: 'enviada', pedidaPor: 'r1' }), false, paso);
+  }
+  // RF-63: ni registra ni anula compras, ni anula pagos.
+  assert.equal(alcanza('auxiliar_administrativa', 'compras', 'escribir'), false);
+  assert.equal(alcanza('auxiliar_administrativa', 'compras', 'anular'), false);
+  assert.equal(alcanza('auxiliar_administrativa', 'tesoreria', 'anular'), false);
+  assert.equal(puedeDarPaso('anular_pago', auxiliar, { estado: 'pagada', pedidaPor: 'r1' }), false);
+  // RF-41: registra pagos.
+  assert.ok(puedeDarPaso('registrar_pago', auxiliar, { estado: 'aprobada', pedidaPor: 'r1' }));
+  // RF-64: Recursos Humanos, Documentos y cortes, como antes.
+  for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
+    for (const modulo of ['rrhh', 'documentos', 'finanzas'] as const) {
+      assert.ok(alcanza('auxiliar_administrativa', modulo, accion), `${modulo}/${accion}`);
+      // RF-60: la Administradora, lo mismo.
+      assert.ok(alcanza('administradora_elemental', modulo, accion), `${modulo}/${accion}`);
+    }
+  }
+  assert.ok(veElSalario('auxiliar_administrativa'));
+  assert.ok(veElSalario('administradora_elemental'));
+  assert.equal(porQueNoPuedeTocarElCorte('administradora_elemental', { empresaId: 'elemental' }), null);
+  assert.equal(porQueNoPuedeTocarElCorte('administradora_elemental', { obraId: 'o1' }), 'Solo la gerencia registra o anula los cortes de las obras.');
+});
+
+prueba('046/RF-47, RF-92: Requisiciones de Elemental la ven la gerencia, la Administradora y la Auxiliar; aprueban solo las dos primeras', () => {
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'aprobaciones', 'ver')), ['admin', 'auxiliar_administrativa', 'administradora_elemental']);
+  assert.ok(alcanza('auxiliar_administrativa', 'aprobaciones', 'listar'));
+  assert.deepEqual(ROLES.filter((r) => alcanza(r, 'aprobaciones', 'aprobar')), ['admin', 'administradora_elemental']);
+});
+
+prueba('046/RF-10 a RF-12, RF-15: en una requisición de compra cada renglón dice para cuándo y para qué', () => {
+  const hoy = '2026-11-16';
+  const renglon = { descripcion: 'Cemento', cantidad: 10, unidad: 'bulto', materialId: null, necesitaEl: '2026-11-20', paraQue: 'Andenes' };
+  const datos = { renglones: [renglon], paraCuando: '', urgente: false, paraQue: '', proveedorSugerido: '', valorEstimado: null };
+  // Bien: la cabecera no pide fecha, la saca de los renglones.
+  assert.deepEqual(faltasDeLaSolicitud(datos, hoy, { requisicion: true }), []);
+  assert.equal(fechaMasCercana([renglon, { ...renglon, necesitaEl: '2026-11-18' }]), '2026-11-18');
+  assert.equal(fechaMasCercana([{ necesitaEl: null }]), null);
+  // RF-11: sin fecha o sin para qué, dice qué renglón.
+  const sinNada = { ...datos, renglones: [renglon, { ...renglon, necesitaEl: '', paraQue: ' ' }] };
+  assert.deepEqual(faltasDeLaSolicitud(sinNada, hoy, { requisicion: true }), [
+    'Diga para cuándo se necesita el renglón 2.',
+    'Diga para qué es el renglón 2.',
+  ]);
+  // RF-12: anterior a hoy en Colombia, no; hoy, sí.
+  assert.deepEqual(faltasDeLaSolicitud({ ...datos, renglones: [{ ...renglon, necesitaEl: '2026-11-15' }] }, hoy, { requisicion: true }), [
+    'La fecha del renglón 1 no puede ser anterior a hoy.',
+  ]);
+  assert.deepEqual(faltasDeLaSolicitud({ ...datos, renglones: [{ ...renglon, necesitaEl: hoy }] }, hoy, { requisicion: true }), []);
+  const porCampo = faltasPorCampo(sinNada, hoy, { requisicion: true });
+  assert.equal(porCampo.porRenglon[1].necesitaEl, 'Diga para cuándo se necesita el renglón 2.');
+  assert.equal(porCampo.paraCuando, null);
+  // RF-15: sin renglones, o un renglón sin descripción o sin cantidad, como la 036.
+  assert.deepEqual(faltasDeLaSolicitud({ ...datos, renglones: [] }, hoy, { requisicion: true }), [
+    'Agregue al menos un renglón con lo que se necesita.',
+  ]);
+  assert.ok(faltasDeLaSolicitud({ ...datos, renglones: [{ ...renglon, cantidad: 0 }] }, hoy, { requisicion: true }).some((f) => f.includes('renglón 1 debe ser mayor que cero')));
+  // Una SC de antes valida como siempre: la fecha de la cabecera, y nada por renglón.
+  const anterior = { ...datos, renglones: [{ descripcion: 'Cemento', cantidad: 10, unidad: 'bulto', materialId: null }], paraCuando: '2026-11-20' };
+  assert.deepEqual(faltasDeLaSolicitud(anterior, hoy), []);
+  assert.deepEqual(faltasDeLaSolicitud({ ...anterior, paraCuando: '' }, hoy), ['Diga para cuándo se necesita.']);
+});
+
+prueba('046/RF-72: una requisición de pago valida como la solicitud de pago de la 037', () => {
+  const hoy = '2026-11-16';
+  const pago = { beneficiario: 'Transportes La Ye', beneficiarioDocumento: '', concepto: 'transporte', paraQue: 'Acarreo', valor: 500000, paraCuando: '2026-11-20', urgente: false };
+  assert.deepEqual(faltasDeLaSolicitudDePago(pago, hoy), []);
+  assert.deepEqual(faltasDeLaSolicitudDePago({ ...pago, beneficiario: ' ', concepto: '', paraQue: '', valor: 0, paraCuando: '2026-11-15' }, hoy), [
+    'Diga a quién se le paga.',
+    'Elija el concepto.',
+    'Diga para qué es el pago.',
+    'El valor va en pesos, sin decimales y mayor que cero.',
+    'La fecha «para cuándo» no puede ser anterior a hoy.',
+  ]);
+});
+
+prueba('046/RF-25, RF-35, RF-36: una requisición se corrige solo devuelta, se cancela enviada o devuelta, y no se decide por los pasos de antes', () => {
+  const quienPidio = { id: 'r1', rol: 'residente' as const };
+  const enviada = { estado: 'enviada' as const, pedidaPor: 'r1', tieneCompraVigente: false, requisicion: true };
+  assert.deepEqual(porQueNoPuedeDar('corregir', quienPidio, enviada), { estado: 409, mensaje: 'Una requisición solo se corrige cuando se la devuelven.' });
+  assert.ok(puedeDar('corregir', quienPidio, { ...enviada, estado: 'devuelta' }));
+  assert.ok(puedeDar('cancelar', quienPidio, enviada));
+  assert.ok(puedeDar('cancelar', quienPidio, { ...enviada, estado: 'devuelta' }));
+  // Ni la gerencia la aprueba por aquí: la decide su paso.
+  const gerencia = { id: 'g1', rol: 'admin' as const };
+  for (const paso of ['aprobar', 'rechazar', 'devolver'] as const) {
+    assert.deepEqual(porQueNoPuedeDar(paso, gerencia, enviada), {
+      estado: 409,
+      mensaje: 'Una requisición se aprueba, devuelve o rechaza en su paso de la cadena.',
+    });
+  }
+  // Una SC de antes, como siempre: se corrige enviada y la aprueba la gerencia.
+  const anterior = { estado: 'enviada' as const, pedidaPor: 'r1', tieneCompraVigente: false };
+  assert.ok(puedeDar('corregir', quienPidio, anterior));
+  assert.ok(puedeDar('aprobar', gerencia, anterior));
+  // Las de pago, igual.
+  const pagoEnviado = { estado: 'enviada' as const, pedidaPor: 'r1', requisicion: true };
+  assert.equal(puedeDarPaso('corregir', quienPidio, pagoEnviado), false);
+  assert.ok(puedeDarPaso('corregir', quienPidio, { ...pagoEnviado, estado: 'devuelta' }));
+  assert.equal(puedeDarPaso('aprobar', gerencia, pagoEnviado), false);
+  assert.ok(puedeDarPaso('aprobar', gerencia, { estado: 'enviada', pedidaPor: 'r1' }));
+});
+
+prueba('046/RF-33 (T15): la historia separa el paso de la cadena y nombra los eventos nuevos', () => {
+  // Una aprobación final con recorte: el paso va primero y lo demás son los renglones que cambiaron.
+  const final = separarElPaso([{ paso: 'administradora', siguiente: null }, { renglon: 1, antes: 20, despues: 15 }]);
+  assert.equal(final.paso, 'administradora');
+  assert.deepEqual(final.resto, [{ renglon: 1, antes: 20, despues: 15 }]);
+  // Una SC de antes no lleva paso: todo es lo que cambió.
+  assert.deepEqual(separarElPaso([{ renglon: 1, antes: 2, despues: 1 }]), { paso: null, resto: [{ renglon: 1, antes: 2, despues: 1 }] });
+  assert.deepEqual(separarElPaso([]), { paso: null, resto: [] });
+  // Corregir guarda el paso junto a los campos que cambiaron, en el mismo primer cambio.
+  assert.deepEqual(separarElPaso([{ paso: 'residente', campos: ['lo que se pide'] }]), {
+    paso: 'residente',
+    resto: [{ campos: ['lo que se pide'] }],
+  });
+  assert.equal(
+    textoDelEventoDeLaCadena({ paso: 'aprobar_paso', cambios: [{ paso: 'residente', siguiente: 'director_obra' }] }),
+    'Aprobó como Residente; pasa al Director de Obra.',
+  );
+  assert.equal(
+    textoDelEventoDeLaCadena({ paso: 'saltar_paso', cambios: [{ paso: 'residente' }], motivo: 'La obra no tiene un Residente activo.' }),
+    'Se saltó el paso del Residente.',
+  );
+  // Quien no ve los valores recibe la historia sin cambios: el texto no se rompe.
+  assert.equal(textoDelEventoDeLaCadena({ paso: 'aprobar_paso', cambios: [] }), 'La aprobó en su paso; pasa al siguiente.');
+  assert.equal(textoDelEventoDeLaCadena({ paso: 'saltar_paso', cambios: [] }), 'Se saltó un paso de la cadena.');
+  // Los demás los nombra la 036 o la 037.
+  assert.equal(textoDelEventoDeLaCadena({ paso: 'aprobar', cambios: [] }), null);
+});
+
+prueba('046/RF-40, RF-47, RF-83, RF-89 (T16, cambio del 17-nov): en Requisiciones de Elemental se decide y se compra; en Tesorería se paga', () => {
+  const deUnaSc = ['aprobar', 'rechazar', 'devolver'] as const;
+  assert.deepEqual(pasosDeLaPantalla(deUnaSc, 'requisiciones'), ['aprobar', 'rechazar', 'devolver']);
+  assert.deepEqual(pasosDeLaPantalla(deUnaSc, 'tesoreria'), []);
+  const deUnaAprobada = ['registrar_compra', 'anular_compra', 'recibir'] as const;
+  assert.deepEqual(pasosDeLaPantalla(deUnaAprobada, 'requisiciones'), ['registrar_compra', 'anular_compra', 'recibir']);
+  assert.deepEqual(pasosDeLaPantalla(deUnaAprobada, 'tesoreria'), []);
+  assert.deepEqual(pasosDeLaPantalla(['registrar_pago', 'anular_pago'], 'tesoreria'), ['registrar_pago', 'anular_pago']);
+  assert.deepEqual(pasosDeLaPantalla(['registrar_pago', 'anular_pago'], 'requisiciones'), []);
+  // Corregir y cancelar son de quien la pidió: los da el detalle, no estas dos pantallas.
+  assert.deepEqual(pasosDeLaPantalla(['corregir', 'cancelar'], 'requisiciones'), []);
+  assert.deepEqual(pasosDeLaPantalla(['corregir', 'cancelar'], 'tesoreria'), []);
+});
+
+prueba('046/RF-78 (T18b): al corregir no se cambia de compra a pago ni de pago a compra, y lo dice', () => {
+  const deCompra = { version: 2, renglones: [{ descripcion: 'Arena', cantidad: 6, unidad: 'm3', necesitaEl: '2026-12-01', paraQue: 'Andenes' }], paraCuando: '2026-12-01', urgente: false, paraQue: '', proveedorSugerido: '' };
+  const dePago = { version: 2, beneficiario: 'Volquetas', concepto: 'transporte', paraQue: 'Acarreo', valor: 900000, paraCuando: '2026-12-01' };
+  assert.equal(cambiaDeClaseAlCorregir('compra', deCompra), false);
+  assert.equal(cambiaDeClaseAlCorregir('compra', dePago), true);
+  assert.equal(cambiaDeClaseAlCorregir('compra', { ...deCompra, tipo: 'pago' }), true);
+  assert.equal(cambiaDeClaseAlCorregir('pago', dePago), false);
+  assert.equal(cambiaDeClaseAlCorregir('pago', deCompra), true);
+  assert.equal(cambiaDeClaseAlCorregir('pago', { ...dePago, tipo: 'compra' }), true);
+  assert.equal(cambiaDeClaseAlCorregir('pago', null), false);
+  // El contrato lo dice antes que cualquier otra falta, también la de los renglones que no vienen.
+  const mal = solicitudCorregida.safeParse(dePago);
+  assert.ok(!mal.success && mal.error.issues[0].message === NO_CAMBIA_DE_CLASE);
+  const malPago = solicitudDePagoCorregida.safeParse(deCompra);
+  assert.ok(!malPago.success && malPago.error.issues[0].message === NO_CAMBIA_DE_CLASE);
+  assert.ok(solicitudCorregida.safeParse(deCompra).success);
+  assert.ok(solicitudDePagoCorregida.safeParse(dePago).success);
+});
+
+prueba('046/RF-48, RF-91 (T22): en Requisiciones de Elemental el resumen cuenta solo lo que espera el último paso', () => {
+  const base = { tipo: 'compra' as const, numero: 1, urgente: false, paraCuando: '2026-11-20', pedidaPor: 'p' };
+  const enAdministradora = { ...base, numeroRequisicion: 1, estado: 'enviada', paso: 'administradora' as const };
+  const enResidente = { ...base, numeroRequisicion: 2, estado: 'enviada', paso: 'residente' as const };
+  const anterior = { ...base, numeroRequisicion: null, estado: 'enviada', paso: null };
+  const aprobada = { ...base, numeroRequisicion: 3, estado: 'aprobada', paso: null };
+  assert.equal(esperaElUltimoPaso(enAdministradora), true);
+  assert.equal(esperaElUltimoPaso(anterior), true);
+  assert.equal(esperaElUltimoPaso(enResidente), false);
+  assert.equal(esperaElUltimoPaso(aprobada), false);
+  assert.equal(esperaElUltimoPaso({ ...anterior, estado: 'devuelta' }), false);
+});
+
+prueba('046/RF-37 (T15): la Administradora y la Gerencia cancelan una requisición abierta, aunque no la pidieran', () => {
+  const administradora = { id: 'a1', rol: 'administradora_elemental' as const };
+  const gerencia = { id: 'g1', rol: 'admin' as const };
+  const enviada = { estado: 'enviada' as const, pedidaPor: 'r1', tieneCompraVigente: false, requisicion: true };
+  for (const quien of [administradora, gerencia]) {
+    assert.ok(puedeDar('cancelar', quien, enviada), quien.rol);
+    assert.ok(puedeDar('cancelar', quien, { ...enviada, estado: 'devuelta' }), quien.rol);
+    assert.equal(porQueNoPuedeDar('cancelar', quien, { ...enviada, estado: 'aprobada' })?.estado, 409, quien.rol);
+    // Corregir sigue siendo solo de quien la pidió.
+    assert.equal(porQueNoPuedeDar('corregir', quien, { ...enviada, estado: 'devuelta' })?.estado, 403, quien.rol);
+    assert.ok(puedeDarPaso('cancelar', quien, { estado: 'enviada', pedidaPor: 'r1', requisicion: true }), quien.rol);
+    assert.equal(puedeDarPaso('cancelar', quien, { estado: 'aprobada', pedidaPor: 'r1', requisicion: true }), false, quien.rol);
+  }
+  // Los demás de la cadena, no: si no les cuadra, la devuelven o la rechazan.
+  assert.deepEqual(porQueNoPuedeDar('cancelar', { id: 'd1', rol: 'director_obra' }, enviada), {
+    estado: 403,
+    mensaje: 'Solo quien pidió la solicitud puede cancelarla.',
+  });
+  // Una SC de antes, como siempre: solo quien la pidió.
+  assert.equal(puedeDar('cancelar', gerencia, { ...enviada, requisicion: false }), false);
+  assert.equal(puedeDarPaso('cancelar', administradora, { estado: 'enviada', pedidaPor: 'r1' }), false);
+});
+
+prueba('046/RF-85: la Auxiliar conserva marcar lo recibido, sin registrar compras', () => {
+  const auxiliar = { id: 'x1', rol: 'auxiliar_administrativa' as const };
+  const comprada = { estado: 'comprada' as const, pedidaPor: 'r1', tieneCompraVigente: true, requisicion: true };
+  assert.ok(puedeDar('recibir', auxiliar, comprada));
+  assert.equal(puedeDar('registrar_compra', auxiliar, { ...comprada, estado: 'aprobada' }), false);
+  // Quien no ve Compras ni pidió, no recibe.
+  assert.equal(puedeDar('recibir', { id: 'e1', rol: 'encargado_planta' }, comprada), false);
+});
+
+/** Una obra con alguien en cada paso de la cadena (046). */
+const CADENA_COMPLETA: OcupantesDeLaCadena = {
+  residente: ['res1'],
+  director_obra: ['do1', 'do2'],
+  director_proyectos: ['dp1'],
+  administradora: ['ad1'],
+};
+
+prueba('046/RF-18 a RF-22: la requisición empieza en el paso que sigue al de quien la pide', () => {
+  assert.deepEqual([...PASOS_DE_LA_CADENA], ['residente', 'director_obra', 'director_proyectos', 'administradora']);
+  const empieza = (rol: Parameters<typeof pasoInicial>[0], lugar: 'obra' | 'geolab' | 'occ' = 'obra') => pasoInicial(rol, lugar, CADENA_COMPLETA);
+  // RF-20: lo del Almacenista lo aprueba primero el Residente.
+  assert.deepEqual(empieza('almacenista'), { paso: 'residente', saltos: [] });
+  // RF-21: quien está en la cadena empieza en el paso siguiente al suyo.
+  assert.deepEqual(empieza('residente'), { paso: 'director_obra', saltos: [] });
+  assert.deepEqual(empieza('director_obra'), { paso: 'director_proyectos', saltos: [] });
+  assert.deepEqual(empieza('director_proyectos'), { paso: 'administradora', saltos: [] });
+  // RF-22: lo de la Gerencia, solo por la Administradora.
+  assert.deepEqual(empieza('admin'), { paso: 'administradora', saltos: [] });
+  // RF-19: en GeoLab, directo a la Administradora.
+  assert.deepEqual(empieza('laboratorista', 'geolab'), { paso: 'administradora', saltos: [] });
+  // RF-88 (cambio del 17-nov): en OCC también, hasta la 047.
+  assert.deepEqual(empieza('encargado_occ', 'occ'), { paso: 'administradora', saltos: [] });
+  assert.equal(estadoEnLaCadena('director_obra'), 'En aprobación: Director de Obra');
+});
+
+prueba('046/RF-23, RF-24, RF-73, RF-74: un paso sin nadie se salta y se anota; el de la Administradora nunca', () => {
+  // Obra sin Director de Obra: lo del Residente pasa al Director de Proyectos.
+  const sinDirector = { ...CADENA_COMPLETA, director_obra: [] };
+  assert.deepEqual(pasoInicial('residente', 'obra', sinDirector), {
+    paso: 'director_proyectos',
+    saltos: [{ paso: 'director_obra', motivo: 'La obra no tiene un Director de Obra activo.' }],
+  });
+  // Sin Residente ni Director de Obra: lo del Almacenista salta los dos.
+  const sinNadieEnLaObra = { ...CADENA_COMPLETA, residente: [], director_obra: [] };
+  assert.deepEqual(pasoInicial('almacenista', 'obra', sinNadieEnLaObra), {
+    paso: 'director_proyectos',
+    saltos: [
+      { paso: 'residente', motivo: 'La obra no tiene un Residente activo.' },
+      { paso: 'director_obra', motivo: 'La obra no tiene un Director de Obra activo.' },
+    ],
+  });
+  // RF-73: el paso del Director de Proyectos se salta solo si no hay ninguno en el grupo.
+  const sinDirectoresDeProyectos = { ...CADENA_COMPLETA, director_proyectos: [] };
+  assert.deepEqual(pasoInicial('director_obra', 'obra', sinDirectoresDeProyectos), {
+    paso: 'administradora',
+    saltos: [{ paso: 'director_proyectos', motivo: 'No hay ningún Director de Proyectos activo.' }],
+  });
+  // RF-74: sin Administradora, la requisición la espera; no se salta.
+  const vacia = { residente: [], director_obra: [], director_proyectos: [], administradora: [] };
+  assert.equal(pasoInicial('almacenista', 'obra', vacia).paso, 'administradora');
+  assert.equal(pasoInicial('laboratorista', 'geolab', vacia).paso, 'administradora');
+  assert.equal(pasoInicial('almacenista', 'obra', vacia).saltos.length, 3);
+});
+
+prueba('046/RF-27, RF-28: aprobar en un paso la lleva al siguiente con alguien; en el último, ya no hay siguiente', () => {
+  assert.deepEqual(pasoSiguiente('residente', CADENA_COMPLETA), { paso: 'director_obra', saltos: [] });
+  assert.deepEqual(pasoSiguiente('residente', { ...CADENA_COMPLETA, director_obra: [] }), {
+    paso: 'director_proyectos',
+    saltos: [{ paso: 'director_obra', motivo: 'La obra no tiene un Director de Obra activo.' }],
+  });
+  assert.equal(pasoSiguiente('administradora', CADENA_COMPLETA), null);
+});
+
+prueba('046/RF-25, RF-26, RF-67, RF-76, RF-77: decide quien ocupa el paso, o la Gerencia; nadie lo suyo', () => {
+  const enDirectorDeObra = { estado: 'enviada', paso: 'director_obra' as const, pedidaPor: 'res1' };
+  // RF-25: cualquiera de los dos Directores de Obra de la obra.
+  assert.ok(puedeDecidir({ id: 'do1', rol: 'director_obra' }, enDirectorDeObra, CADENA_COMPLETA));
+  assert.ok(puedeDecidir({ id: 'do2', rol: 'director_obra' }, enDirectorDeObra, CADENA_COMPLETA));
+  // Un Director de Obra de otra obra tiene el mismo acceso y no es de esta cadena.
+  assert.deepEqual(porQueNoPuedeDecidir({ id: 'do9', rol: 'director_obra' }, enDirectorDeObra, CADENA_COMPLETA), {
+    estado: 403,
+    mensaje: 'Esta requisición está en el paso de Director de Obra: la decide quien ocupa ese paso o la Gerencia.',
+  });
+  // Un Residente no decide en el paso del Director de Obra.
+  assert.equal(porQueNoPuedeDecidir({ id: 'res2', rol: 'residente' }, enDirectorDeObra, CADENA_COMPLETA)?.estado, 403);
+  // RF-26: la Gerencia, en cualquier paso.
+  assert.ok(puedeDecidir({ id: 'g1', rol: 'admin' }, enDirectorDeObra, CADENA_COMPLETA));
+  // RF-76: nadie decide lo suyo, ni ocupando el paso ni siendo la Gerencia.
+  const propia = { ...enDirectorDeObra, pedidaPor: 'do1' };
+  assert.deepEqual(porQueNoPuedeDecidir({ id: 'do1', rol: 'director_obra' }, propia, CADENA_COMPLETA), {
+    estado: 403,
+    mensaje: 'Nadie aprueba, devuelve ni rechaza una requisición que pidió él mismo.',
+  });
+  const deLaGerencia = { estado: 'enviada', paso: 'administradora' as const, pedidaPor: 'g1' };
+  assert.equal(puedeDecidir({ id: 'g1', rol: 'admin' }, deLaGerencia, CADENA_COMPLETA), false);
+  // RF-77: lo de la Gerencia, sin Administradora, lo decide otra persona de la Gerencia.
+  const sinAdministradora = { ...CADENA_COMPLETA, administradora: [] };
+  assert.ok(puedeDecidir({ id: 'g2', rol: 'admin' }, deLaGerencia, sinAdministradora));
+  // Una que ya salió de la cadena no espera decisión.
+  assert.equal(porQueNoPuedeDecidir({ id: 'g2', rol: 'admin' }, { ...deLaGerencia, estado: 'aprobada', paso: null }, CADENA_COMPLETA)?.estado, 409);
+  assert.equal(porQueNoPuedeDecidir({ id: 'g2', rol: 'admin' }, { ...deLaGerencia, estado: 'devuelta', paso: null }, CADENA_COMPLETA)?.estado, 409);
+});
+
+prueba('046/RF-27 a RF-32: aprobar pasa al siguiente o deja Aprobada; devolver y rechazar sacan de la cadena', () => {
+  const director = { rol: 'director_obra' as const };
+  // RF-27: el Director de Obra aprueba y pasa al Director de Proyectos.
+  assert.deepEqual(trasLaDecision('aprobar', director, 'director_obra', CADENA_COMPLETA), { estado: 'enviada', paso: 'director_proyectos', saltos: [] });
+  // RF-28: en el paso de la Administradora queda Aprobada.
+  assert.deepEqual(trasLaDecision('aprobar', { rol: 'administradora_elemental' }, 'administradora', CADENA_COMPLETA), { estado: 'aprobada', paso: null, saltos: [] });
+  // RF-29: la Gerencia en cualquier paso la deja Aprobada de una vez.
+  assert.deepEqual(trasLaDecision('aprobar', { rol: 'admin' }, 'residente', CADENA_COMPLETA), { estado: 'aprobada', paso: null, saltos: [] });
+  // RF-30, RF-32.
+  assert.deepEqual(trasLaDecision('devolver', director, 'director_obra', CADENA_COMPLETA), { estado: 'devuelta', paso: null, saltos: [] });
+  assert.deepEqual(trasLaDecision('rechazar', director, 'director_obra', CADENA_COMPLETA), { estado: 'rechazada', paso: null, saltos: [] });
+  // RF-31: al reenviar una devuelta, empieza otra vez desde el principio según quién la pidió.
+  assert.equal(pasoInicial('almacenista', 'obra', CADENA_COMPLETA).paso, 'residente');
+  // Devolver y rechazar piden el motivo.
+  assert.equal(faltaDelMotivoDeLaDecision('devolver', ' '), 'Diga qué debe corregirse.');
+  assert.equal(faltaDelMotivoDeLaDecision('rechazar', ''), 'Diga por qué se rechaza.');
+  assert.equal(faltaDelMotivoDeLaDecision('aprobar', ''), null);
+});
+
+prueba('046/RF-34, RF-79 a RF-81: cambiar lo pedido al aprobar es solo de la Administradora y la Gerencia, y no todo en cero', () => {
+  assert.ok(puedeRecortar({ rol: 'administradora_elemental' }, 'administradora'));
+  assert.ok(puedeRecortar({ rol: 'admin' }, 'residente'));
+  for (const rol of ['residente', 'director_obra', 'director_proyectos'] as const) {
+    assert.equal(puedeRecortar({ rol }, 'director_proyectos'), false, rol);
+  }
+  assert.ok(NO_RECORTA.includes('devuélvala'));
+  // RF-81: quitar todos los renglones no vale (la regla de aprobar de la 036).
+  const renglones = [{ id: 'a', orden: 1, descripcion: 'Cemento', cantidad: 10 }];
+  assert.deepEqual(aprobacionDeLaSolicitud(renglones, [{ renglonId: 'a', cantidad: 0 }]).faltas, ['Para no aprobar nada, recházala.']);
+  // RF-79: un valor menor en una de pago, nunca mayor.
+  assert.deepEqual(aprobacionDelPago(1000, 800), { falta: null, aprobado: 800 });
+  assert.ok(aprobacionDelPago(1000, 1200).falta);
+});
+
+prueba('046/RF-71: un paso que se queda sin nadie mueve lo que esperaba y lo anota; sin cambios, nada', () => {
+  const esperando = [
+    { id: 'a', estado: 'enviada', paso: 'director_obra' as const },
+    { id: 'b', estado: 'enviada', paso: 'residente' as const },
+    { id: 'c', estado: 'aprobada', paso: null },
+    { id: 'd', estado: 'enviada', paso: 'administradora' as const },
+  ];
+  // Con todos en su sitio, no hay nada que mover.
+  assert.deepEqual(reacomodar(esperando, CADENA_COMPLETA), []);
+  // Se quedó sin Director de Obra: la que lo esperaba pasa al Director de Proyectos.
+  assert.deepEqual(reacomodar(esperando, { ...CADENA_COMPLETA, director_obra: [] }), [
+    {
+      id: 'a',
+      desde: 'director_obra',
+      paso: 'director_proyectos',
+      saltos: [{ paso: 'director_obra', motivo: 'La obra no tiene un Director de Obra activo.' }],
+    },
+  ]);
+  // Sin Administradora, la que la espera se queda (RF-74).
+  assert.deepEqual(reacomodar(esperando, { ...CADENA_COMPLETA, administradora: [] }), []);
+});
+
+/** Una fila de la lista de Requisiciones para las pruebas (046). */
+function filaRq(cambios: Partial<FilaDeRequisicion> = {}): FilaDeRequisicion {
+  return {
+    tipo: 'compra',
+    numero: 40,
+    numeroRequisicion: 7,
+    estado: 'enviada',
+    paso: 'residente',
+    urgente: false,
+    paraCuando: '2026-11-20',
+    pedidaPor: 'alm1',
+    ...cambios,
+  };
+}
+
+prueba('046/RF-5, RF-50, RF-53: el número RQ, y buscar por RQ, SC o SP', () => {
+  assert.equal(numeroQueSeVe(filaRq()), 'RQ-0007');
+  assert.equal(numeroQueSeVe({ tipo: 'compra', numero: 5, numeroRequisicion: null }), 'SC-0005');
+  assert.equal(numeroQueSeVe({ tipo: 'pago', numero: 5, numeroRequisicion: null }), 'SP-0005');
+  const rq = { tipo: 'compra' as const, numero: 40, numeroRequisicion: 7, textos: ['Cemento gris', 'Ana Almacén'] };
+  for (const texto of ['RQ-0007', 'rq7', '7', 'rq-07']) assert.ok(coincideLaRequisicion(rq, texto), texto);
+  // El número interno (40) no la encuentra: se busca el que se ve.
+  assert.equal(coincideLaRequisicion(rq, '40'), false);
+  assert.equal(coincideLaRequisicion(rq, 'sc40'), false);
+  const sc = { tipo: 'compra' as const, numero: 5, numeroRequisicion: null, textos: [] };
+  assert.ok(coincideLaRequisicion(sc, 'sc5'));
+  assert.ok(coincideLaRequisicion(sc, '5'));
+  assert.equal(coincideLaRequisicion(sc, 'sp5'), false);
+  assert.equal(coincideLaRequisicion(sc, 'rq5'), false);
+  assert.ok(coincideLaRequisicion({ tipo: 'pago', numero: 5, numeroRequisicion: null, textos: [] }, 'SP-0005'));
+  // Por texto, sin tildes ni mayúsculas.
+  assert.ok(coincideLaRequisicion(rq, 'ana almacen'));
+});
+
+prueba('046/RF-16, RF-17, RF-82, RF-83: vencida por renglón, el estado «En aprobación» y las marcas', () => {
+  const hoy = '2026-11-16';
+  const conRenglones = (recibido: number) =>
+    filaRq({
+      estado: 'comprada',
+      paso: null,
+      paraCuando: '2026-11-15',
+      renglones: [
+        { necesitaEl: '2026-11-15', cantidad: 10, cantidadAprobada: 10, recibido },
+        { necesitaEl: '2026-11-30', cantidad: 5, cantidadAprobada: 5, recibido: 0 },
+      ],
+    });
+  // RF-16: un renglón de ayer sin llegar la vence; recibido completo, no.
+  assert.ok(estaVencidaLaRequisicion(conRenglones(0), hoy));
+  assert.equal(estaVencidaLaRequisicion(conRenglones(10), hoy), false);
+  // Un renglón quitado al aprobar no vence a nadie.
+  assert.equal(
+    estaVencidaLaRequisicion(filaRq({ estado: 'aprobada', paso: null, renglones: [{ necesitaEl: '2026-11-01', cantidad: 3, cantidadAprobada: 0, recibido: 0 }] }), hoy),
+    false,
+  );
+  // RF-17: una de pago, por su fecha; cerrada no se vence.
+  assert.ok(estaVencidaLaRequisicion(filaRq({ tipo: 'pago', estado: 'aprobada', paso: null, paraCuando: '2026-11-10' }), hoy));
+  assert.equal(estaVencidaLaRequisicion(filaRq({ tipo: 'pago', estado: 'pagada', paso: null, paraCuando: '2026-11-10' }), hoy), false);
+  // RF-82.
+  assert.equal(estadoQueSeVe(filaRq({ paso: 'director_obra' })), 'En aprobación: Director de Obra');
+  assert.equal(estadoQueSeVe(filaRq({ estado: 'aprobada', paso: null })), 'Aprobada');
+  assert.equal(estadoQueSeVe(filaRq({ tipo: 'pago', estado: 'pagada_en_parte', paso: null })), 'Pagada en parte');
+  // RF-83: las anteriores llevan su marca.
+  assert.deepEqual(marcasDeLaRequisicion(filaRq({ numeroRequisicion: null, paso: null }), hoy), ['Anterior']);
+  assert.deepEqual(marcasDeLaRequisicion(filaRq({ estado: 'devuelta', paso: null }), hoy), ['Devuelta: corrígela']);
+});
+
+prueba('046/RF-45, RF-47 a RF-49: esperan mi aprobación arriba, urgentes y fecha, cerradas al final; el resumen', () => {
+  const residente = { id: 'res1', rol: 'residente' as const };
+  const enResidente = filaRq({ numeroRequisicion: 3, paraCuando: '2026-11-30' });
+  const urgente = filaRq({ numeroRequisicion: 4, paso: 'director_obra', urgente: true, paraCuando: '2026-11-25' });
+  const pronto = filaRq({ numeroRequisicion: 5, paso: 'director_obra', paraCuando: '2026-11-18' });
+  const cerradaVieja = filaRq({ numeroRequisicion: 1, estado: 'recibida', paso: null });
+  const cerradaNueva = filaRq({ numeroRequisicion: 2, estado: 'rechazada', paso: null });
+  // RF-45: espera la del Residente, no las del Director de Obra.
+  assert.ok(esperaMiAprobacion(enResidente, residente, CADENA_COMPLETA));
+  assert.equal(esperaMiAprobacion(urgente, residente, CADENA_COMPLETA), false);
+  // Para la Gerencia, las del paso de la Administradora y las anteriores enviadas.
+  const gerencia = { id: 'g1', rol: 'admin' as const };
+  assert.equal(esperaMiAprobacion(enResidente, gerencia, CADENA_COMPLETA), false);
+  assert.ok(esperaMiAprobacion(filaRq({ paso: 'administradora' }), gerencia, CADENA_COMPLETA));
+  assert.ok(esperaMiAprobacion(filaRq({ numeroRequisicion: null, paso: null }), gerencia, CADENA_COMPLETA));
+  assert.ok(esperaMiAprobacion(filaRq({ numeroRequisicion: null, paso: null }), { id: 'ad1', rol: 'administradora_elemental' }, CADENA_COMPLETA));
+  // Nadie espera decidir lo suyo.
+  assert.equal(esperaMiAprobacion(filaRq({ pedidaPor: 'res1' }), residente, CADENA_COMPLETA), false);
+  // RF-49: las mías, luego abiertas (urgente, luego la más pronta), luego cerradas (la más nueva arriba).
+  const orden = ordenDeRequisiciones([cerradaVieja, pronto, cerradaNueva, urgente, enResidente], (f) => esperaMiAprobacion(f, residente, CADENA_COMPLETA));
+  assert.deepEqual(orden.map((f) => f.numeroRequisicion), [3, 4, 5, 2, 1]);
+  // RF-48.
+  assert.deepEqual(resumenDeRequisiciones([enResidente, urgente, pronto, cerradaNueva], '2026-11-26'), { esperan: 3, urgentes: 1, vencidas: 2 });
+});
+
+prueba('046/RF-51: filtros por tipo, paso, estado, urgencia, fechas y texto', () => {
+  const fila = { ...filaRq({ paso: 'director_obra', urgente: true }), textos: ['Cemento'], pedidaEl: '2026-11-16' };
+  const sin = { tipo: null, paso: null, estado: null, soloUrgentes: false, desde: null, hasta: null, texto: '' };
+  assert.ok(pasaLosFiltrosDeRequisicion(fila, sin));
+  assert.ok(pasaLosFiltrosDeRequisicion(fila, { ...sin, tipo: 'compra', paso: 'director_obra', soloUrgentes: true, texto: 'cemento' }));
+  assert.equal(pasaLosFiltrosDeRequisicion(fila, { ...sin, tipo: 'pago' }), false);
+  assert.equal(pasaLosFiltrosDeRequisicion(fila, { ...sin, paso: 'residente' }), false);
+  assert.equal(pasaLosFiltrosDeRequisicion(fila, { ...sin, desde: '2026-11-17' }), false);
+  assert.equal(pasaLosFiltrosDeRequisicion(fila, { ...sin, estado: 'aprobada' }), false);
+});
+
+prueba('046/RF-4, RF-9, RF-10, RF-13, RF-14: el contrato de crear, de compra o de pago', () => {
+  const renglon = { descripcion: 'Cemento', cantidad: 10, unidad: 'bulto', necesitaEl: '2026-11-20', paraQue: 'Andenes' };
+  const compra = requisicionPedida.safeParse({ tipo: 'compra', renglones: [renglon] });
+  assert.ok(compra.success);
+  assert.equal(compra.success && compra.data.tipo === 'compra' && compra.data.renglones[0].materialId, null);
+  // Un renglón sin fecha falla con su mensaje en español.
+  const sinFecha = requisicionPedida.safeParse({ tipo: 'compra', renglones: [{ ...renglon, necesitaEl: undefined }] });
+  assert.equal(sinFecha.success, false);
+  assert.ok(!sinFecha.success && sinFecha.error.issues.some((i) => i.message === 'Diga para cuándo se necesita cada renglón.'));
+  // La de pago no acepta renglones.
+  const pago = { tipo: 'pago', beneficiario: 'Transportes', concepto: 'transporte', paraQue: 'Acarreo', valor: 1000, paraCuando: '2026-11-20' };
+  assert.ok(requisicionPedida.safeParse(pago).success);
+  const conRenglones = requisicionPedida.safeParse({ ...pago, renglones: [renglon] });
+  assert.equal(conRenglones.success, false);
+  assert.ok(!conRenglones.success && conRenglones.error.issues.some((i) => i.message.startsWith('Una requisición de pago no lleva renglones')));
+  // Sin clase, también en español.
+  const sinTipo = requisicionPedida.safeParse({ renglones: [renglon] });
+  assert.ok(!sinTipo.success && sinTipo.error.issues.some((i) => i.message === 'Diga si la requisición es de compra o de pago.'));
+});
+
+prueba('046/RF-25 a RF-34, RF-68: el contrato de decidir pide la versión que se vio', () => {
+  assert.ok(decisionPedida.safeParse({ decision: 'aprobar', version: 3 }).success);
+  const sinVersion = decisionPedida.safeParse({ decision: 'aprobar' });
+  assert.ok(!sinVersion.success && sinVersion.error.issues.some((i) => i.message === 'Falta la versión de la requisición que vio.'));
+  const otra = decisionPedida.safeParse({ decision: 'cancelar', version: 1 });
+  assert.ok(!otra.success && otra.error.issues.some((i) => i.message === 'La decisión es aprobar, devolver o rechazar.'));
+});
+
+prueba('046/RF-33, RF-46: la cadena del detalle sale de la historia, desde la última vez que entró', () => {
+  // Del Almacenista, sin Residente: se saltó el Residente; el Director de Obra aprobó; espera el de Proyectos.
+  const historia = [
+    { paso: 'enviada', cambios: [{ paso: 'director_obra' }] },
+    { paso: 'saltar_paso', cambios: [{ paso: 'residente' }] },
+    { paso: 'aprobar_paso', cambios: [{ paso: 'director_obra', siguiente: 'director_proyectos' }] },
+  ];
+  assert.deepEqual(cadenaDesdeLaHistoria(historia, 'director_proyectos'), [
+    { paso: 'residente', como: 'saltado' },
+    { paso: 'director_obra', como: 'aprobado' },
+    { paso: 'director_proyectos', como: 'aqui' },
+    { paso: 'administradora', como: 'falta' },
+  ]);
+  // Devuelta y corregida: lo aprobado en la vuelta anterior ya no cuenta (RF-31).
+  const corregida = [
+    ...historia,
+    { paso: 'devolver', cambios: [{ paso: 'director_proyectos', siguiente: null }] },
+    { paso: 'corregir', cambios: [{ campos: ['lo que se pide'], paso: 'residente' }] },
+  ];
+  assert.deepEqual(cadenaDesdeLaHistoria(corregida, 'residente').map((p) => p.como), ['aqui', 'falta', 'falta', 'falta']);
+  // De un Director de Obra: empieza en el de Proyectos, y lo de antes no sale.
+  assert.deepEqual(
+    cadenaDesdeLaHistoria([{ paso: 'enviada', cambios: [{ paso: 'director_proyectos' }] }], 'director_proyectos').map((p) => p.paso),
+    ['director_proyectos', 'administradora'],
+  );
+  // Aprobada: ninguna «aquí».
+  assert.deepEqual(
+    cadenaDesdeLaHistoria(
+      [
+        { paso: 'enviada', cambios: [{ paso: 'administradora' }] },
+        { paso: 'aprobar', cambios: [{ paso: 'administradora', siguiente: null }] },
+      ],
+      null,
+    ),
+    [{ paso: 'administradora', como: 'aprobado' }],
+  );
+  // Una SC anterior no tiene cadena.
+  assert.deepEqual(cadenaDesdeLaHistoria([{ paso: 'enviada', cambios: [] }], null), []);
+});
+
+prueba('046/RF-33, RF-46 (T15): la cadena dice quién aprobó o saltó cada paso, cuándo y por qué', () => {
+  const historia = [
+    { paso: 'enviada', cambios: [{ paso: 'director_obra' }], por: 'alm', en: '2026-11-16T14:00:00.000Z' },
+    { paso: 'saltar_paso', cambios: [{ paso: 'residente' }], por: 'alm', en: '2026-11-16T14:00:00.000Z', motivo: 'La obra no tiene un Residente activo.' },
+    { paso: 'aprobar_paso', cambios: [{ paso: 'director_obra', siguiente: 'director_proyectos' }], por: 'do', en: '2026-11-16T15:00:00.000Z', motivo: null },
+  ];
+  assert.deepEqual(cadenaDesdeLaHistoria(historia, 'director_proyectos'), [
+    { paso: 'residente', como: 'saltado', por: 'alm', en: '2026-11-16T14:00:00.000Z', motivo: 'La obra no tiene un Residente activo.' },
+    { paso: 'director_obra', como: 'aprobado', por: 'do', en: '2026-11-16T15:00:00.000Z' },
+    { paso: 'director_proyectos', como: 'aqui' },
+    { paso: 'administradora', como: 'falta' },
+  ]);
+  // La Gerencia aprueba de una vez en el paso del Director de Proyectos: ese paso es el que aprobó.
+  const deUnaVez = cadenaDesdeLaHistoria(
+    [...historia, { paso: 'aprobar', cambios: [{ paso: 'director_proyectos', siguiente: null }], por: 'ger', en: '2026-11-16T16:00:00.000Z' }],
+    null,
+  );
+  assert.deepEqual(
+    deUnaVez.map((p) => [p.paso, p.como, p.por ?? null]),
+    [
+      ['residente', 'saltado', 'alm'],
+      ['director_obra', 'aprobado', 'do'],
+      ['director_proyectos', 'aprobado', 'ger'],
+      ['administradora', 'falta', null],
+    ],
+  );
+  // Devuelta o rechazada: el paso donde se decidió lo dice, con quién y el motivo.
+  const devuelta = cadenaDesdeLaHistoria(
+    [
+      ...historia,
+      { paso: 'devolver', cambios: [{ paso: 'director_proyectos', siguiente: null }], por: 'dp', en: '2026-11-16T17:00:00.000Z', motivo: 'Faltan medidas.' },
+    ],
+    null,
+  );
+  assert.deepEqual(devuelta[2], { paso: 'director_proyectos', como: 'devolvio', por: 'dp', en: '2026-11-16T17:00:00.000Z', motivo: 'Faltan medidas.' });
+  const rechazada = cadenaDesdeLaHistoria([...historia, { paso: 'rechazar', cambios: [{ paso: 'director_proyectos', siguiente: null }], por: 'dp' }], null);
+  assert.deepEqual(rechazada[2], { paso: 'director_proyectos', como: 'rechazo', por: 'dp' });
+});
+
+prueba('046/RF-86, RF-47, RF-90, RF-92: «Requisiciones» en las obras, GeoLab y OCC; en Elemental, Requisiciones sin Compras', () => {
+  const paginas = (menu: { pagina: string }[]) => menu.map((m) => m.pagina);
+  for (const rol of ['residente', 'almacenista', 'director_obra', 'director_proyectos', 'admin'] as const) {
+    const deObra = paginas(menuDeObra(rol));
+    assert.ok(deObra.includes('requisiciones'), rol);
+    assert.equal(deObra.some((p) => p.startsWith('solicitudes')), false, rol);
+  }
+  assert.ok(paginas(menuDeEmpresa('geolab', 'laboratorista')).includes('requisiciones'));
+  assert.equal(paginas(menuDeEmpresa('geolab', 'laboratorista')).some((p) => p.startsWith('solicitudes')), false);
+  // RF-86: también OCC, sin sus dos solicitudes.
+  assert.deepEqual(paginas(menuDeEmpresa('occ', 'encargado_occ')).filter((p) => p.startsWith('solicitudes') || p === 'requisiciones'), ['requisiciones']);
+  // RF-90, RF-92: en Elemental, Requisiciones para la Gerencia, la Administradora y la Auxiliar; Compras, para nadie.
+  for (const rol of ['admin', 'administradora_elemental', 'auxiliar_administrativa'] as const) {
+    assert.ok(paginas(menuDeEmpresa('elemental', rol)).includes('requisiciones'), rol);
+    assert.equal(paginas(menuDeEmpresa('elemental', rol)).includes('compras'), false, rol);
+  }
+  // La Administradora y la Auxiliar entran a Requisiciones de Elemental.
+  assert.equal(destinoAlEntrar({ rol: 'administradora_elemental', obras: [] }), '/panel/elemental/requisiciones');
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
+  // Las direcciones de antes llevan a Requisiciones; las de OCC siguen donde estaban.
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'solicitudes-compra' }), '/panel/proyectos/o1/requisiciones');
+  assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'solicitudes-pago' }), '/panel/proyectos/o1/requisiciones');
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'geolab', pagina: 'solicitudes-pago' }), '/panel/geolab/requisiciones');
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina: 'solicitudes-compra' }), '/panel/occ/requisiciones');
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina: 'solicitudes-pago' }), '/panel/occ/requisiciones');
+  // RF-90: un enlace guardado a Compras de Elemental lleva a Requisiciones.
+  assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'elemental', pagina: 'compras' }), '/panel/elemental/requisiciones');
 });
 
 verificarFirmaS3()
