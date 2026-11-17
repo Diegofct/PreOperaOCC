@@ -24,6 +24,7 @@ import { alcanza } from '@/shared/rules/permisos';
 import { AccionesPlanificacion } from './acciones-planificacion';
 import { EditorPlanificacion } from './editor-planificacion';
 import { NOMBRE_DE_ESTADO, TONO_DE_ESTADO } from './estados';
+import { ResumenComprometido } from './resumen-comprometido';
 import { ResumenPlanificacion } from './resumen-planificacion';
 
 function fecha(iso: string | null): string {
@@ -142,6 +143,8 @@ export function DetallePlanificacion({
           />
         ) : null}
         <ResumenPlanificacion p={p} />
+        {/* Spec 048, RF-42: lo comprometido por las requisiciones, solo en la vigente. */}
+        {p.estado === 'vigente' ? <ResumenComprometido planificacionId={p.id} obraId={p.obraId} /> : null}
       </View>
     </Seccion>
   );

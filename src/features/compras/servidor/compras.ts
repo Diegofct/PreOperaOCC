@@ -9,6 +9,10 @@
  *
  * La historia guarda el proveedor y los renglones, **no el valor**: la historia la ve también
  * el almacenista, y él no ve valores (RF-31).
+ *
+ * Spec 048 (RF-47 a RF-49): en una requisición de obra, si la compra cubre renglones que van a
+ * partes distintas de la planificación, se dice cuánto es de cada uno y tiene que sumar el valor
+ * de la compra; queda en `compra_renglones.valor`. Si van todos a la misma, no se pide.
  */
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
@@ -34,6 +38,8 @@ import {
   type EstadoDeSolicitud,
   type ReciboPedido,
 } from '@/shared/rules/compras';
+import { enPesos } from '@/shared/rules/pesos';
+import { valoresDeLaCompraPorRenglon } from '@/shared/rules/requisicion-planificacion';
 
 import { MENSAJE_DE_SOLICITUD_CAMBIADA, solicitudAlAlcance, tomarLaVersion } from './solicitudes';
 
@@ -59,6 +65,7 @@ async function renglonesConComprasYRecibos(solicitudId: string) {
   return renglones.map((r) => ({
     id: r.id,
     orden: r.orden,
+    imputacion: r.imputacion,
     cantidadAprobada: r.cantidadAprobada === null ? null : Number(r.cantidadAprobada),
     compraId: enlaces.find((e) => e.renglonId === r.id)?.compraId ?? null,
     recibido: recibos.filter((x) => x.renglonId === r.id).reduce((suma, x) => suma + Number(x.cantidad), 0),
@@ -72,7 +79,7 @@ async function renglonesConComprasYRecibos(solicitudId: string) {
 export async function registrarCompra(
   sesion: PersonaEnSesion,
   solicitudId: string,
-  pedido: DatosDeLaCompra & { version: number },
+  pedido: DatosDeLaCompra & { version: number; valores?: { renglonId: string; valor: number }[] | null },
 ): Promise<{ compraId: string; estado: EstadoDeSolicitud; version: number } | Response> {
   const fila = await solicitudAlAlcance(sesion, solicitudId);
   if (!fila) return noEncontrado('esa solicitud');
@@ -91,6 +98,14 @@ export async function registrarCompra(
   if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
 
   const elegidos = new Set(pedido.renglonIds);
+  // Spec 048, RF-47 a RF-49: el valor de cada renglón, si van a partes distintas de la planificación.
+  const porRenglon = valoresDeLaCompraPorRenglon(
+    renglones.filter((r) => elegidos.has(r.id)).map((r) => ({ renglonId: r.id, orden: r.orden, imputacion: r.imputacion })),
+    pedido.valor,
+    pedido.valores ?? null,
+    enPesos,
+  );
+  if (porRenglon.faltas.length) return Response.json({ error: porRenglon.faltas[0], faltas: porRenglon.faltas }, { status: 422 });
   const estado = estadoTrasComprasYRecibos(
     renglones.map((r) => ({ ...r, enCompraVigente: Boolean(r.compraId) || elegidos.has(r.id) })),
   );
@@ -111,7 +126,7 @@ export async function registrarCompra(
       factura: pedido.factura.trim(),
       registradaPor: sesion.id,
     }),
-    db.insert(compraRenglones).values([...elegidos].map((renglonId) => ({ compraId, renglonId }))),
+    db.insert(compraRenglones).values([...elegidos].map((renglonId) => ({ compraId, renglonId, valor: porRenglon.valores?.get(renglonId) ?? null }))),
     db.insert(solicitudCompraEventos).values({
       id: uuidv7(),
       solicitudId,

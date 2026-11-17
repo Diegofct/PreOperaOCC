@@ -9,14 +9,26 @@
  *
  * Spec 046: con `requisicion` es una requisición de pago de una obra o de GeoLab: los mismos
  * campos (RF-14), creada por Requisiciones.
+ *
+ * Spec 048: una de obra dice a qué parte de la planificación va (RF-3), con lo que queda si quien
+ * pide ve valores; al corregirla trae lo que tenía (RF-10).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
-import type { LugarDeRequisiciones } from '@/features/panel/requisiciones';
+import type { LugarDeRequisiciones, OpcionesParaImputar } from '@/features/panel/requisiciones';
+import { usePersona } from '@/features/panel/sesion';
+import {
+  CampoDeImputacion,
+  IMPUTACION_VACIA,
+  imputacionAPedir,
+  type ImputacionEscrita,
+} from '@/features/requisiciones/campo-de-imputacion';
+import { veLosValores } from '@/shared/rules/compras';
+import { imputacionPropuesta, type ImputacionDelRenglon } from '@/shared/rules/requisicion-planificacion';
 import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Casilla, Modal, Selector } from '@/features/panel/componentes';
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, clasesDe, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -39,7 +51,7 @@ export function FormularioDePago({
   /** Spec 046: es una requisición de pago. */
   requisicion?: boolean;
   /** Para corregir: la solicitud como está, con su versión. Sin ella, es una nueva. */
-  inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitudDePago };
+  inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitudDePago; imputacion?: ImputacionDelRenglon | null };
   alCerrar: () => void;
   /** Con el mensaje para la pantalla: qué quedó y, si algo no subió, qué. */
   alGuardar: (mensaje: string) => void;
@@ -56,6 +68,28 @@ export function FormularioDePago({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
+  // Spec 048: solo las de obra se imputan (RF-1, RF-3).
+  const persona = usePersona();
+  const obraId = 'obraId' in lugar ? lugar.obraId : null;
+  const deObra = requisicion && obraId !== null;
+  const [imputacion, setImputacion] = useState<ImputacionEscrita>(() => {
+    const propuesta = imputacionPropuesta(inicial?.imputacion ?? null);
+    if (!propuesta) return IMPUTACION_VACIA;
+    return propuesta.llave ? { llave: propuesta.llave, fuera: false, explicacion: '' } : { llave: null, fuera: true, explicacion: propuesta.explicacion ?? '' };
+  });
+  const [imputables, setImputables] = useState<OpcionesParaImputar | null>(null);
+  useEffect(() => {
+    if (!deObra || !obraId) return;
+    let vigente = true;
+    api.requisiciones
+      .imputables(obraId)
+      .then((r) => vigente && setImputables(r))
+      .catch((fallo) => vigente && setError(mensajeDe(fallo)));
+    return () => {
+      vigente = false;
+    };
+  }, [deObra, obraId]);
+
   const datos: DatosDeLaSolicitudDePago = {
     beneficiario,
     beneficiarioDocumento: documento,
@@ -66,7 +100,21 @@ export function FormularioDePago({
     urgente,
   };
   const faltas = faltasDelPagoPorCampo(datos);
-  const hayFaltas = Object.values(faltas).some((f) => f !== null) || adjuntos.some((a) => !a.clase);
+  // RF-3, RF-4: con planificación, va a algo; «Fuera de lo planeado» explica por qué.
+  const faltaDeImputacion = !deObra || !imputables?.hayPlanificacion
+    ? null
+    : imputacion.fuera
+      ? imputacion.explicacion.trim()
+        ? null
+        : 'Explique por qué no cabe.'
+      : imputacion.llave
+        ? null
+        : 'Escoja a qué va, o «Fuera de lo planeado».';
+  const hayFaltas =
+    Object.values(faltas).some((f) => f !== null) ||
+    faltaDeImputacion !== null ||
+    (deObra && imputables === null) ||
+    adjuntos.some((a) => !a.clase);
   const ver = (falta: string | null) => (intentado ? (falta ?? undefined) : undefined);
 
   async function adjuntar() {
@@ -91,11 +139,19 @@ export function FormularioDePago({
     let guardada: { id: string; codigo: string };
     try {
       if (inicial) {
-        await api.tesoreria.corregir(inicial.id, { ...datos, version: inicial.version });
+        await api.tesoreria.corregir(inicial.id, {
+          ...datos,
+          version: inicial.version,
+          ...(deObra ? { imputacion: imputacionAPedir(imputacion) } : {}),
+        });
         guardada = { id: inicial.id, codigo: inicial.codigo };
       } else {
         guardada = requisicion
-          ? await api.requisiciones.crear(lugar as LugarDeRequisiciones, { tipo: 'pago', ...datos })
+          ? await api.requisiciones.crear(lugar as LugarDeRequisiciones, {
+              tipo: 'pago',
+              ...datos,
+              ...(deObra ? { imputacion: imputacionAPedir(imputacion) } : {}),
+            })
           : await api.tesoreria.crear(lugar, datos);
       }
     } catch (fallo) {
@@ -169,6 +225,20 @@ export function FormularioDePago({
           <Casilla etiqueta="Es urgente" marcada={urgente} onChange={setUrgente} />
         </View>
       </View>
+
+      {deObra ? (
+        <>
+          <Text style={estilos.subtitulo}>A qué parte de la planificación va</Text>
+          <CampoDeImputacion
+            opciones={imputables}
+            valor={imputacion}
+            onChange={setImputacion}
+            conValores={veLosValores(persona.rol)}
+            pideEstaRequisicion={Number.isFinite(datos.valor) ? datos.valor : 0}
+            error={ver(faltaDeImputacion)}
+          />
+        </>
+      ) : null}
 
       <Text style={estilos.subtitulo}>Adjuntos</Text>
       {adjuntos.map((a, i) => (

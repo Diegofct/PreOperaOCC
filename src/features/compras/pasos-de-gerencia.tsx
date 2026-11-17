@@ -29,6 +29,7 @@ import { aprobacionDeLaSolicitud, faltasDeLaCompra } from '@/shared/rules/compra
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { enPesos } from '@/shared/rules/pesos';
+import { compraVaAVariasPartes, valoresDeLaCompraPorRenglon } from '@/shared/rules/requisicion-planificacion';
 import { pasosDeLaPantalla } from '@/shared/rules/requisiciones';
 
 import { VentanaDeMotivo } from './vista-de-la-solicitud';
@@ -138,16 +139,27 @@ function VentanaDeComprar({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
-  const datos = { proveedor, valor: aPesos(valor), fecha, factura, renglonIds: elegidos };
-  const faltas = faltasDeLaCompra(
-    datos,
-    solicitud.renglones.map((r) => ({
-      id: r.id,
-      orden: r.orden,
-      cantidadAprobada: r.cantidadAprobada,
-      enCompraVigente: enCompra.has(r.id),
-    })),
-  );
+  // Spec 048, RF-47 a RF-49: si los renglones elegidos van a partes distintas de la planificación,
+  // cuánto de la compra es de cada uno; tiene que sumar el valor de la compra.
+  const [porRenglon, setPorRenglon] = useState<Record<string, string>>({});
+  const deLaCompra = solicitud.renglones
+    .filter((r) => elegidos.includes(r.id))
+    .map((r) => ({ renglonId: r.id, orden: r.orden, descripcion: r.descripcion, imputacion: r.planificacion?.imputacion ?? null }));
+  const variasPartes = compraVaAVariasPartes(deLaCompra.map((r) => r.imputacion));
+  const valoresPorRenglon = variasPartes ? deLaCompra.map((r) => ({ renglonId: r.renglonId, valor: aPesos(porRenglon[r.renglonId] ?? '') })) : null;
+  const datos = { proveedor, valor: aPesos(valor), fecha, factura, renglonIds: elegidos, valores: valoresPorRenglon };
+  const faltas = [
+    ...faltasDeLaCompra(
+      datos,
+      solicitud.renglones.map((r) => ({
+        id: r.id,
+        orden: r.orden,
+        cantidadAprobada: r.cantidadAprobada,
+        enCompraVigente: enCompra.has(r.id),
+      })),
+    ),
+    ...valoresDeLaCompraPorRenglon(deLaCompra, aPesos(valor), valoresPorRenglon, enPesos).faltas,
+  ];
 
   async function adjuntar() {
     const elegido = await elegirArchivo(ACEPTA_DOCUMENTOS);
@@ -212,6 +224,23 @@ function VentanaDeComprar({
         <Campo etiqueta="Proveedor" obligatorio valor={proveedor} onChange={setProveedor} ancho={280} />
         <Campo etiqueta="Valor total (pesos)" obligatorio valor={valor} onChange={setValor} ancho={200} ayuda="Sin centavos." />
       </View>
+      {variasPartes ? (
+        <>
+          <Text style={estilos.subtitulo}>Cuánto es de cada renglón</Text>
+          <Text style={estilos.apoyo}>Van a partes distintas de la planificación: diga cuánto de la compra es de cada uno. Tiene que sumar el valor total.</Text>
+          {deLaCompra.map((r) => (
+            <Campo
+              key={r.renglonId}
+              etiqueta={`${r.orden}. ${r.descripcion} · ${r.imputacion?.etiqueta ?? ''}`}
+              obligatorio
+              valor={porRenglon[r.renglonId] ?? ''}
+              onChange={(v) => setPorRenglon((x) => ({ ...x, [r.renglonId]: v }))}
+              ayuda="En pesos, sin centavos."
+              ancho={420}
+            />
+          ))}
+        </>
+      ) : null}
       <View style={estilos.fila}>
         <CampoDeFecha etiqueta="Fecha de compra" valor={fecha} onChange={setFecha} />
         <Campo etiqueta="Factura o remisión" valor={factura} onChange={setFactura} ancho={200} ayuda="Opcional: el número." />

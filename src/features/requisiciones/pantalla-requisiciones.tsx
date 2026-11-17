@@ -23,7 +23,8 @@
  * Elemental, las de OCC en autorización van en la bandeja, con «OCC» (RF-49). Su tabla: 120 + 130 +
  * 220 + 90 + 150 + 150 + 170 + 100 = 1 130, más 7 separaciones (112) y los dos lados (32): 1 274.
  */
-import { useCallback, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
@@ -58,6 +59,7 @@ import { ESTADOS_DE_SOLICITUD } from '@/shared/rules/compras';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { ESTADOS_DE_PAGO } from '@/shared/rules/pagos';
 import { enPesos } from '@/shared/rules/pesos';
+import { TEXTO_DE_LA_MARCA } from '@/shared/rules/requisicion-planificacion';
 import {
   NOMBRE_DEL_PASO,
   pasaLosFiltrosDeRequisicion,
@@ -113,6 +115,14 @@ export default function PantallaRequisiciones() {
   const clave = enBandeja ? 'bandeja' : pedido ? ('obraId' in pedido ? pedido.obraId : pedido.empresa) : null;
   // La abierta va en la dirección (`?requisicion=compra:<id>`), como la solicitud en la 036.
   const [abierta, setAbierta] = useParametroDeDireccion('requisicion', '');
+  // Spec 048, RF-52: el resumen de la planificación abre una requisición con un enlace dentro de la
+  // app; al montarse, la dirección todavía no cambió, así que se toma también la del router.
+  const { requisicion: delEnlace } = useLocalSearchParams<{ requisicion?: string }>();
+  useEffect(() => {
+    if (delEnlace && delEnlace !== abierta) setAbierta(delEnlace);
+    // Solo cuando llega un enlace nuevo; cerrar la abierta no debe volver a abrirla.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [delEnlace]);
   const [pidiendo, setPidiendo] = useState<TipoDeRequisicion | 'occ' | 'importar_occ' | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
   const [filtros, setFiltros] = useState<FiltrosDeRequisiciones>(SIN_FILTROS);
@@ -211,6 +221,10 @@ export default function PantallaRequisiciones() {
               {m}
             </Etiqueta>
           ))}
+          {/* Spec 048, RF-31: se pasa de lo planeado, o algo va fuera de la planificación. */}
+          {f.marcaDePlanificacion ? (
+            <Etiqueta tono={f.marcaDePlanificacion === 'se_pasa' ? 'malo' : 'atencion'}>{TEXTO_DE_LA_MARCA[f.marcaDePlanificacion]}</Etiqueta>
+          ) : null}
         </View>
       ),
     },

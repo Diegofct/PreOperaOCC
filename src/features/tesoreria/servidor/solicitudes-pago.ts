@@ -24,8 +24,9 @@ import type {
 } from '@/features/panel/contratos';
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
 import { ocupantesDeLaCadena, requisicionEnElDetalle } from '@/features/requisiciones/servidor/cadena';
+import { imputarElPago, planificacionDeLosRenglones } from '@/features/requisiciones/servidor/planificacion';
 import { errorDePeticion, noEncontrado } from '@/features/servidor/respuestas';
-import { yaLaDecidioOtro } from '@/shared/rules/compras';
+import { veLosValores, yaLaDecidioOtro } from '@/shared/rules/compras';
 import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, nombreDeEmpresa } from '@/shared/rules/empresas';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import {
@@ -44,6 +45,7 @@ import {
   type EstadoDePago,
 } from '@/shared/rules/pagos';
 import { alcanza } from '@/shared/rules/permisos';
+import { cambiosSinValores, type ImputacionPedida } from '@/shared/rules/requisicion-planificacion';
 import { numeroQueSeVe, pasoInicial } from '@/shared/rules/requisiciones';
 
 /** El lugar de un pedido de pagos, ya comprobado: las mismas reglas que Compras (RF-2, RF-27). */
@@ -228,7 +230,14 @@ export async function solicitudDePagoDe(
     marcas: marcasDelPago(fila),
     version: fila.version,
     // La historia no lleva valores: también la ve el almacenista en las ajenas.
-    historia: eventos.map((e) => ({ paso: e.paso, motivo: e.motivo, cambios: conValores ? e.cambios : [], por: nombre(e.por), en: e.en.toISOString() })),
+    // Spec 048, RF-9: el Almacenista que la pidió ve su valor, pero no las cifras de la planificación.
+    historia: eventos.map((e) => ({
+      paso: e.paso,
+      motivo: e.motivo,
+      cambios: !conValores ? [] : veLosValores(sesion.rol) ? e.cambios : cambiosSinValores(e.cambios),
+      por: nombre(e.por),
+      en: e.en.toISOString(),
+    })),
     // Spec 046: una RQ no se decide con estos pasos, sino en su cadena.
     pasos: PASOS_DE_PAGO.filter((paso) => puedeDarPaso(paso, sesion, { ...fila, requisicion: fila.numeroRequisicion !== null })),
   };
@@ -237,6 +246,16 @@ export async function solicitudDePagoDe(
   if (requisicion) {
     detalle.requisicion = requisicion;
     detalle.codigo = requisicion.codigo;
+  }
+  // Spec 048: en una RQ de obra, a qué parte de la planificación va, con sus cifras para quien las ve (RF-9, RF-34).
+  if (fila.obraId && fila.numeroRequisicion !== null) {
+    const planificacion = await planificacionDeLosRenglones(
+      fila.obraId,
+      fila.id,
+      [{ renglonId: null, imputacion: fila.imputacion }],
+      veLosValores(sesion.rol),
+    );
+    detalle.planificacion = planificacion.get(null);
   }
   if (conValores) {
     detalle.valor = fila.valor;
@@ -283,7 +302,7 @@ export async function tomarLaVersionDelPago(
 export async function corregirSolicitudDePago(
   sesion: PersonaEnSesion,
   id: string,
-  pedido: DatosDeLaSolicitudDePago & { version: number },
+  pedido: DatosDeLaSolicitudDePago & { version: number; imputacion?: ImputacionPedida | null },
 ): Promise<{ version: number } | Response> {
   const fila = await solicitudDePagoAlAlcance(sesion, id);
   if (!fila) return noEncontrado('esa solicitud');
@@ -292,6 +311,9 @@ export async function corregirSolicitudDePago(
   if (rechazo) return errorDePeticion(rechazo.mensaje, rechazo.estado);
   if (fila.version !== pedido.version) return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
   const faltas = faltasDeLaSolicitudDePago(pedido);
+  // Spec 048, RF-3, RF-10: una RQ de pago de obra se vuelve a imputar.
+  const imputada = requisicion && fila.obraId ? await imputarElPago(fila.obraId, pedido.imputacion ?? null) : null;
+  if (imputada?.falta) faltas.push(imputada.falta);
   if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
 
   const inicio = requisicion
@@ -312,6 +334,7 @@ export async function corregirSolicitudDePago(
     valor: pedido.valor,
     paraCuando: pedido.paraCuando,
     urgente: pedido.urgente,
+    ...(imputada ? { imputacion: imputada.imputacion } : {}),
   });
   if (!tomada) return errorDePeticion(MENSAJE_DE_PAGO_CAMBIADO, 409);
   await baseServidor()

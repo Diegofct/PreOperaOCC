@@ -14,7 +14,12 @@
  * Módulo puro —solo Zod— para que lo importen las dos mitades sin arrastrar nada
  * de una a la otra.
  */
-import type { RequisicionEnElDetalle } from '@/features/panel/requisiciones';
+import {
+  imputacionPedida,
+  valorEstimadoDelRenglon,
+  type PlanificacionDelRenglon,
+  type RequisicionEnElDetalle,
+} from '@/features/panel/requisiciones';
 import { z } from 'zod';
 
 import type { PestanaDeReporte, ReporteDe } from '@/features/reportes/servidor/reportes';
@@ -3499,6 +3504,9 @@ export const solicitudPedida = z.object({
           .max(500)
           .nullish()
           .transform((v) => (v ? v : null)),
+        // Spec 048: al corregir una requisición de obra, el valor estimado y la imputación de cada renglón.
+        valorEstimado: valorEstimadoDelRenglon,
+        imputacion: imputacionPedida,
       }),
     )
     .max(100),
@@ -3599,6 +3607,10 @@ export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones'
     /** Spec 046, RF-10: en una requisición, para cuándo y para qué. */
     necesitaEl: string | null;
     paraQue: string | null;
+    /** Spec 048, RF-11: solo para quien ve valores (RF-9). */
+    valorEstimado?: number | null;
+    /** Spec 048: a qué parte de la planificación va, con sus cifras y su aviso. */
+    planificacion?: PlanificacionDelRenglon;
   }[];
   compras: {
     id: string;
@@ -3609,6 +3621,8 @@ export interface SolicitudDetallada extends Omit<SolicitudEnElLugar, 'renglones'
     fecha: string;
     factura: string;
     renglonIds: string[];
+    /** Spec 048, RF-47: el valor de cada renglón, si la compra lo lleva; solo para quien ve valores. */
+    valores?: { renglonId: string; valor: number }[];
     registradaPor: string;
     registradaEn: string;
     anulada: { en: string; por: string; motivo: string } | null;
@@ -3640,6 +3654,19 @@ export const compraPedida = z.object({
   fecha: z.string().trim().max(20),
   factura: z.string().trim().max(100).default(''),
   renglonIds: z.array(z.string().max(64)).max(100),
+  /** Spec 048, RF-47: cuánto es de cada renglón, cuando van a partes distintas de la planificación. */
+  valores: z
+    .array(
+      z.object({
+        renglonId: z.string().max(64),
+        valor: z
+          .number({ error: 'El valor de cada renglón va en pesos, sin decimales.' })
+          .int({ error: 'El valor de cada renglón va en pesos, sin decimales.' }),
+      }),
+    )
+    .max(100)
+    .nullish()
+    .transform((v) => v ?? null),
 });
 
 export type CompraPedida = z.input<typeof compraPedida>;
@@ -3698,6 +3725,8 @@ export const solicitudDePagoPedida = z.object({
   valor: z.number({ error: 'El valor va en pesos, sin decimales y mayor que cero.' }),
   paraCuando: z.string().trim().max(20),
   urgente: z.boolean().default(false),
+  /** Spec 048, RF-3: al corregir una requisición de pago de obra. */
+  imputacion: imputacionPedida,
 });
 
 export type SolicitudDePagoPedida = z.input<typeof solicitudDePagoPedida>;
@@ -3787,6 +3816,8 @@ export interface SolicitudDePagoDetallada extends Omit<SolicitudDePagoEnElLugar,
   pasos: PasoDePago[];
   /** Spec 046: si es una requisición, su número RQ, su estado y su cadena. */
   requisicion?: RequisicionEnElDetalle;
+  /** Spec 048: a qué parte de la planificación va, con sus cifras y su aviso. */
+  planificacion?: PlanificacionDelRenglon;
 }
 
 /**

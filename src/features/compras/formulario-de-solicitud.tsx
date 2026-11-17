@@ -14,14 +14,25 @@
  * pide para cuándo y para qué (RF-10, RF-11); la cabecera ya no pide fecha —es la más cercana de
  * los renglones— y su «para qué» pasa a ser una nota general opcional (RF-9). Se crea por
  * Requisiciones y, devuelta, se corrige por la ruta de la 036, que la vuelve a la cadena.
+ *
+ * Spec 048: en una requisición de obra cada renglón lleva su valor estimado —el Almacenista no lo
+ * ve ni lo pone (RF-11, RF-13)— y a qué parte de la planificación va (RF-2, RF-4). La cabecera ya
+ * no pide valor: es la suma de los renglones (RF-18). Al corregir, cada renglón trae lo que tenía
+ * (RF-10); si su opción ya no está en la planificación, el servidor lo dice (RF-55).
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
-import type { LugarDeRequisiciones } from '@/features/panel/requisiciones';
+import type { LugarDeRequisiciones, OpcionesParaImputar } from '@/features/panel/requisiciones';
+import {
+  CampoDeImputacion,
+  IMPUTACION_VACIA,
+  imputacionAPedir,
+  type ImputacionEscrita,
+} from '@/features/requisiciones/campo-de-imputacion';
 import {
   AccionesFormulario,
   Aviso,
@@ -36,7 +47,7 @@ import type { MaterialDeAlmacenFila } from '@/features/panel/contratos';
 import { useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { abreviaturaDeUnidad } from '@/shared/catalogos/almacen';
-import { faltasPorCampo, veLosValores, type DatosDeLaSolicitud } from '@/shared/rules/compras';
+import { faltasPorCampo, valorEstimadoDeLosRenglones, veLosValores, type DatosDeLaSolicitud } from '@/shared/rules/compras';
 import {
   ACEPTA_DOCUMENTOS,
   BYTES_DE_FIRMA,
@@ -45,6 +56,8 @@ import {
   revisarDocumento,
 } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
+import { enPesos } from '@/shared/rules/pesos';
+import { imputacionPropuesta, type ImputacionDelRenglon } from '@/shared/rules/requisicion-planificacion';
 
 /** Un renglón mientras se escribe: la cantidad es texto hasta enviar. */
 interface RenglonEscrito {
@@ -55,9 +68,28 @@ interface RenglonEscrito {
   /** Spec 046: en una requisición, para cuándo y para qué es este renglón. */
   necesitaEl: string;
   paraQue: string;
+  /** Spec 048: en una requisición de obra, su valor estimado y a qué parte de la planificación va. */
+  valorEstimado: string;
+  imputacion: ImputacionEscrita;
 }
 
-const RENGLON_VACIO: RenglonEscrito = { descripcion: '', cantidad: '', unidad: '', materialId: null, necesitaEl: '', paraQue: '' };
+const RENGLON_VACIO: RenglonEscrito = {
+  descripcion: '',
+  cantidad: '',
+  unidad: '',
+  materialId: null,
+  necesitaEl: '',
+  paraQue: '',
+  valorEstimado: '',
+  imputacion: IMPUTACION_VACIA,
+};
+
+/** RF-10: lo que tenía el renglón que se corrige, como se escribe en el formulario. */
+function imputacionEscritaDe(anterior: ImputacionDelRenglon | null): ImputacionEscrita {
+  const propuesta = imputacionPropuesta(anterior);
+  if (!propuesta) return IMPUTACION_VACIA;
+  return propuesta.llave ? { llave: propuesta.llave, fuera: false, explicacion: '' } : { llave: null, fuera: true, explicacion: propuesta.explicacion ?? '' };
+}
 
 /** «2,5» y «2.5» son lo mismo; vacío no es cero, es que falta. */
 const aNumero = (texto: string) => (texto.trim() ? Number(texto.trim().replace(',', '.')) : Number.NaN);
@@ -75,8 +107,11 @@ export function FormularioDeSolicitud({
   lugar: LugarDeLasSolicitudes;
   /** Spec 046: es una requisición de compra (fecha y para qué por renglón). */
   requisicion?: boolean;
-  /** Para corregir: la solicitud como está, con su versión. Sin ella, es una nueva. */
-  inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitud };
+  /**
+   * Para corregir: la solicitud como está, con su versión. Sin ella, es una nueva. `imputaciones`,
+   * en el orden de los renglones (spec 048).
+   */
+  inicial?: { id: string; codigo: string; version: number; datos: DatosDeLaSolicitud; imputaciones?: (ImputacionDelRenglon | null)[] };
   alCerrar: () => void;
   /** Con el mensaje para la pantalla: qué quedó y, si algo no subió, qué. */
   alGuardar: (mensaje: string) => void;
@@ -84,14 +119,21 @@ export function FormularioDeSolicitud({
   const persona = usePersona();
   const conValores = veLosValores(persona.rol);
   const obraId = 'obraId' in lugar ? lugar.obraId : null;
+  // Spec 048: solo las requisiciones de obra se imputan y llevan valor por renglón (RF-1).
+  const deObra = requisicion && obraId !== null;
+  const delAlmacenista = persona.rol === 'almacenista';
 
   const [renglones, setRenglones] = useState<RenglonEscrito[]>(
     inicial
-      ? inicial.datos.renglones.map((r) => ({
-          ...r,
+      ? inicial.datos.renglones.map((r, i) => ({
+          descripcion: r.descripcion,
+          materialId: r.materialId,
+          unidad: r.unidad,
           cantidad: String(r.cantidad).replace('.', ','),
           necesitaEl: r.necesitaEl ?? '',
           paraQue: r.paraQue ?? '',
+          valorEstimado: r.valorEstimado ? String(r.valorEstimado) : '',
+          imputacion: imputacionEscritaDe(inicial.imputaciones?.[i] ?? null),
         }))
       : [RENGLON_VACIO],
   );
@@ -105,6 +147,20 @@ export function FormularioDeSolicitud({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
+  // Spec 048: las opciones para imputar de la obra, con sus cifras si se ven (RF-6, RF-9).
+  const [imputables, setImputables] = useState<OpcionesParaImputar | null>(null);
+  useEffect(() => {
+    if (!deObra || !obraId) return;
+    let vigente = true;
+    api.requisiciones
+      .imputables(obraId)
+      .then((r) => vigente && setImputables(r))
+      .catch((fallo) => vigente && setError(mensajeDe(fallo)));
+    return () => {
+      vigente = false;
+    };
+  }, [deObra, obraId]);
+
   // El catálogo del Almacén, solo en una obra (RF-7). Si no lo lleva o no se puede ver, se escribe a mano.
   const materiales = useListado<MaterialDeAlmacenFila>(
     useCallback(() => (obraId ? api.almacen.materiales.listar(obraId).catch(() => []) : Promise.resolve([])), [obraId]),
@@ -117,20 +173,33 @@ export function FormularioDeSolicitud({
       unidad: r.unidad,
       materialId: r.materialId,
       ...(requisicion ? { necesitaEl: r.necesitaEl || null, paraQue: r.paraQue } : {}),
+      ...(deObra && conValores ? { valorEstimado: aPesos(r.valorEstimado) } : {}),
     })),
     paraCuando,
     urgente,
     paraQue,
     proveedorSugerido: proveedor,
-    valorEstimado: conValores ? aPesos(valor) : null,
+    valorEstimado: !conValores ? null : deObra ? null : aPesos(valor),
   };
-  const faltas = faltasPorCampo(datos, undefined, { requisicion });
+  if (deObra && conValores) datos.valorEstimado = valorEstimadoDeLosRenglones(datos.renglones);
+  const faltas = faltasPorCampo(datos, undefined, { requisicion, deObra, delAlmacenista });
+  // RF-2, RF-4: con planificación, cada renglón va a algo, y «Fuera de lo planeado» explica por qué.
+  const faltaDeImputacion = (r: RenglonEscrito): string | null => {
+    if (!deObra || !imputables?.hayPlanificacion) return null;
+    if (r.imputacion.fuera) return r.imputacion.explicacion.trim() ? null : 'Explique por qué no cabe.';
+    return r.imputacion.llave ? null : 'Escoja a qué va, o «Fuera de lo planeado».';
+  };
   const hayFaltas =
     faltas.renglones !== null ||
     faltas.paraCuando !== null ||
     faltas.valorEstimado !== null ||
-    faltas.porRenglon.some((r) => r.descripcion || r.cantidad || r.unidad || r.necesitaEl || r.paraQue) ||
+    faltas.porRenglon.some((r) => r.descripcion || r.cantidad || r.unidad || r.necesitaEl || r.paraQue || r.valorEstimado) ||
+    renglones.some((r) => faltaDeImputacion(r) !== null) ||
+    (deObra && imputables === null) ||
     adjuntos.some((a) => !a.clase);
+  /** Lo que la requisición entera pide a una opción, sumando sus renglones (para lo que queda). */
+  const pideALaOpcion = (llave: string | null) =>
+    llave ? renglones.filter((r) => r.imputacion.llave === llave).reduce((t, r) => t + (aPesos(r.valorEstimado) ?? 0), 0) : 0;
   const ver = (falta: string | null) => (intentado ? (falta ?? undefined) : undefined);
 
   const clases = clasesDe('solicitud').filter((c) => conValores || !llevaPrecio(c.id));
@@ -170,7 +239,11 @@ export function FormularioDeSolicitud({
     let guardada: { id: string; codigo: string };
     try {
       if (inicial) {
-        await api.compras.corregir(inicial.id, { ...datos, version: inicial.version });
+        await api.compras.corregir(inicial.id, {
+          ...datos,
+          renglones: datos.renglones.map((r, i) => ({ ...r, ...(deObra ? { imputacion: imputacionAPedir(renglones[i].imputacion) } : {}) })),
+          version: inicial.version,
+        });
         guardada = { id: inicial.id, codigo: inicial.codigo };
       } else if (requisicion) {
         // Spec 046: por Requisiciones, con la nota general en la cabecera.
@@ -187,6 +260,7 @@ export function FormularioDeSolicitud({
             materialId: r.materialId,
             necesitaEl: r.necesitaEl,
             paraQue: r.paraQue,
+            ...(deObra ? { valorEstimado: conValores ? aPesos(r.valorEstimado) : null, imputacion: imputacionAPedir(r.imputacion) } : {}),
           })),
         });
       } else {
@@ -286,6 +360,28 @@ export function FormularioDeSolicitud({
                 />
               </>
             ) : null}
+            {deObra && conValores ? (
+              <Campo
+                etiqueta="Valor estimado (pesos)"
+                obligatorio
+                valor={r.valorEstimado}
+                onChange={(v) => cambiarRenglon(i, { valorEstimado: v })}
+                error={ver(f?.valorEstimado ? 'En pesos, mayor que cero.' : null)}
+                ancho={180}
+              />
+            ) : null}
+            {deObra ? (
+              <View style={estilos.imputacion}>
+                <CampoDeImputacion
+                  opciones={imputables}
+                  valor={r.imputacion}
+                  onChange={(imputacion) => cambiarRenglon(i, { imputacion })}
+                  conValores={conValores}
+                  pideEstaRequisicion={pideALaOpcion(r.imputacion.llave)}
+                  error={ver(faltaDeImputacion(r))}
+                />
+              </View>
+            ) : null}
             {renglones.length > 1 ? (
               <Boton titulo="Quitar" tono="secundario" onPress={() => setRenglones((todos) => todos.filter((_, j) => j !== i))} />
             ) : null}
@@ -322,7 +418,10 @@ export function FormularioDeSolicitud({
       />
       <View style={estilos.fila}>
         <Campo etiqueta="Proveedor sugerido" valor={proveedor} onChange={setProveedor} ayuda="Opcional." ancho={280} />
-        {conValores ? (
+        {deObra && conValores ? (
+          // RF-18: en una de obra, el valor es la suma de los renglones.
+          <Text style={estilos.apoyo}>{`Valor estimado: ${datos.valorEstimado ? enPesos(datos.valorEstimado) : '—'} (la suma de los renglones)`}</Text>
+        ) : conValores ? (
           <Campo
             etiqueta="Valor estimado (pesos)"
             valor={valor}
@@ -386,6 +485,8 @@ const estilos = StyleSheet.create({
   fila: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.two },
   casilla: { paddingBottom: Spacing.two },
   inicio: { gap: Spacing.one, alignItems: 'flex-start' },
+  // La imputación ocupa su propia línea dentro del renglón: el selector y sus cifras son anchos.
+  imputacion: { flexBasis: '100%', paddingLeft: Spacing.three },
   archivo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto, minWidth: 200, paddingBottom: Spacing.two },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 });

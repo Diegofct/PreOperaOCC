@@ -56,6 +56,7 @@ import {
   aprobacionDeLaSolicitud,
   faltasDeLaSolicitud,
   fechaMasCercana,
+  valorEstimadoDeLosRenglones,
   veLosValores,
   yaLaDecidioOtro,
   type DatosDeLaSolicitud,
@@ -65,6 +66,15 @@ import { fechaDeJornada } from '@/shared/rules/jornada';
 import { aprobacionDelPago, faltasDeLaSolicitudDePago, nombreDeConcepto, veElValorDelPago } from '@/shared/rules/pagos';
 import { alcanza } from '@/shared/rules/permisos';
 import { ordenDeLaBandejaOcc, puedeCrearRequisicionOcc } from '@/shared/rules/requisicion-occ';
+import {
+  resolverImputacion,
+  valoresAlAprobar,
+  type CambioDeImputacion,
+  type CambiosDeLaPlanificacion,
+  type ImputacionDelRenglon,
+  type ImputacionPedida,
+  type MarcaDePlanificacion,
+} from '@/shared/rules/requisicion-planificacion';
 import {
   esperaElUltimoPaso,
   esperaMiAprobacion,
@@ -90,6 +100,7 @@ import {
 } from '@/shared/rules/requisiciones';
 
 import { ocupantesDeLaCadena, type LugarDeLaCadena } from './cadena';
+import { avisosAlAprobar, imputarElPago, imputarLaCompra, marcasDeLaObra, opcionesDeLaObra, type RenglonImputado } from './planificacion';
 import { listarRequisicionesOcc } from './requisicion-occ';
 
 /** Un lugar de requisiciones ya comprobado: una obra, GeoLab u OCC (RF-86). */
@@ -133,12 +144,31 @@ export async function crearRequisicion(
     return errorDePeticion('En OCC se pide con la requisición de pagos del viernes.', 422);
   }
 
+  // Spec 048: las de obra se imputan a la planificación (RF-1 a RF-8) y sus renglones de compra
+  // llevan valor estimado, salvo los del Almacenista (RF-11 a RF-13).
+  const deObra = lugar.tipo === 'obra';
+  const delAlmacenista = sesion.rol === 'almacenista';
+  let imputados: RenglonImputado[] | null = null;
+  let imputacionDelPago: ImputacionDelRenglon | null = null;
   if (pedido.tipo === 'compra') {
-    const datos = datosDeLaCompra(pedido);
-    const faltas = [...faltasDeLaSolicitud(datos, fechaDeJornada(), { requisicion: true }), ...(await faltasDeLosMateriales(lugar, datos))];
+    const datos = datosDeLaCompra(pedido, deObra && !delAlmacenista);
+    const faltas = [
+      ...faltasDeLaSolicitud(datos, fechaDeJornada(), { requisicion: true, deObra, delAlmacenista }),
+      ...(await faltasDeLosMateriales(lugar, datos)),
+    ];
+    if (lugar.tipo === 'obra') {
+      const imputacion = await imputarLaCompra(lugar.obraId, pedido.renglones, delAlmacenista);
+      faltas.push(...imputacion.faltas);
+      imputados = imputacion.renglones;
+    }
     if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
   } else {
     const faltas = faltasDeLaSolicitudDePago({ ...pedido, beneficiarioDocumento: pedido.beneficiarioDocumento });
+    if (lugar.tipo === 'obra') {
+      const imputacion = await imputarElPago(lugar.obraId, pedido.imputacion);
+      if (imputacion.falta) faltas.push(imputacion.falta);
+      imputacionDelPago = imputacion.imputacion;
+    }
     if (faltas.length) return Response.json({ error: faltas[0], faltas }, { status: 422 });
   }
 
@@ -155,7 +185,7 @@ export async function crearRequisicion(
 
   let numeroRequisicion: number;
   if (pedido.tipo === 'compra') {
-    const datos = datosDeLaCompra(pedido);
+    const datos = datosDeLaCompra(pedido, deObra && !delAlmacenista);
     const [[creada]] = await db.batch([
       db
         .insert(solicitudesCompra)
@@ -183,6 +213,8 @@ export async function crearRequisicion(
           unidad: r.unidad.trim(),
           necesitaEl: r.necesitaEl,
           paraQue: r.paraQue.trim(),
+          valorEstimado: imputados?.[i].valorEstimado ?? null,
+          imputacion: imputados?.[i].imputacion ?? null,
         })),
       ),
       db.insert(solicitudCompraEventos).values(eventos.map((e) => ({ ...e, solicitudId: id }))),
@@ -205,6 +237,7 @@ export async function crearRequisicion(
           pedidaPor: sesion.id,
           numeroRequisicion: numero,
           paso,
+          imputacion: imputacionDelPago,
         })
         .returning({ numeroRequisicion: solicitudesPago.numeroRequisicion }),
       db.insert(solicitudPagoEventos).values(eventos.map((e) => ({ ...e, solicitudPagoId: id }))),
@@ -216,8 +249,11 @@ export async function crearRequisicion(
   return { tipo: pedido.tipo, id, codigo: numeroQueSeVe(fila), paso, estadoQueSeVe: estadoQueSeVe(fila) };
 }
 
-/** Lo que valida y guarda la 036, desde lo que llega de una RQ de compra (RF-9, RF-10, RF-13). */
-function datosDeLaCompra(pedido: RequisicionDeCompraPedida): DatosDeLaSolicitud {
+/**
+ * Lo que valida y guarda la 036, desde lo que llega de una RQ de compra (RF-9, RF-10, RF-13). En
+ * una de obra con valores por renglón, la cabecera es su suma (048, RF-18).
+ */
+function datosDeLaCompra(pedido: RequisicionDeCompraPedida, valoresPorRenglon: boolean): DatosDeLaSolicitud {
   return {
     renglones: pedido.renglones.map((r) => ({ ...r, necesitaEl: r.necesitaEl || null, paraQue: r.paraQue })),
     // La fecha de la cabecera es la más cercana de los renglones, para ordenar la bandeja.
@@ -226,7 +262,7 @@ function datosDeLaCompra(pedido: RequisicionDeCompraPedida): DatosDeLaSolicitud 
     // En una RQ, la cabecera guarda la nota general en el «para qué» de la 036 (RF-9).
     paraQue: pedido.nota.trim(),
     proveedorSugerido: pedido.proveedorSugerido.trim(),
-    valorEstimado: pedido.valorEstimado,
+    valorEstimado: valoresPorRenglon ? valorEstimadoDeLosRenglones(pedido.renglones) : pedido.valorEstimado,
   };
 }
 
@@ -292,7 +328,10 @@ export async function requisicionesDelLugar(sesion: PersonaEnSesion, lugar: Luga
   const condicionPago = lugar.tipo === 'obra' ? eq(solicitudesPago.obraId, lugar.obraId) : eq(solicitudesPago.empresaId, lugar.empresaId);
   const filas = await filasDeRequisiciones(sesion, condicionCompra, condicionPago);
   const persona = { id: sesion.id, rol: sesion.rol };
-  const conMarca = filas.map((f) => ({ ...f.lista, esperaMiAprobacion: esperaMiAprobacion(f.regla, persona, ocupantes) }));
+  const conMarca = await conMarcaDePlanificacion(
+    sesion,
+    filas.map((f) => ({ ...f.lista, esperaMiAprobacion: esperaMiAprobacion(f.regla, persona, ocupantes) })),
+  );
   return {
     requisiciones: ordenDeRequisiciones(
       filas.map((f, i) => ({ ...f.regla, lista: conMarca[i] })),
@@ -305,6 +344,18 @@ export async function requisicionesDelLugar(sesion: PersonaEnSesion, lugar: Luga
       ? { pagosOcc: await listarRequisicionesOcc(sesion), sePuedePedirOcc: puedeCrearRequisicionOcc(sesion.rol) }
       : {}),
   };
+}
+
+/**
+ * Spec 048, RF-31: la marca «Se pasa de lo planeado» o «Fuera de lo planeado» de cada RQ de obra,
+ * para quien ve valores (RF-34). Se calcula una vez por obra, no por requisición.
+ */
+async function conMarcaDePlanificacion<T extends RequisicionEnLaLista>(sesion: PersonaEnSesion, listas: T[]): Promise<T[]> {
+  if (!veLosValores(sesion.rol)) return listas;
+  const obras = [...new Set(listas.filter((l) => l.numeroRequisicion !== null && l.lugar.tipo === 'obra').map((l) => l.lugar.id))];
+  const marcas = new Map<string, MarcaDePlanificacion>();
+  for (const porObra of await Promise.all(obras.map(marcasDeLaObra))) for (const [id, marca] of porObra) marcas.set(id, marca);
+  return listas.map((l) => (marcas.has(l.id) ? { ...l, marcaDePlanificacion: marcas.get(l.id) ?? null } : l));
 }
 
 /**
@@ -524,6 +575,14 @@ export async function decidirRequisicion(
   if (faltaMotivo) return errorDePeticion(faltaMotivo, 422);
 
   const pasoActual = paso as PasoDeLaCadena;
+  // Spec 048: solo las de obra se imputan; cambiar la imputación es recortar (RF-36, RF-38, RF-64).
+  if ((pedido.imputaciones.length > 0 || pedido.valoresEstimados.length > 0) && !fila.obraId) {
+    return errorDePeticion('Solo las requisiciones de obra se imputan a la planificación.', 422);
+  }
+  if (pedido.imputaciones.length > 0 && !puedeRecortar(sesion, pasoActual)) {
+    return errorDePeticion(NO_CAMBIA_LA_IMPUTACION, 422);
+  }
+  const opciones = fila.obraId && pedido.imputaciones.length > 0 ? (await opcionesDeLaObra(fila.obraId)).opciones : [];
   const despues = trasLaDecision(pedido.decision, sesion, pasoActual, ocupantes);
   const queda = despues.estado === 'aprobada';
   const db = baseServidor();
@@ -547,6 +606,28 @@ export async function decidirRequisicion(
       return !r || Number(r.cantidad) !== c.cantidad;
     });
     if (recorta && !puedeRecortar(sesion, pasoActual)) return errorDePeticion(NO_RECORTA, 422);
+
+    // Spec 048, RF-14 a RF-17: los valores que faltan se completan; los que había no se tocan.
+    const valores = valoresAlAprobar(
+      renglones.map((r) => ({ id: r.id, orden: r.orden, imputacion: r.imputacion, valorEstimado: r.valorEstimado })),
+      pedido.valoresEstimados,
+      pedido.decision === 'aprobar',
+    );
+    if (valores.faltas.length) return Response.json({ error: valores.faltas[0], faltas: valores.faltas }, { status: 422 });
+    // RF-36, RF-37, RF-64: las imputaciones que cambian, contra las opciones vigentes.
+    const imputacionDe = new Map(renglones.map((r) => [r.id, r.imputacion]));
+    const cambiosDeImputacion: (CambioDeImputacion & { renglonId: string; nueva: ImputacionDelRenglon })[] = [];
+    for (const cambio of pedido.imputaciones) {
+      const renglon = renglones.find((r) => r.id === cambio.renglonId);
+      if (!renglon) return errorDePeticion('Una de las imputaciones es de un renglón que ya no está en la requisición.', 422);
+      const resuelta = resolverImputacion(cambio.imputacion, opciones, true, renglon.orden);
+      if (resuelta.falta !== null) return errorDePeticion(resuelta.falta, 422);
+      const antes = renglon.imputacion?.etiqueta ?? 'Sin imputar';
+      if (renglon.imputacion?.llave === resuelta.imputacion.llave && renglon.imputacion?.tipo === resuelta.imputacion.tipo) continue;
+      imputacionDe.set(renglon.id, resuelta.imputacion);
+      cambiosDeImputacion.push({ renglonId: renglon.id, orden: renglon.orden, antes, despues: resuelta.imputacion.etiqueta, nueva: resuelta.imputacion });
+    }
+
     let aprobacion: ReturnType<typeof aprobacionDeLaSolicitud> | null = null;
     if (queda) {
       aprobacion = aprobacionDeLaSolicitud(
@@ -556,7 +637,15 @@ export async function decidirRequisicion(
       // RF-81: quitarlo todo no vale; para eso se rechaza.
       if (aprobacion.faltas.length) return Response.json({ error: aprobacion.faltas[0], faltas: aprobacion.faltas }, { status: 422 });
     }
-    if (!(await tomarLaVersion(id, pedido.version, { estado: despues.estado, paso: despues.paso }))) {
+    // Spec 048, RF-18: si se completaron valores, la cabecera vuelve a ser la suma de los renglones.
+    const cabecera = valores.escritos.length
+      ? {
+          valorEstimado: valorEstimadoDeLosRenglones(
+            renglones.map((r) => ({ valorEstimado: valores.escritos.find((e) => e.renglonId === r.id)?.valor ?? r.valorEstimado })),
+          ),
+        }
+      : {};
+    if (!(await tomarLaVersion(id, pedido.version, { estado: despues.estado, paso: despues.paso, ...cabecera }))) {
       return conflicto(MENSAJE_DE_REQUISICION_CAMBIADA);
     }
     const aprobadas = aprobacion
@@ -564,17 +653,73 @@ export async function decidirRequisicion(
           db.update(solicitudCompraRenglones).set({ cantidadAprobada: String(cantidad) }).where(eq(solicitudCompraRenglones.id, renglonId)),
         )
       : [];
+    // Spec 048, RF-63: los avisos que tiene al aprobarla, con lo que queda tras esta decisión.
+    const valorDe = new Map(renglones.map((r) => [r.id, r.valorEstimado]));
+    for (const e of valores.escritos) valorDe.set(e.renglonId, e.valor);
+    const avisos =
+      pedido.decision === 'aprobar' && fila.obraId
+        ? await avisosAlAprobar(
+            fila.obraId,
+            {
+              tipo: 'compra',
+              id,
+              estado: queda ? 'aprobada' : 'enviada',
+              renglones: renglones.map((r) => ({
+                id: r.id,
+                imputacion: imputacionDe.get(r.id) ?? null,
+                cantidad: Number(r.cantidad),
+                cantidadAprobada: aprobacion ? (aprobacion.aprobadas[r.id] ?? Number(r.cantidad)) : null,
+                valorEstimado: valorDe.get(r.id) ?? null,
+              })),
+              compras: [],
+            },
+            renglones.map((r) => ({ renglonId: r.id, orden: r.orden, imputacion: imputacionDe.get(r.id) ?? null })),
+          )
+        : [];
+    const deLaPlanificacion: CambiosDeLaPlanificacion = {
+      ...(valores.escritos.length ? { valoresEstimados: valores.escritos.map(({ orden, valor }) => ({ orden, valor })) } : {}),
+      ...(cambiosDeImputacion.length ? { imputaciones: cambiosDeImputacion.map(({ orden, antes, despues }) => ({ orden, antes, despues })) } : {}),
+      ...(avisos.length ? { avisos } : {}),
+    };
     await ejecutarLote(db, [
       db.insert(solicitudCompraEventos).values([
-        { ...eventoDeLaDecision, solicitudId: id, cambios: [{ paso: pasoActual, siguiente: despues.paso }, ...(aprobacion?.cambios ?? [])] },
+        {
+          ...eventoDeLaDecision,
+          solicitudId: id,
+          cambios: [
+            { paso: pasoActual, siguiente: despues.paso },
+            ...(aprobacion?.cambios ?? []),
+            ...(Object.keys(deLaPlanificacion).length ? [deLaPlanificacion] : []),
+          ],
+        },
         ...saltos.map((e) => ({ ...e, solicitudId: id })),
       ]),
       ...aprobadas,
+      ...valores.escritos.map((e) =>
+        db.update(solicitudCompraRenglones).set({ valorEstimado: e.valor }).where(eq(solicitudCompraRenglones.id, e.renglonId)),
+      ),
+      ...cambiosDeImputacion.map((c) =>
+        db.update(solicitudCompraRenglones).set({ imputacion: c.nueva }).where(eq(solicitudCompraRenglones.id, c.renglonId)),
+      ),
     ]);
   } else {
     const filaDePago = fila as typeof solicitudesPago.$inferSelect;
     const recorta = pedido.valorAprobado !== null && pedido.valorAprobado !== filaDePago.valor;
     if (recorta && !puedeRecortar(sesion, pasoActual)) return errorDePeticion(NO_RECORTA, 422);
+    if (pedido.valoresEstimados.length > 0) return errorDePeticion('Una requisición de pago no tiene renglones con valor estimado.', 422);
+    // Spec 048, RF-36, RF-37, RF-64: la imputación de la requisición de pago.
+    let imputacionNueva: ImputacionDelRenglon | null = null;
+    let cambioDeImputacion: CambioDeImputacion | null = null;
+    const pedida = pedido.imputaciones.find((c) => c.renglonId === null);
+    if (pedido.imputaciones.some((c) => c.renglonId !== null)) return errorDePeticion('Una requisición de pago no tiene renglones.', 422);
+    if (pedida) {
+      const resuelta = resolverImputacion(pedida.imputacion, opciones, true, null);
+      if (resuelta.falta !== null) return errorDePeticion(resuelta.falta, 422);
+      if (filaDePago.imputacion?.llave !== resuelta.imputacion.llave || filaDePago.imputacion?.tipo !== resuelta.imputacion.tipo) {
+        imputacionNueva = resuelta.imputacion;
+        cambioDeImputacion = { orden: null, antes: filaDePago.imputacion?.etiqueta ?? 'Sin imputar', despues: resuelta.imputacion.etiqueta };
+      }
+    }
     let valorAprobado: number | null = null;
     let cambios: unknown[] = [];
     if (queda) {
@@ -583,22 +728,49 @@ export async function decidirRequisicion(
       valorAprobado = aprobacion.aprobado;
       if (valorAprobado !== filaDePago.valor) cambios = [{ antes: filaDePago.valor, despues: valorAprobado }];
     }
+    // Spec 048, RF-63: los avisos que tiene al aprobarla.
+    const imputacionFinal = imputacionNueva ?? filaDePago.imputacion;
+    const avisos =
+      pedido.decision === 'aprobar' && fila.obraId
+        ? await avisosAlAprobar(
+            fila.obraId,
+            { tipo: 'pago', id, estado: queda ? 'aprobada' : 'enviada', imputacion: imputacionFinal, valor: filaDePago.valor, valorAprobado },
+            [{ renglonId: null, orden: null, imputacion: imputacionFinal }],
+          )
+        : [];
+    const deLaPlanificacion: CambiosDeLaPlanificacion = {
+      ...(cambioDeImputacion ? { imputaciones: [cambioDeImputacion] } : {}),
+      ...(avisos.length ? { avisos } : {}),
+    };
     if (
       !(await tomarLaVersionDelPago(id, pedido.version, {
         estado: despues.estado,
         paso: despues.paso,
         ...(valorAprobado !== null ? { valorAprobado } : {}),
+        ...(imputacionNueva ? { imputacion: imputacionNueva } : {}),
       }))
     ) {
       return conflicto(MENSAJE_DE_REQUISICION_CAMBIADA);
     }
     await db.insert(solicitudPagoEventos).values([
-      { ...eventoDeLaDecision, solicitudPagoId: id, cambios: [{ paso: pasoActual, siguiente: despues.paso }, ...cambios] },
+      {
+        ...eventoDeLaDecision,
+        solicitudPagoId: id,
+        cambios: [
+          { paso: pasoActual, siguiente: despues.paso },
+          ...cambios,
+          ...(Object.keys(deLaPlanificacion).length ? [deLaPlanificacion] : []),
+        ],
+      },
       ...saltos.map((e) => ({ ...e, solicitudPagoId: id })),
     ]);
   }
   return { estado: despues.estado, paso: despues.paso, version: pedido.version + 1 };
 }
+
+/** Spec 048, RF-38: el Residente, el Director de Obra y el Director de Proyectos devuelven en vez de reimputar. */
+const NO_CAMBIA_LA_IMPUTACION =
+  'A qué parte de la planificación va un renglón solo lo cambian la Administradora en su paso o la Gerencia. Si no le cuadra, devuélvala.';
 
 /** Lo que llega a decidir, ya leído por el contrato (`decisionPedida`). */
 export interface DecisionDeRequisicion {
@@ -607,6 +779,10 @@ export interface DecisionDeRequisicion {
   motivo: string;
   cantidades: { renglonId: string; cantidad: number }[];
   valorAprobado: number | null;
+  /** Spec 048, RF-14: los valores estimados que completa el primer paso en lo del Almacenista. */
+  valoresEstimados: { renglonId: string; valor: number }[];
+  /** Spec 048, RF-36, RF-64: las imputaciones que cambian la Administradora o la Gerencia. */
+  imputaciones: { renglonId: string | null; imputacion: ImputacionPedida | null }[];
 }
 
 /** El 409 de quien llega tarde: si otra persona ya decidió, quién fue (040/RF-9). */
@@ -684,6 +860,11 @@ export async function bandejaDeRequisiciones(sesion: PersonaEnSesion): Promise<B
     }
     return { regla: f.regla, lista };
   });
+  const listasConMarca = await conMarcaDePlanificacion(
+    sesion,
+    conMarca.map((f) => f.lista),
+  );
+  conMarca.forEach((f, i) => (f.lista = listasConMarca[i]));
   // Spec 047, RF-49 a RF-51: las de pagos de OCC que esperan autorización, con «OCC», por viernes.
   const pagosOcc = ordenDeLaBandejaOcc(
     (await listarRequisicionesOcc(sesion))

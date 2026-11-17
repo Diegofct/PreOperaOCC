@@ -204,6 +204,32 @@ import {
   type RespuestaDeLineaOcc,
 } from '../src/shared/rules/requisicion-occ';
 import {
+  aportesDeLasRequisiciones,
+  avisosParaLaHistoria,
+  buscarOpciones,
+  cambiosSinValores,
+  resumenDeLoComprometido,
+  textosDeLaPlanificacion,
+  valoresAlAprobar,
+  valoresDeLaCompraPorRenglon,
+  cifrasDeLaOpcion,
+  cifrasDeLaRequisicion,
+  comprometidoPorOpcion,
+  marcaDeLaRequisicion,
+  textoDelAviso,
+  valorRealPorRenglon,
+  type Aporte,
+  type CompraParaComprometer,
+  type ImputacionDelRenglon,
+  type RenglonParaComprometer,
+  type RequisicionParaComprometer,
+  imputacionDeLaOpcion,
+  imputacionPropuesta,
+  opcionesParaImputar,
+  resolverImputacion,
+  type PlanificacionParaImputar,
+} from '../src/shared/rules/requisicion-planificacion';
+import {
   esExcelParaImportarOcc,
   FALLOS_DE_LA_REQUISICION_OCC,
   propuestaDeLaLecturaOcc,
@@ -240,7 +266,7 @@ import {
 import { decisionPedida, requisicionPedida } from '../src/features/panel/requisiciones';
 import { lineaOccPedida, pasoOccPedido, requisicionOccPedida, respuestasOccPedidas } from '../src/features/panel/requisiciones-occ';
 import { COLUMNAS_OCC, planillaOcc } from '../src/features/requisiciones/exportar-occ';
-import { solicitudCorregida, solicitudDePagoCorregida } from '../src/features/panel/contratos';
+import { compraPedida, solicitudCorregida, solicitudDePagoCorregida, solicitudPedida } from '../src/features/panel/contratos';
 import {
   anulacionDePlanSemanal,
   aprobacionDePlanSemanal,
@@ -617,6 +643,7 @@ import {
   resumenDeLaBandeja,
   solicitudAbierta,
   veElGasto,
+  valorEstimadoDeLosRenglones,
   yaLaDecidioOtro,
   veLosValores,
   type DatosDeLaCompra,
@@ -13573,14 +13600,16 @@ prueba('036/RF-9, RF-10: cada falta de la solicitud, junto a su campo', () => {
   assert.deepEqual(faltasPorCampo(datos, hoy), {
     renglones: null,
     porRenglon: [
-      // `necesitaEl` y `paraQue` son de las requisiciones de la 046: en una SC de antes no se piden.
-      { descripcion: null, cantidad: null, unidad: null, necesitaEl: null, paraQue: null },
+      // `necesitaEl` y `paraQue` son de las requisiciones de la 046, y `valorEstimado` de las de obra
+      // de la 048: en una SC de antes no se piden.
+      { descripcion: null, cantidad: null, unidad: null, necesitaEl: null, paraQue: null, valorEstimado: null },
       {
         descripcion: 'El renglón 2 no dice qué se necesita.',
         cantidad: 'La cantidad del renglón 2 debe ser mayor que cero, con dos decimales a lo más.',
         unidad: 'El renglón 2 no tiene unidad.',
         necesitaEl: null,
         paraQue: null,
+        valorEstimado: null,
       },
     ],
     paraCuando: 'La fecha «para cuándo» no puede ser anterior a hoy.',
@@ -21274,6 +21303,638 @@ prueba('047/RF-52 a RF-57: la descarga con las columnas de OCC, sin imputar, con
   assert.equal(enAutorizacion.filas[0][9], 'Arreglo del domingo');
   assert.equal(enAutorizacion.filas[0][10], '');
   assert.equal(enAutorizacion.totalAPagar, 0);
+});
+
+/* ── Spec 048: las requisiciones de obra amarradas a la planificación ── */
+
+/** Un renglón indirecto de valor fijo, para las pruebas de la 048. */
+function indirectoFijo048(id: string, concepto: RenglonIndirecto['concepto'], descripcion: string, valor: number): RenglonIndirecto {
+  return { id, concepto, descripcion, revisar: false, forma: 'fijo', valor, mesInicio: '2026-01', tiempoEjecucion: 4, fijados: [] };
+}
+
+/** Una planificación de un frente: un ítem con costo, uno sin costo, un rubro y sus indirectos. */
+function planificacion048(id = 'p1', cambios: Partial<EstructuraDePlanificacion> = {}): PlanificacionParaImputar {
+  const conCosto = { ...FILA_12_DEL_V2, item: '2.9', descripcion: 'Concreto clase D', precioCosto: 100_000, medidaCoste: 70 };
+  return {
+    id,
+    estructura: estructura045({
+      items: [conCosto, FILA_12_DEL_V2],
+      rubros: [
+        { nombre: 'Plan de manejo ambiental', valor: 9_000_000, costo: 6_000_000, programacion: [] },
+        { nombre: 'Señalización', valor: 1_000_000, costo: null, programacion: [] },
+      ],
+      renglonesIndirectos: [
+        indirectoFijo048('i1', 'maquinaria_general', 'Camioneta de la residencia', 12_000_000),
+        indirectoFijo048('i2', 'mano_obra_indirecta', 'Residente de obra', 30_000_000),
+        indirectoFijo048('i3', 'mano_obra_indirecta', 'Inspector SISO', 10_000_000),
+      ],
+      ...cambios,
+    }),
+  };
+}
+
+prueba('048/RF-6, RF-7, RF-27, RF-29, RF-35: las opciones para imputar, con su costo planeado', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const porDescripcion = (texto: string) => opciones.find((o) => o.descripcion === texto);
+
+  // RF-27: un ítem con costo vale medida para costo × precio de costo.
+  const concreto = porDescripcion('Concreto clase D');
+  assert.equal(concreto?.tipo, 'item');
+  assert.equal(concreto?.numero, '2.9');
+  assert.equal(concreto?.etiqueta, '2.9 · Concreto clase D');
+  assert.equal(concreto?.capitulo, 'CONSTRUCCIÓN DE ALCANTARILLAS');
+  assert.equal(concreto?.frente, 'BERRIO');
+  assert.equal(concreto?.planeado, 7_000_000);
+  // RF-29: el costo de relleno del Excel es «sin precio de costo».
+  assert.equal(porDescripcion('Demolición de estructuras (Concreto reforzado).')?.planeado, null);
+  // RF-27 (precisado): un rubro vale su costo, no su valor contractual; sin costo, sin cifra.
+  assert.equal(porDescripcion('Plan de manejo ambiental')?.planeado, 6_000_000);
+  assert.equal(porDescripcion('Plan de manejo ambiental')?.tipo, 'rubro');
+  assert.equal(porDescripcion('Señalización')?.planeado, null);
+  // Un renglón indirecto, con su total y su concepto.
+  const camioneta = porDescripcion('Camioneta de la residencia');
+  assert.equal(camioneta?.planeado, 12_000_000);
+  assert.equal(camioneta?.etiqueta, 'Maquinaria general de obra · Camioneta de la residencia');
+  // RF-35: la mano de obra indirecta es una sola opción, con el total del concepto y sin sus renglones.
+  const manoDeObra = opciones.filter((o) => o.capitulo === 'Mano de obra indirecta');
+  assert.equal(manoDeObra.length, 1);
+  assert.equal(manoDeObra[0].tipo, 'mano_obra_indirecta');
+  assert.equal(manoDeObra[0].planeado, 40_000_000);
+  assert.equal(opciones.some((o) => o.descripcion === 'Residente de obra' || o.descripcion === 'Inspector SISO'), false);
+  // Seis opciones, todas de la planificación p1.
+  assert.equal(opciones.length, 6);
+  assert.ok(opciones.every((o) => o.planificacionId === 'p1'));
+  // Sin renglones de mano de obra indirecta, no hay esa opción.
+  const sinManoDeObra = opcionesParaImputar([planificacion048('p1', { renglonesIndirectos: [] })]);
+  assert.equal(sinManoDeObra.some((o) => o.tipo === 'mano_obra_indirecta'), false);
+});
+
+prueba('048/RF-65, RF-39: la misma opción tiene la misma llave en otra versión', () => {
+  const v1 = opcionesParaImputar([planificacion048('p1')]);
+  // La v2 cambia costos y cifras, no la identidad de lo planeado.
+  const v2 = opcionesParaImputar([
+    planificacion048('p2', {
+      renglonesIndirectos: [
+        indirectoFijo048('otro-id', 'maquinaria_general', 'Camioneta  de la RESIDENCIA', 15_000_000),
+        indirectoFijo048('i2', 'mano_obra_indirecta', 'Residente de obra', 35_000_000),
+      ],
+    }),
+  ]);
+  for (const descripcion of ['Concreto clase D', 'Plan de manejo ambiental']) {
+    assert.equal(v1.find((o) => o.descripcion === descripcion)?.llave, v2.find((o) => o.descripcion === descripcion)?.llave, descripcion);
+  }
+  // El renglón indirecto se reconoce por concepto y descripción, aunque cambie su id o sus espacios.
+  assert.equal(
+    v1.find((o) => o.descripcion === 'Camioneta de la residencia')?.llave,
+    v2.find((o) => o.descripcion === 'Camioneta  de la RESIDENCIA')?.llave,
+  );
+  assert.equal(
+    v1.find((o) => o.tipo === 'mano_obra_indirecta')?.llave,
+    v2.find((o) => o.tipo === 'mano_obra_indirecta')?.llave,
+  );
+  // Las llaves no chocan entre tipos.
+  assert.equal(new Set(v1.map((o) => o.llave)).size, v1.length);
+});
+
+prueba('048/RF-46: se busca por número o por descripción', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  assert.deepEqual(buscarOpciones(opciones, '2.9').map((o) => o.numero), ['2.9']);
+  assert.deepEqual(buscarOpciones(opciones, 'camioneta').map((o) => o.descripcion), ['Camioneta de la residencia']);
+  assert.deepEqual(buscarOpciones(opciones, 'MANEJO ambiental').map((o) => o.tipo), ['rubro']);
+  assert.equal(buscarOpciones(opciones, '').length, opciones.length);
+  assert.equal(buscarOpciones(opciones, 'no existe').length, 0);
+  // Lo que se guarda al escoger.
+  const concreto = buscarOpciones(opciones, 'concreto clase')[0];
+  assert.deepEqual(imputacionDeLaOpcion(concreto), {
+    tipo: 'item',
+    llave: concreto.llave,
+    etiqueta: '2.9 · Concreto clase D',
+    frente: 'BERRIO',
+    planificacionId: 'p1',
+    explicacion: null,
+  });
+});
+
+prueba('048/RF-2 a RF-5, RF-8, RF-54, RF-55: la imputación que se guarda, o lo que falta', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const concreto = opciones.find((o) => o.descripcion === 'Concreto clase D') as (typeof opciones)[number];
+
+  // RF-8: sin planificación vigente se guarda «Sin planificación aprobada» y no se pide nada.
+  const sinPlan = resolverImputacion(null, [], false, 1);
+  assert.equal(sinPlan.falta, null);
+  assert.equal(sinPlan.imputacion?.tipo, 'sin_planificacion');
+  assert.equal(sinPlan.imputacion?.etiqueta, 'Sin planificación aprobada');
+
+  // RF-2, RF-5: con planificación, es obligatoria y dice qué renglón.
+  assert.equal(
+    resolverImputacion(null, opciones, true, 2).falta,
+    'Diga a qué parte de la planificación va el renglón 2, o márquelo «Fuera de lo planeado».',
+  );
+  // RF-3: en la de pago, «la requisición».
+  assert.match(resolverImputacion({ llave: null, explicacion: null }, opciones, true, null).falta ?? '', /va la requisición/);
+
+  // RF-4: «Fuera de lo planeado» sin explicación no vale; con ella, sí. Lo mismo un frente sin planificar (RF-54).
+  assert.equal(resolverImputacion({ llave: null, explicacion: '   ' }, opciones, true, 1).falta, 'Explique por qué el renglón 1 no cabe en la planificación.');
+  const fuera = resolverImputacion({ llave: null, explicacion: ' Es del frente Yondo ' }, opciones, true, 1);
+  assert.deepEqual(fuera.imputacion, {
+    tipo: 'fuera',
+    llave: null,
+    etiqueta: 'Fuera de lo planeado',
+    frente: '',
+    planificacionId: null,
+    explicacion: 'Es del frente Yondo',
+  });
+
+  // La opción vigente: la etiqueta y la versión salen de ella, no de lo que mande la pantalla.
+  const valida = resolverImputacion({ llave: concreto.llave, explicacion: 'se ignora' }, opciones, true, 1);
+  assert.deepEqual(valida.imputacion, imputacionDeLaOpcion(concreto));
+
+  // RF-55: una llave que ya no está en la planificación vigente no se acepta.
+  assert.equal(
+    resolverImputacion({ llave: 'item:otra|cosa|1.1', explicacion: null }, opciones, true, 3).falta,
+    'Lo que tenía el renglón 3 ya no está en la planificación vigente: escoja otra opción.',
+  );
+
+  // RF-10: al corregir se propone lo que tenía; «sin planificación» no se propone.
+  assert.deepEqual(imputacionPropuesta(valida.imputacion), { llave: concreto.llave, explicacion: null });
+  assert.deepEqual(imputacionPropuesta(fuera.imputacion), { llave: null, explicacion: 'Es del frente Yondo' });
+  assert.equal(imputacionPropuesta(sinPlan.imputacion), null);
+  assert.equal(imputacionPropuesta(null), null);
+});
+
+prueba('048/RF-11 a RF-13, RF-18: el valor estimado por renglón en una requisición de obra', () => {
+  const hoy = '2026-11-17';
+  const renglon = (valorEstimado: number | null | undefined) => ({
+    descripcion: 'Cemento gris',
+    cantidad: 20,
+    unidad: 'bulto',
+    materialId: null,
+    necesitaEl: '2026-11-20',
+    paraQue: 'Alcantarilla 3',
+    valorEstimado,
+  });
+  const datos = (valores: (number | null | undefined)[]) => ({
+    renglones: valores.map(renglon),
+    paraCuando: '',
+    urgente: false,
+    paraQue: '',
+    proveedorSugerido: '',
+    valorEstimado: null,
+  });
+  const deObra = { requisicion: true, deObra: true };
+
+  // RF-12: cada renglón lleva su valor, entero y mayor que cero.
+  assert.deepEqual(faltasDeLaSolicitud(datos([500_000, 300_000]), hoy, deObra), []);
+  assert.deepEqual(faltasDeLaSolicitud(datos([500_000, null]), hoy, deObra), [
+    'Diga el valor estimado del renglón 2, en pesos y mayor que cero.',
+  ]);
+  assert.equal(faltasDeLaSolicitud(datos([0]), hoy, deObra).length, 1);
+  assert.equal(faltasDeLaSolicitud(datos([1500.5]), hoy, deObra).length, 1);
+  assert.equal(faltasPorCampo(datos([undefined]), hoy, deObra).porRenglon[0].valorEstimado, 'Diga el valor estimado del renglón 1, en pesos y mayor que cero.');
+
+  // RF-13: el Almacenista envía sin valores.
+  assert.deepEqual(faltasDeLaSolicitud(datos([null, null]), hoy, { ...deObra, delAlmacenista: true }), []);
+  // GeoLab y las SC de antes no piden valor por renglón (RF-1).
+  assert.deepEqual(faltasDeLaSolicitud(datos([null]), hoy, { requisicion: true }), []);
+
+  // RF-18: la cabecera es la suma de los renglones; sin valores, ninguno.
+  assert.equal(valorEstimadoDeLosRenglones([{ valorEstimado: 500_000 }, { valorEstimado: 300_000 }]), 800_000);
+  assert.equal(valorEstimadoDeLosRenglones([{ valorEstimado: null }, {}]), null);
+});
+
+/** Una imputación a la llave dada, para armar requisiciones de prueba de la 048. */
+const imputada048 = (llave: string): ImputacionDelRenglon => ({ tipo: 'item', llave, etiqueta: llave, frente: 'BERRIO', planificacionId: 'p1', explicacion: null });
+const fuera048: ImputacionDelRenglon = { tipo: 'fuera', llave: null, etiqueta: 'Fuera de lo planeado', frente: '', planificacionId: null, explicacion: 'Imprevisto' };
+
+/** Una requisición de compra de prueba: renglones `[id, llave, estimado]`; llave nula es «fuera». */
+function compra048(
+  id: string,
+  estado: string,
+  renglones: [string, string | null, number | null][],
+  compras: CompraParaComprometer[] = [],
+  cambios: Partial<RenglonParaComprometer> = {},
+): RequisicionParaComprometer {
+  return {
+    tipo: 'compra',
+    id,
+    estado,
+    renglones: renglones.map(([rid, llave, valorEstimado]) => ({
+      id: rid,
+      imputacion: llave === null ? fuera048 : imputada048(llave),
+      cantidad: 10,
+      cantidadAprobada: null,
+      valorEstimado,
+      ...cambios,
+    })),
+    compras,
+  };
+}
+
+/** Una compra de prueba: renglones `[renglonId, valor por renglón]`. */
+function compraHecha048(valor: number, renglones: [string, number | null][], anulada = false): CompraParaComprometer {
+  return { id: `c-${valor}`, valor, anulada, renglones: renglones.map(([renglonId, v]) => ({ renglonId, valor: v })) };
+}
+
+const sumaDe048 = (aportes: Aporte[]) => aportes.reduce((t, a) => t + a.valor, 0);
+
+prueba('048/RF-19, RF-20, RF-24, RF-25, RF-60: lo comprometido de los renglones sin compra', () => {
+  // RF-20: enviada cuenta su estimado; aprobada también.
+  assert.equal(sumaDe048(aportesDeLasRequisiciones([compra048('a', 'enviada', [['r1', 'k', 500_000]])])), 500_000);
+  assert.equal(sumaDe048(aportesDeLasRequisiciones([compra048('a', 'aprobada', [['r1', 'k', 500_000]])])), 500_000);
+  // RF-19: devuelta, cancelada y rechazada sin compras no cuentan.
+  for (const estado of ['devuelta', 'cancelada', 'rechazada']) {
+    assert.equal(aportesDeLasRequisiciones([compra048('a', estado, [['r1', 'k', 500_000]])]).length, 0, estado);
+  }
+  // RF-24: quitado al aprobar, nada.
+  assert.equal(aportesDeLasRequisiciones([compra048('a', 'aprobada', [['r1', 'k', 500_000]], [], { cantidadAprobada: 0 })]).length, 0);
+  // RF-60: de 10 se aprobaron 4: el 40 % del estimado.
+  assert.equal(
+    sumaDe048(aportesDeLasRequisiciones([compra048('a', 'aprobada', [['r1', 'k', 500_000]], [], { cantidadAprobada: 4 })])),
+    200_000,
+  );
+  // Lo del Almacenista sin estimado todavía no aporta.
+  assert.equal(aportesDeLasRequisiciones([compra048('a', 'enviada', [['r1', 'k', null]])]).length, 0);
+  // RF-25, D11: sin imputación (de antes de la 048) o pedida sin planificación, no cuenta.
+  assert.equal(aportesDeLasRequisiciones([compra048('a', 'enviada', [['r1', 'k', 500_000]], [], { imputacion: null })]).length, 0);
+  const sinPlan: ImputacionDelRenglon = { ...fuera048, tipo: 'sin_planificacion', explicacion: null };
+  assert.equal(aportesDeLasRequisiciones([compra048('a', 'enviada', [['r1', 'k', 500_000]], [], { imputacion: sinPlan })]).length, 0);
+  // «Fuera de lo planeado» aporta con llave nula.
+  assert.deepEqual(aportesDeLasRequisiciones([compra048('a', 'enviada', [['r1', null, 70_000]])]), [
+    { requisicionId: 'a', renglonId: 'r1', llave: null, valor: 70_000 },
+  ]);
+});
+
+prueba('048/RF-21, RF-22, RF-47, RF-49, RF-56, RF-58: lo comprometido con compras', () => {
+  // RF-21: con compra cuenta el real, no el estimado.
+  assert.deepEqual(
+    aportesDeLasRequisiciones([compra048('a', 'comprada', [['r1', 'k', 500_000]], [compraHecha048(620_000, [['r1', null]])])]),
+    [{ requisicionId: 'a', renglonId: 'r1', llave: 'k', valor: 620_000 }],
+  );
+  // RF-49: dos renglones de la misma opción en una compra sin valor por renglón suman la compra entera.
+  const misma = aportesDeLasRequisiciones([
+    compra048('a', 'comprada', [['r1', 'k', 300_000], ['r2', 'k', 100_000]], [compraHecha048(1_000_001, [['r1', null], ['r2', null]])]),
+  ]);
+  assert.equal(sumaDe048(misma), 1_000_001);
+  assert.ok(misma.every((x) => x.llave === 'k'));
+  // RF-47: con valor por renglón, cada uno el suyo.
+  const porRenglon = aportesDeLasRequisiciones([
+    compra048('a', 'comprada', [['r1', 'k', 300_000], ['r2', 'j', 100_000]], [compraHecha048(900_000, [['r1', 650_000], ['r2', 250_000]])]),
+  ]);
+  assert.deepEqual(porRenglon.map((x) => [x.llave, x.valor]), [['k', 650_000], ['j', 250_000]]);
+  // Un renglón comprado y otro no: el real y el estimado.
+  const mitad = aportesDeLasRequisiciones([
+    compra048('a', 'recibida_en_parte', [['r1', 'k', 300_000], ['r2', 'k', 100_000]], [compraHecha048(350_000, [['r1', null]])]),
+  ]);
+  assert.equal(sumaDe048(mitad), 450_000);
+  // RF-22: la compra anulada deja de contar y vuelve el estimado.
+  assert.equal(
+    sumaDe048(aportesDeLasRequisiciones([compra048('a', 'aprobada', [['r1', 'k', 500_000]], [compraHecha048(620_000, [['r1', null]], true)])])),
+    500_000,
+  );
+  // RF-56: cancelada con una compra viva: cuenta lo comprado, no el resto.
+  assert.deepEqual(
+    aportesDeLasRequisiciones([
+      compra048('a', 'cancelada', [['r1', 'k', 300_000], ['r2', 'k', 100_000]], [compraHecha048(350_000, [['r1', null]])]),
+    ]),
+    [{ requisicionId: 'a', renglonId: 'r1', llave: 'k', valor: 350_000 }],
+  );
+  // RF-58: y si esa compra se anula, ya no cuenta nada.
+  assert.equal(
+    aportesDeLasRequisiciones([compra048('a', 'cancelada', [['r1', 'k', 300_000]], [compraHecha048(350_000, [['r1', null]], true)])]).length,
+    0,
+  );
+  // Sin valor por renglón ni estimados, la compra se reparte por partes iguales y la suma es exacta.
+  assert.deepEqual([...valorRealPorRenglon(compraHecha048(100, [['r1', null], ['r2', null], ['r3', null]]), new Map()).values()], [33, 33, 34]);
+});
+
+prueba('048/RF-23, RF-59: una requisición de pago cuenta lo pedido y luego lo aprobado', () => {
+  const pago = (estado: string, valorAprobado: number | null, imputacion: ImputacionDelRenglon | null = imputada048('k')): RequisicionParaComprometer => ({
+    tipo: 'pago',
+    id: 'p',
+    estado,
+    imputacion,
+    valor: 900_000,
+    valorAprobado,
+  });
+  assert.equal(sumaDe048(aportesDeLasRequisiciones([pago('enviada', null)])), 900_000);
+  assert.equal(sumaDe048(aportesDeLasRequisiciones([pago('aprobada', 700_000)])), 700_000);
+  assert.equal(sumaDe048(aportesDeLasRequisiciones([pago('pagada', 700_000)])), 700_000);
+  for (const estado of ['devuelta', 'cancelada', 'rechazada']) assert.equal(aportesDeLasRequisiciones([pago(estado, null)]).length, 0, estado);
+  assert.equal(aportesDeLasRequisiciones([pago('enviada', null, null)]).length, 0);
+  assert.deepEqual(aportesDeLasRequisiciones([pago('enviada', null, fuera048)]), [
+    { requisicionId: 'p', renglonId: null, llave: null, valor: 900_000 },
+  ]);
+});
+
+prueba('048/RF-40, RF-51: lo comprometido por opción, aparte lo de fuera y lo que perdió su opción', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const concreto = (opciones.find((o) => o.descripcion === 'Concreto clase D') as (typeof opciones)[number]).llave;
+  const total = comprometidoPorOpcion(
+    [
+      { requisicionId: 'a', renglonId: 'r1', llave: concreto, valor: 500_000 },
+      { requisicionId: 'b', renglonId: 'r2', llave: concreto, valor: 250_000 },
+      { requisicionId: 'b', renglonId: 'r3', llave: null, valor: 70_000 },
+      { requisicionId: 'c', renglonId: 'r4', llave: 'item:ya|no|esta', valor: 40_000 },
+    ],
+    opciones,
+  );
+  assert.deepEqual(total, { porLlave: { [concreto]: 750_000 }, fuera: 70_000, sinOpcion: 40_000 });
+});
+
+prueba('048/RF-26, RF-28 a RF-30, RF-61, RF-62: las cifras y el aviso de cada renglón', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const opcion = (descripcion: string) => opciones.find((o) => o.descripcion === descripcion) as (typeof opciones)[number];
+  const concreto = imputacionDeLaOpcion(opcion('Concreto clase D'));
+  const demolicion = imputacionDeLaOpcion(opcion('Demolición de estructuras (Concreto reforzado).'));
+  // Otra requisición ya comprometió 5 000 000 del concreto (planeado 7 000 000).
+  const aportes: Aporte[] = [
+    { requisicionId: 'otra', renglonId: 'x', llave: concreto.llave, valor: 5_000_000 },
+    // Esta pide dos renglones al concreto, que juntos se pasan.
+    { requisicionId: 'esta', renglonId: 'r1', llave: concreto.llave, valor: 1_500_000 },
+    { requisicionId: 'esta', renglonId: 'r2', llave: concreto.llave, valor: 1_000_000 },
+    { requisicionId: 'esta', renglonId: 'r3', llave: demolicion.llave, valor: 800_000 },
+  ];
+  const sinOpcion: ImputacionDelRenglon = { ...concreto, llave: 'item:vieja|llave|9.9', etiqueta: '9.9 · Ítem que ya no está' };
+  const sinPlan: ImputacionDelRenglon = { tipo: 'sin_planificacion', llave: null, etiqueta: 'Sin planificación aprobada', frente: '', planificacionId: null, explicacion: null };
+  const filas = cifrasDeLaRequisicion(
+    'esta',
+    [
+      { renglonId: 'r1', imputacion: concreto },
+      { renglonId: 'r2', imputacion: concreto },
+      { renglonId: 'r3', imputacion: demolicion },
+      { renglonId: 'r4', imputacion: fuera048 },
+      { renglonId: 'r5', imputacion: sinOpcion },
+      { renglonId: 'r6', imputacion: sinPlan },
+      { renglonId: 'r7', imputacion: null },
+    ],
+    aportes,
+    opciones,
+  );
+  // RF-26, RF-61, RF-62: planeado, lo de las demás, lo que pide esta y lo que queda; RF-28, se pasa por 500 000.
+  assert.deepEqual(filas[0].cifras, {
+    llave: concreto.llave,
+    planeado: 7_000_000,
+    yaComprometido: 5_000_000,
+    pide: 2_500_000,
+    queda: -500_000,
+    exceso: 500_000,
+  });
+  assert.deepEqual(filas[0].aviso, { tipo: 'se_pasa', exceso: 500_000 });
+  // Los dos renglones de la misma opción muestran lo mismo.
+  assert.deepEqual(filas[1].cifras, filas[0].cifras);
+  // RF-29: sin precio de costo, sin cifra planeada y sin aviso de exceso.
+  assert.deepEqual(filas[2].cifras, { llave: demolicion.llave, planeado: null, yaComprometido: 0, pide: 800_000, queda: null, exceso: null });
+  assert.equal(filas[2].aviso, null);
+  // RF-30: «Fuera de lo planeado» con su explicación; RF-40: «Sin ítem»; RF-8: sin planificación.
+  assert.deepEqual(filas[3].aviso, { tipo: 'fuera', explicacion: 'Imprevisto' });
+  assert.deepEqual(filas[4].aviso, { tipo: 'sin_opcion' });
+  assert.deepEqual(filas[5].aviso, { tipo: 'sin_planificacion' });
+  // RF-25: una de antes de la 048, sin nada.
+  assert.deepEqual(filas[6], { renglonId: 'r7', imputacion: null, cifras: null, aviso: null });
+
+  // Los textos.
+  const pesos = (v: number) => `$ ${v.toLocaleString('es-CO')}`;
+  assert.equal(textoDelAviso({ tipo: 'se_pasa', exceso: 500_000 }, pesos), 'Se pasa de lo planeado por $ 500.000');
+  assert.equal(textoDelAviso({ tipo: 'fuera', explicacion: 'Imprevisto' }, pesos), 'Fuera de lo planeado: Imprevisto');
+  assert.equal(textoDelAviso({ tipo: 'sin_opcion' }, pesos), 'Sin ítem en la versión vigente');
+
+  // RF-31: la marca de la lista; «se pasa» manda sobre «fuera».
+  assert.equal(marcaDeLaRequisicion(filas), 'se_pasa');
+  assert.equal(marcaDeLaRequisicion(filas.slice(2)), 'fuera');
+  assert.equal(marcaDeLaRequisicion(filas.slice(4)), null);
+  // Sin exceso: queda en positivo y sin aviso.
+  assert.deepEqual(cifrasDeLaOpcion('k', 1_000, 300, 200), { llave: 'k', planeado: 1_000, yaComprometido: 300, pide: 200, queda: 500, exceso: null });
+});
+
+prueba('048/RF-14 a RF-17: al aprobar se completan los valores que faltan, y no se cambian los que había', () => {
+  const imputacion = imputada048('k');
+  const renglones = [
+    { id: 'r1', orden: 1, imputacion, valorEstimado: null },
+    { id: 'r2', orden: 2, imputacion, valorEstimado: null },
+  ];
+  // RF-15: sin los valores, no se aprueba; dice qué renglón.
+  assert.deepEqual(valoresAlAprobar(renglones, [{ renglonId: 'r1', valor: 400_000 }], true).faltas, [
+    'Diga el valor estimado del renglón 2 antes de aprobar.',
+  ]);
+  // RF-14: con los dos, se aprueba y quedan escritos.
+  assert.deepEqual(valoresAlAprobar(renglones, [{ renglonId: 'r1', valor: 400_000 }, { renglonId: 'r2', valor: 90_000 }], true), {
+    faltas: [],
+    escritos: [
+      { renglonId: 'r1', orden: 1, valor: 400_000 },
+      { renglonId: 'r2', orden: 2, valor: 90_000 },
+    ],
+  });
+  // Devolver o rechazar no pide valores.
+  assert.deepEqual(valoresAlAprobar(renglones, [], false).faltas, []);
+  // RF-17: un valor que ya estaba no se cambia.
+  assert.deepEqual(valoresAlAprobar([{ ...renglones[0], valorEstimado: 500_000 }], [{ renglonId: 'r1', valor: 1 }], true).faltas, [
+    'El renglón 1 ya tenía valor estimado: al aprobar no se cambia. Si no cuadra, devuélvala.',
+  ]);
+  assert.equal(valoresAlAprobar(renglones, [{ renglonId: 'r1', valor: 0 }, { renglonId: 'r2', valor: 5 }], true).faltas[0], 'El valor estimado del renglón 1 va en pesos y mayor que cero.');
+  // Una requisición de antes de la 048 (sin imputación) no pide valor por renglón.
+  assert.deepEqual(valoresAlAprobar([{ ...renglones[0], imputacion: null }], [], true).faltas, []);
+});
+
+prueba('048/RF-36, RF-38, RF-64: cambian la imputación la Administradora en su paso y la Gerencia en cualquiera', () => {
+  assert.equal(puedeRecortar({ rol: 'administradora_elemental' }, 'administradora'), true);
+  assert.equal(puedeRecortar({ rol: 'administradora_elemental' }, 'director_obra'), false);
+  for (const paso of ['residente', 'director_obra', 'director_proyectos', 'administradora'] as const) {
+    assert.equal(puedeRecortar({ rol: 'admin' }, paso), true, paso);
+  }
+  assert.equal(puedeRecortar({ rol: 'director_obra' }, 'director_obra'), false);
+  assert.equal(puedeRecortar({ rol: 'residente' }, 'residente'), false);
+});
+
+prueba('048/RF-9, RF-16, RF-37, RF-63: lo que queda en la historia, y lo que no ve el Almacenista', () => {
+  const pesos = (v: number) => `$ ${v.toLocaleString('es-CO')}`;
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const concreto = imputacionDeLaOpcion(opciones.find((o) => o.descripcion === 'Concreto clase D') as (typeof opciones)[number]);
+  const filas = cifrasDeLaRequisicion(
+    'esta',
+    [
+      { renglonId: 'r1', imputacion: concreto },
+      { renglonId: 'r2', imputacion: fuera048 },
+    ],
+    [{ requisicionId: 'esta', renglonId: 'r1', llave: concreto.llave, valor: 9_000_000 }],
+    opciones,
+  );
+  const avisos = avisosParaLaHistoria(filas, (id) => (id === 'r1' ? 1 : 2));
+  assert.deepEqual(avisos, [
+    { orden: 1, aviso: { tipo: 'se_pasa', exceso: 2_000_000 } },
+    { orden: 2, aviso: { tipo: 'fuera', explicacion: 'Imprevisto' } },
+  ]);
+  const cambios: unknown[] = [
+    { paso: 'residente', siguiente: 'director_obra' },
+    {
+      valoresEstimados: [{ orden: 1, valor: 400_000 }],
+      imputaciones: [{ orden: 2, antes: 'Fuera de lo planeado', despues: '2.9 · Concreto clase D' }],
+      avisos,
+    },
+  ];
+  assert.deepEqual(textosDeLaPlanificacion(cambios, pesos), [
+    'Valor estimado del renglón 1: $ 400.000.',
+    'Renglón 2: cambió de «Fuera de lo planeado» a «2.9 · Concreto clase D».',
+    'Aprobada con aviso. Renglón 1: Se pasa de lo planeado por $ 2.000.000.',
+    'Aprobada con aviso. Renglón 2: Fuera de lo planeado: Imprevisto.',
+  ]);
+  // RF-9: el Almacenista ve que se escribió un valor, pero no cuál, ni el aviso de exceso.
+  assert.deepEqual(textosDeLaPlanificacion(cambiosSinValores(cambios), pesos), [
+    'Escribió el valor estimado del renglón 1.',
+    'Renglón 2: cambió de «Fuera de lo planeado» a «2.9 · Concreto clase D».',
+    'Aprobada con aviso. Renglón 2: Fuera de lo planeado: Imprevisto.',
+  ]);
+  // Lo de la 046 en el mismo evento pasa sin tocar.
+  assert.deepEqual(cambiosSinValores(cambios)[0], { paso: 'residente', siguiente: 'director_obra' });
+});
+
+prueba('048/RF-47 a RF-49: la compra pide el valor por renglón solo si va a partes distintas', () => {
+  const pesos = (v: number) => `$ ${v.toLocaleString('es-CO')}`;
+  const renglones = [
+    { renglonId: 'r1', orden: 1, imputacion: imputada048('k') },
+    { renglonId: 'r2', orden: 2, imputacion: imputada048('j') },
+  ];
+  // RF-49: una sola opción, no pide nada.
+  assert.deepEqual(valoresDeLaCompraPorRenglon([renglones[0], { ...renglones[1], imputacion: imputada048('k') }], 900_000, null, pesos), {
+    faltas: [],
+    valores: null,
+  });
+  // RF-47: dos opciones sin valores.
+  assert.deepEqual(valoresDeLaCompraPorRenglon(renglones, 900_000, null, pesos).faltas, [
+    'Diga cuánto de la compra es del renglón 1: van a partes distintas de la planificación.',
+    'Diga cuánto de la compra es del renglón 2: van a partes distintas de la planificación.',
+  ]);
+  // RF-48: que no suman, lo que falta y lo que sobra.
+  assert.deepEqual(
+    valoresDeLaCompraPorRenglon(renglones, 900_000, [{ renglonId: 'r1', valor: 500_000 }, { renglonId: 'r2', valor: 300_000 }], pesos).faltas,
+    ['Los valores por renglón suman $ 800.000: faltan $ 100.000 para el valor de la compra.'],
+  );
+  assert.deepEqual(
+    valoresDeLaCompraPorRenglon(renglones, 900_000, [{ renglonId: 'r1', valor: 700_000 }, { renglonId: 'r2', valor: 300_000 }], pesos).faltas,
+    ['Los valores por renglón suman $ 1.000.000: sobran $ 100.000 sobre el valor de la compra.'],
+  );
+  // Que suman: se guardan.
+  const bien = valoresDeLaCompraPorRenglon(renglones, 900_000, [{ renglonId: 'r1', valor: 600_000 }, { renglonId: 'r2', valor: 300_000 }], pesos);
+  assert.deepEqual(bien.faltas, []);
+  assert.deepEqual([...(bien.valores as Map<string, number>).entries()], [['r1', 600_000], ['r2', 300_000]]);
+  // «Fuera» cuenta como una parte distinta; uno sin imputación (de antes) no cuenta.
+  assert.equal(valoresDeLaCompraPorRenglon([renglones[0], { ...renglones[1], imputacion: fuera048 }], 1, null, pesos).faltas.length, 2);
+  assert.deepEqual(valoresDeLaCompraPorRenglon([renglones[0], { ...renglones[1], imputacion: null }], 1, null, pesos).faltas, []);
+});
+
+prueba('048/RF-42, RF-50, RF-51, RF-66: el resumen de lo comprometido de la planificación', () => {
+  const opciones = opcionesParaImputar([planificacion048()]);
+  const llaveDe = (descripcion: string) => (opciones.find((o) => o.descripcion === descripcion) as (typeof opciones)[number]).llave;
+  const concreto = llaveDe('Concreto clase D');
+  const manoDeObra = (opciones.find((o) => o.tipo === 'mano_obra_indirecta') as (typeof opciones)[number]).llave;
+  const resumen = resumenDeLoComprometido(opciones, [
+    { requisicionId: 'a', renglonId: 'r1', llave: concreto, valor: 6_000_000 },
+    { requisicionId: 'b', renglonId: 'r2', llave: concreto, valor: 2_000_000 },
+    { requisicionId: 'b', renglonId: 'r3', llave: manoDeObra, valor: 3_000_000 },
+    { requisicionId: 'c', renglonId: 'r4', llave: null, valor: 70_000 },
+    { requisicionId: 'd', renglonId: null, llave: 'item:ya|no|esta', valor: 40_000 },
+  ]);
+  // Una fila por opción, en el orden de la planificación: la mano de obra indirecta en una sola (RF-66).
+  assert.equal(resumen.filas.length, opciones.length);
+  assert.equal(resumen.filas.filter((f) => f.capitulo === 'Mano de obra indirecta').length, 1);
+  // RF-50: el concreto se pasa por 1 000 000, con las dos requisiciones que lo componen (RF-52).
+  const filaConcreto = resumen.filas.find((f) => f.llave === concreto);
+  assert.deepEqual(
+    { comprometido: filaConcreto?.comprometido, queda: filaConcreto?.queda, exceso: filaConcreto?.exceso, requisiciones: filaConcreto?.requisiciones },
+    { comprometido: 8_000_000, queda: -1_000_000, exceso: 1_000_000, requisiciones: ['a', 'b'] },
+  );
+  const filaMano = resumen.filas.find((f) => f.llave === manoDeObra);
+  assert.deepEqual([filaMano?.planeado, filaMano?.comprometido, filaMano?.queda, filaMano?.exceso], [40_000_000, 3_000_000, 37_000_000, null]);
+  // Sin requisiciones: comprometido en cero y queda todo.
+  const camioneta = resumen.filas.find((f) => f.etiqueta.includes('Camioneta'));
+  assert.deepEqual([camioneta?.comprometido, camioneta?.queda, camioneta?.requisiciones], [0, 12_000_000, []]);
+  // RF-51: aparte, fuera y sin ítem.
+  assert.deepEqual(resumen.fuera, { valor: 70_000, requisiciones: ['c'] });
+  assert.deepEqual(resumen.sinOpcion, { valor: 40_000, requisiciones: ['d'] });
+});
+
+prueba('048/contratos: imputación y valor por renglón al pedir, al decidir y al registrar la compra', () => {
+  const renglon = {
+    descripcion: 'Cemento gris',
+    cantidad: 20,
+    unidad: 'bulto',
+    necesitaEl: '2026-11-20',
+    paraQue: 'Alcantarilla 3',
+  };
+  // Un pedido válido: valor y opción en un renglón, «Fuera de lo planeado» con explicación en otro.
+  const pedido = requisicionPedida.parse({
+    tipo: 'compra',
+    renglones: [
+      { ...renglon, valorEstimado: 500_000, imputacion: { llave: 'item:berrio|cap|2.9', explicacion: null } },
+      { ...renglon, valorEstimado: 80_000, imputacion: { llave: null, explicacion: ' Imprevisto ' } },
+    ],
+  });
+  assert.equal(pedido.tipo, 'compra');
+  if (pedido.tipo === 'compra') {
+    assert.deepEqual(pedido.renglones[0].imputacion, { llave: 'item:berrio|cap|2.9', explicacion: null });
+    assert.deepEqual(pedido.renglones[1].imputacion, { llave: null, explicacion: 'Imprevisto' });
+    assert.equal(pedido.renglones[0].valorEstimado, 500_000);
+  }
+  // Sin valor ni imputación (Almacenista, GeoLab, obra sin planificación): pasa con `null`; lo decide la regla.
+  const sinNada = requisicionPedida.parse({ tipo: 'compra', renglones: [renglon] });
+  if (sinNada.tipo === 'compra') assert.deepEqual([sinNada.renglones[0].valorEstimado, sinNada.renglones[0].imputacion], [null, null]);
+  // «Fuera de lo planeado» sin explicación pasa el contrato, y la regla lo rechaza con su renglón.
+  const fueraVacio = requisicionPedida.parse({ tipo: 'compra', renglones: [{ ...renglon, imputacion: { llave: null, explicacion: '   ' } }] });
+  if (fueraVacio.tipo === 'compra') {
+    assert.deepEqual(fueraVacio.renglones[0].imputacion, { llave: null, explicacion: '' });
+    assert.equal(resolverImputacion(fueraVacio.renglones[0].imputacion, [], true, 1).falta, 'Explique por qué el renglón 1 no cabe en la planificación.');
+  }
+  // Un valor no entero no pasa.
+  assert.equal(requisicionPedida.safeParse({ tipo: 'compra', renglones: [{ ...renglon, valorEstimado: 1500.5 }] }).success, false);
+  // La de pago lleva su imputación.
+  const pago = requisicionPedida.parse({
+    tipo: 'pago',
+    beneficiario: 'Transportes',
+    concepto: 'transporte',
+    paraQue: 'Volquetas',
+    valor: 900_000,
+    paraCuando: '2026-11-20',
+    imputacion: { llave: 'rubro:berrio|plan de manejo ambiental', explicacion: null },
+  });
+  if (pago.tipo === 'pago') assert.equal(pago.imputacion?.llave, 'rubro:berrio|plan de manejo ambiental');
+
+  // Decidir: valores estimados enteros e imputaciones (del pago con renglón nulo).
+  const decision = decisionPedida.parse({
+    decision: 'aprobar',
+    version: 3,
+    valoresEstimados: [{ renglonId: 'r1', valor: 400_000 }],
+    imputaciones: [{ renglonId: null, imputacion: { llave: null, explicacion: 'Imprevisto' } }],
+  });
+  assert.deepEqual(decision.valoresEstimados, [{ renglonId: 'r1', valor: 400_000 }]);
+  assert.deepEqual(decision.imputaciones, [{ renglonId: null, imputacion: { llave: null, explicacion: 'Imprevisto' } }]);
+  assert.deepEqual(decisionPedida.parse({ decision: 'devolver', version: 1, motivo: 'x' }).valoresEstimados, []);
+  assert.equal(decisionPedida.safeParse({ decision: 'aprobar', version: 3, valoresEstimados: [{ renglonId: 'r1', valor: 1.5 }] }).success, false);
+
+  // Registrar la compra: valores por renglón opcionales y enteros.
+  const base = { version: 2, proveedor: 'Ferretería', valor: 900_000, fecha: '2026-11-18', renglonIds: ['r1', 'r2'] };
+  assert.equal(compraPedida.parse(base).valores, null);
+  assert.deepEqual(compraPedida.parse({ ...base, valores: [{ renglonId: 'r1', valor: 600_000 }] }).valores, [{ renglonId: 'r1', valor: 600_000 }]);
+  assert.equal(compraPedida.safeParse({ ...base, valores: [{ renglonId: 'r1', valor: 0.5 }] }).success, false);
+  // Corregir lleva lo mismo por renglón.
+  const corregida = solicitudPedida.parse({ renglones: [{ ...renglon, valorEstimado: 1, imputacion: { llave: 'k', explicacion: null } }] });
+  assert.deepEqual([corregida.renglones[0].valorEstimado, corregida.renglones[0].imputacion], [1, { llave: 'k', explicacion: null }]);
+});
+
+prueba('048/RF-65: dos renglones indirectos iguales no comparten llave (V8 de Magdalena)', () => {
+  const opciones = opcionesParaImputar([
+    planificacion048('p1', {
+      renglonesIndirectos: [
+        indirectoFijo048('a', 'maquinaria_general', 'Volqueta de apoyo', 1_000_000),
+        indirectoFijo048('b', 'maquinaria_general', 'Volqueta de apoyo', 2_000_000),
+      ],
+    }),
+  ]);
+  const volquetas = opciones.filter((o) => o.descripcion === 'Volqueta de apoyo');
+  assert.equal(volquetas.length, 2);
+  assert.notEqual(volquetas[0].llave, volquetas[1].llave);
+  assert.ok(volquetas[1].llave.endsWith('|#2'));
+  // Lo comprometido en una no cuenta en la otra.
+  const total = comprometidoPorOpcion([{ requisicionId: 'a', renglonId: 'r', llave: volquetas[1].llave, valor: 500 }], opciones);
+  assert.deepEqual(total.porLlave, { [volquetas[1].llave]: 500 });
 });
 
 verificarFirmaS3()

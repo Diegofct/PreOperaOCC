@@ -15,16 +15,28 @@
  * RF-26, RF-76). Devolver y rechazar piden el motivo (RF-30, RF-32). Al aprobar, cambiar lo pedido
  * —bajar cantidades, quitar renglones, un valor menor— solo se ofrece a quien puede (`puedeRecortar`:
  * la Administradora en su paso o la Gerencia, RF-34, RF-79, RF-80); los demás aprueban tal cual.
+ *
+ * ── La planificación al aprobar (spec 048) ──
+ *
+ * Si a un renglón le falta su valor estimado —lo pidió el Almacenista—, la ventana lo pide y no
+ * aprueba sin él (RF-14, RF-15): el servidor solo acepta los que faltan (RF-17). Quien puede
+ * recortar puede también cambiar a qué parte de la planificación va cada renglón, y queda en la
+ * historia (RF-36, RF-37, RF-64); los demás, si no les cuadra, devuelven (RF-38).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import { AccionesFormulario, Aviso, Boton, Campo, Etiqueta, Modal, Seccion } from '@/features/panel/componentes';
-import type { CadenaDeLaRequisicion, RequisicionEnElDetalle } from '@/features/panel/requisiciones';
+import type { CadenaDeLaRequisicion, OpcionesParaImputar, RequisicionEnElDetalle } from '@/features/panel/requisiciones';
+import { usePersona } from '@/features/panel/sesion';
+import { veLosValores } from '@/shared/rules/compras';
 import { enPesos } from '@/shared/rules/pesos';
+import { imputacionPropuesta, type ImputacionDelRenglon } from '@/shared/rules/requisicion-planificacion';
+
+import { CampoDeImputacion, IMPUTACION_VACIA, imputacionAPedir, type ImputacionEscrita } from './campo-de-imputacion';
 import type { TipoDeRequisicion } from '@/shared/rules/requisiciones';
 
 type PasoDeLaVista = CadenaDeLaRequisicion['pasos'][number];
@@ -80,10 +92,35 @@ export function CadenaDeLaRequisicionVista({ requisicion }: { requisicion: Requi
   );
 }
 
-/** Lo que hace falta de la requisición para aprobarla con recorte. */
-export type ParaRecortar =
-  | { tipo: 'compra'; renglones: { id: string; orden: number; descripcion: string; cantidad: number; unidad: string }[] }
-  | { tipo: 'pago'; valor: number | undefined };
+/**
+ * Lo que hace falta de la requisición para aprobarla con recorte. Spec 048: con `obraId`, cada
+ * renglón trae su imputación y su valor estimado (`undefined` si quien mira no ve valores).
+ */
+export type ParaRecortar = { obraId?: string | null } & (
+  | {
+      tipo: 'compra';
+      renglones: {
+        id: string;
+        orden: number;
+        descripcion: string;
+        cantidad: number;
+        unidad: string;
+        valorEstimado?: number | null;
+        planificacion?: { imputacion: ImputacionDelRenglon | null };
+      }[];
+    }
+  | { tipo: 'pago'; valor: number | undefined; imputacion?: ImputacionDelRenglon | null }
+);
+
+/** RF-36: la imputación de ahora, como se escribe en el formulario. */
+function escritaDe(imputacion: ImputacionDelRenglon | null | undefined): ImputacionEscrita {
+  const propuesta = imputacionPropuesta(imputacion ?? null);
+  if (!propuesta) return IMPUTACION_VACIA;
+  return propuesta.llave ? { llave: propuesta.llave, fuera: false, explicacion: '' } : { llave: null, fuera: true, explicacion: propuesta.explicacion ?? '' };
+}
+
+const mismaImputacion = (a: ImputacionEscrita, b: ImputacionEscrita) =>
+  a.fuera === b.fuera && a.llave === b.llave && a.explicacion.trim() === b.explicacion.trim();
 
 /** Los botones de decidir y sus ventanas (RF-25 a RF-34, RF-80). */
 export function BotonesDeDecision({
@@ -186,11 +223,60 @@ function VentanaDeAprobar({
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
+  // Spec 048: los valores que faltan (RF-14) y, a quien recorta, las imputaciones (RF-36).
+  const persona = usePersona();
+  const conValores = veLosValores(persona.rol);
+  const faltanValores =
+    recorte.tipo === 'compra' && recorte.obraId
+      ? recorte.renglones.filter((r) => r.planificacion?.imputacion && r.valorEstimado === null)
+      : [];
+  const [valores, setValores] = useState<Record<string, string>>({});
+  const reimputa = recorta && Boolean(recorte.obraId);
+  const antes: Record<string, ImputacionEscrita> =
+    recorte.tipo === 'compra'
+      ? Object.fromEntries(recorte.renglones.map((r) => [r.id, escritaDe(r.planificacion?.imputacion)]))
+      : { pago: escritaDe(recorte.imputacion) };
+  const [imputaciones, setImputaciones] = useState<Record<string, ImputacionEscrita>>(antes);
+  const [imputables, setImputables] = useState<OpcionesParaImputar | null>(null);
+  useEffect(() => {
+    if (!reimputa || !recorte.obraId) return;
+    let vigente = true;
+    api.requisiciones
+      .imputables(recorte.obraId)
+      .then((r) => vigente && setImputables(r))
+      .catch((fallo) => vigente && setError(mensajeDe(fallo)));
+    return () => {
+      vigente = false;
+    };
+  }, [reimputa, recorte.obraId]);
+
+  // RF-61: lo que esta requisición ya aporta a cada opción (está contada en lo que trae el
+  // servidor) y lo que le pide con las imputaciones de la ventana.
+  const valorDe = (id: string) => (recorte.tipo === 'compra' ? (recorte.renglones.find((r) => r.id === id)?.valorEstimado ?? 0) : (recorte.valor ?? 0));
+  const contadoEn = (llave: string | null) =>
+    recorte.tipo === 'compra'
+      ? recorte.renglones.filter((r) => (r.planificacion?.imputacion?.llave ?? null) === llave).reduce((t, r) => t + (r.valorEstimado ?? 0), 0)
+      : (recorte.imputacion?.llave ?? null) === llave
+        ? (recorte.valor ?? 0)
+        : 0;
+  const pideA = (llave: string | null) =>
+    Object.entries(imputaciones)
+      .filter(([, escrita]) => escrita.llave === llave)
+      .reduce((t, [clave]) => t + valorDe(clave), 0);
+
   async function aprobar() {
     setEnviando(true);
     setError(null);
     try {
       const extra: Record<string, unknown> = {};
+      if (faltanValores.length) {
+        extra.valoresEstimados = faltanValores.map((r) => ({ renglonId: r.id, valor: aPesos(valores[r.id] ?? '') }));
+      }
+      if (reimputa) {
+        extra.imputaciones = Object.entries(imputaciones)
+          .filter(([clave, escrita]) => !mismaImputacion(escrita, antes[clave]))
+          .map(([clave, escrita]) => ({ renglonId: clave === 'pago' ? null : clave, imputacion: imputacionAPedir(escrita) }));
+      }
       if (recorta && recorte.tipo === 'compra') {
         extra.cantidades = recorte.renglones
           .map((r) => ({ renglonId: r.id, cantidad: aNumero(cantidades[r.id] ?? '') }))
@@ -205,7 +291,7 @@ function VentanaDeAprobar({
   }
 
   return (
-    <Modal titulo={`Aprobar ${codigo}`} onCerrar={alCerrar} angosta>
+    <Modal titulo={`Aprobar ${codigo}`} onCerrar={alCerrar} angosta={!reimputa}>
       <Text style={estilos.texto}>
         {recorta
           ? 'Puede bajar una cantidad, quitar un renglón con 0 o aprobar un valor menor. Lo demás se aprueba tal como se pidió.'
@@ -232,6 +318,53 @@ function VentanaDeAprobar({
           ancho={240}
         />
       ) : null}
+      {faltanValores.length ? (
+        <>
+          <Text style={estilos.texto}>
+            Lo pidió el Almacenista, que no pone valores: escriba el valor estimado de cada renglón antes de aprobar.
+          </Text>
+          {faltanValores.map((r) => (
+            <Campo
+              key={r.id}
+              etiqueta={`Valor estimado de ${r.orden}. ${r.descripcion}`}
+              obligatorio
+              valor={valores[r.id] ?? ''}
+              onChange={(v) => setValores((x) => ({ ...x, [r.id]: v }))}
+              ayuda="En pesos, sin centavos."
+              ancho={320}
+            />
+          ))}
+        </>
+      ) : null}
+      {reimputa ? (
+        <>
+          <Text style={estilos.texto}>A qué parte de la planificación va. Si la cambia, queda en la historia.</Text>
+          {recorte.tipo === 'compra'
+            ? recorte.renglones.map((r) => (
+                <View key={r.id} style={estilos.imputacion}>
+                  <Text style={estilos.fuerte}>{`${r.orden}. ${r.descripcion}`}</Text>
+                  <CampoDeImputacion
+                    opciones={imputables}
+                    valor={imputaciones[r.id] ?? IMPUTACION_VACIA}
+                    onChange={(v) => setImputaciones((x) => ({ ...x, [r.id]: v }))}
+                    conValores={conValores}
+                    pideEstaRequisicion={pideA(imputaciones[r.id]?.llave ?? null)}
+                    yaContado={{ llave: imputaciones[r.id]?.llave ?? null, valor: contadoEn(imputaciones[r.id]?.llave ?? null) }}
+                  />
+                </View>
+              ))
+            : (
+                <CampoDeImputacion
+                  opciones={imputables}
+                  valor={imputaciones.pago ?? IMPUTACION_VACIA}
+                  onChange={(v) => setImputaciones((x) => ({ ...x, pago: v }))}
+                  conValores={conValores}
+                  pideEstaRequisicion={pideA(imputaciones.pago?.llave ?? null)}
+                  yaContado={{ llave: imputaciones.pago?.llave ?? null, valor: contadoEn(imputaciones.pago?.llave ?? null) }}
+                />
+              )}
+        </>
+      ) : null}
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
@@ -247,4 +380,5 @@ const estilos = StyleSheet.create({
   fuerte: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, fontWeight: '600', color: Panel.texto },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
+  imputacion: { gap: Spacing.one },
 });

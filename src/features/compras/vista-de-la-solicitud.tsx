@@ -35,8 +35,10 @@ import type { SolicitudDetallada } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
 import { BotonesDeDecision, CadenaDeLaRequisicionVista } from '@/features/requisiciones/cadena-y-decision';
+import { TablaDePlanificacion } from '@/features/requisiciones/tabla-de-planificacion';
 import { veLosValores } from '@/shared/rules/compras';
 import { NOMBRE_DEL_PAGO_DE_LA_COMPRA, pagoDeLaCompra } from '@/shared/rules/pagos';
+import { textosDeLaPlanificacion } from '@/shared/rules/requisicion-planificacion';
 import { separarElPaso, textoDelEventoDeLaCadena } from '@/shared/rules/requisiciones';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -59,7 +61,11 @@ export function textoDelEvento(e: Evento, renglones: Renglon[]): string {
   // Spec 046 (RF-33): los eventos de la cadena, y el paso que va primero en los cambios de una RQ.
   const deLaCadena = textoDelEventoDeLaCadena(e);
   if (deLaCadena) return deLaCadena;
-  const cambios = separarElPaso(e.cambios).resto as Record<string, unknown>[];
+  // Lo de la 048 (valores, imputaciones, avisos) va en su propio objeto y lo pinta
+  // `textosDeLaPlanificacion`: aquí solo lo de la 036.
+  const cambios = (separarElPaso(e.cambios).resto as Record<string, unknown>[]).filter(
+    (c) => !('valoresEstimados' in c || 'imputaciones' in c || 'avisos' in c),
+  );
   const ordenes = (lista: unknown) =>
     Array.isArray(lista) ? `${lista.length === 1 ? 'renglón' : 'renglones'} ${lista.join(', ')}` : '';
   switch (e.paso) {
@@ -415,6 +421,12 @@ export function VistaDeLaSolicitud({
       pintar: (e) => (
         <View style={estilos.celdaDoble}>
           <Text style={estilos.texto}>{textoDelEvento(e, s.renglones)}</Text>
+          {/* Spec 048 (RF-16, RF-37, RF-63): valores escritos, imputaciones cambiadas y avisos al aprobar. */}
+          {textosDeLaPlanificacion(e.cambios, enPesos).map((linea) => (
+            <Text key={linea} style={estilos.apoyo}>
+              {linea}
+            </Text>
+          ))}
           {e.motivo ? <Text style={estilos.apoyo}>{`Motivo: ${e.motivo}`}</Text> : null}
         </View>
       ),
@@ -442,7 +454,7 @@ export function VistaDeLaSolicitud({
             codigo={s.codigo}
             version={s.version}
             requisicion={s.requisicion}
-            recorte={{ tipo: 'compra', renglones: s.renglones }}
+            recorte={{ tipo: 'compra', renglones: s.renglones, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
             listo={listo}
           />
         ) : null}
@@ -478,6 +490,17 @@ export function VistaDeLaSolicitud({
           {conValores ? <Dato titulo="Valor estimado">{s.valorEstimado ? enPesos(s.valorEstimado) : '—'}</Dato> : null}
         </View>
         <Tabla columnas={columnasRenglones} filas={s.renglones} vacio="Sin renglones." />
+        {s.renglones.some((r) => r.planificacion) ? (
+          <TablaDePlanificacion
+            filas={s.renglones.map((r) => ({
+              id: r.id,
+              orden: String(r.orden),
+              valorEstimado: r.valorEstimado,
+              planificacion: r.planificacion ?? { imputacion: null, aviso: null },
+            }))}
+            conValores={conValores}
+          />
+        ) : null}
       </Seccion>
 
       {s.requisicion ? <CadenaDeLaRequisicionVista requisicion={s.requisicion} /> : null}
@@ -525,6 +548,7 @@ export function VistaDeLaSolicitud({
                 materialId: r.materialId,
                 necesitaEl: r.necesitaEl,
                 paraQue: r.paraQue,
+                valorEstimado: r.valorEstimado ?? null,
               })),
               paraCuando: s.paraCuando,
               urgente: s.urgente,
@@ -532,6 +556,8 @@ export function VistaDeLaSolicitud({
               proveedorSugerido: s.proveedorSugerido,
               valorEstimado: s.valorEstimado ?? null,
             },
+            // Spec 048, RF-10: la corrección propone a qué iba cada renglón.
+            imputaciones: s.renglones.map((r) => r.planificacion?.imputacion ?? null),
           }}
           alCerrar={() => setVentana(null)}
           alGuardar={listo}

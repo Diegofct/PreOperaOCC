@@ -42,9 +42,11 @@ import type {
   BandejaDeRequisiciones,
   DecisionPedida,
   LugarDeRequisiciones,
+  OpcionesParaImputar,
   RequisicionCreada,
   RequisicionPedida,
   RequisicionesDelLugar,
+  ResumenComprometidoRespuesta,
 } from '@/features/panel/requisiciones';
 import type {
   ImportacionOccConfirmada,
@@ -733,6 +735,8 @@ export const api = {
       panelEnviar<RequisicionCreada>(`/requisiciones${deLasRequisiciones(lugar)}`, 'POST', pedido),
     /** Lo que espera el paso de la Administradora, y las anteriores y de OCC (RF-47, RF-83). */
     bandeja: () => panel<BandejaDeRequisiciones>('/requisiciones/bandeja'),
+    /** Spec 048, RF-6, RF-7: a qué se puede imputar en la obra, con cifras para quien las ve. */
+    imputables: (obraId: string) => panel<OpcionesParaImputar>(`/requisiciones/imputables${conObra(obraId)}`),
     /** Aprobar, devolver o rechazar en el paso, con la versión que se vio (RF-25 a RF-34). */
     decidir: (tipo: TipoDeRequisicion, id: string, pedido: DecisionPedida) =>
       panelEnviar<{ estado: string; paso: PasoDeLaCadena | null; version: number }>(
@@ -1219,6 +1223,8 @@ reportes: {
   planificaciones: {
     listar: (obraId: string) => panel<PlanificacionFila[]>(`/planificaciones${conObra(obraId)}`),
     de: (id: string) => panel<PlanificacionDetalle>(`/planificaciones/${encodeURIComponent(id)}`),
+    /** Spec 048, RF-42, RF-52: lo comprometido por las requisiciones contra la vigente. */
+    comprometido: (id: string) => panel<ResumenComprometidoRespuesta>(`/planificaciones/${encodeURIComponent(id)}/comprometido`),
     /** El Excel tal como se subió (RF-8, RF-50). */
     excel: (id: string) => descargar(`/api/panel/planificaciones/${encodeURIComponent(id)}/excel`),
     /** RF-4: qué hojas propone la IA. No escribe nada. */
