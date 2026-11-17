@@ -178,6 +178,39 @@ import {
   type OcupantesDeLaCadena,
 } from '../src/shared/rules/requisiciones';
 import {
+  esViernes,
+  faltaDelViernes,
+  faltasDeLasLineasOcc,
+  faltasParaEnviarOcc,
+  ESTADOS_CERRADOS_OCC,
+  requisicionOccAbierta,
+  estadoTrasResponderOcc,
+  faltaDeLaRespuestaOcc,
+  faltanPorResponderOcc,
+  porQueNoPuedeOcc,
+  puedeCrearRequisicionOcc,
+  veRequisicionesOcc,
+  estadoTrasPagosOcc,
+  estaVencidaOcc,
+  faltasDelPagoDeLineaOcc,
+  numeroDeRequisicionOcc,
+  ordenDeLaBandejaOcc,
+  pagoDeLaLineaOcc,
+  totalAPagarOcc,
+  totalPedidoOcc,
+  type LineaOccParaPagar,
+  type DatosDeLineaOcc,
+  type EstadoDeRequisicionOcc,
+  type RespuestaDeLineaOcc,
+} from '../src/shared/rules/requisicion-occ';
+import {
+  esExcelParaImportarOcc,
+  FALLOS_DE_LA_REQUISICION_OCC,
+  propuestaDeLaLecturaOcc,
+  SIN_LINEAS_EN_EL_ARCHIVO,
+  type LineaLeidaOcc,
+} from '../src/shared/rules/requisicion-occ-ia';
+import {
   LARGO_DE_LA_EXPLICACION,
   textoParaElCalendario,
   validarCalendario,
@@ -205,6 +238,8 @@ import {
   seleccionDeHojasPedida,
 } from '../src/features/panel/planificacion';
 import { decisionPedida, requisicionPedida } from '../src/features/panel/requisiciones';
+import { lineaOccPedida, pasoOccPedido, requisicionOccPedida, respuestasOccPedidas } from '../src/features/panel/requisiciones-occ';
+import { COLUMNAS_OCC, planillaOcc } from '../src/features/requisiciones/exportar-occ';
 import { solicitudCorregida, solicitudDePagoCorregida } from '../src/features/panel/contratos';
 import {
   anulacionDePlanSemanal,
@@ -20877,6 +20912,368 @@ prueba('046/RF-86, RF-47, RF-90, RF-92: «Requisiciones» en las obras, GeoLab y
   assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'occ', pagina: 'solicitudes-pago' }), '/panel/occ/requisiciones');
   // RF-90: un enlace guardado a Compras de Elemental lleva a Requisiciones.
   assert.equal(rutaRenombrada({ tipo: 'empresa', empresa: 'elemental', pagina: 'compras' }), '/panel/elemental/requisiciones');
+});
+
+/* ── Spec 047: la requisición de pagos de OCC ── */
+
+/** Una línea bien llenada del Excel de OCC (fila 8), para cambiarle un campo en cada prueba. */
+function lineaOcc(cambios: Partial<DatosDeLineaOcc> = {}): DatosDeLineaOcc {
+  return {
+    fechaSolicitud: '2026-10-30',
+    beneficiario: 'Jaime Arbelaez Correa',
+    concepto: 'Soldadura tanque de combustible',
+    especificaciones: 'Para Volqueta TAY 076',
+    proveedor: 'Jaime Arbelaez Correa',
+    valor: 350000,
+    observaciones: '',
+    ...cambios,
+  };
+}
+
+prueba('047/RF-6, RF-7: el viernes de entrega tiene que ser un viernes y no pasado', () => {
+  const hoy = '2026-11-17';
+  assert.equal(esViernes('2026-11-20'), true);
+  assert.equal(esViernes('2026-11-19'), false);
+  // El del Excel de ejemplo dice «viernes» y es jueves.
+  assert.equal(esViernes('2026-11-12'), false);
+  assert.equal(esViernes('2026-02-30'), false);
+  assert.equal(faltaDelViernes('2026-11-20', hoy), null);
+  assert.equal(faltaDelViernes('2026-11-19', hoy), 'La fecha de entrega tiene que ser un viernes.');
+  assert.equal(faltaDelViernes('2026-11-13', hoy), 'El viernes de entrega no puede ser anterior a hoy.');
+  assert.equal(faltaDelViernes('', hoy), 'Diga el viernes de entrega.');
+});
+
+prueba('047/RF-10 a RF-14, RF-22: cada línea dice qué le falta, con su número; sin líneas no se envía', () => {
+  const hoy = '2026-11-17';
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc(), lineaOcc()], hoy), []);
+  // Especificaciones, proveedor y observaciones son opcionales.
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ especificaciones: '', proveedor: '', observaciones: '' })], hoy), []);
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc(), lineaOcc(), lineaOcc({ beneficiario: '  ' })], hoy), [
+    'Línea 3: falta el beneficiario.',
+  ]);
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ concepto: '', valor: 0 })], hoy), [
+    'Línea 1: falta el concepto.',
+    'Línea 1: el valor va en pesos, sin centavos y mayor que cero.',
+  ]);
+  // D11: pesos enteros; la caja menor del Excel trae centavos.
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ valor: 684829.21 })], hoy), [
+    'Línea 1: el valor va en pesos, sin centavos y mayor que cero.',
+  ]);
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ valor: null })], hoy), ['Línea 1: falta el valor.']);
+  // RF-13: la fecha de solicitud no puede ser de mañana; la de hoy sí.
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ fechaSolicitud: '2026-11-18' })], hoy), [
+    'Línea 1: la fecha de solicitud no puede ser posterior a hoy.',
+  ]);
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ fechaSolicitud: hoy })], hoy), []);
+  assert.deepEqual(faltasDeLasLineasOcc([lineaOcc({ fechaSolicitud: '' })], hoy), ['Línea 1: falta la fecha de solicitud.']);
+  assert.deepEqual(faltasParaEnviarOcc([], hoy), ['Agregue al menos una línea antes de enviar.']);
+  assert.deepEqual(faltasParaEnviarOcc([lineaOcc()], hoy), []);
+});
+
+prueba('047/RF-9: abiertas y cerradas, para «una por viernes»', () => {
+  for (const estado of ['borrador', 'en_autorizacion', 'devuelta', 'autorizada', 'pagada_en_parte'] as const) {
+    assert.equal(requisicionOccAbierta(estado), true, estado);
+  }
+  assert.deepEqual([...ESTADOS_CERRADOS_OCC].sort(), ['cancelada', 'no_autorizada', 'pagada']);
+});
+
+prueba('047/RF-4, RF-19 a RF-26, RF-32, RF-34, RF-36: quién arma, envía, cancela, autoriza y devuelve', () => {
+  const de = (estado: EstadoDeRequisicionOcc, elaboradaPor = 'encargado', tienePagos = false) => ({ estado, elaboradaPor, tienePagos });
+  const puede = (rol: Rol, yo: string, accion: Parameters<typeof porQueNoPuedeOcc>[2], req: ReturnType<typeof de>) =>
+    porQueNoPuedeOcc(rol, yo, accion, req);
+  // RF-4: crean el Encargado de OCC y la Gerencia; la Administradora y la Auxiliar no.
+  assert.equal(puedeCrearRequisicionOcc('encargado_occ'), true);
+  assert.equal(puedeCrearRequisicionOcc('admin'), true);
+  assert.equal(puedeCrearRequisicionOcc('administradora_elemental'), false);
+  assert.equal(puedeCrearRequisicionOcc('auxiliar_administrativa'), false);
+  // El Encargado arma y envía la suya; no responde.
+  assert.equal(puede('encargado_occ', 'encargado', 'armar', de('borrador')), null);
+  assert.equal(puede('encargado_occ', 'encargado', 'enviar', de('borrador')), null);
+  assert.equal(puede('encargado_occ', 'encargado', 'responder', de('en_autorizacion'))?.estado, 403);
+  // RF-23: enviada ya no admite líneas.
+  assert.equal(puede('encargado_occ', 'encargado', 'armar', de('en_autorizacion'))?.estado, 409);
+  // RF-19: la Gerencia arma un Borrador ajeno; RF-36: una devuelta solo quien la elaboró.
+  assert.equal(puede('admin', 'gerente', 'armar', de('borrador')), null);
+  assert.equal(puede('admin', 'gerente', 'armar', de('devuelta'))?.estado, 403);
+  assert.equal(puede('encargado_occ', 'encargado', 'armar', de('devuelta')), null);
+  // La Administradora responde y devuelve, no arma.
+  assert.equal(puede('administradora_elemental', 'adm', 'armar', de('borrador'))?.estado, 403);
+  assert.equal(puede('administradora_elemental', 'adm', 'responder', de('en_autorizacion')), null);
+  assert.equal(puede('administradora_elemental', 'adm', 'devolver', de('en_autorizacion')), null);
+  assert.equal(puede('administradora_elemental', 'adm', 'responder', de('borrador'))?.estado, 409);
+  // RF-32: la elaboró la Gerencia: esa persona no responde; otra de la Gerencia sí.
+  assert.equal(puede('admin', 'gerente', 'responder', de('en_autorizacion', 'gerente'))?.estado, 403);
+  assert.equal(puede('admin', 'otro', 'responder', de('en_autorizacion', 'gerente')), null);
+  // RF-38: cerrada, ya no se responde.
+  assert.equal(puede('administradora_elemental', 'adm', 'responder', de('autorizada'))?.estado, 409);
+  // RF-24: quien la elaboró cancela hasta Devuelta, no una Autorizada.
+  assert.equal(puede('encargado_occ', 'encargado', 'cancelar', de('en_autorizacion')), null);
+  assert.equal(puede('encargado_occ', 'encargado', 'cancelar', de('autorizada'))?.estado, 409);
+  // RF-25: la Gerencia cancela una Autorizada sin pagos, no una con pagos ni una cerrada.
+  assert.equal(puede('admin', 'gerente', 'cancelar', de('autorizada')), null);
+  assert.equal(puede('admin', 'gerente', 'cancelar', de('pagada_en_parte', 'encargado', true))?.estado, 409);
+  assert.equal(puede('admin', 'gerente', 'cancelar', de('no_autorizada'))?.estado, 409);
+  // Pagar: la Auxiliar sí, en Autorizada; anular, no.
+  assert.equal(puede('auxiliar_administrativa', 'aux', 'pagar', de('autorizada')), null);
+  assert.equal(puede('auxiliar_administrativa', 'aux', 'pagar', de('en_autorizacion'))?.estado, 409);
+  assert.equal(puede('auxiliar_administrativa', 'aux', 'anular_pago', de('pagada'))?.estado, 403);
+  assert.equal(puede('encargado_occ', 'encargado', 'pagar', de('autorizada'))?.estado, 403);
+  assert.equal(puede('administradora_elemental', 'adm', 'anular_pago', de('pagada')), null);
+});
+
+prueba('047/RF-27 a RF-30, RF-42, RF-77: responder línea por línea, con motivo en lo NO autorizado', () => {
+  const doce: (RespuestaDeLineaOcc | null)[] = [...Array<RespuestaDeLineaOcc>(12).fill('autorizada'), 'no_autorizada', 'no_autorizada'];
+  assert.equal(estadoTrasResponderOcc(doce), 'autorizada');
+  assert.equal(estadoTrasResponderOcc(['no_autorizada', 'no_autorizada']), 'no_autorizada');
+  const conUnaSinResponder = [...doce.slice(0, 13), null];
+  assert.equal(estadoTrasResponderOcc(conUnaSinResponder), 'en_autorizacion');
+  assert.equal(faltanPorResponderOcc(conUnaSinResponder), 1);
+  assert.equal(faltanPorResponderOcc([null, null, 'autorizada']), 2);
+  assert.equal(faltaDeLaRespuestaOcc('no_autorizada', '  '), 'Diga por qué no se autoriza.');
+  assert.equal(faltaDeLaRespuestaOcc('no_autorizada', 'Ya se pagó la semana pasada'), null);
+  assert.equal(faltaDeLaRespuestaOcc('autorizada', ''), null);
+});
+
+/** Los valores del Excel de OCC de ejemplo, con la caja menor redondeada (D11); la 2 y la 3, NO autorizadas. */
+const VALORES_DEL_EXCEL_OCC = [350000, 850000, 690000, 285600, 200000, 250000, 120000, 60000, 80000, 315112, 500000, 90000, 684829, 900000];
+
+prueba('047/RF-40 a RF-41, RF-44 a RF-47, RF-80, RF-81: totales y pagos por línea, con el Excel de ejemplo', () => {
+  const lineas: LineaOccParaPagar[] = VALORES_DEL_EXCEL_OCC.map((valor, i) => ({
+    valor,
+    respuesta: i === 1 || i === 2 ? 'no_autorizada' : 'autorizada',
+    pagado: 0,
+  }));
+  assert.equal(totalPedidoOcc(lineas), 5_375_541);
+  assert.equal(totalAPagarOcc(lineas), 5_375_541 - 850_000 - 690_000);
+  assert.equal(estadoTrasPagosOcc(lineas), 'autorizada');
+  // Pagar 5 de las 12 autorizadas: pagada en parte.
+  const autorizadas = lineas.map((l, i) => i).filter((i) => lineas[i].respuesta === 'autorizada');
+  const conCinco = lineas.map((l, i) => (autorizadas.slice(0, 5).includes(i) ? { ...l, pagado: l.valor } : l));
+  assert.equal(estadoTrasPagosOcc(conCinco), 'pagada_en_parte');
+  // Las 12: pagada, aunque las NO autorizadas no se paguen.
+  const todas = lineas.map((l) => (l.respuesta === 'autorizada' ? { ...l, pagado: l.valor } : l));
+  assert.equal(estadoTrasPagosOcc(todas), 'pagada');
+  // RF-48: anular un pago devuelve a pagada en parte; anular todos, a autorizada.
+  const unaAnulada = todas.map((l, i) => (i === 0 ? { ...l, pagado: 0 } : l));
+  assert.equal(estadoTrasPagosOcc(unaAnulada), 'pagada_en_parte');
+  // RF-81, D12: una línea pagada en dos pagos.
+  assert.equal(pagoDeLaLineaOcc({ valor: 350000, pagado: 0 }), 'sin_pagar');
+  assert.equal(pagoDeLaLineaOcc({ valor: 350000, pagado: 100000 }), 'en_parte');
+  assert.equal(pagoDeLaLineaOcc({ valor: 350000, pagado: 350000 }), 'pagada');
+  const pago = { fecha: '2026-11-20', valor: 300000, medio: 'transferencia', referencia: '' };
+  assert.deepEqual(faltasDelPagoDeLineaOcc(pago, { valor: 350000, respuesta: 'autorizada', pagado: 100000 }), [
+    'Ese pago pasa de lo que falta: faltan $ 250.000.',
+  ]);
+  assert.deepEqual(faltasDelPagoDeLineaOcc(pago, { valor: 350000, respuesta: 'autorizada', pagado: 0 }), []);
+  // RF-45: una NO autorizada no se paga.
+  assert.deepEqual(faltasDelPagoDeLineaOcc(pago, { valor: 850000, respuesta: 'no_autorizada', pagado: 0 }), [
+    'Esta línea no está autorizada: no se paga.',
+  ]);
+});
+
+prueba('047/RF-2, RF-50, RF-51: número RQ, vencida y orden de la bandeja por viernes', () => {
+  assert.equal(numeroDeRequisicionOcc(12), 'RQ-0012');
+  assert.equal(estaVencidaOcc({ estado: 'autorizada', viernes: '2026-11-13' }, '2026-11-17'), true);
+  assert.equal(estaVencidaOcc({ estado: 'pagada', viernes: '2026-11-13' }, '2026-11-17'), false);
+  assert.equal(estaVencidaOcc({ estado: 'en_autorizacion', viernes: '2026-11-20' }, '2026-11-17'), false);
+  const orden = ordenDeLaBandejaOcc([
+    { viernes: '2026-11-27', numero: 3 },
+    { viernes: '2026-11-20', numero: 9 },
+    { viernes: '2026-11-20', numero: 4 },
+  ]);
+  assert.deepEqual(orden.map((r) => r.numero), [4, 9, 3]);
+});
+
+/** El Excel de OCC de ejemplo como lo entrega el lector: hoja REQUISICIONES, filas desde 1. */
+function hojaDelExcelOcc(): HojaDelLibro {
+  const filas: Celda[][] = Array.from({ length: 39 }, () => new Array<Celda>(13).fill(null));
+  filas[0][0] = 'REQUISICIÓN DE PAGOS OCC';
+  filas[2] = ['Fecha viernes de entrega:', 'Fecha viernes de entrega:', '2026-11-12', null, null, null, null, null, 'TOTAL A PAGAR', null, null, null, null];
+  filas[3] = ['Elaborado por:', 'Elaborado por:', 'Milena Ariza', 'Milena Ariza', null, null, null, null, 5375541.21, null, null, null, null];
+  filas[6] = ['N.º', 'Fecha de solicitud', 'Beneficiario', 'Concepto', 'Especificaciones', 'Proveedor', 'COSTO DIRECTO', 'COSTO INDIRECTO', 'Valor (COP)', 'RUT', 'Cuenta bancaria', 'Observaciones', 'Firma visto bueno'];
+  VALORES_DEL_EXCEL_OCC.forEach((valor, i) => {
+    const real = i === 12 ? 684829.21 : valor;
+    filas[7 + i] = [i + 1, '2026-11-12', `Beneficiario ${i + 1}`, `Concepto ${i + 1}`, `Placa ${i + 1}`, `Proveedor ${i + 1}`, null, null, real, 'FALSO', 'FALSO', i === 1 || i === 2 ? 'NO Autorizado' : 'Autorizado', null];
+  });
+  for (let f = 21; f < 39; f++) filas[f][9] = filas[f][10] = 'FALSO';
+  return { nombre: 'REQUISICIONES', visible: true, filas };
+}
+
+/** Lo que devolvería la IA, a propósito con la fila de títulos, la del total y una vacía, para ver que se quitan. */
+function lecturaDelExcelOcc(): LineaLeidaOcc[] {
+  const vacia = { fechaSolicitud: '', especificaciones: '', proveedor: '', observaciones: '' };
+  return [
+    { ...vacia, cita: 'H1F7', beneficiario: 'Beneficiario', concepto: 'Concepto', valor: 0 },
+    ...VALORES_DEL_EXCEL_OCC.map((valor, i) => ({
+      cita: `H1F${8 + i}`,
+      fechaSolicitud: '2026-11-12',
+      beneficiario: `Beneficiario ${i + 1}`,
+      concepto: `Concepto ${i + 1}`,
+      especificaciones: `Placa ${i + 1}`,
+      proveedor: `Proveedor ${i + 1}`,
+      valor: i === 12 ? 684829.21 : valor,
+      // La IA a veces deja la respuesta: la regla la quita (RF-65).
+      observaciones: i === 1 ? 'NO Autorizado' : i === 5 ? 'Autorizado: arreglo del domingo' : '',
+    })),
+    { ...vacia, cita: 'H1F25', beneficiario: '', concepto: '', valor: 0 },
+    { ...vacia, cita: 'H1F4', beneficiario: 'TOTAL A PAGAR', concepto: '', valor: 5375541.21 },
+  ];
+}
+
+prueba('047/RF-60, RF-63 a RF-65, D11: la planilla de ejemplo da 14 líneas sin respuesta, la caja menor redondeada y marcada', () => {
+  const hojas = [hojaDelExcelOcc()];
+  const r = propuestaDeLaLecturaOcc({ viernes: '2026-11-12', lineas: lecturaDelExcelOcc() }, { hoy: '2026-11-17', hojas });
+  assert.ok(r.ok);
+  const { lineas, viernes, viernesMarcado, avisos } = r.propuesta;
+  assert.equal(lineas.length, 14);
+  // RF-60: el viernes del archivo es jueves: se propone y queda marcado.
+  assert.equal(viernes, '2026-11-12');
+  assert.equal(viernesMarcado, true);
+  assert.ok(avisos[0].includes('no es viernes'));
+  // D11: la 13 (caja menor), 684.829 y marcada; las demás sin marcas.
+  assert.equal(lineas[12].valor, 684829);
+  assert.deepEqual(lineas[12].marcados, ['valor']);
+  assert.ok(avisos.some((a) => a.startsWith('Línea 13:') && a.includes('$ 684.829')));
+  assert.equal(lineas.filter((l) => l.marcados.length > 0).length, 1);
+  // RF-65: sin respuestas.
+  assert.equal(lineas[1].observaciones, '');
+  assert.equal(lineas[5].observaciones, 'arreglo del domingo');
+  assert.equal(lineas.reduce((a, l) => a + (l.valor ?? 0), 0), 5_375_541);
+  assert.equal(lineas[0].cita, 'H1F8');
+});
+
+prueba('047/RF-63, RF-66, RF-67, RF-79: lo que no cuadra queda vacío; sin líneas, aviso; cortada y no Excel, su mensaje', () => {
+  const hojas = [hojaDelExcelOcc()];
+  const base = lecturaDelExcelOcc()[1];
+  // Un valor que no está en su fila no se toma.
+  const otra = propuestaDeLaLecturaOcc({ viernes: '2026-11-20', lineas: [{ ...base, valor: 999999 }] }, { hoy: '2026-11-17', hojas });
+  assert.ok(otra.ok);
+  assert.equal(otra.propuesta.lineas[0].valor, null);
+  assert.deepEqual(otra.propuesta.lineas[0].marcados, ['valor']);
+  assert.equal(otra.propuesta.viernesMarcado, false);
+  // Fecha ilegible y beneficiario vacío: marcados.
+  const sinDatos = propuestaDeLaLecturaOcc(
+    { viernes: '', lineas: [{ ...base, fechaSolicitud: '12 de nov', beneficiario: '' }] },
+    { hoy: '2026-11-17', hojas },
+  );
+  assert.ok(sinDatos.ok);
+  assert.deepEqual(sinDatos.propuesta.lineas[0].marcados, ['fechaSolicitud', 'beneficiario']);
+  assert.equal(sinDatos.propuesta.viernes, '');
+  assert.equal(sinDatos.propuesta.viernesMarcado, true);
+  // RF-67: solo títulos y vacías.
+  const vacia = propuestaDeLaLecturaOcc({ viernes: '2026-11-20', lineas: [lecturaDelExcelOcc()[0], lecturaDelExcelOcc()[15]] }, { hoy: '2026-11-17', hojas });
+  assert.deepEqual(vacia, { ok: false, error: SIN_LINEAS_EN_EL_ARCHIVO });
+  // RF-66: la lectura cortada da su mensaje, no media propuesta (lo usa `llamarConEsquema`).
+  assert.ok(FALLOS_DE_LA_REQUISICION_OCC.muyLargo.includes('no se leyó entera'));
+  // RF-78, RF-79: solo Excel.
+  assert.equal(esExcelParaImportarOcc('Formato requisiciones pagos OCC.xlsx'), true);
+  assert.equal(esExcelParaImportarOcc('requisicion.PDF'), false);
+  assert.equal(esExcelParaImportarOcc('foto.jpg'), false);
+});
+
+prueba('047/RF-4, RF-26, RF-44, RF-48, RF-73: los permisos que ya existen dan lo que pide la spec en OCC', () => {
+  // El Encargado de OCC pide en OCC y no aprueba ni paga.
+  assert.equal(alcanzaLaEmpresa('encargado_occ', 'occ'), true);
+  assert.equal(alcanza('encargado_occ', 'solicitudes', 'escribir'), true);
+  assert.equal(alcanza('encargado_occ', 'aprobaciones', 'aprobar'), false);
+  assert.equal(alcanza('encargado_occ', 'tesoreria', 'escribir'), false);
+  // La Administradora entra a OCC, aprueba, paga y anula; no pide.
+  assert.equal(alcanzaLaEmpresa('administradora_elemental', 'occ'), true);
+  assert.equal(alcanza('administradora_elemental', 'aprobaciones', 'aprobar'), true);
+  assert.equal(alcanza('administradora_elemental', 'tesoreria', 'escribir'), true);
+  assert.equal(alcanza('administradora_elemental', 'tesoreria', 'anular'), true);
+  assert.equal(puedeCrearRequisicionOcc('administradora_elemental'), false);
+  // La Auxiliar paga; no aprueba ni anula.
+  assert.equal(alcanza('auxiliar_administrativa', 'tesoreria', 'escribir'), true);
+  assert.equal(alcanza('auxiliar_administrativa', 'tesoreria', 'anular'), false);
+  assert.equal(alcanza('auxiliar_administrativa', 'aprobaciones', 'aprobar'), false);
+  // La Gerencia todo.
+  assert.equal(puedeCrearRequisicionOcc('admin'), true);
+  assert.equal(alcanza('admin', 'aprobaciones', 'aprobar'), true);
+  assert.equal(alcanza('admin', 'tesoreria', 'anular'), true);
+  // RF-73: un Residente o un Director de Obra pide en su obra, no en OCC.
+  for (const rol of ['residente', 'director_obra', 'director_proyectos', 'almacenista', 'laboratorista'] as const) {
+    assert.equal(alcanzaLaEmpresa(rol, 'occ'), false, rol);
+    assert.equal(puedeCrearRequisicionOcc(rol), false, rol);
+  }
+});
+
+prueba('047/RF-73: ven las de OCC el Encargado, la Administradora, la Gerencia y, para pagar, la Auxiliar', () => {
+  for (const rol of ['encargado_occ', 'administradora_elemental', 'admin', 'auxiliar_administrativa'] as const) {
+    assert.equal(veRequisicionesOcc(rol), true, rol);
+  }
+  for (const rol of ['residente', 'director_obra', 'director_proyectos', 'almacenista', 'laboratorista', 'operador', 'encargado_planta'] as const) {
+    assert.equal(veRequisicionesOcc(rol), false, rol);
+  }
+});
+
+prueba('047/RF-10, RF-26, RF-34, RF-75, RF-77, D11: los contratos rechazan, en español, lo que no tiene forma', () => {
+  const mensaje = (r: { success: boolean; error?: { issues: { message: string }[] } }) => r.error?.issues[0]?.message;
+  assert.ok(requisicionOccPedida.safeParse({ viernes: '2026-11-20' }).success);
+  // RF-75: un cambio sin la versión que se vio.
+  const sinVersion = lineaOccPedida.safeParse({ beneficiario: 'Navitrans', concepto: 'Caucho', valor: 315112 });
+  assert.equal(sinVersion.success, false);
+  assert.equal(mensaje(sinVersion), 'Falta la versión de la requisición que vio.');
+  // D11: con centavos no pasa.
+  const conCentavos = lineaOccPedida.safeParse({ version: 1, beneficiario: 'OCC', concepto: 'Caja menor', valor: 684829.21 });
+  assert.equal(conCentavos.success, false);
+  assert.equal(mensaje(conCentavos), 'El valor va en pesos, sin centavos y mayor que cero.');
+  // Bien: los opcionales vacíos.
+  const bien = lineaOccPedida.safeParse({ version: 1, fechaSolicitud: '2026-11-12', beneficiario: 'OCC', concepto: 'Caja menor', valor: 684829 });
+  assert.ok(bien.success);
+  assert.equal(bien.data.proveedor, '');
+  // RF-77: NO autorizada sin motivo.
+  const sinMotivo = respuestasOccPedidas.safeParse({ version: 2, respuestas: [{ lineaId: 'l1', respuesta: 'no_autorizada' }] });
+  assert.equal(sinMotivo.success, false);
+  assert.equal(mensaje(sinMotivo), 'Diga por qué no se autoriza.');
+  assert.ok(respuestasOccPedidas.safeParse({ version: 2, respuestas: [{ lineaId: 'l1', respuesta: 'no_autorizada', motivo: 'Repetida' }] }).success);
+  assert.ok(respuestasOccPedidas.safeParse({ version: 2, respuestas: [{ lineaId: 'l1', respuesta: 'autorizada' }] }).success);
+  // Un paso que no existe.
+  assert.equal(mensaje(pasoOccPedido.safeParse({ version: 1, accion: 'aprobar' })), 'El paso es enviar, devolver o cancelar.');
+});
+
+prueba('047/RF-52 a RF-57: la descarga con las columnas de OCC, sin imputar, con la respuesta, el visto bueno y el total autorizado', () => {
+  const linea = (numero: number, valor: number, respuesta: RespuestaDeLineaOcc | null, motivo: string | null = null) => ({
+    numero,
+    fechaSolicitud: '2026-11-12',
+    beneficiario: `Beneficiario ${numero}`,
+    concepto: `Concepto ${numero}`,
+    especificaciones: 'Volqueta LLQ 377',
+    proveedor: 'Navitrans',
+    valor,
+    observaciones: numero === 1 ? 'Arreglo del domingo' : '',
+    tieneRut: numero === 1,
+    tieneCuenta: false,
+    respuesta,
+    motivoRespuesta: motivo,
+    // 2026-11-17 a las 9 p. m. en Colombia: en UTC ya es 18; la fecha que sale es la de Colombia.
+    respondida: respuesta ? { por: 'Administradora (prueba 047)', en: '2026-11-18T02:00:00.000Z' } : null,
+  });
+  const autorizada = planillaOcc({
+    codigo: 'RQ-0010',
+    viernes: '2026-11-20',
+    estado: 'autorizada',
+    elaboradaPor: 'Encargado OCC',
+    lineas: [linea(1, 350000, 'autorizada'), linea(2, 820000, 'no_autorizada', 'Ya se compraron')],
+  });
+  // RF-53: once columnas, sin las de ítem a imputar.
+  assert.equal(COLUMNAS_OCC.length, 11);
+  assert.equal(COLUMNAS_OCC.some((c) => c.toLowerCase().includes('imputar') || c.includes('COSTO')), false);
+  // RF-41: el total, solo lo autorizado.
+  assert.equal(autorizada.totalAPagar, 350000);
+  assert.equal(autorizada.aviso, null);
+  assert.deepEqual(autorizada.filas[0], [
+    1, '2026-11-12', 'Beneficiario 1', 'Concepto 1', 'Volqueta LLQ 377', 'Navitrans', 350000, 'Sí', 'No',
+    'Autorizado · Arreglo del domingo', 'Administradora (prueba 047) · 2026-11-17',
+  ]);
+  // RF-54: «NO Autorizado» con su motivo.
+  assert.equal(autorizada.filas[1][9], 'NO Autorizado: Ya se compraron');
+  // RF-57: en autorización, el aviso; sin respuestas, ni respuesta ni visto bueno.
+  const enAutorizacion = planillaOcc({ codigo: 'RQ-0013', viernes: '2026-12-04', estado: 'en_autorizacion', elaboradaPor: 'X', lineas: [linea(1, 200000, null)] });
+  assert.equal(enAutorizacion.aviso, 'Estado: En autorización. Esta requisición todavía no está autorizada.');
+  assert.equal(enAutorizacion.filas[0][9], 'Arreglo del domingo');
+  assert.equal(enAutorizacion.filas[0][10], '');
+  assert.equal(enAutorizacion.totalAPagar, 0);
 });
 
 verificarFirmaS3()

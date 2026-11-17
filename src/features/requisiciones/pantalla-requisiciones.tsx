@@ -17,6 +17,11 @@
  *
  * Las columnas caben en `MaxContentWidthPanel` (1 280): 120 + 240 + 120 + 240 + 140 + 170 + 100 =
  * 1 130, más 6 separaciones de 16 (96) y 16 a cada lado (32): 1 258.
+ *
+ * Spec 047: en OCC se pide con la requisición de pagos del viernes (RF-1), que va en su propia tabla
+ * arriba —con «Nueva requisición de pagos» e «Importar planilla»— y las de antes debajo (RF-3). En
+ * Elemental, las de OCC en autorización van en la bandeja, con «OCC» (RF-49). Su tabla: 120 + 130 +
+ * 220 + 90 + 150 + 150 + 170 + 100 = 1 130, más 7 separaciones (112) y los dos lados (32): 1 274.
  */
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -44,6 +49,7 @@ import {
 } from '@/features/panel/componentes';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import type { LugarDeRequisiciones, RequisicionEnLaLista } from '@/features/panel/requisiciones';
+import type { RequisicionOccEnLaLista } from '@/features/panel/requisiciones-occ';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { FormularioDePago } from '@/features/tesoreria/formulario-de-pago';
 import { PasosDeTesoreria } from '@/features/tesoreria/pasos-de-tesoreria';
@@ -61,6 +67,11 @@ import {
   type TipoDeRequisicion,
 } from '@/shared/rules/requisiciones';
 
+import { ImportarPlanillaOcc } from './occ/importar-planilla-occ';
+import { EstadoOcc } from './occ/partes-occ';
+import { VentanaNuevaOcc } from './occ/ventanas-occ';
+import { VistaDeRequisicionOcc } from './occ/vista-requisicion-occ';
+
 type Fila = RequisicionEnLaLista;
 
 /** Lo que llega del servidor, en las dos formas de la pantalla. */
@@ -69,6 +80,9 @@ interface Cargado {
   sePuedePedir: boolean;
   resumen: { esperan: number; urgentes: number; vencidas: number } | null;
   sinAdministradora: boolean;
+  /** Spec 047: las requisiciones de pagos de OCC (en OCC, todas; en la bandeja, las que esperan). */
+  pagosOcc: RequisicionOccEnLaLista[];
+  sePuedePedirOcc: boolean;
 }
 
 const SIN_FILTROS: FiltrosDeRequisiciones = {
@@ -99,7 +113,7 @@ export default function PantallaRequisiciones() {
   const clave = enBandeja ? 'bandeja' : pedido ? ('obraId' in pedido ? pedido.obraId : pedido.empresa) : null;
   // La abierta va en la dirección (`?requisicion=compra:<id>`), como la solicitud en la 036.
   const [abierta, setAbierta] = useParametroDeDireccion('requisicion', '');
-  const [pidiendo, setPidiendo] = useState<TipoDeRequisicion | null>(null);
+  const [pidiendo, setPidiendo] = useState<TipoDeRequisicion | 'occ' | 'importar_occ' | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
   const [filtros, setFiltros] = useState<FiltrosDeRequisiciones>(SIN_FILTROS);
 
@@ -107,9 +121,13 @@ export default function PantallaRequisiciones() {
     useCallback(
       () =>
         enBandeja
-          ? api.requisiciones.bandeja().then((b) => [{ requisiciones: b.requisiciones, sePuedePedir: false, resumen: b.resumen, sinAdministradora: b.sinAdministradora }])
+          ? api.requisiciones.bandeja().then((b) => [
+              { requisiciones: b.requisiciones, sePuedePedir: false, resumen: b.resumen, sinAdministradora: b.sinAdministradora, pagosOcc: b.pagosOcc, sePuedePedirOcc: false },
+            ])
           : pedido
-            ? api.requisiciones.listar(pedido).then((l) => [{ ...l, resumen: null, sinAdministradora: false }])
+            ? api.requisiciones.listar(pedido).then((l) => [
+                { ...l, resumen: null, sinAdministradora: false, pagosOcc: l.pagosOcc ?? [], sePuedePedirOcc: l.sePuedePedirOcc ?? false },
+              ])
             : Promise.resolve([]),
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [clave],
@@ -132,6 +150,8 @@ export default function PantallaRequisiciones() {
       setAbierta('');
       cargadas.recargar();
     };
+    // Spec 047: una requisición de pagos de OCC tiene su propio detalle.
+    if (tipo === 'occ') return <VistaDeRequisicionOcc id={id} alVolver={volver} volverA={enBandeja ? 'la bandeja' : 'las requisiciones'} />;
     // En la bandeja se deciden también las SC y SP de antes y las de OCC (RF-83), con los botones
     // de la gerencia; una RQ se decide con los de su cadena, que pone el propio detalle.
     return tipo === 'pago' ? (
@@ -221,6 +241,47 @@ export default function PantallaRequisiciones() {
     },
   ];
 
+  const columnasOcc: Columna<RequisicionOccEnLaLista>[] = [
+    { clave: 'numero', titulo: 'Número', ancho: 120, pintar: (r) => <Text style={estilos.fuerte}>{r.codigo}</Text> },
+    { clave: 'viernes', titulo: 'Viernes de entrega', ancho: 130, pintar: (r) => <Celda>{fechaDelCorte(r.viernes)}</Celda> },
+    {
+      clave: 'estado',
+      titulo: 'Estado',
+      ancho: 220,
+      pintar: (r) => (
+        <View style={estilos.marcas}>
+          {/* «Devuelta: corrígela» ya dice el estado, como en la lista de la 046. */}
+          {r.marcas.includes('Devuelta: corrígela') ? null : <EstadoOcc estado={r.estado} />}
+          {r.marcas.map((m) => (
+            <Etiqueta key={m} tono={m === 'OCC' ? 'neutro' : 'malo'}>
+              {m}
+            </Etiqueta>
+          ))}
+          {r.faltanPorResponder > 0 ? <Etiqueta tono="atencion">{`Faltan ${r.faltanPorResponder}`}</Etiqueta> : null}
+        </View>
+      ),
+    },
+    { clave: 'lineas', titulo: 'Líneas', ancho: 90, pintar: (r) => <Celda>{String(r.lineas)}</Celda> },
+    { clave: 'pedido', titulo: 'Total pedido', ancho: 150, pintar: (r) => <Celda>{enPesos(r.totalPedido)}</Celda> },
+    {
+      clave: 'pagar',
+      titulo: 'Total a pagar',
+      ancho: 150,
+      // Solo hay algo que pagar cuando está autorizada; en una cancelada o sin autorizar, nada.
+      pintar: (r) => <Celda>{r.estado === 'autorizada' || r.estado === 'pagada_en_parte' || r.estado === 'pagada' ? enPesos(r.totalAPagar) : '—'}</Celda>,
+    },
+    { clave: 'elaborada', titulo: 'Elaborada por', ancho: 170, pintar: (r) => <Celda>{r.elaboradaPor.nombre}</Celda> },
+    {
+      clave: 'abrir',
+      titulo: '',
+      ancho: 100,
+      anchoMinimo: 100,
+      pintar: (r) => <Boton titulo="Abrir" tono="secundario" onPress={() => setAbierta(`occ:${r.id}`)} />,
+    },
+  ];
+  const enOcc = pedido !== null && !('obraId' in pedido) && pedido.empresa === 'occ';
+  const pagosOcc = cargado?.pagosOcc ?? [];
+
   const esperan = filas.filter((f) => f.esperaMiAprobacion).length;
   const listo = (mensaje: string) => {
     setPidiendo(null);
@@ -233,9 +294,12 @@ export default function PantallaRequisiciones() {
       descripcion={
         enBandeja
           ? 'Lo que el grupo pide comprar o pagar: aquí se aprueba en el último paso, se registra la compra y se marca lo recibido.'
-          : // RF-19, RF-88: en GeoLab y en OCC no hay pasos de obra; va directo a la Administradora.
-            pedido && !('obraId' in pedido)
-            ? `Lo que ${pedido.empresa === 'occ' ? 'OCC' : 'GeoLab'} pide comprar o pagar. Cada requisición va directo a la Administradora de Elemental.`
+          : // Spec 047: OCC arma una requisición de pagos por viernes; la autorizan línea por línea.
+            enOcc
+            ? 'Lo que OCC pide pagar: una requisición por viernes de entrega, que la Administradora de Elemental o la Gerencia autorizan línea por línea.'
+            : // RF-19: en GeoLab no hay pasos de obra; va directo a la Administradora.
+              pedido && !('obraId' in pedido)
+              ? 'Lo que GeoLab pide comprar o pagar. Cada requisición va directo a la Administradora de Elemental.'
             : 'Lo que se pide comprar o pagar. Cada requisición pasa por el Residente, el Director de Obra, el Director de Proyectos y la Administradora de Elemental.'
       }
       error={cargadas.error}
@@ -257,12 +321,49 @@ export default function PantallaRequisiciones() {
       {pidiendo === 'pago' && pedido ? (
         <FormularioDePago requisicion lugar={pedido} alCerrar={() => setPidiendo(null)} alGuardar={listo} />
       ) : null}
+      {cargado?.sePuedePedirOcc ? (
+        <Acciones>
+          <Boton titulo="Nueva requisición de pagos" onPress={() => setPidiendo('occ')} />
+          <Boton titulo="Importar planilla" tono="secundario" onPress={() => setPidiendo('importar_occ')} />
+        </Acciones>
+      ) : null}
+      {pidiendo === 'occ' ? (
+        <VentanaNuevaOcc
+          alCerrar={() => setPidiendo(null)}
+          alCrear={(id) => {
+            setPidiendo(null);
+            setAbierta(`occ:${id}`);
+          }}
+          alAbrirExistente={(id) => {
+            setPidiendo(null);
+            setAbierta(`occ:${id}`);
+          }}
+        />
+      ) : null}
+      {pidiendo === 'importar_occ' ? (
+        <ImportarPlanillaOcc
+          alCerrar={() => setPidiendo(null)}
+          alConfirmar={(_mensaje, id) => {
+            setPidiendo(null);
+            setAbierta(`occ:${id}`);
+          }}
+        />
+      ) : null}
+      {enOcc || pagosOcc.length ? (
+        <Seccion titulo={enBandeja ? `Requisiciones de pagos de OCC · ${pagosOcc.length} esperan autorización` : 'Requisiciones de pagos'}>
+          <Tabla
+            columnas={columnasOcc}
+            filas={pagosOcc}
+            vacio="Todavía no hay requisiciones de pagos. Cree la del próximo viernes o importe la planilla."
+          />
+        </Seccion>
+      ) : null}
       {cargado?.resumen ? (
         <Text style={estilos.texto}>
           {`Esperan el último paso: ${cargado.resumen.esperan} · urgentes: ${cargado.resumen.urgentes} · vencidas: ${cargado.resumen.vencidas}`}
         </Text>
       ) : null}
-      <Seccion titulo={esperan > 0 ? `Requisiciones · ${esperan} esperan su aprobación` : 'Requisiciones'}>
+      <Seccion titulo={enOcc ? 'Requisiciones anteriores' : esperan > 0 ? `Requisiciones · ${esperan} esperan su aprobación` : 'Requisiciones'}>
         <BarraDeListado busqueda={filtros.texto} onBuscar={(texto) => cambiar({ texto })} total={filas.length} mostradas={visibles.length}>
           <Selector
             etiqueta="Clase"

@@ -135,6 +135,15 @@ function esViolacionDeUnicidad(fallo: unknown): boolean {
 }
 
 /**
+ * El índice único que violó la sentencia, o `null` si el fallo es otro. Para la ruta que quiere
+ * responder algo más que el mensaje: la requisición de OCC del mismo viernes devuelve la que ya
+ * estaba abierta (spec 047, RF-8, RF-82).
+ */
+export function indiceUnicoViolado(fallo: unknown): string | null {
+  return esViolacionDeUnicidad(fallo) ? (detallePostgres(fallo)?.constraint ?? null) : null;
+}
+
+/**
  * Postgres 42P01: la tabla no existe.
  *
  * Es lo que responde una base recién creada a la que todavía no se le aplicaron
@@ -177,6 +186,9 @@ export function duplicadoDe(indice: string | undefined): { mensaje: string; camp
     case 'ux_plan_semanal_vigente':
       // Spec 044, RF-51. `aprobarPlan` lo mira antes; esto es el respaldo si dos aprueban a la vez.
       return { mensaje: 'Esa semana ya tiene un plan aprobado. Anúlelo antes de aprobar otro.' };
+    case 'ux_requisicion_occ_viernes_abierta':
+      // Spec 047, RF-8, RF-82. La ruta lo ataja antes con la que ya estaba abierta; esto es el respaldo.
+      return { mensaje: 'Ya hay una requisición de pagos abierta para ese viernes.', campo: 'viernes' };
     case 'ux_obras_codigo':
       return { mensaje: 'Ya existe una obra con ese código.', campo: 'codigo' };
     case 'ux_usuarios_usuario':

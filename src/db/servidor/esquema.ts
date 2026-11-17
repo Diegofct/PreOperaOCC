@@ -80,6 +80,8 @@ import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
 import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
 import { IDS_DE_ESTADOS_DE_PAGO } from '../../shared/rules/pagos';
 import { PASOS_DE_LA_CADENA } from '../../shared/rules/requisiciones';
+import { ESTADOS_CERRADOS_OCC, IDS_DE_ESTADOS_DE_REQUISICION_OCC } from '../../shared/rules/requisicion-occ';
+import type { PropuestaDeRequisicionOcc } from '../../shared/rules/requisicion-occ-ia';
 import type {
   AclaracionDelAsistente,
   AdjuntoGuardado,
@@ -182,6 +184,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'planificacion',
   // Spec 042: el documento original de una importación al Almacén, con `dueno_id` = la importación.
   'almacen',
+  // Spec 047: la planilla importada de una requisición de pagos de OCC y el RUT y la cuenta de cada línea.
+  'requisicion_occ',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -3123,6 +3127,165 @@ export const solicitudPagoEventos = pgTable(
   (t) => [index('ix_solicitud_pago_eventos').on(t.solicitudPagoId, t.en)],
 );
 
+/* ------------------------------------------------------------------------ */
+/* Requisición de pagos de OCC (spec 047)                                    */
+/* ------------------------------------------------------------------------ */
+
+export const estadoRequisicionOcc = pgEnum('estado_requisicion_occ', IDS_DE_ESTADOS_DE_REQUISICION_OCC);
+
+/** Los estados cerrados, como lista SQL, para el índice de «una abierta por viernes». */
+const CERRADAS_OCC = sql.raw(ESTADOS_CERRADOS_OCC.map((e) => `'${e}'`).join(', '));
+
+/**
+ * La requisición de pagos de OCC (spec 047): **una planilla por viernes de entrega**, con sus líneas
+ * aparte. No va en `solicitudes_pago` porque allá una fila es un beneficiario y un valor, con
+ * concepto de lista cerrada y «para qué» obligatorio (plan, «Tablas propias»).
+ *
+ * El número sale de la misma secuencia `requisicion_numero` de la 046, al insertar (RF-2). «Una
+ * abierta por viernes» (RF-8, RF-82) la cuida el índice único parcial y no una consulta previa:
+ * sin transacciones interactivas, dos creaciones a la vez pasarían las dos.
+ */
+export const requisicionesOcc = pgTable(
+  'requisiciones_occ',
+  {
+    id: text('id').primaryKey(),
+    numeroRequisicion: integer('numero_requisicion').notNull(),
+    viernes: date('viernes', { mode: 'string' }).notNull(),
+    estado: estadoRequisicionOcc('estado').notNull().default('borrador'),
+    elaboradaPor: text('elaborada_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadaEn: creadoEn(),
+    enviadaEn: timestamp('enviada_en', { withTimezone: true, mode: 'date' }),
+    /** Cuántas veces se envió: al devolverla y reenviarla, sube (RF-35). */
+    ronda: integer('ronda').notNull().default(0),
+    version: integer('version').notNull().default(1),
+    actualizadaEn: timestamp('actualizada_en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [
+    uniqueIndex('ux_requisicion_occ_numero').on(t.numeroRequisicion),
+    uniqueIndex('ux_requisicion_occ_viernes_abierta').on(t.viernes).where(sql`${t.estado} not in (${CERRADAS_OCC})`),
+    // RF-6: la fecha de entrega es un viernes (isodow 5).
+    check('ck_requisicion_occ_viernes', sql`extract(isodow from ${t.viernes}) = 5`),
+    index('ix_requisicion_occ_estado').on(t.estado, t.viernes),
+  ],
+);
+
+/**
+ * Las líneas (RF-10). **Nada se borra ni se sobrescribe** (constitución, principio 4): quitar marca
+ * `quitada_en` (RF-20) y cambiar inserta otra con el mismo `orden` y marca esta `reemplazada_en`
+ * (RF-37). Las vigentes son las que no tienen ninguna de las dos.
+ *
+ * El RUT y la cuenta bancaria son dos archivos fijos por línea, sin clase ni vencimiento: van como
+ * `media` aquí, y al reemplazar la línea se heredan.
+ */
+export const requisicionOccLineas = pgTable(
+  'requisicion_occ_lineas',
+  {
+    id: text('id').primaryKey(),
+    requisicionId: text('requisicion_id')
+      .notNull()
+      .references(() => requisicionesOcc.id),
+    orden: integer('orden').notNull(),
+    fechaSolicitud: date('fecha_solicitud', { mode: 'string' }).notNull(),
+    beneficiario: text('beneficiario').notNull(),
+    concepto: text('concepto').notNull(),
+    especificaciones: text('especificaciones').notNull().default(''),
+    proveedor: text('proveedor').notNull().default(''),
+    /** Pesos, sin centavos (D11). */
+    valor: bigint('valor', { mode: 'number' }).notNull(),
+    observaciones: text('observaciones').notNull().default(''),
+    rutMediaId: text('rut_media_id').references(() => media.id),
+    cuentaMediaId: text('cuenta_media_id').references(() => media.id),
+    /** `autorizada` o `no_autorizada`; nula mientras espera (RF-26). */
+    respuesta: text('respuesta'),
+    motivoRespuesta: text('motivo_respuesta'),
+    respondidaPor: text('respondida_por').references(() => usuarios.id),
+    respondidaEn: timestamp('respondida_en', { withTimezone: true, mode: 'date' }),
+    quitadaEn: timestamp('quitada_en', { withTimezone: true, mode: 'date' }),
+    quitadaPor: text('quitada_por').references(() => usuarios.id),
+    reemplazadaEn: timestamp('reemplazada_en', { withTimezone: true, mode: 'date' }),
+    reemplazadaPorLinea: text('reemplazada_por_linea').references((): AnyPgColumn => requisicionOccLineas.id),
+    creadaPor: text('creada_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadaEn: creadoEn(),
+  },
+  (t) => [
+    check('ck_requisicion_occ_linea_valor', sql`${t.valor} > 0`),
+    check('ck_requisicion_occ_linea_textos', sql`length(trim(${t.beneficiario})) > 0 and length(trim(${t.concepto})) > 0`),
+    check(
+      'ck_requisicion_occ_linea_respuesta',
+      sql`(${t.respuesta} is null or ${t.respuesta} in ('autorizada', 'no_autorizada'))
+       and ((${t.respuesta} is null) = (${t.respondidaEn} is null))
+       and (${t.respuesta} is distinct from 'no_autorizada' or length(trim(coalesce(${t.motivoRespuesta}, ''))) > 0)`,
+    ),
+    check('ck_requisicion_occ_linea_baja', sql`${t.quitadaEn} is null or ${t.reemplazadaEn} is null`),
+    index('ix_requisicion_occ_lineas').on(t.requisicionId, t.orden),
+  ],
+);
+
+/** La historia de una requisición de pagos OCC (RF-39): cada paso, con su motivo y lo que cambió. */
+export const requisicionOccEventos = pgTable(
+  'requisicion_occ_eventos',
+  {
+    id: text('id').primaryKey(),
+    requisicionId: text('requisicion_id')
+      .notNull()
+      .references(() => requisicionesOcc.id),
+    paso: text('paso').notNull(),
+    motivo: text('motivo'),
+    cambios: jsonb('cambios').$type<unknown[]>().notNull().default([]),
+    por: text('por')
+      .notNull()
+      .references(() => usuarios.id),
+    en: timestamp('en', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => [index('ix_requisicion_occ_eventos').on(t.requisicionId, t.en)],
+);
+
+/**
+ * Una planilla subida para que la IA proponga sus líneas (RF-59 a RF-70), como `almacen_importaciones`
+ * de la 042 y con su mismo enum de estados: se lee por detrás, la propuesta vence a un día y nada entra
+ * sin confirmar. `requisicion_id` es nula cuando la planilla crea una requisición nueva (RF-60); al
+ * confirmarse queda apuntando a la requisición, y el archivo queda con ella (RF-68).
+ */
+export const requisicionOccImportaciones = pgTable(
+  'requisicion_occ_importaciones',
+  {
+    id: text('id').primaryKey(),
+    requisicionId: text('requisicion_id').references(() => requisicionesOcc.id),
+    mediaId: text('media_id')
+      .notNull()
+      .references(() => media.id),
+    nombreArchivo: text('nombre_archivo').notNull(),
+    estado: estadoImportacionAlmacen('estado').notNull().default('en_curso'),
+    error: text('error'),
+    propuesta: jsonb('propuesta').$type<PropuestaDeRequisicionOcc>(),
+    version: integer('version').notNull().default(1),
+    venceLecturaEn: timestamp('vence_lectura_en', { withTimezone: true, mode: 'date' }).notNull(),
+    vencePropuestaEn: timestamp('vence_propuesta_en', { withTimezone: true, mode: 'date' }),
+    creadoPor: text('creado_por')
+      .notNull()
+      .references(() => usuarios.id),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+    confirmadaEn: timestamp('confirmada_en', { withTimezone: true, mode: 'date' }),
+    confirmadaPor: text('confirmada_por').references(() => usuarios.id),
+    descartadaEn: timestamp('descartada_en', { withTimezone: true, mode: 'date' }),
+  },
+  (t) => [
+    index('ix_requisicion_occ_importacion_pendientes').on(t.creadoPor, t.estado),
+    index('ix_requisicion_occ_importacion_requisicion').on(t.requisicionId),
+    check('ck_requisicion_occ_importacion_confirmada', sql`(${t.estado} = 'confirmada') = (${t.confirmadaEn} is not null)`),
+    check('ck_requisicion_occ_importacion_descartada', sql`(${t.estado} = 'descartada') = (${t.descartadaEn} is not null)`),
+  ],
+);
+
 /**
  * Un pago (RF-13 a RF-18): de una solicitud de pago **o** de una compra de la spec 036, uno
  * de los dos. Así «Pagos» (RF-23) suma los dos lados con una sola consulta y las compras se
@@ -3138,6 +3301,8 @@ export const pagos = pgTable(
     id: text('id').primaryKey(),
     solicitudPagoId: text('solicitud_pago_id').references(() => solicitudesPago.id),
     compraId: text('compra_id').references(() => compras.id),
+    /** Spec 047: una línea autorizada de una requisición de pagos de OCC (RF-44). */
+    requisicionOccLineaId: text('requisicion_occ_linea_id').references(() => requisicionOccLineas.id),
     fecha: date('fecha', { mode: 'string' }).notNull(),
     /** Pesos, sin decimales. */
     valor: bigint('valor', { mode: 'number' }).notNull(),
@@ -3145,6 +3310,11 @@ export const pagos = pgTable(
     referencia: text('referencia').notNull().default(''),
     /** El comprobante, si se adjuntó: en la solicitud de pago o en la de compra. */
     documentoId: text('documento_id').references((): AnyPgColumn => documentosDelGrupo.id),
+    /**
+     * Spec 047: el comprobante del pago de una línea de OCC, como archivo de su requisición (como el
+     * RUT y la cuenta). No va en Documentos: quien paga, la Auxiliar, no entra a OCC.
+     */
+    comprobanteMediaId: text('comprobante_media_id').references(() => media.id),
     registradoPor: text('registrado_por')
       .notNull()
       .references(() => usuarios.id),
@@ -3156,7 +3326,11 @@ export const pagos = pgTable(
     motivoAnulacion: text('motivo_anulacion'),
   },
   (t) => [
-    check('ck_pago_dueno', sql`((${t.solicitudPagoId} is not null)::int + (${t.compraId} is not null)::int) = 1`),
+    check(
+      'ck_pago_dueno',
+      sql`((${t.solicitudPagoId} is not null)::int + (${t.compraId} is not null)::int
+         + (${t.requisicionOccLineaId} is not null)::int) = 1`,
+    ),
     check('ck_pago_valor', sql`${t.valor} > 0`),
     check('ck_pago_medio', sql`${t.medio} in ('transferencia', 'consignacion', 'cheque', 'efectivo')`),
     check(
@@ -3166,6 +3340,7 @@ export const pagos = pgTable(
     ),
     index('ix_pagos_solicitud').on(t.solicitudPagoId),
     index('ix_pagos_compra').on(t.compraId),
+    index('ix_pagos_requisicion_occ_linea').on(t.requisicionOccLineaId),
     index('ix_pagos_fecha').on(t.fecha),
   ],
 );

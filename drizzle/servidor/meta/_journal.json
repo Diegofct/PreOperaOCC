@@ -337,6 +337,20 @@
       "when": 1794892948327,
       "tag": "0047_sloppy_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794932285871,
+      "tag": "0048_wide_marvel_apes",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794934267508,
+      "tag": "0049_clammy_jamie_braddock",
+      "breakpoints": true
     }
   ]
 }

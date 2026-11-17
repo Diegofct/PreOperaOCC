@@ -9,6 +9,7 @@
  */
 import { z } from 'zod';
 
+import type { RequisicionOccEnLaLista } from '@/features/panel/requisiciones-occ';
 import { DECISIONES, type PasoDeLaCadena, type TipoDeRequisicion } from '@/shared/rules/requisiciones';
 
 /** Un renglón de una requisición de compra (RF-10): lo de la 036 más la fecha y el para qué. */
@@ -122,13 +123,19 @@ export interface RequisicionEnLaLista {
 export interface RequisicionesDelLugar {
   /** En el orden de RF-45 y RF-49. */
   requisiciones: RequisicionEnLaLista[];
-  /** ¿Puede pedir aquí? No la Administradora (RF-8), ni en una obra inactiva. */
+  /** ¿Puede pedir aquí? No la Administradora (RF-8), ni en una obra inactiva, ni en OCC (047, RF-1). */
   sePuedePedir: boolean;
+  /** Spec 047, RF-3: en OCC, las requisiciones de pagos del viernes. */
+  pagosOcc?: RequisicionOccEnLaLista[];
+  /** Spec 047, RF-4: ¿puede crear la de pagos del viernes? */
+  sePuedePedirOcc?: boolean;
 }
 
 /** La bandeja de Elemental (RF-47, RF-48, RF-75, RF-83). */
 export interface BandejaDeRequisiciones {
   requisiciones: RequisicionEnLaLista[];
+  /** Spec 047, RF-49, RF-50: las de pagos de OCC en autorización, con «OCC», por viernes. */
+  pagosOcc: RequisicionOccEnLaLista[];
   resumen: { esperan: number; urgentes: number; vencidas: number };
   /** RF-75: no hay ninguna Administradora activa; lo de su paso espera a la Gerencia. */
   sinAdministradora: boolean;
