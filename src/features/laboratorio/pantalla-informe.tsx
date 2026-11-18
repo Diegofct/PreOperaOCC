@@ -117,21 +117,25 @@ export default function PantallaInforme() {
   }, []);
 
   return (
-    <MarcoPantalla
+    <MarcoPantalla ancho="formulario"
       modulo="laboratorio"
       exigeObra
       titulo="Informe para imprimir"
       descripcion="Al imprimir sale solo la hoja, sin el menú del panel. Para PDF, escoja «Guardar como PDF» en el diálogo de impresión."
       error={ensayo.error}
       cargando={ensayo.cargando}
-    >
-      <Acciones>
+      registro={detalle?.numeroInforme ?? undefined}
+      // Spec 050, RF-30: imprimir es la acción de esta pantalla.
+      acciones={
         <Boton
           titulo="Imprimir o guardar PDF"
           onPress={() => {
             if (Platform.OS === 'web') window.print();
           }}
         />
+      }
+    >
+      <Acciones>
         <Boton
           titulo="Volver al ensayo"
           tono="secundario"

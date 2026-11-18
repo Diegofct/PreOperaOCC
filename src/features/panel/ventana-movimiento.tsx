@@ -71,7 +71,7 @@ export function VentanaMovimiento({
    * que se quedaban aquí y cualquier otro se iba al aviso de la página, detrás
    * del telón; ahora el hook los trata todos igual.
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
 
   const centesimas = cantidad.trim() === '' ? null : aCentesimas(cantidad);
   const faltas = validarMovimiento(

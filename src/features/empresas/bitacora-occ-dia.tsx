@@ -24,6 +24,7 @@ import { api } from '@/features/panel/cliente-api';
 import {
   Acciones,
   AccionesFormulario,
+  ANCHOS_DE_CAMPO,
   Aviso,
   Boton,
   Campo,
@@ -162,7 +163,7 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
     },
     { clave: 'reporto', titulo: 'Reportó', ancho: 140, pintar: (r) => <Celda lineas={2}>{r.origen?.reportadoPor ?? '—'}</Celda> },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 94,
@@ -173,12 +174,12 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
 
   const columnasDeTrabajos: Columna<TrabajoDeMantenimiento>[] = [
     { clave: 'hora', titulo: 'Hora', ancho: 70, pintar: (t) => <Celda>{t.hora}</Celda> },
-    { clave: 'equipo', titulo: 'Equipo', ancho: 210, pintar: (t) => celdaDeEquipo(t) },
+    { clave: 'equipo', principal: true, titulo: 'Equipo', ancho: 210, pintar: (t) => celdaDeEquipo(t) },
     { clave: 'tipo', titulo: 'Tipo', ancho: 170, pintar: (t) => <Celda>{NOMBRE_DE_TIPO_DE_TRABAJO[t.tipo]}</Celda> },
     { clave: 'descripcion', titulo: 'Qué se hizo', ancho: 370, pintar: (t) => <Celda lineas={3}>{t.descripcion}</Celda> },
     { clave: 'reporto', titulo: 'Reportó', ancho: 130, pintar: (t) => <Celda lineas={2}>{t.reportadoPor}</Celda> },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 94,
@@ -201,7 +202,7 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
     { clave: 'actividad', titulo: 'Actividad', ancho: 520, pintar: (a) => <Celda lineas={3}>{a.descripcion}</Celda> },
     { clave: 'equipo', titulo: 'Equipo', ancho: 220, pintar: (a) => (a.equipo ? celdaDeEquipo(a.equipo) : <Celda>—</Celda>) },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 94,
@@ -220,7 +221,7 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
     { clave: 'texto', titulo: 'Pendiente', ancho: 640, pintar: (p) => <Celda lineas={3}>{p.texto}</Celda> },
     { clave: 'equipo', titulo: 'Equipo', ancho: 260, pintar: (p) => (p.equipo ? celdaDeEquipo(p.equipo) : <Celda>—</Celda>) },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 94,
@@ -243,14 +244,19 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
       descripcion={`Al final del día: ${equiposEn(dia.operativos, 'operativo')} y ${equiposEn(dia.inoperativos, 'inoperativo')}.`}
       error={cargado.error}
       cargando={cargado.cargando}
+      // Spec 050, RF-30: cerrar y anular el día van en el encabezado; volver y el estado, en el cuerpo.
+      acciones={
+        <>
+          {!cerrada ? <Boton titulo="Cerrar el día" onPress={() => setCerrando(true)} /> : null}
+          <Boton titulo="Anular" tono="peligro" onPress={() => setAnulando(true)} />
+        </>
+      }
     >
       <Acciones>
         <Boton titulo="← Volver a los días" tono="secundario" onPress={alVolver} />
         <Etiqueta tono={cerrada ? 'neutro' : dia.estado === 'incompleta' ? 'atencion' : 'bueno'}>
           {cerrada ? 'Cerrada' : dia.estado === 'incompleta' ? 'Incompleta' : dia.estado === 'en_espera' ? 'En espera' : 'Armada'}
         </Etiqueta>
-        {!cerrada ? <Boton titulo="Cerrar el día" onPress={() => setCerrando(true)} /> : null}
-        <Boton titulo="Anular" tono="peligro" onPress={() => setAnulando(true)} />
       </Acciones>
 
       {dia.fechaDudosa && !cerrada ? (
@@ -267,8 +273,9 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
         </Aviso>
       ) : null}
 
-      <Acciones>
-        <Selector etiqueta="Equipo" valor={equipo} opciones={equipos} onChange={setEquipo} permiteVacio vacio="Todos los equipos" ancho={260} />
+      {/* Spec 050, RF-25: los filtros en rejilla, no en el grupo de botones. */}
+      <Formulario desnudo>
+        <Selector etiqueta="Equipo" valor={equipo} opciones={equipos} onChange={setEquipo} permiteVacio vacio="Todos los equipos" ancho={ANCHOS_DE_CAMPO.medio} />
         <Selector
           etiqueta="Quedó"
           valor={estado}
@@ -279,9 +286,9 @@ export function DiaDeLaBitacoraDeOcc({ fecha, alVolver }: { fecha: string; alVol
           onChange={setEstado}
           permiteVacio
           vacio="Todos"
-          ancho={200}
+          ancho={ANCHOS_DE_CAMPO.medio}
         />
-      </Acciones>
+      </Formulario>
 
       <Seccion titulo="Estado de los equipos">
         <Tabla columnas={columnasDeEstado} filas={visto.estadoEquipos} vacio={vacio('Todavía no llega la lista de equipos de este día.')} />

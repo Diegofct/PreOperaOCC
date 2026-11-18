@@ -36,8 +36,10 @@ import {
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import type { EmpresaId } from '@/shared/rules/empresas';
 
+import { useAvisos } from '../avisos';
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
 import {
+  ANCHOS_DE_CAMPO,
   Acciones,
   AccionesFormulario,
   Aviso,
@@ -47,15 +49,15 @@ import {
   Casilla,
   Celda,
   Confirmacion,
-  FilaDeFormulario,
+  Formulario,
   Modal,
+  Paginacion,
   Seccion,
   Selector,
   SelectorDeHora,
   Tabla,
   type Columna,
   type Opcion,
-  Paginacion,
 } from '../componentes';
 import type { DetalleDePropuesta, ExcepcionFila } from '../contratos';
 import { useListado } from '../marco';
@@ -221,7 +223,7 @@ export function NoSePudoGuardar({ opcionesDeObra, empresa }: { opcionesDeObra: O
       ),
     },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué',
       ancho: 220,
       anchoMinimo: 150,
@@ -278,7 +280,8 @@ export function NoSePudoGuardar({ opcionesDeObra, empresa }: { opcionesDeObra: O
         Lo que el sistema no pudo guardar solo. Complételo y guárdelo, o descártelo con un motivo. Lo que no es un
         renglón (la fecha, una bitácora cerrada) se reintenta.
       </Ayuda>
-      <Acciones>
+      {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+      <Formulario desnudo>
         {esGerencia && !obraDeLaRuta && !deEmpresa ? (
           <Selector
             etiqueta="Obra"
@@ -287,11 +290,11 @@ export function NoSePudoGuardar({ opcionesDeObra, empresa }: { opcionesDeObra: O
             onChange={setObraId}
             vacio="Todas las obras"
             permiteVacio
-            ancho={280}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
         ) : null}
         <CamposDeFechas filtro={fechas} />
-      </Acciones>
+      </Formulario>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {lista.error ? <Aviso tono="error">{lista.error}</Aviso> : null}
       {anteriores > 0 ? (
@@ -377,6 +380,8 @@ function VentanaDescartar({
 }) {
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   return (
     <Modal titulo="Descartar" onCerrar={alCerrar} angosta>
@@ -395,7 +400,7 @@ function VentanaDescartar({
               await api.whatsapp.excepciones.descartar(excepcion.id, motivo);
               alDescartar();
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
             } finally {
               setEnviando(false);
             }
@@ -426,6 +431,8 @@ function VentanaCompletar({
   const [fecha, setFecha] = useState(excepcion.fecha ?? '');
   const [faltas, setFaltas] = useState<Falta[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [guardando, setGuardando] = useState(false);
 
   const cambiar = (cambio: Record<string, unknown>) => setDatos((d) => ({ ...d, ...cambio }));
@@ -441,7 +448,7 @@ function VentanaCompletar({
     } catch (fallo) {
       const cuerpo = fallo instanceof ErrorApi ? (fallo.cuerpo as { faltas?: Falta[] } | undefined) : undefined;
       setFaltas(cuerpo?.faltas ?? []);
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }
@@ -453,14 +460,15 @@ function VentanaCompletar({
       {detalle.error ? <Aviso tono="error">{detalle.error}</Aviso> : null}
       {!opciones ? null : (
         <>
-          {excepcion.fecha ? (
-            <Ayuda>{`Día del reporte: ${excepcion.fecha}`}</Ayuda>
-          ) : (
-            <Campo etiqueta="Día del reporte" valor={fecha} onChange={setFecha} ayuda="AAAA-MM-DD" ancho={160} />
-          )}
-          <FilaDeFormulario ultima>
+          {excepcion.fecha ? <Ayuda>{`Día del reporte: ${excepcion.fecha}`}</Ayuda> : null}
+          {/* Spec 050, RF-25: en rejilla, como los formularios, y no en la fila de la bitácora, que lleva
+              su propio relleno y línea. Dentro de la rejilla, los anchos del renglón caen en la escala. */}
+          <Formulario desnudo>
+            {excepcion.fecha ? null : (
+              <Campo etiqueta="Día del reporte" valor={fecha} onChange={setFecha} ayuda="AAAA-MM-DD" ancho={ANCHOS_DE_CAMPO.corto} />
+            )}
             <CamposDelRenglon seccion={excepcion.seccion} datos={datos} cambiar={cambiar} opciones={opciones} />
-          </FilaDeFormulario>
+          </Formulario>
           <FaltasDelRenglon faltas={faltas} />
           {error ? <Aviso tono="error">{error}</Aviso> : null}
           <AccionesFormulario>

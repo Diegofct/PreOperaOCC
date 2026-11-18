@@ -1,6 +1,6 @@
 # Spec 033 — Grupo empresarial: tarjetas y menú por empresa
 
-> Estado: **Cumplida en dev** el 2026-10-29 (ver `validacion.md`); producción con la T23, que espera a las specs 036 a 038 (RF-53) · plan aprobado el 2026-10-27 · aprobada el 2026-10-26 · Fecha: 2026-10-26
+> Estado: **Cumplida en dev** el 2026-10-29 (ver `validacion.md`); producción con la T23, que espera a las specs 036 a 038 (RF-53) · plan aprobado el 2026-10-27 · aprobada el 2026-10-26 · Fecha: 2026-10-26 · **Modificada por la spec 050** (2026-11-18): la portada de cada empresa y obra es su Asistente; se retira el Resumen del día de la obra; el menú va por secciones (Día a día, Planeación y contrato, Materiales y calidad, Personal y archivo) — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 > Cambio del 2026-10-27 (al aprobar el plan): Proyectos no tiene corte propio; RF-2, RF-3, RF-34 y RF-41 ajustados.
 > Cambio del 2026-10-27 (en la T21): el menú de la obra también lleva Preoperacionales y Asignaciones; RF-17 ajustado.
 > Cambio del 2026-10-27 (menús definitivos, explicado por el usuario antes de la T22): Elemental presta los servicios administrativos del grupo; nuevos menús en RF-13 a RF-17; salen del menú Información de la empresa, Información financiera y Consolidado (los cortes pasan a Tesorería, spec 037); RF-49 a RF-53 nuevos. Módulos nuevos en sus specs: Documentos (034), Recursos Humanos (035), Compras (036), Tesorería (037), WhatsApp y Bitácora de OCC y Geolab (038). Todo sube a producción junto.

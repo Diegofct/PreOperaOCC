@@ -32,9 +32,9 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import type { MaterialParaImportar } from '@/features/panel/almacen-importacion';
-import { Acciones, Aviso, Boton, Campo, Modal, Selector } from '@/features/panel/componentes';
+import { Acciones, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import { OPCIONES_DE_UNIDAD } from '@/features/panel/ventana-material';
 import { abreviaturaDeUnidad, nombreDeUnidad, type UnidadAlmacen } from '@/shared/catalogos/almacen';
 import { CLAVE_OTRO_MATERIAL, MATERIALES_DE_OCC } from '@/shared/catalogos/materiales';
@@ -173,21 +173,32 @@ export function VentanaDeRenglon({
         {/* RF-16, RF-83: por qué se descartó una cifra; se corrige escribiéndola. */}
         {r.revisar ? <Aviso tono="error">{`${r.revisar} Escriba la cifra correcta o quite el renglón.`}</Aviso> : null}
 
-        <Selector etiqueta="Material del Almacén" valor={valorSelector} opciones={opciones} onChange={escogerMaterial} vacio="Escoja el material" obligatorio />
-        {r.material?.tipo === 'nuevo' && !r.material.deLaLista ? (
-          <Campo etiqueta="Nombre del material nuevo" valor={nombreOtro} onChange={setNombreOtro} obligatorio />
-        ) : null}
-        {r.material?.tipo === 'nuevo' ? (
-          <Selector etiqueta="Unidad del material nuevo" valor={r.material.unidad} opciones={OPCIONES_DE_UNIDAD} onChange={escogerUnidad} vacio="Escoja la unidad" obligatorio />
-        ) : null}
+        {/* Spec 050, RF-25: los campos en rejilla, con los anchos de la escala y sin filas hechas a mano. */}
+        <Formulario desnudo>
+          <Selector etiqueta="Material del Almacén" valor={valorSelector} opciones={opciones} onChange={escogerMaterial} vacio="Escoja el material" obligatorio />
+          {r.material?.tipo === 'nuevo' && !r.material.deLaLista ? (
+            <Campo etiqueta="Nombre del material nuevo" valor={nombreOtro} onChange={setNombreOtro} obligatorio />
+          ) : null}
+          {r.material?.tipo === 'nuevo' ? (
+            <Selector
+              etiqueta="Unidad del material nuevo"
+              valor={r.material.unidad}
+              opciones={OPCIONES_DE_UNIDAD}
+              onChange={escogerUnidad}
+              vacio="Escoja la unidad"
+              obligatorio
+              ancho={ANCHOS_DE_CAMPO.medio}
+            />
+          ) : null}
+        </Formulario>
 
-        <View style={estilos.fila}>
+        <Formulario desnudo>
           {unidadDistinta ? (
             <Campo
               etiqueta={`Factor: ${abreviaturaDeUnidad(unidad)} por cada ${r.unidadEnDocumento}`}
               valor={textoFactor}
               onChange={escribirFactor}
-              ancho={240}
+              ancho={ANCHOS_DE_CAMPO.medio}
               ayuda={r.conversion ? `De: ${r.conversion.fuente}` : 'Vacío si el documento no dice cuánto trae cada una.'}
             />
           ) : null}
@@ -195,21 +206,24 @@ export function VentanaDeRenglon({
             etiqueta={unidad ? `Cantidad en ${nombreDeUnidad(unidad).toLowerCase()}` : 'Cantidad'}
             valor={textoCantidad}
             onChange={escribirCantidad}
-            ancho={200}
+            ancho={ANCHOS_DE_CAMPO.medio}
             ayuda="Hasta dos decimales."
           />
-        </View>
-
-        <View style={estilos.fila}>
-          <Campo etiqueta="Valor unitario" valor={textoValor} onChange={escribirValor} ancho={200} ayuda="Como lo trae el documento." />
+          <Campo
+            etiqueta="Valor unitario"
+            valor={textoValor}
+            onChange={escribirValor}
+            ancho={ANCHOS_DE_CAMPO.medio}
+            ayuda="Como lo trae el documento."
+          />
           <Campo
             etiqueta="Por cada"
             valor={r.valorUnidad ?? ''}
             onChange={(valorUnidad) => setR({ ...r, valorUnidad: valorUnidad || null })}
-            ancho={160}
+            ancho={ANCHOS_DE_CAMPO.corto}
             ayuda="La unidad del documento."
           />
-        </View>
+        </Formulario>
 
         <Acciones>
           <Boton titulo="Aceptar" tono="primario" onPress={aceptar} />
@@ -222,9 +236,8 @@ export function VentanaDeRenglon({
 }
 
 const estilos = StyleSheet.create({
-  columna: { gap: 12 },
-  fila: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
-  documento: { gap: 2, paddingBottom: 4 },
+  columna: { gap: Spacing.two + Spacing.one },
+  documento: { gap: Spacing.half, paddingBottom: Spacing.one },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   pie: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 });

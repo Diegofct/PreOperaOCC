@@ -1,6 +1,6 @@
 # Spec 035 — Recursos Humanos: ficha y documentos de cada persona
 
-> Estado: **Cumplida en dev** el 2026-10-29 (aprobada el 2026-10-28; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28
+> Estado: **Cumplida en dev** el 2026-10-29 (aprobada el 2026-10-28; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28 · **Modificada por la spec 050** (2026-11-18): la lista de personal filtra por estado con cifras en lugar del selector; Recursos Humanos entra al Asistente (D12) — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 > Respuestas del usuario del 2026-10-28 (D1 a D7, abajo): salario en la ficha; Recursos Humanos lo llevan gerencia y las auxiliares administrativas de Elemental (acceso nuevo), que ven todo lo de Elemental, salario incluido; el residente, el Encargado de OCC y el laboratorista consultan el personal de su obra o su empresa; avisos de ficha incompleta; para retirar se exigen liquidación, paz y salvo y el examen médico de retiro o el consentimiento firmado de no hacerlo.
 
 ## Contexto y objetivo

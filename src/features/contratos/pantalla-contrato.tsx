@@ -50,7 +50,7 @@ export default function PantallaContrato() {
   const obraId = veTodas ? obraElegida || null : null;
 
   return (
-    <MarcoPantalla
+    <MarcoPantalla ancho="formulario"
       modulo="contrato"
       exigeObra
       titulo="Contrato y Presupuesto"

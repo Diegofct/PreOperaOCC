@@ -14,6 +14,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 
+import { useAvisos } from '@/features/panel/avisos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
@@ -286,7 +287,7 @@ function Historial({ cortes, alAnular }: { cortes: CorteFila[]; alAnular: ((cort
     ...(alAnular
       ? [
           {
-            clave: 'anular',
+            clave: 'anular', acciones: true,
             titulo: '',
             ancho: 110,
             anchoMinimo: 110,
@@ -307,7 +308,8 @@ function Historial({ cortes, alAnular }: { cortes: CorteFila[]; alAnular: ((cort
 function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerrar: () => void; alAnular: () => void }) {
   const [motivo, setMotivo] = useState('');
   const [ocupado, setOcupado] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
 
   async function anular() {
     setOcupado(true);
@@ -315,7 +317,7 @@ function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerr
       await api.cortes.anular(corte.id, motivo);
       alAnular();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setOcupado(false);
     }
   }
@@ -329,7 +331,6 @@ function VentanaAnular({ corte, alCerrar, alAnular }: { corte: CorteFila; alCerr
         obligatorio
         ayuda="Queda en el historial con su nombre. Después puede registrar el corte correcto."
       />
-      {error ? <Aviso tono="error">{error}</Aviso> : null}
       <AccionesFormulario>
         <Boton
           titulo="Confirmar anulación"

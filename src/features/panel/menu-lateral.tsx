@@ -2,14 +2,20 @@
  * El menú lateral del panel. Spec 022, RF-1 a RF-14; desde la spec 033, uno por empresa
  * y por obra (RF-10, RF-11, RF-13 a RF-18, RF-20).
  *
- * Qué lleva sale de `menuDelLugar` (rules/empresas), según dónde se está —que lo dice
- * la dirección— y lo que el rol alcanza: el menú reparte, no da permisos (RF-21). Arriba,
- * «← Empresas» y «Cambiar de obra» para la gerencia; debajo, el nombre de la empresa (y
- * de la obra) y sus páginas. El activo es la página de la dirección (RF-6).
+ * Qué lleva sale de `menuPorSecciones` (rules/empresas), según dónde se está —que lo dice
+ * la dirección— y lo que el rol alcanza: el menú reparte, no da permisos (RF-21). Desde la
+ * spec 050 (RF-1, RF-2, RF-8, RF-67, RF-68), de arriba abajo: «← Empresas» para la gerencia;
+ * la marca de la empresa o el nombre de la obra, con «Cambiar de obra» debajo; el Asistente
+ * solo y sin título; y las secciones, siempre abiertas y cada una con su título. En las
+ * tarjetas de la gerencia no hay secciones: van las cuatro empresas, como antes. El activo
+ * es la página de la dirección (RF-6).
  *
  * Plegado deja solo los íconos (RF-9). El nombre aparece al pasar el puntero o al
  * llegar con el tabulador (RF-10), en una etiqueta que se dibuja **fuera** de la
  * lista: la lista se desplaza, y todo lo que se sale de un desplazable se recorta.
+ * Desde la spec 050 la etiqueta dice también la sección («Materiales y calidad ·
+ * Almacén», RF-12), porque plegado los títulos de sección son una raya (RF-11); y
+ * sale también al mantener pulsado el ícono, que en una tableta no hay puntero.
  *
  * En ventana angosta (régimen `riel`) el menú ocupa siempre su columna plegada, y
  * al abrirlo se dibuja **encima** del contenido, con el telón detrás (RF-12, RF-13):
@@ -40,6 +46,7 @@ import {
   type EmpresaId,
   type EnlaceDelMenu as Enlace,
   menuDelLugar,
+  menuPorSecciones,
 } from '@/shared/rules/empresas';
 import { MODULOS, type Modulo } from '@/shared/rules/permisos';
 
@@ -62,6 +69,8 @@ interface Bloque {
   titulo: string | null;
   subtitulo: string | null;
   enlaces: Enlace[];
+  /** Es una sección del menú (spec 050): su título va también en la etiqueta del plegado. */
+  esSeccion?: boolean;
 }
 
 /** El dibujo de cada enlace: el del módulo si es uno, y los propios de la spec 033. */
@@ -105,10 +114,15 @@ function MenuConSesion() {
   const lugar = useLugarDelPanel();
   const obra = useObraDelLugar();
   const menu = menuDelLugar(lugar, persona, obra?.modulos);
+  const porSecciones = menuPorSecciones(lugar, persona, obra?.modulos);
   // Spec 049: la marca de la empresa y el título; dentro de una obra, su nombre (RF-24).
   const cabecera = cabeceraDelMenu(lugar, obra?.nombre ?? null);
   const enObra = lugar?.tipo === 'obra';
   const activo = lugar && lugar.tipo !== 'proyectos' ? lugar.pagina : null;
+  // Dentro de una empresa o de una obra el menú va por secciones (spec 050); en las tarjetas
+  // de la gerencia y en la lista de obras, la lista de siempre.
+  const conSecciones = lugar?.tipo === 'empresa' || enObra;
+  const cambiarDeObra = menu.navegacion.filter((enlace) => enlace.clave === 'cambiar-obra');
 
   const bloques: Bloque[] = [
     {
@@ -116,17 +130,38 @@ function MenuConSesion() {
       marca: null,
       titulo: null,
       subtitulo: null,
-      enlaces: menu.navegacion,
+      // «Cambiar de obra» va debajo del nombre de la obra (050/RF-68), no aquí.
+      enlaces: menu.navegacion.filter((enlace) => enlace.clave !== 'cambiar-obra'),
     },
     {
-      clave: 'paginas',
+      clave: 'cabecera',
       // La marca de la empresa (spec 049); el nombre de la obra va debajo del ícono de
       // Proyectos, en la letra que se lee (RF-24), y no como rótulo en mayúsculas.
       marca: cabecera.marca,
       titulo: enObra ? null : cabecera.titulo,
       subtitulo: enObra ? cabecera.titulo : null,
-      enlaces: menu.entradas,
+      enlaces: conSecciones ? cambiarDeObra : menu.entradas,
     },
+    ...(conSecciones
+      ? [
+          // El Asistente, primero y sin título (050/RF-8).
+          {
+            clave: 'asistente',
+            marca: null,
+            titulo: null,
+            subtitulo: null,
+            enlaces: porSecciones.asistente ? [porSecciones.asistente] : [],
+          },
+          ...porSecciones.secciones.map((seccion) => ({
+            clave: `seccion-${seccion.titulo}`,
+            marca: null,
+            titulo: seccion.titulo,
+            subtitulo: null,
+            enlaces: seccion.enlaces,
+            esSeccion: true,
+          })),
+        ]
+      : []),
   ].filter((b) => b.enlaces.length > 0 || b.titulo !== null || b.marca !== null);
 
   const [desplazado, setDesplazado] = useState(0);
@@ -261,7 +296,14 @@ function Grupo({
           abierto={abierto}
           alElegir={alElegir}
           alSenalar={(centro) =>
-            alSenalar(centro === null ? null : enlace.titulo, arriba + (centro ?? 0))
+            alSenalar(
+              centro === null
+                ? null
+                : bloque.esSeccion && bloque.titulo
+                  ? `${bloque.titulo} · ${enlace.titulo}`
+                  : enlace.titulo,
+              arriba + (centro ?? 0),
+            )
           }
         />
       ))}
@@ -304,6 +346,13 @@ function EnlaceDelMenu({
       onBlur={() => {
         setEnfocado(false);
         alSenalar(null);
+      }}
+      // Spec 050, RF-12: en una pantalla táctil no hay puntero; mantener pulsado muestra la
+      // etiqueta, y soltar la quita. Una pulsación larga no navega: el `onPress` del `Link`
+      // no llega después de un `onLongPress`.
+      onLongPress={abierto ? undefined : () => alSenalar(centro)}
+      onPressOut={abierto ? undefined : () => {
+        if (!encima && !enfocado) alSenalar(null);
       }}
       // Plegado, el nombre no se ve: el lector de pantalla lo necesita igual.
       accessibilityLabel={enlace.titulo}
@@ -520,6 +569,10 @@ const estilos = StyleSheet.create({
   /** El nombre del módulo junto al ícono, con el menú plegado (RF-10). */
   etiqueta: {
     position: 'absolute',
+    // Tan ancha como su texto (spec 050, RF-12): con la sección delante, «Materiales y calidad ·
+    // Almacén» se partía en tres renglones, porque una caja absoluta se encoge al ancho de la
+    // columna plegada. `max-content` es de la web, que es donde vive el panel.
+    width: 'max-content' as unknown as number,
     transform: [{ translateY: '-50%' }],
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.one + Spacing.half,

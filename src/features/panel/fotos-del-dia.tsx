@@ -23,6 +23,7 @@ import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from './cliente-api';
 import { Acciones, AccionesFormulario, Aviso, Ayuda, Boton, Campo, Modal } from './componentes';
 import type { FotoDelDiaFila, FotosDelDiaFila } from '@/features/panel/contratos';
@@ -186,6 +187,8 @@ function VentanaQuitar({
 }) {
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   async function quitar() {
@@ -199,7 +202,7 @@ function VentanaQuitar({
       await api.partes.quitarFoto(parteId, foto.id, motivo);
       alQuitar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }

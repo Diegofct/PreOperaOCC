@@ -58,7 +58,7 @@ export function PestanaActividades({ consulta }: { consulta: ConsultaDeReporte }
 
   const columnas: Columna<Item>[] = [
     { clave: 'item', titulo: 'Ítem', ancho: 80, pintar: (i) => <Celda>{i.item}</Celda> },
-    { clave: 'actividad', titulo: 'Actividad', ancho: 300, pintar: (i) => <Celda lineas={2}>{i.nombre}</Celda> },
+    { clave: 'actividad', principal: true, titulo: 'Actividad', ancho: 300, pintar: (i) => <Celda lineas={2}>{i.nombre}</Celda> },
     {
       clave: 'capitulo',
       titulo: 'Capítulo',
@@ -88,7 +88,7 @@ export function PestanaActividades({ consulta }: { consulta: ConsultaDeReporte }
         ),
     },
     {
-      clave: 'detalle',
+      clave: 'detalle', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,
@@ -101,7 +101,7 @@ export function PestanaActividades({ consulta }: { consulta: ConsultaDeReporte }
   ];
   const columnasDeOtras: Columna<Otra>[] = [
     { clave: 'fecha', titulo: 'Día', ancho: 80, pintar: (o) => <Celda>{diaCorto(o.fecha)}</Celda> },
-    { clave: 'actividad', titulo: 'Actividad', ancho: 220, pintar: (o) => <Celda lineas={2}>{o.nombre}</Celda> },
+    { clave: 'actividad', principal: true, titulo: 'Actividad', ancho: 220, pintar: (o) => <Celda lineas={2}>{o.nombre}</Celda> },
     { clave: 'descripcion', titulo: 'Descripción', ancho: 280, pintar: (o) => <Celda lineas={2}>{o.descripcion || '—'}</Celda> },
     {
       clave: 'cantidad',
@@ -245,7 +245,7 @@ export function PestanaCalidad({ consulta }: { consulta: ConsultaDeReporte }) {
       pintar: (e) => <Celda>{e.resultado === null ? '—' : `${cifra(e.resultado, 2)} ${e.unidad ?? ''}`}</Celda>,
     },
     {
-      clave: 'ver',
+      clave: 'ver', acciones: true,
       titulo: '',
       ancho: 130,
       anchoMinimo: 130,

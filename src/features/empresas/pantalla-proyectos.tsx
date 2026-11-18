@@ -13,7 +13,7 @@
  * listar. A quien administra las obras se le señala la que no tiene Director de Obra (RF-44).
  */
 
-import { Link, useLocalSearchParams, type Href } from 'expo-router';
+import { Link, Redirect, useLocalSearchParams, type Href } from 'expo-router';
 import { useCallback } from 'react';
 import { Platform, Pressable, StyleSheet, Text } from 'react-native';
 
@@ -22,9 +22,8 @@ import { api } from '@/features/panel/cliente-api';
 import { Aviso, Celda, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
 import type { ObraFila } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
-import { Portada } from '@/features/panel/pantalla-inicio';
 import { usePersona } from '@/features/panel/sesion';
-import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, rutaDeObra } from '@/shared/rules/empresas';
+import { alcanzaLaEmpresa, alcanzaLaObraDeLaRuta, portadaDelLugar, rutaDeObra } from '@/shared/rules/empresas';
 import { alcanza, rolVeTodasLasObras } from '@/shared/rules/permisos';
 
 import { PantallaSinAcceso } from './pantallas-de-aviso';
@@ -149,12 +148,18 @@ function SuObra() {
   );
 }
 
-/** `/panel/proyectos/<obra>`: el resumen del día de esa obra (el Inicio de antes). */
+/**
+ * `/panel/proyectos/<obra>`: la portada de la obra, que desde la spec 050 es su Asistente (RF-84;
+ * si el cargo no lo ve, la primera entrada de su menú: RF-85). Hasta entonces era una pantalla con
+ * las cifras del día, que se retiró (RF-86, D10); una dirección guardada de ella llega aquí y
+ * sigue al Asistente (RF-87).
+ */
 export function PortadaDeLaObra() {
   const persona = usePersona();
   const { obra } = useLocalSearchParams<{ obra: string }>();
   if (!alcanzaLaObraDeLaRuta(persona, obra)) return <PantallaSinAcceso />;
-  return <Portada obraId={obra} />;
+  const portada = portadaDelLugar({ tipo: 'obra', obraId: obra, pagina: null }, persona);
+  return portada ? <Redirect href={portada as Href} /> : <PantallaSinAcceso />;
 }
 
 const estilos = StyleSheet.create({

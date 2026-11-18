@@ -12,6 +12,7 @@ import { useCallback, useState } from 'react';
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '@/shared/rules/horas';
 import { motivoParaNoDarDeBajaObra } from '@/shared/rules/permisos';
 
+import { useAvisos } from './avisos';
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -20,7 +21,6 @@ import {
   Campo,
   Celda,
   Confirmacion,
-  Confirmado,
   Etiqueta,
   Formulario,
   Seccion,
@@ -37,7 +37,7 @@ import type { ObraFila } from './contratos';
 import { POR_PAGINA, usePaginacion } from './usar-listado-filtrado';
 
 export default function PantallaObras() {
-  const listado = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
+  const listado = useListado<ObraFila>(useCallback(() => api.obras.listar(), []), { conCampos: true });
   const puedeDarDeBaja = motivoParaNoDarDeBajaObra(usePersona().rol) === null;
 
   const [codigo, setCodigo] = useState('');
@@ -51,7 +51,11 @@ export default function PantallaObras() {
 
   const [editando, setEditando] = useState<ObraFila | null>(null);
   const [porDarDeBaja, setPorDarDeBaja] = useState<ObraFila | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
 
   async function crear() {
     const creada = await listado.ejecutar(() =>
@@ -67,7 +71,7 @@ export default function PantallaObras() {
       }),
     );
     if (creada) {
-      setHecho(nombre + ' quedó registrada.');
+      avisarHecho(nombre + ' quedó registrada.');
       setCodigo('');
       setNombre('');
       setMunicipio('');
@@ -78,7 +82,7 @@ export default function PantallaObras() {
 
   const columnas: Columna<ObraFila>[] = [
     { clave: 'codigo', titulo: 'Código', ancho: 120, pintar: (o) => <Celda>{o.codigo}</Celda> },
-    { clave: 'nombre', titulo: 'Nombre', ancho: 320, pintar: (o) => <Celda>{o.nombre}</Celda> },
+    { clave: 'nombre', principal: true, titulo: 'Nombre', ancho: 320, pintar: (o) => <Celda>{o.nombre}</Celda> },
     {
       clave: 'municipio',
       titulo: 'Municipio',
@@ -105,7 +109,6 @@ export default function PantallaObras() {
               titulo="Dar de baja"
               tono="peligro"
               onPress={() => {
-                setHecho(null);
                 setPorDarDeBaja(o);
               }}
             />
@@ -158,7 +161,6 @@ export default function PantallaObras() {
         </Formulario>
       </Seccion>
 
-      <Confirmado mensaje={hecho} />
 
       {porDarDeBaja ? (
         <Confirmacion
@@ -172,7 +174,7 @@ export default function PantallaObras() {
             await api.obras.darDeBaja(obra.id);
             setPorDarDeBaja(null);
             listado.recargar();
-            setHecho(obra.nombre + ' quedó dada de baja.');
+            avisarHecho(obra.nombre + ' quedó dada de baja.');
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -184,7 +186,7 @@ export default function PantallaObras() {
           onCerrar={() => setEditando(null)}
           onGuardado={(nombreObra) => {
             setEditando(null);
-            setHecho(nombreObra + ' quedó corregida.');
+            avisarHecho(nombreObra + ' quedó corregida.');
             listado.recargar();
           }}
         />

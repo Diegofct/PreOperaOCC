@@ -22,6 +22,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, Campo, Casilla, Modal } from '@/features/panel/componentes';
 import type { PlanificacionDetalle } from '@/features/panel/planificacion';
@@ -60,6 +61,8 @@ export function AccionesPlanificacion({
   const [motivo, setMotivo] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [cambio, setCambio] = useState(false);
 
   const puedeAprobar = p.estado === 'borrador' && alcanza(rol, 'planificacion', 'aprobar');
@@ -90,7 +93,7 @@ export function AccionesPlanificacion({
       setCambio(fallo instanceof ErrorApi && fallo.estado === 409 && !(fallo.cuerpo as { hallazgos?: unknown } | undefined)?.hallazgos);
       // RF-132: lo que impide aprobar, con su ítem, rubro o renglón.
       setImpedimentos(fallo instanceof ErrorApi ? ((fallo.cuerpo as { impedimentos?: ImpedimentoParaAprobar[] } | undefined)?.impedimentos ?? []) : []);
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -114,7 +117,7 @@ export function AccionesPlanificacion({
         setBorradorQueSeSustituye(borrador.numeroVersion);
         setVentana('copiar');
       } else {
-        setError(mensajeDe(fallo));
+        avisos.error(mensajeDe(fallo));
       }
     } finally {
       setEnviando(false);

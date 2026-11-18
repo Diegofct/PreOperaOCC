@@ -16,6 +16,7 @@ import { Image, Platform, StyleSheet, View } from 'react-native';
 
 import { Panel, Radio, Spacing } from '@/constants/theme';
 
+import { useAvisos } from './avisos';
 import { Acciones, Ayuda, Aviso, Boton } from './componentes';
 import { cabeceraDeObraEnUso, mensajeDe } from './cliente-api';
 
@@ -46,6 +47,8 @@ export function SubirFoto({
 }) {
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
 
   function elegir() {
     if (Platform.OS !== 'web') return;
@@ -77,7 +80,7 @@ export function SubirFoto({
         }
         alSubir();
       } catch (fallo) {
-        setError(mensajeDe(fallo));
+        avisos.error(mensajeDe(fallo));
       } finally {
         setSubiendo(false);
       }

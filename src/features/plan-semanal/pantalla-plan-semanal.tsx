@@ -23,7 +23,7 @@ import { StyleSheet, View } from 'react-native';
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api } from '@/features/panel/cliente-api';
 import { Boton, Celda, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
-import { MarcoPantalla, useListado } from '@/features/panel/marco';
+import { MarcoPantalla, type PartesDeLaAccion, useListado } from '@/features/panel/marco';
 import type { ListaDePlanesSemanales, PlanSemanalFila } from '@/features/panel/plan-semanal';
 import { usePersona } from '@/features/panel/sesion';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
@@ -82,26 +82,19 @@ export default function PantallaPlanSemanal() {
     },
   ];
 
-  return (
+  // Spec 050, RF-30: «Proponer con IA», «Subir Excel» y «Empezar en blanco» van en el encabezado; su
+  // progreso y sus ventanas, en la página. Las dos piezas salen de `ArmarPlanSemanal`, que guarda el estado.
+  const pintar = ({ botones, cuerpo }: PartesDeLaAccion) => (
     <MarcoPantalla
       exigeObra
       titulo="Plan semanal"
       descripcion="El plan de trabajo de cada semana: qué se va a ejecutar, con qué gente, máquinas y materiales. Una vez aprobado, es la meta con que se mide el cumplimiento de esa semana."
       error={carga.error}
       cargando={carga.cargando}
+      acciones={botones ?? undefined}
     >
       <View style={estilos.bloques}>
-        {obraId && puedeArmar && carga.datos[0] ? (
-          <ArmarPlanSemanal
-            key={obraId}
-            obraId={obraId}
-            lista={lista}
-            alTerminar={(id) => {
-              setElegido(id);
-              carga.recargar();
-            }}
-          />
-        ) : null}
+        {cuerpo}
         <Seccion titulo="Planes de la obra">
           <Tabla filas={lista.planes} columnas={columnas} vacio="Esta obra todavía no tiene planes semanales." />
         </Seccion>
@@ -121,6 +114,23 @@ export default function PantallaPlanSemanal() {
         ) : null}
       </View>
     </MarcoPantalla>
+  );
+
+  // Sin obra, sin permiso o mientras carga, no hay plan que armar: la pantalla va sin botones.
+  return obraId && puedeArmar && carga.datos[0] ? (
+    <ArmarPlanSemanal
+      key={obraId}
+      obraId={obraId}
+      lista={lista}
+      alTerminar={(id) => {
+        setElegido(id);
+        carga.recargar();
+      }}
+    >
+      {pintar}
+    </ArmarPlanSemanal>
+  ) : (
+    pintar({ botones: null, cuerpo: null })
   );
 }
 

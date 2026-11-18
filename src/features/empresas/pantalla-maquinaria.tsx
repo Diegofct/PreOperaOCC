@@ -12,7 +12,7 @@ import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import { api } from '@/features/panel/cliente-api';
-import { Acciones, Celda, Paginacion, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
+import { ANCHOS_DE_CAMPO, Celda, Formulario, Paginacion, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
 import type { MaquinaDeLasObrasFila, ObraFila } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
@@ -58,7 +58,7 @@ export function PantallaBitacoraDeMaquinaria() {
         ),
     },
     { clave: 'obra', titulo: 'Obra', ancho: 200, pintar: (m) => <Celda>{m.obraNombre}</Celda> },
-    { clave: 'equipo', titulo: 'Equipo', ancho: 200, pintar: (m) => <Celda>{m.equipo}</Celda> },
+    { clave: 'equipo', principal: true, titulo: 'Equipo', ancho: 200, pintar: (m) => <Celda>{m.equipo}</Celda> },
     { clave: 'operador', titulo: 'Operador', ancho: 170, pintar: (m) => <Celda>{m.operador ?? '—'}</Celda> },
     {
       clave: 'lecturas',
@@ -86,7 +86,8 @@ export function PantallaBitacoraDeMaquinaria() {
       cargando={maquinas.cargando}
     >
       <Seccion titulo="Máquinas por día">
-        <Acciones>
+        {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+        <Formulario desnudo>
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -94,10 +95,10 @@ export function PantallaBitacoraDeMaquinaria() {
             onChange={setObraId}
             permiteVacio
             vacio="Todas las obras"
-            ancho={260}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
           <CamposDeFechas filtro={fechas} />
-        </Acciones>
+        </Formulario>
         <Tabla
           columnas={columnas}
           filas={pagina.pagina}

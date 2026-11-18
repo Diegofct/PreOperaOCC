@@ -17,8 +17,8 @@
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
-import { Acciones, Aviso, Boton, Campo, Modal, Selector } from '@/features/panel/componentes';
+import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { Acciones, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import type { ItemParaElPlan } from '@/features/panel/plan-semanal';
 import { descuadreDeLaActividad, metaDiaria, repartir, totalProgramado, type ActividadDelPlan, type TipoDeActividad } from '@/shared/rules/plan-semanal';
 
@@ -124,69 +124,85 @@ export function VentanaDeActividad({
   return (
     <Modal titulo={esNueva ? 'Agregar actividad' : 'Ajustar actividad'} onCerrar={alCerrar} amplia>
       <View style={estilos.columna}>
-        <Selector
-          etiqueta="Tipo"
-          valor={a.tipo}
-          opciones={(['item', 'fuera', 'rubro'] as const).map((t) => ({ valor: t, etiqueta: NOMBRE_DEL_TIPO[t] }))}
-          onChange={(t) => cambiarTipo(t as TipoDeActividad | null)}
-          obligatorio
-          ancho={360}
-        />
-        {a.tipo === 'item' ? (
+        {/* Spec 050, RF-25: cada grupo de campos en su rejilla, con los anchos de la escala. */}
+        <Formulario desnudo>
           <Selector
-            etiqueta="Ítem de la planificación"
-            valor={delItem?.llave ?? null}
-            opciones={items.map((i) => ({
-              valor: i.llave,
-              etiqueta: `${i.item || i.renglon || ''} · ${i.descripcion}`,
-              detalle: `${i.capitulo} · pendiente ${enCantidad(i.pendiente)} ${i.unidad}`,
-            }))}
-            onChange={escogerItem}
-            vacio="Escoja el ítem"
+            etiqueta="Tipo"
+            valor={a.tipo}
+            opciones={(['item', 'fuera', 'rubro'] as const).map((t) => ({ valor: t, etiqueta: NOMBRE_DEL_TIPO[t] }))}
+            onChange={(t) => cambiarTipo(t as TipoDeActividad | null)}
             obligatorio
-            ancho={640}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
-        ) : null}
+          {a.tipo === 'item' ? (
+            <Selector
+              etiqueta="Ítem de la planificación"
+              valor={delItem?.llave ?? null}
+              opciones={items.map((i) => ({
+                valor: i.llave,
+                etiqueta: `${i.item || i.renglon || ''} · ${i.descripcion}`,
+                detalle: `${i.capitulo} · pendiente ${enCantidad(i.pendiente)} ${i.unidad}`,
+              }))}
+              onChange={escogerItem}
+              vacio="Escoja el ítem"
+              obligatorio
+            />
+          ) : null}
+        </Formulario>
         {a.tipo === 'fuera' ? (
           <Aviso tono="info">Lo que no es un ítem de la planificación queda marcado «Fuera de la planificación» y no cuenta como meta del cumplimiento.</Aviso>
         ) : null}
         {esRubro ? <Aviso tono="info">Un rubro se planea por su valor y no cuenta en el cumplimiento.</Aviso> : null}
 
-        <View style={estilos.fila}>
-          <Campo etiqueta="Frente de trabajo" valor={a.frenteDeTrabajo} onChange={(v) => setA({ ...a, frenteDeTrabajo: v })} ayuda="Como lo nombran en la obra: «3. Cunetas»." ancho={240} />
-          {a.tipo === 'fuera' ? <Campo etiqueta="Ítem" valor={a.item} onChange={(v) => setA({ ...a, item: v })} ancho={120} /> : null}
-          <Campo etiqueta="Actividad" valor={a.descripcion} onChange={(v) => setA({ ...a, descripcion: v })} obligatorio ancho={360} />
-          {esRubro ? null : <Campo etiqueta="Unidad" valor={a.unidad} onChange={(v) => setA({ ...a, unidad: v })} soloLectura={a.tipo === 'item'} ancho={110} />}
-        </View>
-        <View style={estilos.fila}>
-          <Campo etiqueta="Cuadrilla" valor={a.cuadrilla} onChange={(v) => setA({ ...a, cuadrilla: v })} ancho={360} />
-          <Campo etiqueta="Equipo principal" valor={a.equipo} onChange={(v) => setA({ ...a, equipo: v })} ancho={360} />
-        </View>
+        <Formulario desnudo>
+          <Campo
+            etiqueta="Frente de trabajo"
+            valor={a.frenteDeTrabajo}
+            onChange={(v) => setA({ ...a, frenteDeTrabajo: v })}
+            ayuda="Como lo nombran en la obra: «3. Cunetas»."
+            ancho={ANCHOS_DE_CAMPO.medio}
+          />
+          {a.tipo === 'fuera' ? <Campo etiqueta="Ítem" valor={a.item} onChange={(v) => setA({ ...a, item: v })} ancho={ANCHOS_DE_CAMPO.corto} /> : null}
+          <Campo etiqueta="Actividad" valor={a.descripcion} onChange={(v) => setA({ ...a, descripcion: v })} obligatorio />
+          {esRubro ? null : (
+            <Campo etiqueta="Unidad" valor={a.unidad} onChange={(v) => setA({ ...a, unidad: v })} soloLectura={a.tipo === 'item'} ancho={ANCHOS_DE_CAMPO.corto} />
+          )}
+        </Formulario>
+        <Formulario desnudo>
+          <Campo etiqueta="Cuadrilla" valor={a.cuadrilla} onChange={(v) => setA({ ...a, cuadrilla: v })} />
+          <Campo etiqueta="Equipo principal" valor={a.equipo} onChange={(v) => setA({ ...a, equipo: v })} />
+        </Formulario>
 
         {esRubro ? (
           conPlata ? (
-            <Campo etiqueta="Valor de la semana ($)" valor={valor} onChange={setValor} soloNumeros ancho={220} />
+            <Campo etiqueta="Valor de la semana ($)" valor={valor} onChange={setValor} soloNumeros ancho={ANCHOS_DE_CAMPO.medio} />
           ) : null
         ) : (
           <>
-            <View style={estilos.fila}>
+            <Formulario desnudo>
               <Campo
                 etiqueta={`Meta de la semana${a.unidad ? ` (${a.unidad})` : ''}`}
                 valor={meta}
                 onChange={repartirLaMeta}
                 ayuda="Al escribirla se reparte en partes iguales entre los días marcados."
                 obligatorio
-                ancho={220}
+                ancho={ANCHOS_DE_CAMPO.medio}
               />
-            </View>
+            </Formulario>
             {delItem ? <Text style={estilos.dato}>{`Pendiente del ítem hoy: ${enCantidad(delItem.pendiente)} ${delItem.unidad}`}</Text> : null}
             <Text style={estilos.subtitulo}>Cantidad de cada día</Text>
             {dias.length === 0 ? <Aviso tono="info">El plan no tiene días marcados. Marque los días de trabajo antes de repartir.</Aviso> : null}
-            <View style={estilos.fila}>
+            <Formulario desnudo>
               {dias.map((dia) => (
-                <Campo key={dia} etiqueta={nombreDelDia(dia)} valor={porDia[dia] ?? ''} onChange={(v) => setPorDia({ ...porDia, [dia]: v })} ancho={110} />
+                <Campo
+                  key={dia}
+                  etiqueta={nombreDelDia(dia)}
+                  valor={porDia[dia] ?? ''}
+                  onChange={(v) => setPorDia({ ...porDia, [dia]: v })}
+                  ancho={ANCHOS_DE_CAMPO.corto}
+                />
               ))}
-            </View>
+            </Formulario>
             <Text style={estilos.dato}>
               {`Meta diaria: ${enCantidad(metaDiaria(metaSemana, dias.length))} · Total programado: ${enCantidad(totalProgramado(cantidades))}`}
             </Text>
@@ -206,8 +222,7 @@ export function VentanaDeActividad({
 }
 
 const estilos = StyleSheet.create({
-  columna: { gap: 12 },
-  fila: { flexDirection: 'row', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' },
+  columna: { gap: Spacing.two + Spacing.one },
   subtitulo: { fontFamily: FuentePanel.texto, fontWeight: '600', fontSize: TextoPanel.cuerpo, color: Panel.texto },
   dato: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 });

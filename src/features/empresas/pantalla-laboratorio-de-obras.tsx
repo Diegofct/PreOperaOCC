@@ -10,7 +10,7 @@
 import { useCallback, useState } from 'react';
 
 import { api } from '@/features/panel/cliente-api';
-import { Acciones, Celda, Etiqueta, Paginacion, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
+import { ANCHOS_DE_CAMPO, Celda, Etiqueta, Formulario, Paginacion, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
 import type { EnsayoDeLasObrasFila, ObraFila } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
@@ -37,7 +37,7 @@ export function PantallaLaboratorioDeLasObras() {
   const columnas: Columna<EnsayoDeLasObrasFila>[] = [
     { clave: 'fecha', titulo: 'Día', ancho: 110, pintar: (e) => <Celda>{fechaDelCorte(e.fecha)}</Celda> },
     { clave: 'obra', titulo: 'Obra', ancho: 180, pintar: (e) => <Celda lineas={2}>{e.obraNombre}</Celda> },
-    { clave: 'ensayo', titulo: 'Ensayo', ancho: 180, pintar: (e) => <Celda lineas={2}>{e.nombre}</Celda> },
+    { clave: 'ensayo', principal: true, titulo: 'Ensayo', ancho: 180, pintar: (e) => <Celda lineas={2}>{e.nombre}</Celda> },
     { clave: 'ubicacion', titulo: 'Ubicación', ancho: 150, pintar: (e) => <Celda lineas={2}>{e.ubicacion || '—'}</Celda> },
     {
       clave: 'resultado',
@@ -70,7 +70,8 @@ export function PantallaLaboratorioDeLasObras() {
       cargando={ensayos.cargando}
     >
       <Seccion titulo="Ensayos de las obras">
-        <Acciones>
+        {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+        <Formulario desnudo>
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -78,10 +79,10 @@ export function PantallaLaboratorioDeLasObras() {
             onChange={setObraId}
             permiteVacio
             vacio="Todas las obras"
-            ancho={260}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
           <CamposDeFechas filtro={fechas} />
-        </Acciones>
+        </Formulario>
         <Tabla
           columnas={columnas}
           filas={pagina.pagina}

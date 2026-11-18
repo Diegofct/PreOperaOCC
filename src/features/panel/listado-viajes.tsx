@@ -12,11 +12,12 @@
  * bitácora de ese día ya está cerrada, se anula igual y se avisa que la bitácora lo
  * sigue mostrando (RF-30).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { DESTINO_OBRA, filtrarViajes, formatearAbscisa } from '@/shared/rules/cantera';
 import { fechaDeJornada, restarDias } from '@/shared/rules/jornada';
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
@@ -74,6 +75,7 @@ export function ListadoDeViajes({
   puedeAnular,
   version,
   fecha,
+  registrarPrimero,
 }: {
   obraId: string | null;
   puedeAnular: boolean;
@@ -81,6 +83,8 @@ export function ListadoDeViajes({
   version: number;
   /** Un día para abrir el listado en él (spec 024, RF-59: desde el historial de WhatsApp). */
   fecha?: string;
+  /** Spec 050, RF-53: el botón para registrar el primero, si el cargo puede. */
+  registrarPrimero?: ReactNode;
 }) {
   const hoy = fechaDeJornada();
   const delEnlace = fecha && FECHA.test(fecha) ? fecha : null;
@@ -146,7 +150,7 @@ export function ListadoDeViajes({
       // Spec 023, RF-46: el vale va debajo de la volqueta, tal como se escribió, y no
       // en columna propia: con ella la tabla no cabe en la ventana más angosta que el
       // panel promete (1024 con el menú plegado). Sin vale no se pinta nada (RF-49).
-      clave: 'volqueta',
+      clave: 'volqueta', principal: true,
       titulo: 'Volqueta y vale',
       ancho: 110,
       pintar: (v) => (
@@ -200,7 +204,7 @@ export function ListadoDeViajes({
       ),
     },
     {
-      clave: 'estado',
+      clave: 'estado', acciones: true,
       titulo: '',
       ancho: 100,
       pintar: (v) =>
@@ -305,7 +309,7 @@ export function ListadoDeViajes({
             viajes.cargando
               ? 'Cargando los viajes…'
               : viajes.datos.length === 0
-                ? 'No hay viajes registrados en este periodo.'
+                ? { icono: '⛟', texto: 'No hay viajes registrados en este periodo.', accion: registrarPrimero }
                 : 'Ningún viaje coincide con los filtros elegidos.'
           }
         />
@@ -348,6 +352,8 @@ function VentanaAnularViaje({
   const [intentado, setIntentado] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const faltaMotivo = motivo.trim().length === 0;
 
   async function anular() {
@@ -359,7 +365,7 @@ function VentanaAnularViaje({
       const { aviso } = await api.cantera.viajes.anular(viaje.id, motivo);
       onAnulado(aviso);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }

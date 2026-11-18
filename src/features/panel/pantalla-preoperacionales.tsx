@@ -45,7 +45,8 @@ import {
   type VehiculoFila,
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
-import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { CifrasDeEstado, type EstadoDeLaLista } from './cifras-de-estado';
+import { contarPorEstado, POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { useParametroDeDireccion } from './usar-parametro-direccion';
 import { DetallePreoperacional } from './detalle-preoperacional';
 
@@ -168,11 +169,12 @@ export default function PantallaPreoperacionales() {
   const [resultadoFiltro, setResultadoFiltro] = useState<string | null>(null);
   const filtrado = useListadoFiltrado(
     ventana?.preoperacionales ?? [],
-    (p) => [p.vehiculoCodigo, p.tipoNombre, p.operadorNombre, p.obraNombre],
+    textoDelPreoperacional,
     useCallback(
       (p: PreoperacionalFila) => resultadoFiltro === null || p.resultado === resultadoFiltro,
       [resultadoFiltro],
     ),
+    undefined, undefined, { hay: resultadoFiltro !== null, limpiar: () => setResultadoFiltro(null) },
   );
 
   if (abierto) {
@@ -201,7 +203,7 @@ export default function PantallaPreoperacionales() {
       ),
     },
     {
-      clave: 'vehiculo',
+      clave: 'vehiculo', principal: true,
       titulo: 'Máquina',
       ancho: 130,
       pintar: (p) => <Celda>{p.vehiculoCodigo}</Celda>,
@@ -319,8 +321,8 @@ export default function PantallaPreoperacionales() {
         </View>
       )}
 
-      {/* Antes llevaba zIndex para que su lista no quedara bajo la tabla; ya va en la capa flotante. */}
-      <View>
+      {/* Spec 050, RF-25: un solo campo, sin el envoltorio que le quedó de cuando llevaba zIndex (su
+          lista ya va en la capa flotante). */}
       <Selector
         etiqueta="Filtrar por máquina"
         valor={vehiculoId}
@@ -334,7 +336,6 @@ export default function PantallaPreoperacionales() {
         vacio="Todas las máquinas"
         ancho={280}
       />
-      </View>
 
       {ventana && ventana.pendientes.length > 0 ? (
         <Aviso tono="error">
@@ -348,28 +349,32 @@ export default function PantallaPreoperacionales() {
         <Seccion
           titulo={dia ? 'Firmados este día' : 'Firmados en el periodo'}
         >
-          <BarraDeListado
+          {/* Spec 050, RF-48, RF-75: cuántos hay de cada resultado, y un toque filtra; reemplaza al
+              selector «Resultado». Cuentan con la búsqueda puesta (RF-52). */}
+          <CifrasDeEstado
+            estados={RESULTADOS}
+            conteos={
+              jornada.cargando
+                ? null
+                : contarPorEstado(ventana.preoperacionales, {
+                    textoDe: textoDelPreoperacional,
+                    // Uno sin resultado todavía no tiene cifra, como antes no tenía opción en el selector.
+                    estadoDe: (p) => p.resultado ?? 'sin_resultado',
+                    busqueda: filtrado.busqueda,
+                  })
+            }
+            elegido={resultadoFiltro}
+            alElegir={setResultadoFiltro}
+          />
+          <BarraDeListado onLimpiar={filtrado.limpiar}
             busqueda={filtrado.busqueda}
             onBuscar={filtrado.buscar}
             total={filtrado.total}
             mostradas={filtrado.coincidencias}
-          >
-            <Selector
-              etiqueta="Resultado"
-              valor={resultadoFiltro}
-              opciones={[
-                { valor: 'no_apto', etiqueta: 'NO APTO' },
-                { valor: 'apto_con_observaciones', etiqueta: 'Apto con observaciones' },
-                { valor: 'apto', etiqueta: 'Apto' },
-              ]}
-              onChange={setResultadoFiltro}
-              permiteVacio
-              vacio="Cualquier resultado"
-              ancho={230}
-            />
-          </BarraDeListado>
+          />
 
           <Tabla
+          sinResultados={filtrado.sinResultados}
             columnas={columnas}
             filas={filtrado.pagina}
             vacio={textoDelVacio(ventana, filtrado.busqueda, resultadoFiltro)}
@@ -396,14 +401,9 @@ export default function PantallaPreoperacionales() {
 }
 
 const estilos = StyleSheet.create({
-  /**
-   * La fila del periodo lleva un desplegable, así que se pinta por encima de lo
-   * que viene debajo. Sin esto, React Native Web deja a todos los hermanos
-   * empatados a `z-index: 0` y la lista abierta se mete detrás del filtro de
-   * máquina y del aviso de flota.
-   */
+  /** La fila del periodo: el selector o los botones de día, con el rango legible al lado. */
   dias: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  /** El filtro de máquina: por encima de la tabla, por debajo del periodo. */
+  /** El rango o el día, centrado en lo que sobra de la fila. */
   fecha: { flex: 1, alignItems: 'center' },
   fechaTexto: {
     fontFamily: FuentePanel.texto,
@@ -429,5 +429,17 @@ const estilos = StyleSheet.create({
     color: Panel.textoApoyo,
   },
 });
+
+/** Lo que se busca en un preoperacional: lo mismo para la lista y para sus cifras. */
+function textoDelPreoperacional(p: PreoperacionalFila): (string | null | undefined)[] {
+  return [p.vehiculoCodigo, p.tipoNombre, p.operadorNombre, p.obraNombre];
+}
+
+/** Los resultados del preoperacional, del que más preocupa al que menos, con su símbolo (spec 050, RF-48). */
+const RESULTADOS: EstadoDeLaLista[] = [
+  { valor: 'no_apto', etiqueta: 'NO APTO', simbolo: '✕', tono: 'malo' },
+  { valor: 'apto_con_observaciones', etiqueta: 'Apto con observaciones', simbolo: '!', tono: 'atencion' },
+  { valor: 'apto', etiqueta: 'Apto', simbolo: '✓', tono: 'bueno' },
+];
 
 export { ETIQUETA_RESULTADO };

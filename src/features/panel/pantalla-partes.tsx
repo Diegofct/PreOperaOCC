@@ -111,6 +111,7 @@ import {
 
 import { useObraDeLaRuta } from "@/features/empresas/contexto-empresa";
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from "./cliente-api";
 import {
   Acciones,
@@ -587,6 +588,12 @@ export default function PantallaPartes() {
       error={dia.error ?? vehiculos.error ?? personas.error ?? obras.error}
       cargando={dia.cargando || vehiculos.cargando || personas.cargando}
       refDesplazamiento={desplazamiento}
+      // Spec 050, RF-30: abrir la bitácora del día es la acción principal mientras ese día no tiene.
+      acciones={
+        !parte && !dia.cargando ? (
+          <Boton titulo="Abrir la bitácora de este día" onPress={abrir} deshabilitado={esGerencia && !obraMirada} />
+        ) : undefined
+      }
     >
       <Seccion titulo={`Día ${fecha}`}>
         <Acciones>
@@ -650,15 +657,7 @@ export default function PantallaPartes() {
             ) : null}
           </View>
         ) : (
-          <Formulario>
-            <AccionesFormulario>
-              <Boton
-                titulo="Abrir la bitácora de este día"
-                onPress={abrir}
-                deshabilitado={esGerencia && !obraMirada}
-              />
-            </AccionesFormulario>
-          </Formulario>
+          <Ayuda>Este día todavía no tiene bitácora. Se abre con el botón de arriba.</Ayuda>
         )}
 
         {anulado && parte?.motivoAnulacion ? (
@@ -824,7 +823,7 @@ function SeccionCantera({
       // Spec 023, RF-47: el vale debajo de la volqueta, como en Control Cantera (una
       // columna propia no cabe en esta banda). Sin vale, o fijado antes de que
       // existiera, no se pinta nada (RF-49).
-      clave: "volqueta",
+      clave: "volqueta", principal: true,
       titulo: "Volqueta y vale",
       ancho: 110,
       pintar: (v) => (
@@ -2103,6 +2102,8 @@ function SinRegistro({
   alGuardar: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [guardando, setGuardando] = useState(false);
   const { seccion, guardada, marcada, setMarcada, motivo, setMotivo, cambiada } = estado;
 
@@ -2122,7 +2123,7 @@ function SinRegistro({
       setError(null);
       alGuardar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }

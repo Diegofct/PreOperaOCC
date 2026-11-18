@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
@@ -21,6 +22,7 @@ import {
   Campo,
   CampoDeFecha,
   Casilla,
+  Formulario,
   Modal,
   Selector,
 } from '@/features/panel/componentes';
@@ -57,6 +59,8 @@ function VentanaDeAprobar({
     Object.fromEntries(solicitud.renglones.map((r) => [r.id, String(r.cantidad).replace('.', ',')])),
   );
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const pedidas = solicitud.renglones.map((r) => ({ renglonId: r.id, cantidad: aNumero(cantidades[r.id] ?? '') }));
   const { faltas, cambios } = aprobacionDeLaSolicitud(
@@ -80,7 +84,7 @@ function VentanaDeAprobar({
           : `Solicitud ${solicitud.codigo} aprobada.`,
       );
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -137,6 +141,8 @@ function VentanaDeComprar({
   const [soporte, setSoporte] = useState<{ archivo: File; clase: string } | null>(null);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   // Spec 048, RF-47 a RF-49: si los renglones elegidos van a partes distintas de la planificación,
@@ -178,7 +184,7 @@ function VentanaDeComprar({
     try {
       await api.compras.registrarCompra(solicitud.id, { ...datos, version: solicitud.version });
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
       return;
     }
@@ -220,10 +226,10 @@ function VentanaDeComprar({
           }
         />
       ))}
-      <View style={estilos.fila}>
+      <Formulario desnudo>
         <Campo etiqueta="Proveedor" obligatorio valor={proveedor} onChange={setProveedor} ancho={280} />
         <Campo etiqueta="Valor total (pesos)" obligatorio valor={valor} onChange={setValor} ancho={200} ayuda="Sin centavos." />
-      </View>
+      </Formulario>
       {variasPartes ? (
         <>
           <Text style={estilos.subtitulo}>Cuánto es de cada renglón</Text>
@@ -241,10 +247,10 @@ function VentanaDeComprar({
           ))}
         </>
       ) : null}
-      <View style={estilos.fila}>
+      <Formulario desnudo>
         <CampoDeFecha etiqueta="Fecha de compra" valor={fecha} onChange={setFecha} />
         <Campo etiqueta="Factura o remisión" valor={factura} onChange={setFactura} ancho={200} ayuda="Opcional: el número." />
-      </View>
+      </Formulario>
       <Text style={estilos.subtitulo}>Soporte</Text>
       {soporte ? (
         <View style={estilos.fila}>
@@ -291,6 +297,8 @@ function VentanaDeAnularCompra({
   const [compra, setCompra] = useState<string | null>(vigentes.length === 1 ? vigentes[0].id : null);
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const elegida = vigentes.find((c) => c.id === compra);
   return (
@@ -326,7 +334,7 @@ function VentanaDeAnularCompra({
               await api.compras.anularCompra(elegida.id, { version: solicitud.version, motivo });
               alAnular(`Compra a ${elegida.proveedor} anulada.`);
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
               setEnviando(false);
             }
           }}

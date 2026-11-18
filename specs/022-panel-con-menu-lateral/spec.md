@@ -1,6 +1,6 @@
 # Spec 022 — Panel con menú lateral y diseño nuevo
 
-> Estado: Cumplida (2026-10-06) · Fecha: 2026-10-06
+> Estado: Cumplida (2026-10-06) · Fecha: 2026-10-06 · **Modificada por la spec 050** (2026-11-18): las tarjetas y tablas llevan sombra en lugar de borde (RF-46); los listados llegan a 1600 px y los formularios a 1100, y por encima de 1366 las columnas crecen en proporción — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 
 ## Contexto y objetivo
 

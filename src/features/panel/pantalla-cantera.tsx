@@ -23,20 +23,19 @@ import { alcanza } from '@/shared/rules/permisos';
 
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
+import { useAvisos } from './avisos';
 import { api } from './cliente-api';
 import { CatalogosCantera } from './catalogos-cantera';
 import {
-  Acciones,
   Aviso,
   Boton,
-  Confirmado,
   Formulario,
   Seccion,
   Selector,
 } from './componentes';
 import type { ObraFila, OpcionesDeCantera } from './contratos';
 import { ListadoDeViajes } from './listado-viajes';
-import { MarcoPantalla, useListado } from './marco';
+import { MarcoPantalla, useListado, type Listado } from './marco';
 import { usePersona } from './sesion';
 import { VentanaViaje } from './ventana-viaje';
 
@@ -68,8 +67,32 @@ export default function PantallaCantera() {
   const obraId = esGerencia ? obraElegida : null;
   const hayObra = !esGerencia || obraElegida !== null;
 
+  // Spec 050, RF-30: «Registrar viaje» va en el encabezado, así que las opciones del formulario y la
+  // ventana abierta viven aquí, y la sección de viajes las recibe. Se piden al tener obra y otra vez
+  // cuando cambian los sitios o los materiales, para que un sitio recién registrado se pueda elegir
+  // sin recargar la página.
+  const opciones = useListado<OpcionesDeCantera>(
+    useCallback(
+      () =>
+        puedeRegistrar && hayObra ? api.cantera.opciones(obraId).then((o) => [o]) : Promise.resolve([]),
+      // La versión no se usa dentro: está para volver a pedir cuando cambia.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [obraId, puedeRegistrar, hayObra, versionDeCatalogos],
+    ),
+  );
+  const [registrando, setRegistrando] = useState(false);
+
   return (
     <MarcoPantalla
+      acciones={
+        puedeRegistrar && hayObra ? (
+          <Boton
+            titulo="Registrar viaje"
+            onPress={() => setRegistrando(true)}
+            deshabilitado={opciones.cargando || opciones.datos.length === 0}
+          />
+        ) : undefined
+      }
       modulo="cantera"
       exigeObra
       titulo="Control Cantera"
@@ -113,7 +136,9 @@ export default function PantallaCantera() {
           obraId={obraId}
           puedeRegistrar={puedeRegistrar}
           puedeAnular={alcanza(rol, 'cantera', 'anular')}
-          versionDeCatalogos={versionDeCatalogos}
+          opciones={opciones}
+          registrando={registrando}
+          alCambiarRegistrando={setRegistrando}
         />
       ) : null}
 
@@ -132,61 +157,42 @@ export default function PantallaCantera() {
 }
 
 /**
- * Los viajes de la obra: registrar uno y el listado del periodo, con anulación.
- *
- * Las opciones del formulario se piden al abrir la sección y otra vez cuando cambian
- * los sitios o los materiales, para que un sitio recién registrado se pueda elegir
- * sin recargar la página.
+ * Los viajes de la obra: la ventana para registrar uno y el listado del periodo, con anulación.
+ * El botón que abre la ventana está en el encabezado de la pantalla (spec 050, RF-30), que es
+ * también quien pide las opciones del formulario.
  */
 function SeccionViajes({
   obraId,
   puedeRegistrar,
   puedeAnular,
-  versionDeCatalogos,
+  opciones,
+  registrando,
+  alCambiarRegistrando: setRegistrando,
 }: {
   obraId: string | null;
   puedeRegistrar: boolean;
   puedeAnular: boolean;
-  versionDeCatalogos: number;
+  opciones: Listado<OpcionesDeCantera>;
+  registrando: boolean;
+  alCambiarRegistrando: (abierta: boolean) => void;
 }) {
   // El día del enlace del historial de WhatsApp, si se llegó por él (spec 024, RF-59).
   const { fecha: fechaDelEnlace } = useLocalSearchParams<{ fecha?: string }>();
-  const opciones = useListado<OpcionesDeCantera>(
-    useCallback(
-      () =>
-        puedeRegistrar ? api.cantera.opciones(obraId).then((o) => [o]) : Promise.resolve([]),
-      // La versión no se usa dentro: está para volver a pedir cuando cambia.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [obraId, puedeRegistrar, versionDeCatalogos],
-    ),
-  );
-
-  const [registrando, setRegistrando] = useState(false);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const [aviso, setAviso] = useState<string | null>(null);
   /** Sube con cada viaje registrado, para que el listado vuelva a pedir el periodo. */
   const [registrados, setRegistrados] = useState(0);
 
   return (
     <Seccion titulo="Viajes">
-      <Confirmado mensaje={hecho} />
-      {/* RF-30: el viaje se guardó, pero la bitácora de ese día ya no cambia. */}
-      {aviso ? <Aviso tono="info">{aviso}</Aviso> : null}
+      {/* RF-30: el viaje se guardó, pero la bitácora de ese día ya no cambia. Mientras la ventana está
+          abierta no se muestra: el que importa es el del viaje que se está registrando. */}
+      {aviso && !registrando ? <Aviso tono="info">{aviso}</Aviso> : null}
       {opciones.error ? <Aviso tono="error">{opciones.error}</Aviso> : null}
-
-      {puedeRegistrar ? (
-        <Acciones>
-          <Boton
-            titulo="Registrar viaje"
-            onPress={() => {
-              setHecho(null);
-              setAviso(null);
-              setRegistrando(true);
-            }}
-            deshabilitado={opciones.cargando || opciones.datos.length === 0}
-          />
-        </Acciones>
-      ) : null}
 
       {registrando && opciones.datos[0] ? (
         <VentanaViaje
@@ -195,7 +201,7 @@ function SeccionViajes({
           onCerrar={() => setRegistrando(false)}
           onRegistrado={({ viaje, aviso: avisoDelServidor }) => {
             setRegistrando(false);
-            setHecho(
+            avisarHecho(
               `Viaje registrado: ${viaje.volqueta} con ${viaje.material}, de ${viaje.origen} a ${
                 viaje.destinoObra && viaje.pr !== null && viaje.metros !== null
                   ? `la obra en ${formatearAbscisa(viaje.pr, viaje.metros)}`
@@ -213,6 +219,15 @@ function SeccionViajes({
         puedeAnular={puedeAnular}
         version={registrados}
         fecha={fechaDelEnlace}
+        registrarPrimero={
+          puedeRegistrar ? (
+            <Boton
+              titulo="Registrar viaje"
+              onPress={() => setRegistrando(true)}
+              deshabilitado={opciones.cargando || opciones.datos.length === 0}
+            />
+          ) : undefined
+        }
       />
     </Seccion>
   );

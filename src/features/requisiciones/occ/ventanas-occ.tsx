@@ -11,9 +11,10 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
-import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Modal, Selector } from '@/features/panel/componentes';
+import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import type { LineaOccEnElDetalle, RequisicionOccExistente } from '@/features/panel/requisiciones-occ';
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
@@ -44,6 +45,8 @@ export function VentanaNuevaOcc({
 }) {
   const [viernes, setViernes] = useState(proximoViernes());
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [existente, setExistente] = useState<RequisicionOccExistente['existente'] | null>(null);
   const [enviando, setEnviando] = useState(false);
   const falta = faltaDelViernes(viernes);
@@ -60,7 +63,7 @@ export function VentanaNuevaOcc({
       // RF-8: la del viernes ya existe; se ofrece abrirla.
       const cuerpo = fallo instanceof ErrorApi ? (fallo.cuerpo as Partial<RequisicionOccExistente> | undefined) : undefined;
       if (cuerpo?.existente) setExistente(cuerpo.existente);
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -68,7 +71,7 @@ export function VentanaNuevaOcc({
   return (
     <Modal titulo="Nueva requisición de pagos" onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>Una por viernes de entrega. Se arma durante la semana y se envía para autorizar.</Text>
-      <CampoDeFecha etiqueta="Viernes de entrega *" valor={viernes} onChange={setViernes} min={fechaDeJornada()} error={falta ?? undefined} />
+      <CampoDeFecha etiqueta="Viernes de entrega" obligatorio valor={viernes} onChange={setViernes} min={fechaDeJornada()} error={falta ?? undefined} />
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
@@ -111,6 +114,8 @@ export function VentanaLineaOcc({
   const [cuenta, setCuenta] = useState<File | null>(null);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   const paraGuardar: DatosDeLineaOcc = {
@@ -150,7 +155,7 @@ export function VentanaLineaOcc({
       }
       alGuardar(linea ? 'Línea cambiada.' : 'Línea agregada.');
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -164,9 +169,10 @@ export function VentanaLineaOcc({
 
   return (
     <Modal titulo={linea ? `Cambiar la línea ${linea.numero}` : 'Agregar una línea'} onCerrar={alCerrar} amplia>
-      <View style={estilos.fila}>
+      <Formulario desnudo>
         <CampoDeFecha
-          etiqueta="Fecha de solicitud *"
+          etiqueta="Fecha de solicitud"
+          obligatorio
           valor={datos.fechaSolicitud}
           onChange={(fechaSolicitud) => cambiar({ fechaSolicitud })}
           max={fechaDeJornada()}
@@ -174,9 +180,9 @@ export function VentanaLineaOcc({
         />
         <Campo etiqueta="Beneficiario" obligatorio valor={datos.beneficiario} onChange={(beneficiario) => cambiar({ beneficiario })} error={ver(faltas.beneficiario)} ancho={320} />
         <Campo etiqueta="Valor (pesos)" obligatorio valor={datos.valorTexto} onChange={(valorTexto) => cambiar({ valorTexto })} error={ver(faltas.valor)} ayuda="Sin centavos." ancho={180} />
-      </View>
+      </Formulario>
       <Campo etiqueta="Concepto" obligatorio valor={datos.concepto} onChange={(concepto) => cambiar({ concepto })} error={ver(faltas.concepto)} />
-      <View style={estilos.fila}>
+      <Formulario desnudo>
         <Campo
           etiqueta="Especificaciones"
           valor={datos.especificaciones}
@@ -185,7 +191,7 @@ export function VentanaLineaOcc({
           ancho={360}
         />
         <Campo etiqueta="Proveedor" valor={datos.proveedor} onChange={(proveedor) => cambiar({ proveedor })} ancho={300} />
-      </View>
+      </Formulario>
       <Campo etiqueta="Observaciones" valor={datos.observaciones} onChange={(observaciones) => cambiar({ observaciones })} multilinea compacto />
       <View style={estilos.fila}>
         {adjunto('RUT', rut, Boolean(linea?.rutMediaId), setRut)}
@@ -225,6 +231,8 @@ export function VentanaAutorizarOcc({
   );
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   const cambiadas = lineas.filter((l) => {
@@ -254,7 +262,7 @@ export function VentanaAutorizarOcc({
             : `${codigo} quedó sin ninguna línea autorizada.`,
       );
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -271,7 +279,7 @@ export function VentanaAutorizarOcc({
             <Text style={estilos.apoyo}>{[l.concepto, l.especificaciones, l.proveedor].filter(Boolean).join(' · ')}</Text>
             <Text style={estilos.apoyo}>{`RUT: ${l.rutMediaId ? 'sí' : 'no'} · Cuenta: ${l.cuentaMediaId ? 'sí' : 'no'}`}</Text>
           </View>
-          <View style={estilos.fila}>
+          <Formulario desnudo>
             <Selector
               etiqueta="Respuesta"
               valor={marcadas[l.id].respuesta}
@@ -294,7 +302,7 @@ export function VentanaAutorizarOcc({
                 ancho={360}
               />
             ) : null}
-          </View>
+          </Formulario>
         </View>
       ))}
       {intentado && cambiadas.length === 0 && !lineas.some(sinMotivo) ? <Aviso tono="error">Marque al menos una línea.</Aviso> : null}
@@ -331,6 +339,8 @@ export function VentanaPagoOcc({
   const [comprobante, setComprobante] = useState<File | null>(null);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const datos = { fecha, valor: aPesosOcc(valor) ?? Number.NaN, medio: medio ?? '', referencia };
   const faltas = faltasDelPago(datos, linea.porPagar);
@@ -353,7 +363,7 @@ export function VentanaPagoOcc({
       const r = await api.requisiciones.occ.pagar(requisicionId, linea.id, { ...datos, version, comprobanteMediaId });
       alPagar(`Pago de ${enPesos(datos.valor)} a ${linea.beneficiario} registrado${r.estado === 'pagada' ? `: ${codigo} quedó pagada` : ''}.`);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -361,11 +371,11 @@ export function VentanaPagoOcc({
   return (
     <Modal titulo={`Pagar la línea ${linea.numero} · ${codigo}`} onCerrar={alCerrar}>
       <Text style={estilos.texto}>{`${linea.beneficiario}: falta por pagar ${enPesos(linea.porPagar)}. Para un anticipo, baje el valor.`}</Text>
-      <View style={estilos.fila}>
+      <Formulario desnudo>
         <Campo etiqueta="Valor (pesos)" obligatorio valor={valor} onChange={setValor} ancho={200} />
         <CampoDeFecha etiqueta="Fecha del pago" valor={fecha} onChange={setFecha} max={fechaDeJornada()} />
-      </View>
-      <View style={estilos.fila}>
+      </Formulario>
+      <Formulario desnudo>
         <Selector
           etiqueta="Medio"
           obligatorio
@@ -375,7 +385,7 @@ export function VentanaPagoOcc({
           ancho={200}
         />
         <Campo etiqueta="Referencia" valor={referencia} onChange={setReferencia} ayuda="Opcional: número de transferencia o de cheque." ancho={260} />
-      </View>
+      </Formulario>
       <View style={estilos.adjunto}>
         <Boton titulo={comprobante ? 'Cambiar comprobante' : 'Adjuntar comprobante'} tono="secundario" onPress={adjuntar} />
         <Text style={estilos.apoyo}>{comprobante ? comprobante.name : 'Opcional. PDF o imagen, hasta 20 MB.'}</Text>

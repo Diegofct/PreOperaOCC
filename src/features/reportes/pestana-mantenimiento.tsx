@@ -14,6 +14,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
@@ -176,7 +177,7 @@ export function PestanaMantenimiento({
 
   const columnasDelHistorial: Columna<Registro>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 90, pintar: (r) => <Celda>{diaCorto(r.fecha)}</Celda> },
-    { clave: 'maquina', titulo: 'Máquina', ancho: 150, pintar: (r) => <Celda>{r.codigo}</Celda> },
+    { clave: 'maquina', principal: true, titulo: 'Máquina', ancho: 150, pintar: (r) => <Celda>{r.codigo}</Celda> },
     { clave: 'clase', titulo: 'Clase', ancho: 130, pintar: (r) => <Celda>{NOMBRE_DE_CLASE[r.clase]}</Celda> },
     { clave: 'lectura', titulo: 'Lectura', ancho: 100, pintar: (r) => <Celda>{lectura(r.lectura)}</Celda> },
     { clave: 'nota', titulo: 'Nota', ancho: 220, pintar: (r) => <Celda lineas={2}>{r.nota || '—'}</Celda> },
@@ -212,7 +213,7 @@ export function PestanaMantenimiento({
         ),
     },
     {
-      clave: 'anular',
+      clave: 'anular', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,
@@ -321,6 +322,8 @@ function VentanaRegistrar({
   const [lectura, setLectura] = useState('');
   const [nota, setNota] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const maquina = maquinas.find((m) => m.vehiculoId === maquinaId);
   const leida = numeroEscrito(lectura);
@@ -335,7 +338,7 @@ function VentanaRegistrar({
         `${NOMBRE_DE_CLASE[clase]} de ${maquina?.codigo ?? 'la máquina'} registrado.${hecho.avisoLectura ? ` ${hecho.avisoLectura}` : ''}`,
       );
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -396,6 +399,8 @@ function VentanaAnular({
 }) {
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   async function anular() {
     if (!motivo.trim()) return setError('Escriba por qué lo anula.');
@@ -404,7 +409,7 @@ function VentanaAnular({
       await api.reportes.anularMantenimiento(registro.id, motivo.trim());
       alTerminar(`Se anuló el ${NOMBRE_DE_CLASE[registro.clase].toLowerCase()} de ${registro.codigo} del ${diaCorto(registro.fecha)}.`);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -435,7 +440,8 @@ function VentanaResolver({
 }) {
   const [fecha, setFecha] = useState(fechaDeJornada());
   const [nota, setNota] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   async function resolver() {
     setEnviando(true);
@@ -443,13 +449,12 @@ function VentanaResolver({
       await api.reportes.resolverCorrectivo(correctivoId, { fecha, nota });
       alTerminar(`El correctivo de ${maquina.codigo} quedó resuelto.`);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
   return (
     <Modal titulo={`Correctivo de ${maquina.codigo} resuelto`} onCerrar={onCerrar} angosta>
-      {error ? <Aviso tono="error">{error}</Aviso> : null}
       <Formulario>
         <CampoDeFecha etiqueta="Resuelto el" valor={fecha} onChange={setFecha} max={fechaDeJornada()} />
         <Campo etiqueta="Nota" valor={nota} onChange={setNota} multilinea compacto ayuda="Qué se reparó." />
@@ -561,6 +566,8 @@ function EditorDeIntervalo({
   const [cada, setCada] = useState(String(actual.cada));
   const [aviso, setAviso] = useState(String(actual.avisoPorcentaje));
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   async function enviar(quitar: boolean) {
@@ -574,7 +581,7 @@ function EditorDeIntervalo({
       await guardar(quitar ? null : (n as number), quitar ? 90 : a);
       alGuardar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }

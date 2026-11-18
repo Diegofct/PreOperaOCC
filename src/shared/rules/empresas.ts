@@ -65,16 +65,39 @@ export interface EntradaDelMenu {
   permiso: ModuloConPermiso;
   /** Otra aplicación, que se abre en una pestaña nueva en vez de una página del panel. */
   externa?: string;
+  /**
+   * La sección del menú donde va (spec 050, RF-1 a RF-7). `null` solo para el Asistente,
+   * que va primero y sin título (RF-8).
+   */
+  seccion: SeccionDelMenu | null;
 }
 
-const e = (pagina: string, titulo: string, permiso: ModuloConPermiso): EntradaDelMenu => ({
-  pagina,
-  titulo,
-  permiso,
-});
+/**
+ * Los títulos de sección del menú lateral (spec 050, RF-4 a RF-7). Fijos, para que una obra
+ * y otra se lean igual: con dieciséis entradas en una lista plana nadie encontraba nada.
+ */
+export type SeccionDelMenu =
+  | 'Día a día'
+  | 'Planeación y contrato'
+  | 'Materiales y calidad'
+  | 'Personal y archivo'
+  | 'Flota'
+  | 'Administración'
+  | 'Laboratorio'
+  | 'Gestión';
 
-/** El asistente va en todos los menús (RF-29, RF-50). */
-const ASISTENTE = e('asistente', 'Asistente', 'asistente');
+const e = (
+  pagina: string,
+  titulo: string,
+  permiso: ModuloConPermiso,
+  seccion: SeccionDelMenu | null,
+): EntradaDelMenu => ({ pagina, titulo, permiso, seccion });
+
+/**
+ * Spec 050, RF-8 y RF-84 (D9): el Asistente va primero en todos los menús, sin sección, y es
+ * la portada de cada empresa y obra. Hasta la 050 iba al final.
+ */
+const ASISTENTE = e('asistente', 'Asistente', 'asistente', null);
 
 /** LicitApp, en el mismo VPS (RF-49). */
 export const DIRECCION_DE_LICITAPP = 'https://licitapp-elementaling.cloud/';
@@ -83,88 +106,96 @@ export const DIRECCION_DE_LICITAPP = 'https://licitapp-elementaling.cloud/';
  * Spec 046, RF-1: en cada obra y en GeoLab, compras y pagos se piden en un solo módulo. El
  * permiso es el mismo de las solicitudes, que lo tienen quienes piden y quienes aprueban.
  */
-const REQUISICIONES = e('requisiciones', 'Requisiciones', 'solicitudes');
+const requisiciones = (seccion: SeccionDelMenu) => e('requisiciones', 'Requisiciones', 'solicitudes', seccion);
 
 /**
- * RF-13 a RF-15, en el orden de la spec (menús definitivos, cambio del 2026-10-27).
+ * RF-13 a RF-15 (menús definitivos, cambio del 2026-10-27). Desde la spec 050 van en el orden de
+ * sus secciones, con el Asistente primero: la lista se lee igual plana o agrupada.
  * Proyectos no tiene menú propio: tiene obras.
  *
  * Elemental presta los servicios administrativos del grupo: Personas y Obras van dentro
  * de su Recursos Humanos, y la información financiera, dentro de Tesorería (spec 037).
  */
 const MENUS: Record<Exclude<EmpresaId, 'proyectos'>, readonly EntradaDelMenu[]> = {
+  // Spec 050, RF-7: Gestión · Personal y archivo. Antes la lista empezaba por Recursos Humanos.
   elemental: [
-    e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
+    ASISTENTE,
     // Spec 046, RF-47, RF-89 a RF-92: las requisiciones del grupo, donde se aprueban y se compran.
     // Compras ya no es un módulo aparte (cambio del 2026-11-17): su trabajo vive aquí.
-    e('requisiciones', 'Requisiciones', 'aprobaciones'),
-    e('tesoreria', 'Tesorería', 'tesoreria'),
-    e('documentos', 'Documentos', 'documentos'),
-    { ...e('licitaciones', 'Licitaciones', 'licitaciones'), externa: DIRECCION_DE_LICITAPP },
-    ASISTENTE,
+    // Con el permiso de las aprobaciones, no el de las solicitudes: en Elemental es la bandeja.
+    e('requisiciones', 'Requisiciones', 'aprobaciones', 'Gestión'),
+    e('tesoreria', 'Tesorería', 'tesoreria', 'Gestión'),
+    { ...e('licitaciones', 'Licitaciones', 'licitaciones', 'Gestión'), externa: DIRECCION_DE_LICITAPP },
+    e('recursos-humanos', 'Recursos Humanos', 'rrhh', 'Personal y archivo'),
+    e('documentos', 'Documentos', 'documentos', 'Personal y archivo'),
   ],
+  // Spec 050, RF-5: Día a día · Flota · Administración.
   occ: [
-    e('whatsapp', 'Reportes de WhatsApp', 'whatsapp'),
-    // Spec 038: su bitácora propia y la de las obras, con el permiso de la de empresa.
-    e('bitacora', 'Bitácora', 'bitacora_empresa'),
-    e('documentos', 'Documentos', 'documentos'),
-    // Spec 035, RF-3: el personal de OCC, de consulta.
-    e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
-    e('reportes', 'Reportes de vehículos y maquinaria', 'reportes'),
-    e('vehiculos', 'Vehículos', 'vehiculos'),
-    e('preoperacionales', 'Preoperacionales', 'preoperacionales'),
-    e('asignaciones', 'Asignaciones', 'asignaciones'),
-    // Spec 046, RF-86 (cambio del 2026-11-17): también OCC pide con Requisiciones.
-    REQUISICIONES,
     ASISTENTE,
+    // Spec 038: su bitácora propia y la de las obras, con el permiso de la de empresa.
+    e('bitacora', 'Bitácora', 'bitacora_empresa', 'Día a día'),
+    e('preoperacionales', 'Preoperacionales', 'preoperacionales', 'Día a día'),
+    e('asignaciones', 'Asignaciones', 'asignaciones', 'Día a día'),
+    e('whatsapp', 'Reportes de WhatsApp', 'whatsapp', 'Día a día'),
+    e('vehiculos', 'Vehículos', 'vehiculos', 'Flota'),
+    e('reportes', 'Reportes de vehículos y maquinaria', 'reportes', 'Flota'),
+    // Spec 046, RF-86 (cambio del 2026-11-17): también OCC pide con Requisiciones.
+    requisiciones('Administración'),
+    // Spec 035, RF-3: el personal de OCC, de consulta.
+    e('recursos-humanos', 'Recursos Humanos', 'rrhh', 'Administración'),
+    e('documentos', 'Documentos', 'documentos', 'Administración'),
   ],
+  // Spec 050, RF-6: Laboratorio · Administración.
   geolab: [
+    ASISTENTE,
+    e('laboratorio', 'Laboratorio', 'laboratorio', 'Laboratorio'),
+    e('reportes', 'Reportes de laboratorio', 'reportes', 'Laboratorio'),
     // Spec 038, RF-27, RF-29: el laboratorio de las obras, que el laboratorista consulta.
-    e('bitacora', 'Bitácora', 'bitacora_empresa'),
+    e('bitacora', 'Bitácora', 'bitacora_empresa', 'Laboratorio'),
     // Spec 038, RF-28: el grupo de Geolab, que el laboratorista consulta con el permiso de la
     // Bitácora de la empresa. No con el de WhatsApp: ese le abriría las bandejas de las obras.
-    e('whatsapp', 'Reportes de WhatsApp', 'bitacora_empresa'),
-    e('laboratorio', 'Laboratorio', 'laboratorio'),
-    e('reportes', 'Reportes de laboratorio', 'reportes'),
-    e('documentos', 'Documentos', 'documentos'),
-    // Spec 035, RF-3: el personal de Geolab, de consulta.
-    e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
+    e('whatsapp', 'Reportes de WhatsApp', 'bitacora_empresa', 'Laboratorio'),
     // Spec 046, RF-1.
-    REQUISICIONES,
-    ASISTENTE,
+    requisiciones('Administración'),
+    // Spec 035, RF-3: el personal de Geolab, de consulta.
+    e('recursos-humanos', 'Recursos Humanos', 'rrhh', 'Administración'),
+    e('documentos', 'Documentos', 'documentos', 'Administración'),
   ],
 };
 
 /**
- * RF-17, igual para todas las obras. La portada de la obra es el resumen del día (el
- * Inicio de antes). Calidad es el Laboratorio de la obra, con su mismo interruptor.
+ * RF-17, igual para todas las obras, en el orden de sus secciones desde la spec 050. Calidad
+ * es el Laboratorio de la obra, con su mismo interruptor.
  *
  * Preoperacionales y Asignaciones también van aquí (cambio del 2026-10-27, decisión del
  * usuario): el residente los tenía y solo entra a su obra; sin ellos en este menú los
  * perdía, y RF-21 dice que cada rol sigue viendo lo de hoy.
  */
 const MENU_DE_OBRA: readonly EntradaDelMenu[] = [
-  e('bitacoras', 'Bitácoras', 'bitacoras'),
-  e('whatsapp', 'Reportes de WhatsApp', 'whatsapp'),
-  e('reportes', 'Reportes e informes', 'reportes'),
-  e('recursos-humanos', 'Recursos Humanos', 'rrhh'),
-  e('calidad', 'Calidad', 'laboratorio'),
-  e('almacen', 'Almacén', 'almacen'),
-  e('preoperacionales', 'Preoperacionales', 'preoperacionales'),
-  e('asignaciones', 'Asignaciones', 'asignaciones'),
-  e('cantera', 'Control Cantera', 'cantera'),
-  e('contrato', 'Contrato y Presupuesto', 'contrato'),
-  // Spec 034, RF-2: los documentos de la obra, después de los del contrato, que siguen allí.
-  e('documentos', 'Documentos', 'documentos'),
+  ASISTENTE,
+  // Spec 050, RF-4: Día a día · Planeación y contrato · Materiales y calidad · Personal y archivo.
+  e('bitacoras', 'Bitácoras', 'bitacoras', 'Día a día'),
+  e('preoperacionales', 'Preoperacionales', 'preoperacionales', 'Día a día'),
+  e('asignaciones', 'Asignaciones', 'asignaciones', 'Día a día'),
+  e('whatsapp', 'Reportes de WhatsApp', 'whatsapp', 'Día a día'),
+  e('contrato', 'Contrato y Presupuesto', 'contrato', 'Planeación y contrato'),
   // Spec 043, RF-86, RF-88: la planificación del Excel y su cumplimiento. El Residente ve solo
   // Cumplimiento, en cantidades; la tabla decide quién ve qué.
-  e('planificacion', 'Planificación', 'planificacion'),
-  e('cumplimiento', 'Cumplimiento', 'cumplimiento'),
+  e('planificacion', 'Planificación', 'planificacion', 'Planeación y contrato'),
   // Spec 044, RF-78: el plan de trabajo de cada semana, junto a lo que lo mide.
-  e('plan-semanal', 'Plan semanal', 'plan_semanal'),
+  e('plan-semanal', 'Plan semanal', 'plan_semanal', 'Planeación y contrato'),
+  e('cumplimiento', 'Cumplimiento', 'cumplimiento', 'Planeación y contrato'),
   // Spec 046, RF-1.
-  REQUISICIONES,
-  ASISTENTE,
+  requisiciones('Materiales y calidad'),
+  e('almacen', 'Almacén', 'almacen', 'Materiales y calidad'),
+  e('cantera', 'Control Cantera', 'cantera', 'Materiales y calidad'),
+  // Calidad es el Laboratorio de la obra, con su mismo interruptor.
+  e('calidad', 'Calidad', 'laboratorio', 'Materiales y calidad'),
+  e('recursos-humanos', 'Recursos Humanos', 'rrhh', 'Personal y archivo'),
+  // Spec 034, RF-2: los documentos de la obra. Desde la 050 van en «Personal y archivo» y no
+  // detrás de Contrato y Presupuesto.
+  e('documentos', 'Documentos', 'documentos', 'Personal y archivo'),
+  e('reportes', 'Reportes e informes', 'reportes', 'Personal y archivo'),
 ];
 
 /**
@@ -383,32 +414,31 @@ export function rutaDeProyectos(ir?: string): string {
  */
 export function destinoAlEntrar(persona: { rol: Rol; obras: readonly string[] }): string | null {
   const unaObra = persona.obras.length === 1 ? persona.obras[0] : null;
+  // Spec 050, RF-84, RF-89, RF-90 (D9, D12): todos entran al Asistente de donde trabajan, también
+  // los cargos que hasta entonces entraban directo a su módulo (008, 034, 035, 046). Su módulo
+  // queda a un toque, en el menú.
   switch (persona.rol) {
     case 'admin':
+      // RF-88 (D11): la gerencia sigue escogiendo la empresa en las tarjetas.
       return '/panel';
     case 'laboratorista':
-      return rutaDeEmpresa('geolab', 'laboratorio');
+      return rutaDeEmpresa('geolab', 'asistente');
     case 'encargado_occ':
-      // Spec 034, RF-14: sin tarjetas; su lugar es OCC, que abre en su primera página.
-      return rutaDeEmpresa('occ');
+      // Spec 034, RF-14: sin tarjetas; su lugar es OCC.
+      return rutaDeEmpresa('occ', 'asistente');
     case 'auxiliar_administrativa':
-      // Spec 035, RF-9: sin tarjetas. Desde la 046 (RF-92, cambio del 17-nov) entra a Requisiciones
-      // de Elemental, que absorbió Compras: ahí marca lo recibido.
-      return rutaDeEmpresa('elemental', 'requisiciones');
     case 'administradora_elemental':
-      // Spec 046, RF-47: lo que espera su aprobación, en la bandeja «Requisiciones».
-      return rutaDeEmpresa('elemental', 'requisiciones');
+      // Spec 035, RF-9 y 046, RF-47: sin tarjetas; su lugar es Elemental.
+      return rutaDeEmpresa('elemental', 'asistente');
     case 'director_proyectos':
       // Spec 041, RF-5: ve todas las obras; entra a la lista, como la gerencia a Proyectos.
       return rutaDeProyectos();
     case 'residente':
     case 'director_obra':
-      // La portada de la obra es el resumen del día, el Inicio de antes.
-      return unaObra ? rutaDeObra(unaObra) : rutaDeProyectos();
     case 'almacenista':
-      return unaObra ? rutaDeObra(unaObra, 'almacen') : rutaDeProyectos();
     case 'encargado_planta':
-      return unaObra ? rutaDeObra(unaObra, 'cantera') : rutaDeProyectos();
+      // Con una sola obra, a su Asistente; con varias o ninguna, a la lista (041/RF-24).
+      return unaObra ? rutaDeObra(unaObra, 'asistente') : rutaDeProyectos();
     case 'operador':
       return null;
   }
@@ -514,10 +544,10 @@ export function rutaNueva(
   }
   // El Encargado de OCC no entra a las obras: lo de antes que era de una obra lo lleva a
   // OCC, a la misma página si OCC la tiene.
-  // La Auxiliar Administrativa tampoco entra a las obras: lo de antes la lleva a su entrada,
-  // Requisiciones de Elemental (spec 040; 046, RF-92).
+  // La Auxiliar Administrativa tampoco entra a las obras: lo de antes la lleva a su entrada, que
+  // desde la spec 050 (RF-90, D12) es el Asistente de Elemental (antes, Requisiciones: 040; 046, RF-92).
   if (persona.rol === 'auxiliar_administrativa') {
-    return conParametros(rutaDeEmpresa('elemental', pagina === 'asistente' ? 'asistente' : 'requisiciones'));
+    return conParametros(rutaDeEmpresa('elemental', 'asistente'));
   }
   if (persona.rol === 'encargado_occ') {
     const enOcc = pagina === 'preoperacionales' || pagina === 'asignaciones';
@@ -597,6 +627,8 @@ export interface EnlaceDelMenu {
   ruta: string;
   /** La ruta es de otra aplicación: se abre en una pestaña nueva (RF-49). */
   externa?: true;
+  /** La sección del menú (spec 050). Sin ella, el enlace no es de un menú de empresa u obra. */
+  seccion?: SeccionDelMenu | null;
 }
 
 /**
@@ -633,8 +665,8 @@ export function menuDelLugar(
       navegacion: gerencia ? [aEmpresas] : [],
       entradas: (entra ? menuDeEmpresa(lugar.empresa, rol) : []).map((m) =>
         m.externa
-          ? { clave: m.pagina, titulo: m.titulo, ruta: m.externa, externa: true as const }
-          : { clave: m.pagina, titulo: m.titulo, ruta: rutaDeEmpresa(lugar.empresa, m.pagina) },
+          ? { clave: m.pagina, titulo: m.titulo, ruta: m.externa, externa: true as const, seccion: m.seccion }
+          : { clave: m.pagina, titulo: m.titulo, ruta: rutaDeEmpresa(lugar.empresa, m.pagina), seccion: m.seccion },
       ),
     };
   }
@@ -651,7 +683,73 @@ export function menuDelLugar(
       clave: m.pagina,
       titulo: m.titulo,
       ruta: rutaDeObra(lugar.obraId, m.pagina),
+      seccion: m.seccion,
     })),
+  };
+}
+
+/**
+ * La portada de un menú (spec 050, RF-84, RF-85): el Asistente; si no lo tiene, la primera
+ * entrada de su primera sección que sea del panel —Licitaciones abre otra aplicación y no puede
+ * ser la portada—. `null` si no queda ninguna: la pantalla dice «Sin acceso».
+ */
+export function portadaDelMenu(menu: {
+  asistente: EnlaceDelMenu | null;
+  secciones: readonly SeccionConEnlaces[];
+}): string | null {
+  if (menu.asistente) return menu.asistente.ruta;
+  for (const seccion of menu.secciones) {
+    const primera = seccion.enlaces.find((enlace) => !enlace.externa);
+    if (primera) return primera.ruta;
+  }
+  return null;
+}
+
+/**
+ * La portada de una empresa o de una obra (spec 050, RF-84, RF-85, RF-87): la página que se abre al
+ * entrar a `/panel/<empresa>` o a `/panel/proyectos/<obra>`. Sale del mismo menú que se ve, así que
+ * nunca lleva a una página que el menú no ofrece. Fuera de una empresa u obra no hay portada.
+ */
+export function portadaDelLugar(
+  lugar: LugarDelPanel | null,
+  quien: Rol | { rol: Rol; obraId: string | null; obras?: readonly string[] },
+  modulosDeObra: ModulosDeObra = TODOS_LOS_MODULOS,
+): string | null {
+  if (!lugar || lugar.tipo === 'proyectos') return null;
+  return portadaDelMenu(menuPorSecciones(lugar, quien, modulosDeObra));
+}
+
+/** Una sección del menú lateral, con su título y sus enlaces (spec 050, RF-1). */
+export interface SeccionConEnlaces {
+  titulo: SeccionDelMenu;
+  enlaces: EnlaceDelMenu[];
+}
+
+/**
+ * El menú de un lugar por secciones (spec 050, RF-1 a RF-10): el Asistente aparte, para ir
+ * primero y sin título (RF-8), y luego las secciones en su orden fijo, cada una con lo que
+ * este cargo ve. Parte de `menuDelLugar`, así que el permiso, los módulos apagados y la regla
+ * de la Administradora fuera de Elemental se deciden en un solo sitio, y una sección que se
+ * queda sin entradas no aparece (RF-9, RF-10). Fuera de una empresa u obra (las tarjetas de
+ * la gerencia) no hay secciones: esos enlaces siguen en `entradas`.
+ */
+export function menuPorSecciones(
+  lugar: LugarDelPanel | null,
+  quien: Rol | { rol: Rol; obraId: string | null; obras?: readonly string[] },
+  modulosDeObra: ModulosDeObra = TODOS_LOS_MODULOS,
+): { navegacion: EnlaceDelMenu[]; asistente: EnlaceDelMenu | null; secciones: SeccionConEnlaces[] } {
+  const { navegacion, entradas } = menuDelLugar(lugar, quien, modulosDeObra);
+  const secciones: SeccionConEnlaces[] = [];
+  for (const enlace of entradas) {
+    if (!enlace.seccion) continue;
+    const ultima = secciones[secciones.length - 1];
+    if (ultima?.titulo === enlace.seccion) ultima.enlaces.push(enlace);
+    else secciones.push({ titulo: enlace.seccion, enlaces: [enlace] });
+  }
+  return {
+    navegacion,
+    asistente: entradas.find((enlace) => enlace.clave === 'asistente') ?? null,
+    secciones,
   };
 }
 
@@ -719,7 +817,48 @@ export function tituloDelLugar(lugar: LugarDelPanel | null): string | null {
     return pagina ? `${pagina.titulo} · ${nombre}` : nombre;
   }
   const pagina = MENU_DE_OBRA.find((m) => m.pagina === lugar.pagina);
-  return `${pagina?.titulo ?? 'Resumen del día'} · Proyectos`;
+  // Spec 050, RF-86: sin el Resumen del día, la portada de la obra no tiene título propio; se va
+  // al Asistente y ese ya trae el suyo.
+  return pagina ? `${pagina.titulo} · Proyectos` : 'Proyectos';
+}
+
+/** Un paso de la ruta de arriba de una pantalla (spec 050, RF-27). Sin `ruta`, es donde se está. */
+export interface Miga {
+  titulo: string;
+  ruta: string | null;
+}
+
+/**
+ * La ruta de arriba de una pantalla (spec 050, RF-27, RF-28): empresa u obra › módulo › registro.
+ * Todo paso lleva a su pantalla menos el último, que es donde se está (D4). El primero lleva a la
+ * portada del lugar, que desde la 050 es su Asistente.
+ *
+ * `nombres.obra` es el nombre de la obra, que la regla no conoce: lo trae quien la pinta. Mientras
+ * llega, «Obra», para que la ruta no se quede sin su primer paso. Una página que no está en el menú
+ * (una dirección vieja) no inventa un paso con un nombre que nadie le dio.
+ */
+export function migasDelLugar(
+  lugar: LugarDelPanel | null,
+  nombres: { obra?: string | null },
+  registro?: string,
+): Miga[] {
+  if (!lugar || lugar.tipo === 'proyectos') return [];
+  const raiz =
+    lugar.tipo === 'empresa'
+      ? { titulo: nombreDeEmpresa(lugar.empresa), ruta: rutaDeEmpresa(lugar.empresa) }
+      : { titulo: nombres.obra || 'Obra', ruta: rutaDeObra(lugar.obraId) };
+  const menu = lugar.tipo === 'empresa' ? MENUS[lugar.empresa] : MENU_DE_OBRA;
+  const pagina = lugar.pagina ? menu.find((m) => m.pagina === lugar.pagina && !m.externa) : undefined;
+  const pasos: Miga[] = [raiz];
+  if (pagina) {
+    pasos.push({
+      titulo: pagina.titulo,
+      ruta: lugar.tipo === 'empresa' ? rutaDeEmpresa(lugar.empresa, pagina.pagina) : rutaDeObra(lugar.obraId, pagina.pagina),
+    });
+    if (registro) pasos.push({ titulo: registro, ruta: null });
+  }
+  // El último paso es donde se está: sin enlace.
+  return pasos.map((paso, i) => (i === pasos.length - 1 ? { ...paso, ruta: null } : paso));
 }
 
 /**

@@ -18,7 +18,7 @@ import { StyleSheet, View } from 'react-native';
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api } from '@/features/panel/cliente-api';
 import { Boton, Celda, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
-import { MarcoPantalla, useListado } from '@/features/panel/marco';
+import { MarcoPantalla, type PartesDeLaAccion, useListado } from '@/features/panel/marco';
 import type { PlanificacionFila } from '@/features/panel/planificacion';
 import { usePersona } from '@/features/panel/sesion';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
@@ -80,36 +80,30 @@ export default function PantallaPlanificacion() {
     },
   ];
 
-  return (
+  // Spec 050, RF-30: «Subir Excel de planificación» y «Crear desde el presupuesto» van en el encabezado; la
+  // lectura del libro, la propuesta de la IA y sus ventanas, en la página. Cada flujo guarda su estado y
+  // entrega las dos piezas.
+  const pintar = (subir: PartesDeLaAccion, crear: PartesDeLaAccion) => (
     <MarcoPantalla
       exigeObra
       titulo="Planificación"
       descripcion="La planificación de la obra: precios de costo, medidas, programación mes a mes y costos indirectos, con sus versiones. Se crea desde el presupuesto o desde el Excel del Director de Proyectos."
       error={lista.error}
       cargando={lista.cargando}
+      // Mientras carga, sin botones: «Crear desde el presupuesto» necesita saber si ya hay un borrador
+      // para ofrecer sustituirlo (antes, el cuerpo entero quedaba oculto mientras cargaba).
+      acciones={
+        !lista.cargando && (subir.botones || crear.botones) ? (
+          <>
+            {subir.botones}
+            {crear.botones}
+          </>
+        ) : undefined
+      }
     >
       <View style={estilos.columna}>
-        {obraId && puedeSubir ? (
-          <CrearDesdePresupuesto
-            key={`presupuesto-${obraId}`}
-            obraId={obraId}
-            borrador={borrador}
-            alTerminar={(id) => {
-              setElegida(id);
-              lista.recargar();
-            }}
-          />
-        ) : null}
-        {obraId && puedeSubir ? (
-          <SubirPlanificacion
-            key={obraId}
-            obraId={obraId}
-            alTerminar={(id) => {
-              setElegida(id);
-              lista.recargar();
-            }}
-          />
-        ) : null}
+        {subir.cuerpo}
+        {crear.cuerpo}
         <Seccion titulo="Versiones">
           <Tabla filas={lista.datos} columnas={columnas} vacio="Esta obra todavía no tiene planificación." />
         </Seccion>
@@ -125,7 +119,25 @@ export default function PantallaPlanificacion() {
       </View>
     </MarcoPantalla>
   );
+
+  const alTerminar = (id: string) => {
+    setElegida(id);
+    lista.recargar();
+  };
+  // Sin obra o sin permiso para subir, no hay flujos: la pantalla va sin botones.
+  if (!obraId || !puedeSubir) return pintar(SIN_ACCION, SIN_ACCION);
+  return (
+    <CrearDesdePresupuesto key={`presupuesto-${obraId}`} obraId={obraId} borrador={borrador} alTerminar={alTerminar}>
+      {(crear) => (
+        <SubirPlanificacion key={obraId} obraId={obraId} alTerminar={alTerminar}>
+          {(subir) => pintar(subir, crear)}
+        </SubirPlanificacion>
+      )}
+    </CrearDesdePresupuesto>
+  );
 }
+
+const SIN_ACCION: PartesDeLaAccion = { botones: null, cuerpo: null };
 
 const estilos = StyleSheet.create({
   columna: { gap: 16 },

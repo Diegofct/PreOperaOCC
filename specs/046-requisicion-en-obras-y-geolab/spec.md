@@ -1,6 +1,6 @@
 # Spec 046 — Requisición en las obras y en GeoLab, con su cadena de aprobación, y la Administradora de Elemental
 
-> Estado: **Cumplida el 2026-11-17** (`validacion.md`, 91/91 RF vigentes, con el cambio del 2026-11-17, D15–D19) — antes Cumplida el 2026-11-16 con 85/85 · **Aprobada por Diego el 2026-11-16** (entrevista D1–D6, dudas D7–D9; clarificación D10–D14 del mismo día) · Fecha: 2026-11-16 · Segunda de la tanda 045–048 (plan del 2026-11-13). **Modifica la 036 (compras), la 037 (tesorería) y la 040 (Auxiliar Administrativa).** La 047 hará la requisición de OCC con su formato y la 048 amarrará las de obra a la planificación.
+> Estado: **Cumplida el 2026-11-17** (`validacion.md`, 91/91 RF vigentes, con el cambio del 2026-11-17, D15–D19) — antes Cumplida el 2026-11-16 con 85/85 · **Aprobada por Diego el 2026-11-16** (entrevista D1–D6, dudas D7–D9; clarificación D10–D14 del mismo día) · Fecha: 2026-11-16 · Segunda de la tanda 045–048 (plan del 2026-11-13). **Modifica la 036 (compras), la 037 (tesorería) y la 040 (Auxiliar Administrativa).** La 047 hará la requisición de OCC con su formato y la 048 amarrará las de obra a la planificación. · **Modificada por la spec 050** (2026-11-18): las requisiciones filtran por estado con cifras; «Nueva requisición» va en el encabezado; quien solo lleva requisiciones entra al Asistente (D12); lo aprobado se avisa abajo — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 
 ## Contexto y objetivo
 

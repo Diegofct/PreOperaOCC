@@ -55,7 +55,7 @@ export function PantallaCortes() {
     { clave: 'pagar', titulo: 'Por pagar', ancho: 150, pintar: (f) => <Celda>{f.corte ? enPesos(f.corte.cuentasPorPagar) : '—'}</Celda> },
     { clave: 'cobrar', titulo: 'Por cobrar', ancho: 150, pintar: (f) => <Celda>{f.corte ? enPesos(f.corte.cuentasPorCobrar) : '—'}</Celda> },
     {
-      clave: 'ver',
+      clave: 'ver', acciones: true,
       titulo: '',
       ancho: 100,
       anchoMinimo: 100,

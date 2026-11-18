@@ -16,7 +16,7 @@ import { Link, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { CajaDeLogo, EspaciadoLetra, FuentePanel, Grosor, Movimiento, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { CajaDeLogo, EspaciadoLetra, FuentePanel, Grosor, Movimiento, Panel, Radio, Sombra, Spacing, TextoPanel } from '@/constants/theme';
 import { api } from '@/features/panel/cliente-api';
 import type { EmpresaFila } from '@/features/panel/contratos';
 import { useMenu } from '@/features/panel/estado-menu';
@@ -140,13 +140,15 @@ const estilos = StyleSheet.create({
     padding: Spacing.four,
     borderRadius: Radio.lg,
     borderCurve: 'continuous',
-    borderWidth: Grosor.linea,
-    borderColor: Panel.bordeSuave,
     backgroundColor: Panel.superficie,
+    // Spec 050, RF-46, RF-47: sombra en lugar de borde, y crece al pasar el puntero.
+    boxShadow: Sombra.tarjeta,
+    transitionProperty: 'box-shadow',
     transitionDuration: `${Movimiento.rapido}ms`,
   },
-  tarjetaEncima: { borderColor: Panel.borde, backgroundColor: Panel.fondoHover },
-  tarjetaEnfocada: { boxShadow: `0 0 0 ${Grosor.marca}px ${Panel.foco}` },
+  tarjetaEncima: { boxShadow: Sombra.elevada },
+  // El anillo del foco va con la sombra, no en su lugar: con el teclado la tarjeta sigue siendo una tarjeta.
+  tarjetaEnfocada: { boxShadow: `0 0 0 ${Grosor.marca}px ${Panel.foco}, ${Sombra.elevada}` },
   franjaDeMarca: {
     alignSelf: 'stretch',
     height: CajaDeLogo.card.alto,

@@ -27,12 +27,12 @@
  */
 import { useMemo, useState } from 'react';
 
-import { normalizar } from '@/shared/rules/texto';
-
+import { coincideConBusqueda } from './contar-por-estado';
 import { recortarPagina } from './paginas';
 import { useParametroDeDireccion } from './usar-parametro-direccion';
 
 export { POR_PAGINA, recortarPagina } from './paginas';
+export { contarPorEstado } from './contar-por-estado';
 
 /**
  * Vuelve a la página 1 cuando cambia lo que se lista (spec 025, RF-57): un filtro o
@@ -82,6 +82,15 @@ export interface ListadoFiltrado<T> {
   buscar: (texto: string) => void;
   paginaActual: number;
   irAPagina: (pagina: number) => void;
+  /** Si hay una búsqueda o un filtro de la pantalla puesto (spec 050, RF-54). */
+  hayFiltros: boolean;
+  /** Quita la búsqueda y los filtros de la pantalla (RF-78). */
+  limpiar: () => void;
+  /**
+   * Para `Tabla.sinResultados`: hay registros pero nada pasa la búsqueda y los filtros. `undefined` si la
+   * lista está vacía de verdad o si algo coincide.
+   */
+  sinResultados: { alQuitar: () => void } | undefined;
 }
 
 /**
@@ -94,6 +103,8 @@ export interface ListadoFiltrado<T> {
  * @param claveDeBusqueda  el nombre de la búsqueda en la dirección. Cambia solo cuando
  *   hay dos listados en la misma página (spec 035: el personal y, en la ficha, la carpeta
  *   de documentos), para que una búsqueda no se le meta a la otra.
+ * @param filtrosDeLaPantalla  si la pantalla tiene filtros propios puestos y cómo quitarlos
+ *   (spec 050, RF-54, RF-78). El listado no los conoce: solo sabe si una fila pasa.
  */
 export function useListadoFiltrado<T>(
   filas: T[],
@@ -101,6 +112,7 @@ export function useListadoFiltrado<T>(
   pasaFiltros: (fila: T) => boolean = () => true,
   ordenar?: (filas: T[]) => T[],
   claveDeBusqueda = 'buscar',
+  filtrosDeLaPantalla?: { hay: boolean; limpiar: () => void },
 ): ListadoFiltrado<T> {
   // La búsqueda vive en la dirección: recargar no la pierde y el enlace se puede
   // pasar. El ayudante es el mismo que usa el periodo de los preoperacionales.
@@ -108,12 +120,8 @@ export function useListadoFiltrado<T>(
   const [paginaActual, setPaginaActual] = useState(1);
 
   const coincidentes = useMemo(() => {
-    const buscado = normalizar(busqueda);
-    return filas.filter((fila) => {
-      if (!pasaFiltros(fila)) return false;
-      if (buscado.length === 0) return true;
-      return textoDe(fila).some((campo) => campo && normalizar(campo).includes(buscado));
-    });
+    // La misma búsqueda que cuentan las cifras de estado (spec 050, RF-52).
+    return filas.filter((fila) => pasaFiltros(fila) && coincideConBusqueda(textoDe(fila), busqueda));
     // `textoDe` y `pasaFiltros` se definen en el cuerpo de la pantalla y cambian
     // de identidad en cada render; incluirlas recalcularía siempre. Lo que de
     // verdad decide el resultado son las filas, el texto y los filtros, y esos
@@ -147,6 +155,12 @@ export function useListadoFiltrado<T>(
     setPaginaActual(1);
   }
   const { filas: recorte, pagina } = recortarPagina(ordenadas, paginaActual);
+  const hayFiltros = busqueda.trim().length > 0 || Boolean(filtrosDeLaPantalla?.hay);
+  const limpiar = () => {
+    setBusqueda('');
+    setPaginaActual(1);
+    filtrosDeLaPantalla?.limpiar();
+  };
 
   return {
     pagina: recorte,
@@ -159,5 +173,8 @@ export function useListadoFiltrado<T>(
     },
     paginaActual: pagina,
     irAPagina: setPaginaActual,
+    hayFiltros,
+    limpiar,
+    sinResultados: filas.length > 0 && coincidentes.length === 0 ? { alQuitar: limpiar } : undefined,
   };
 }

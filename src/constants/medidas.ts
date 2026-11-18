@@ -43,6 +43,48 @@ export const MaxContentWidth = 800;
 export const MaxContentWidthPanel = 1280;
 
 /**
+ * Hasta dónde llegan los listados y los tableros en una pantalla grande (spec 050,
+ * RF-42, D1). `MaxContentWidthPanel` no se toca: es la medida contra la que se
+ * calibraron todas las columnas, y la regla de AGENTS.md sigue siendo que quepan
+ * ahí. Esto es el techo de una pantalla de 1920 px, donde a 1280 el panel quedaba
+ * en una franja con un vacío a cada lado.
+ */
+export const AnchoListado = 1600;
+
+/**
+ * Hasta dónde llegan los formularios y las fichas de lectura (spec 050, RF-43, D2).
+ * Más angosto que un listado a propósito: una línea de campos de 1600 px obliga a
+ * mover la vista de un extremo a otro de la pantalla para llenar un renglón.
+ */
+export const AnchoFormulario = 1100;
+
+/**
+ * Lo que dura a la vista un aviso de éxito, en milisegundos (spec 050, RF-56, D3).
+ * Los de error no se van solos (RF-57): hay que leerlos y cerrarlos.
+ */
+export const DuracionDeAviso = 4000;
+
+/**
+ * Lo más ancho que es un aviso (spec 050, RF-82). Va en la esquina de abajo a la izquierda y angosto, para no
+ * tapar los botones del pie de una ventana, que se alinean a la derecha.
+ */
+export const AnchoDeAviso = 420;
+
+/**
+ * Lo más que ocupa un paso de la ruta de arriba de una pantalla (spec 050, RF-29). Un nombre de
+ * obra como «CONSORCIO VIAL MAGDALENA MEDIO 2026 — TRAMO 787» no deja ver el módulo a 390 px; se
+ * recorta con «…» y se ve completo al pasar el puntero (RF-69).
+ */
+export const AnchoMaximoDeMiga = 280;
+
+/**
+ * Por encima de este ancho de ventana las columnas de una tabla crecen (spec 050, RF-74). Es el portátil de
+ * la oficina, contra el que se midieron las columnas: hasta ahí miden lo suyo y el aire queda a la derecha;
+ * más allá, en un monitor de 1920 con listados de 1600, ese aire era un hueco de un tercio de la tabla.
+ */
+export const AnchoCrecenColumnas = 1366;
+
+/**
  * Grosores de línea. Spec 006.
  *
  * Estaban escritos a mano en todo el panel —una docena de `borderWidth: 1` y
@@ -96,6 +138,12 @@ export const AnchoMinimoDosColumnas = 1000;
  */
 export const CampoPanel = {
   alto: 38,
+  /**
+   * El alto del renglón de la etiqueta encima de un campo (spec 050, RF-13, RF-15). Fijo y de
+   * un solo renglón en el escritorio: con «Unidad (kg, m3, caja…)» partida en dos y su vecina en
+   * uno, los recuadros de un mismo renglón quedaban a alturas distintas.
+   */
+  altoEtiqueta: 20,
   // Seis renglones de 21 de alto, más el relleno y el borde del campo.
   altoAreaDeTexto: 146,
   /**
@@ -152,6 +200,12 @@ export const AnchoMinimoMenuFijo = 1280;
  * a lo ancho dentro de su marco.
  */
 export const AnchoCelular = 768;
+
+/**
+ * En el celular, lo que se toca en el panel mide al menos esto de alto (spec 026, RF-40; spec 050, RF-65). Es
+ * menos que el `Toque.minimo` de la app del operador, que trabaja con guantes; el panel se usa con el dedo.
+ */
+export const AltoDeControlAngosto = 44;
 
 /** El ancho más angosto en el que la spec promete el panel completo (022, RNF). */
 export const AnchoMinimoPanel = 1024;

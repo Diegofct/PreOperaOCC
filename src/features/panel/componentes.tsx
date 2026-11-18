@@ -42,11 +42,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type FlexStyle,
 } from 'react-native';
 
 import {
+  AltoDeControlAngosto,
   CampoPanel,
   EspaciadoLetra,
   Estado,
@@ -70,8 +72,8 @@ import {
 import { filtrarOpciones, ofreceBusqueda } from '@/shared/rules/texto';
 
 import { CapaFlotante } from './capa-flotante';
-import { anchoMinimoDeColumna } from './columnas';
-import type { Orden } from './ordenar';
+import { anchoMinimoDeColumna, crecimientoDeColumna, partesDeLaTarjeta, seMuestraEnTarjetas } from './columnas';
+import { pulsacionesPara, type Orden, type Sentido } from './ordenar';
 import { useEsAngosto } from './usar-ancho';
 import { useAccionDeVentana } from './usar-accion-de-ventana';
 
@@ -301,6 +303,18 @@ export function Boton({
 const EnFormulario = createContext(false);
 
 /**
+ * Dentro de una ventana (spec 050, RF-21): los botones de su formulario se quedan pegados al pie
+ * mientras el cuerpo se desplaza, para no tener que bajar hasta el final a buscar «Guardar».
+ *
+ * Se resuelve con `position: sticky` sobre los mismos botones y no con una ranura en la ventana
+ * que `AccionesFormulario` llenara, que era lo que decía el plan: llenarla obliga a que los
+ * botones le avisen a la ventana en cada pintada, y la ventana, al repintarse, vuelve a pintar los
+ * botones —un ciclo—, o a sacarlos con un portal de `react-dom`, que el proyecto no usa. Pegados,
+ * los botones son los mismos, se pintan una sola vez y siguen en el orden de siempre.
+ */
+const EnVentana = createContext(false);
+
+/**
  * Dentro de la columna final de una `FilaDeSeccion` la observación toma el ancho de esa
  * columna y no el suyo, para que la casilla caiga en el mismo sitio en todas las
  * secciones de la bitácora (spec 032, RF-3).
@@ -350,11 +364,62 @@ function useAnchoDeCampo(ancho: number): FlexStyle {
   return { width: ancho };
 }
 
+/**
+ * Ir al primer campo con error (spec 050, RF-20).
+ *
+ * Al guardar, el servidor puede rechazar un campo que no está a la vista —el último de una
+ * ventana larga— y quien guardó solo ve que no pasó nada. Cada campo con error se marca en su
+ * elemento (`data-campo-con-error`), y en el siguiente cuadro se lleva a la vista **el primero de
+ * la página**, en el orden en que se lee. Si fallan cinco campos a la vez, se hace un solo
+ * desplazamiento, no cinco.
+ *
+ * Va sobre la marca del DOM y no sobre un contexto que registre los campos, que era lo que decía
+ * el plan: así ningún formulario tiene que envolverse en nada, y «el primero» lo decide el orden
+ * real de la página y no el orden en que React montó los componentes. Solo se mueve cuando el
+ * error **aparece**: mientras alguien corrige otro campo, la pantalla no salta.
+ */
+let irAlPrimerErrorPendiente = false;
+
+function programarIrAlPrimerError() {
+  if (irAlPrimerErrorPendiente || Platform.OS !== 'web' || typeof document === 'undefined') return;
+  irAlPrimerErrorPendiente = true;
+  requestAnimationFrame(() => {
+    irAlPrimerErrorPendiente = false;
+    document.querySelector('[data-campo-con-error]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  });
+}
+
+function useIrAlPrimerError(error: string | undefined) {
+  const ref = useRef<View>(null);
+  const conError = Boolean(error);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    // En la web, el `View` de React Native es un elemento del DOM.
+    const nodo = ref.current as unknown as HTMLElement | null;
+    if (!nodo?.setAttribute) return;
+    if (conError) {
+      nodo.setAttribute('data-campo-con-error', '');
+      programarIrAlPrimerError();
+    } else {
+      nodo.removeAttribute('data-campo-con-error');
+    }
+  }, [conError]);
+  return ref;
+}
+
+/**
+ * La etiqueta de un campo, siempre encima (spec 050, RF-13 a RF-16). En el escritorio ocupa un
+ * solo renglón de alto fijo, así que en un renglón de campos todos los recuadros arrancan a la
+ * misma altura, digan lo que digan sus etiquetas; la que no cabe se corta con «…» y el lector de
+ * pantalla la lee entera. En el celular va un campo por renglón y no hay nada que alinear: ahí se
+ * parte en los renglones que necesite, para no esconder nada.
+ */
 function EtiquetaDeCampo({ texto, obligatorio }: { texto: string; obligatorio?: boolean }) {
   const angosto = useEsAngosto();
   return (
     <Text
-      style={[estilos.campoEtiqueta, angosto && estilos.textoAngosto]}
+      style={[estilos.campoEtiqueta, angosto ? estilos.textoAngosto : estilos.campoEtiquetaFija]}
+      numberOfLines={angosto ? undefined : 1}
       accessibilityLabel={obligatorio ? `${texto}, obligatorio` : texto}
     >
       {texto}
@@ -431,9 +496,11 @@ export function Campo({
   const [enfocado, setEnfocado] = useState(false);
   const anchoDeCampo = useAnchoDeCampo(ancho ?? 0);
   const sinMedida = useAnchoSinMedida();
+  const conError = useIrAlPrimerError(error);
 
   return (
     <View
+      ref={conError}
       style={[
         estilos.campo,
         ancho !== undefined
@@ -620,6 +687,7 @@ export function CampoDeFecha({
   error,
   ayuda,
   ancho = 170,
+  obligatorio,
 }: {
   etiqueta: string;
   valor: string;
@@ -629,17 +697,24 @@ export function CampoDeFecha({
   error?: string;
   ayuda?: string;
   ancho?: number;
+  /**
+   * Hay que llenarla para guardar. Se marca en la etiqueta igual que en `Campo` y `Selector`
+   * (spec 050, RF-18): hasta entonces cada pantalla escribía «Para cuándo *» en el texto, y el
+   * asterisco no salía en rojo como en los demás.
+   */
+  obligatorio?: boolean;
 }) {
   const angosto = useEsAngosto();
   const [enfocado, setEnfocado] = useState(false);
   const anchoDeCampo = useAnchoDeCampo(ancho);
+  const conError = useIrAlPrimerError(error);
   if (Platform.OS !== 'web') {
-    return <Campo etiqueta={etiqueta} valor={valor} onChange={onChange} error={error} ayuda={ayuda} ancho={ancho} />;
+    return <Campo etiqueta={etiqueta} valor={valor} onChange={onChange} error={error} ayuda={ayuda} ancho={ancho} obligatorio={obligatorio} />;
   }
   const borde = error ? Estado.noConforme : enfocado ? Panel.accion : Panel.borde;
   return (
-    <View style={[estilos.campo, anchoDeCampo]}>
-      <EtiquetaDeCampo texto={etiqueta} />
+    <View ref={conError} style={[estilos.campo, anchoDeCampo]}>
+      <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       {createElement('input', {
         type: 'date',
         value: valor,
@@ -755,8 +830,9 @@ export function SelectorDeVarios({
   obligatorio?: boolean;
 }) {
   const anchoDeCampo = useAnchoDeCampo(ancho);
+  const conError = useIrAlPrimerError(error);
   return (
-    <View style={[estilos.campo, anchoDeCampo]}>
+    <View ref={conError} style={[estilos.campo, anchoDeCampo]}>
       <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       {opciones.map((o) => (
         <Casilla
@@ -821,6 +897,7 @@ export function Selector({
   obligatorio?: boolean;
 }) {
   const angosto = useEsAngosto();
+  const conError = useIrAlPrimerError(error);
   const [colocacion, setColocacion] = useState<
     (ColocacionDeLista & { x: number; anchoBoton: number }) | null
   >(null);
@@ -956,7 +1033,7 @@ export function Selector({
   }, [abierto, idLista, senalada]);
 
   return (
-    <View style={[estilos.campo, ancho === undefined ? sinMedida : anchoDeCampo]}>
+    <View ref={conError} style={[estilos.campo, ancho === undefined ? sinMedida : anchoDeCampo]}>
       <EtiquetaDeCampo texto={etiqueta} obligatorio={obligatorio} />
       <Pressable
         ref={boton}
@@ -1221,19 +1298,53 @@ export interface Columna<T> {
    * nadie entiende.
    */
   ordenar?: (fila: T) => string | null | undefined;
+  /**
+   * El dato principal de la fila, el que encabeza su tarjeta en el celular (spec 050, RF-34). Sin
+   * marca, la primera columna; se marca cuando la primera no lo es, como una fecha.
+   */
+  principal?: boolean;
+  /**
+   * Los botones de la fila, que van al pie de su tarjeta (RF-36). Sin marca, la columna de clave
+   * `acciones`; se marca cuando los botones tienen otra clave.
+   */
+  acciones?: boolean;
+}
+
+/**
+ * Dentro del dato principal de una tarjeta, la `Celda` sale en letra más grande (spec 050, RF-34). Por
+ * contexto, porque lo que pinta cada columna lo escribe cada pantalla y casi siempre es una `Celda`.
+ */
+const EnPrincipalDeTarjeta = createContext(false);
+
+/**
+ * Lo que dice una lista sin ningún registro (spec 050, RF-53): un ícono, una frase que dice qué va ahí y,
+ * si el cargo puede crearlo, el botón para crear el primero. Un texto solo sigue valiendo: es la frase.
+ */
+export interface VacioDeLista {
+  texto: string;
+  icono?: string;
+  /** El botón para crear el primero, con la misma condición de permiso que el del encabezado. */
+  accion?: ReactNode;
 }
 
 export function Tabla<T extends { id: string }>({
   columnas,
   filas,
   vacio,
+  sinResultados,
   variante = 'tarjeta',
   orden,
   alOrdenar,
+  tipo = 'lista',
 }: {
   columnas: Columna<T>[];
   filas: T[];
-  vacio: string;
+  vacio: string | VacioDeLista;
+  /**
+   * Hay registros, pero la búsqueda o los filtros no dejan ver ninguno (spec 050, RF-54, RF-78). Se dice
+   * así, y no con la frase de la lista vacía, que haría creer que no hay nada; y se ofrece quitarlos.
+   */
+  sinResultados?: { alQuitar: () => void };
   /**
    * `tarjeta` es una tabla apoyada en el lienzo gris, con su fondo y su sombra.
    * `desnuda` es la misma tabla **dentro** de otra superficie: sin fondo, sin
@@ -1251,6 +1362,12 @@ export function Tabla<T extends { id: string }>({
    */
   orden?: Orden;
   alOrdenar?: (clave: string) => void;
+  /**
+   * Una `lista` pasa a tarjetas en el celular (spec 050, RF-33). Una `cuadricula` —lo que se llena celda
+   * por celda o es una matriz: la granulometría, los renglones del almacén, el presupuesto— sigue
+   * siendo tabla en cualquier ancho y se desplaza dentro de su marco (RF-71, RF-72, D5).
+   */
+  tipo?: 'lista' | 'cuadricula';
 }) {
   // Lo mínimo que mide la tabla con todas las columnas encogidas: por debajo de
   // esto, y solo por debajo, se desplaza dentro de su marco.
@@ -1260,16 +1377,71 @@ export function Tabla<T extends { id: string }>({
     Spacing.three * 2;
 
   const angosto = useEsAngosto();
+  // Spec 050, RF-40, RF-70: el ancho que de verdad tiene la tabla, no el de la ventana: con el menú
+  // abierto o en una columna de dos, una lista de nueve columnas no cabe aunque la ventana mida 1366.
+  // Se vuelve a medir al girar o cambiar el tamaño; la búsqueda, los filtros y el orden viven en la
+  // pantalla, así que pasar a tarjetas y volver no los toca (RF-73).
+  const [marco, setMarco] = useState(0);
+  const tarjetas = seMuestraEnTarjetas({ tipo, angosto, marco, minimo });
 
   if (filas.length === 0) {
+    if (sinResultados) {
+      return (
+        <View style={estilos.tablaVacia}>
+          <Text style={estilos.vacioSimbolo}>⌕</Text>
+          <Text style={estilos.vacioTexto}>No hay resultados con estos filtros.</Text>
+          <Boton titulo="Quitar los filtros" tono="secundario" onPress={sinResultados.alQuitar} />
+        </View>
+      );
+    }
+    const { texto, icono = '—', accion } = typeof vacio === 'string' ? { texto: vacio } : vacio;
     return (
       <View style={estilos.tablaVacia}>
-        <Text style={estilos.vacioSimbolo}>—</Text>
-        <Text style={estilos.vacioTexto}>{vacio}</Text>
+        <Text style={estilos.vacioSimbolo}>{icono}</Text>
+        <Text style={estilos.vacioTexto}>{texto}</Text>
+        {accion ?? null}
       </View>
     );
   }
 
+  return (
+    <View onLayout={(e) => setMarco(e.nativeEvent.layout.width)}>
+      {tarjetas ? (
+        <Tarjetas columnas={columnas} filas={filas} orden={orden} alOrdenar={alOrdenar} />
+      ) : (
+        <TablaConColumnas
+          columnas={columnas}
+          filas={filas}
+          variante={variante}
+          orden={orden}
+          alOrdenar={alOrdenar}
+          minimo={minimo}
+          angosto={angosto}
+        />
+      )}
+    </View>
+  );
+}
+
+/** La tabla de siempre, con sus columnas, su cabecera y su desplazamiento dentro del marco. */
+function TablaConColumnas<T extends { id: string }>({
+  columnas,
+  filas,
+  variante,
+  orden,
+  alOrdenar,
+  minimo,
+  angosto,
+}: {
+  columnas: Columna<T>[];
+  filas: T[];
+  variante: 'tarjeta' | 'desnuda';
+  orden?: Orden;
+  alOrdenar?: (clave: string) => void;
+  minimo: number;
+  angosto: boolean;
+}) {
+  const { width: ventana } = useWindowDimensions();
   return (
     // Horizontal propio: una tabla ancha se desplaza dentro de su marco, nunca
     // empujando la página entera de lado. Sin barra visible: se dibujaba siempre,
@@ -1293,12 +1465,12 @@ export function Tabla<T extends { id: string }>({
               <TituloOrdenable
                 key={columna.clave}
                 titulo={columna.titulo}
-                estiloColumna={estiloDeColumna(columna)}
+                estiloColumna={estiloDeColumna(columna, ventana)}
                 sentido={orden?.clave === columna.clave ? orden.sentido : null}
                 onPress={() => alOrdenar(columna.clave)}
               />
             ) : (
-              <Text key={columna.clave} style={[estilos.tablaTitulo, angosto && estilos.rotuloAngosto, estiloDeColumna(columna)]}>
+              <Text key={columna.clave} style={[estilos.tablaTitulo, angosto && estilos.rotuloAngosto, estiloDeColumna(columna, ventana)]}>
                 {columna.titulo}
               </Text>
             ),
@@ -1307,7 +1479,7 @@ export function Tabla<T extends { id: string }>({
         {filas.map((fila, indice) => (
           <Fila key={fila.id} alterna={indice % 2 === 1}>
             {columnas.map((columna) => (
-              <View key={columna.clave} style={estiloDeColumna(columna)}>
+              <View key={columna.clave} style={estiloDeColumna(columna, ventana)}>
                 {columna.pintar(fila)}
               </View>
             ))}
@@ -1319,14 +1491,97 @@ export function Tabla<T extends { id: string }>({
 }
 
 /**
- * El ancho de una columna: parte de su `ancho`, se encoge hasta su mínimo y no
- * crece (spec 022, RF-27). Que no crezca es a propósito: con sitio de sobra la
- * tabla se ve igual que antes, con el aire a la derecha de la última columna.
- * Cabecera y celdas usan el mismo estilo, así que siguen alineadas al encogerse.
+ * Las filas de una lista como tarjetas (spec 050, RF-33 a RF-37): arriba el dato principal en letra
+ * más grande; en medio cada dato con el nombre de su columna, «Cargo: Residente»; al pie los botones,
+ * o nada si la fila no tiene. Se arma con las mismas `Columna` de la tabla, así que una tarjeta enseña
+ * todo lo que enseña su fila (RF-35) sin que ninguna pantalla escriba otra vista.
  */
-function estiloDeColumna(columna: { ancho: number; anchoMinimo?: number }): FlexStyle {
+/** Los dos sentidos de «Ordenar por», con las mismas palabras que la flecha de los títulos (spec 015). */
+const SENTIDOS: { sentido: Sentido; texto: string }[] = [
+  { sentido: 'asc', texto: 'de la A a la Z' },
+  { sentido: 'desc', texto: 'de la Z a la A' },
+];
+
+function Tarjetas<T extends { id: string }>({
+  columnas,
+  filas,
+  orden,
+  alOrdenar,
+}: {
+  columnas: Columna<T>[];
+  filas: T[];
+  orden?: Orden;
+  alOrdenar?: (clave: string) => void;
+}) {
+  const partes = partesDeLaTarjeta(columnas);
+  const deClave = (clave: string) => columnas.find((c) => c.clave === clave)!;
+  const principal = partes.principal ? deClave(partes.principal) : null;
+  // RF-38, RF-39: sin títulos que pulsar, el orden se escoge aquí. Es el mismo orden de la tabla —lo
+  // lleva la pantalla—, así que al volver a la tabla sigue igual.
+  const ordenables = alOrdenar && orden ? columnas.filter((c) => c.ordenar) : [];
+  return (
+    <View style={estilos.tarjetas}>
+      {ordenables.length > 0 && alOrdenar && orden ? (
+        <Formulario desnudo>
+          <Selector
+            etiqueta="Ordenar por"
+            valor={`${orden.clave}:${orden.sentido}`}
+            opciones={ordenables.flatMap((c) =>
+              SENTIDOS.map(({ sentido, texto }) => ({ valor: `${c.clave}:${sentido}`, etiqueta: `${c.titulo}, ${texto}` })),
+            )}
+            onChange={(valor) => {
+              if (!valor) return;
+              const [clave, sentido] = valor.split(':') as [string, Sentido];
+              for (let i = 0; i < pulsacionesPara(orden, { clave, sentido }); i++) alOrdenar(clave);
+            }}
+            ancho={ANCHOS_DE_CAMPO.medio}
+          />
+        </Formulario>
+      ) : null}
+      {filas.map((fila) => {
+        const pie = partes.acciones.map((clave) => ({ clave, contenido: deClave(clave).pintar(fila) }));
+        const conPie = pie.some((p) => p.contenido !== null && p.contenido !== undefined && p.contenido !== false);
+        return (
+          <View key={fila.id} style={estilos.tarjetaDeFila}>
+            {principal ? (
+              <EnPrincipalDeTarjeta.Provider value>
+                <View>{principal.pintar(fila)}</View>
+              </EnPrincipalDeTarjeta.Provider>
+            ) : null}
+            {partes.datos.map((clave) => {
+              const columna = deClave(clave);
+              return (
+                <View key={clave} style={estilos.datoDeTarjeta}>
+                  {columna.titulo ? <Text style={estilos.datoDeTarjetaTitulo}>{`${columna.titulo}:`}</Text> : null}
+                  <View style={estilos.datoDeTarjetaValor}>{columna.pintar(fila)}</View>
+                </View>
+              );
+            })}
+            {conPie ? (
+              <View style={estilos.pieDeTarjeta}>
+                {pie.map((p) => (
+                  <View key={p.clave}>{p.contenido}</View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/**
+ * El ancho de una columna: parte de su `ancho` y se encoge hasta su mínimo (spec 022, RF-27). Hasta una
+ * ventana de 1366 no crece: la tabla se ve como se midió, con el aire a la derecha de la última columna.
+ * Por encima sí, en proporción a su ancho (spec 050, RF-74): en un monitor de 1920 ese aire era un hueco
+ * de un tercio del listado. Cabecera y celdas usan el mismo estilo, así que siguen alineadas al encogerse
+ * y al crecer.
+ */
+function estiloDeColumna(columna: { ancho: number; anchoMinimo?: number }, ventana: number): FlexStyle {
   return {
-    flexGrow: 0,
+    // Spec 050, RF-74: por encima de 1366 sí crece, en proporción a su ancho.
+    flexGrow: crecimientoDeColumna(columna.ancho, ventana),
     flexShrink: 1,
     flexBasis: columna.ancho,
     minWidth: anchoMinimoDeColumna(columna.ancho, columna.anchoMinimo),
@@ -1416,8 +1671,9 @@ export function Celda({
    */
   lineas?: number;
 }) {
+  const principal = useContext(EnPrincipalDeTarjeta);
   return (
-    <Text style={estilos.celda} numberOfLines={lineas}>
+    <Text style={[estilos.celda, principal && estilos.celdaPrincipal]} numberOfLines={lineas}>
       {children}
     </Text>
   );
@@ -1444,10 +1700,21 @@ export function Seccion({ titulo, children }: { titulo: string; children: ReactN
 }
 
 /** La fila de campos de un formulario de alta: se acomoda sola al ancho. */
-export function Formulario({ children }: { children: ReactNode }) {
+export function Formulario({
+  children,
+  desnudo = false,
+}: {
+  children: ReactNode;
+  /**
+   * Los mismos anchos uniformes, sin la caja blanca ni su relleno: para una fila de campos
+   * **dentro** de otra superficie, como cada renglón de la requisición (spec 050, RF-23). Una caja
+   * blanca dentro de una caja blanca se lee como un error de dibujo (igual que la tabla `desnuda`).
+   */
+  desnudo?: boolean;
+}) {
   return (
     <EnFormulario.Provider value>
-      <View style={estilos.formulario}>{children}</View>
+      <View style={desnudo ? estilos.formularioDesnudo : estilos.formulario}>{children}</View>
     </EnFormulario.Provider>
   );
 }
@@ -1503,9 +1770,10 @@ export function AccionesFormulario({ children }: { children: ReactNode }) {
   // El principal a la derecha y los secundarios a su izquierda, en todos los formularios,
   // los haya escrito cada pantalla en el orden que fuera.
   const ordenados = enOrdenDeFormulario(children);
+  const enVentana = useContext(EnVentana);
   // Sin botones (todos condicionales y ninguno aplica), ni la línea: sola parece un error.
   if (ordenados.length === 0) return null;
-  return <View style={estilos.acciones}>{ordenados}</View>;
+  return <View style={[estilos.acciones, enVentana && estilos.accionesFijas]}>{ordenados}</View>;
 }
 
 /** Una tarjeta blanca sobre el lienzo. La unidad de composición del panel. */
@@ -1779,7 +2047,7 @@ export function Modal({
             style={estilos.ventanaDesplazable}
             contentContainerStyle={estilos.ventanaCuerpo}
           >
-            {children}
+            <EnVentana.Provider value>{children}</EnVentana.Provider>
           </ScrollView>
         </View>
       </View>
@@ -1803,12 +2071,18 @@ export function BarraDeListado({
   onBuscar,
   total,
   mostradas,
+  onLimpiar,
   children,
 }: {
   busqueda: string;
   onBuscar: (texto: string) => void;
   total: number;
   mostradas: number;
+  /**
+   * Quita la búsqueda **y** los filtros (spec 050, RF-78). Sin él, solo la búsqueda, como antes: un
+   * «Limpiar» que dejaba puestos los filtros dejaba la lista igual de vacía.
+   */
+  onLimpiar?: () => void;
   /** Los selectores de filtro, si la pantalla tiene alguno. */
   children?: ReactNode;
 }) {
@@ -1823,7 +2097,7 @@ export function BarraDeListado({
             : `${mostradas} de ${total}`}
         </Text>
         {busqueda.length > 0 || mostradas !== total ? (
-          <Boton titulo="Limpiar" tono="secundario" onPress={() => onBuscar('')} />
+          <Boton titulo="Limpiar" tono="secundario" onPress={onLimpiar ?? (() => onBuscar(''))} />
         ) : null}
       </View>
     </View>
@@ -1871,20 +2145,9 @@ export function Paginacion({
   );
 }
 
-/**
- * Lo que se acaba de hacer, dicho sin interrumpir.
- *
- * No es un diálogo ni tapa nada: una confirmación que hay que cerrar convierte
- * cada guardado en dos gestos, y a la tercera vez se pulsa sin leer.
- */
-export function Confirmado({ mensaje }: { mensaje: string | null }) {
-  if (!mensaje) return null;
-  return <Aviso tono="exito">{mensaje}</Aviso>;
-}
-
 /** El anillo de foco del panel: franja clara y aro grafito (spec 022). */
-/** En el celular, lo que se toca mide al menos esto (spec 026, RF-40). */
-const ALTO_DE_CONTROL_ANGOSTO = 44;
+/** En el celular, lo que se toca mide al menos esto (spec 026, RF-40): el token de `medidas.ts`. */
+const ALTO_DE_CONTROL_ANGOSTO = AltoDeControlAngosto;
 
 const ANILLO_DE_FOCO = `0 0 0 2px ${Panel.superficie}, 0 0 0 ${2 + Grosor.marca}px ${Panel.foco}`;
 
@@ -1896,12 +2159,16 @@ const ANILLO_DE_FOCO = `0 0 0 2px ${Panel.superficie}, 0 0 0 ${2 + Grosor.marca}
  * sombra se queda para lo que **flota** —ventanas, listas abiertas—, que es donde
  * dice algo; en cada tarjeta era ruido sobre el crema.
  */
+/**
+ * La superficie de las tarjetas y las tablas. Desde la spec 050 (RF-46) se separa del lienzo crema con una
+ * sombra suave y no con un borde: el borde fino de antes, repetido en cada tarjeta, tablas y secciones,
+ * dibujaba una rejilla de líneas que se leía como un formulario de papel.
+ */
 const SUPERFICIE = {
   borderRadius: Radio.lg,
   borderCurve: 'continuous',
-  borderWidth: Grosor.linea,
-  borderColor: Panel.bordeSuave,
   backgroundColor: Panel.superficie,
+  boxShadow: Sombra.tarjeta,
 } as const;
 
 const estilos = StyleSheet.create({
@@ -2133,6 +2400,9 @@ const estilos = StyleSheet.create({
 
   etiqueta: {
     alignSelf: 'flex-start',
+    // Spec 050, RF-64: en una tarjeta de 360 px, «En aprobación: Administradora de Elemental» no cabía en
+    // un renglón y se salía por el borde. Con el tope, el texto se parte.
+    maxWidth: '100%',
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.half,
     borderRadius: Radio.pastilla,
@@ -2194,6 +2464,8 @@ const estilos = StyleSheet.create({
     fontWeight: '600',
     color: Panel.texto,
   },
+  /** Un renglón de alto fijo en el escritorio (spec 050, RF-15). */
+  campoEtiquetaFija: { height: CampoPanel.altoEtiqueta, lineHeight: CampoPanel.altoEtiqueta },
   campoObligatorio: { color: Estado.noConforme },
   campoEntrada: {
     borderWidth: Grosor.linea,
@@ -2378,6 +2650,24 @@ const estilos = StyleSheet.create({
     maxWidth: 460,
   },
   celda: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
+  /** El dato que encabeza la tarjeta de una fila (spec 050, RF-34). */
+  celdaPrincipal: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.seccion, fontWeight: '700' },
+
+  /* Las filas de una lista como tarjetas (spec 050, RF-33 a RF-37). */
+  tarjetas: { gap: Spacing.three },
+  tarjetaDeFila: { ...SUPERFICIE, gap: Spacing.two, padding: Spacing.three },
+  datoDeTarjeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: Spacing.two, rowGap: Spacing.half },
+  datoDeTarjetaTitulo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, fontWeight: '600', color: Panel.textoApoyo },
+  datoDeTarjetaValor: { flexShrink: 1, minWidth: 0 },
+  pieDeTarjeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+    paddingTop: Spacing.two,
+    borderTopWidth: Grosor.linea,
+    borderTopColor: Panel.bordeSuave,
+  },
 
   seccion: { gap: Spacing.two },
   seccionTitulo: {
@@ -2394,6 +2684,13 @@ const estilos = StyleSheet.create({
     gap: Spacing.two + Spacing.one,
     padding: Spacing.three,
     ...SUPERFICIE,
+  },
+  /** El mismo renglón de campos, sin superficie propia (spec 050, RF-23). */
+  formularioDesnudo: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: Spacing.two + Spacing.one,
   },
   grupoAcciones: {
     flexDirection: 'row',
@@ -2417,6 +2714,18 @@ const estilos = StyleSheet.create({
     marginTop: Spacing.one,
     borderTopWidth: Grosor.linea,
     borderTopColor: Panel.bordeSuave,
+  },
+  /**
+   * Pegados al pie de la ventana mientras se desplaza (spec 050, RF-21). Con el fondo de la
+   * ventana, para que lo que pasa por detrás no se lea a través, y un relleno abajo para que el
+   * último botón no quede contra el borde. `sticky` es de la web, donde vive el panel.
+   */
+  accionesFijas: {
+    position: 'sticky' as 'relative',
+    bottom: 0,
+    zIndex: 1,
+    paddingBottom: Spacing.two,
+    backgroundColor: Panel.superficie,
   },
   tarjeta: {
     padding: Spacing.three,

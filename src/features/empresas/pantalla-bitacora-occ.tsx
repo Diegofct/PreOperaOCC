@@ -21,6 +21,7 @@ import {
   Boton,
   Celda,
   Etiqueta,
+  Formulario,
   Paginacion,
   Seccion,
   Tabla,
@@ -133,9 +134,10 @@ function DiasDeLaBitacora({ alAbrir }: { alAbrir: (fecha: string) => void }) {
       cargando={dias.cargando}
     >
       <Seccion titulo="Días">
-        <Acciones>
+        {/* Spec 050, RF-25: un filtro no va en el grupo de botones. */}
+        <Formulario desnudo>
           <CamposDeFechas filtro={fechas} />
-        </Acciones>
+        </Formulario>
         {dias.datos.some((d) => d.fechaDudosa && d.estado !== 'anulada') ? (
           <Aviso tono="info">
             Hay días con «Fecha dudosa»: su lista de equipos decía un día que ya había pasado, o llegó de noche para el mismo

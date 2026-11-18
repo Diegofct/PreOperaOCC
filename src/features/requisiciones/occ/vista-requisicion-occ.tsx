@@ -16,9 +16,10 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
-import { Acciones, Aviso, Boton, Celda, Cifra, Cifras, Confirmacion, Confirmado, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
+import { Acciones, Aviso, Boton, Celda, Cifra, Cifras, Confirmacion, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
 import type { PagoRegistrado } from '@/features/panel/contratos';
 import { guardarArchivo } from '@/features/panel/guardar-archivo';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
@@ -48,12 +49,16 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
   const cargada = useListado<RequisicionOccDetallada>(useCallback(() => api.requisiciones.occ.detalle(id).then((d) => [d]), [id]));
   const r = cargada.datos[0];
   const [ventana, setVentana] = useState<Ventana | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const [error, setError] = useState<string | null>(null);
 
   const listo = (mensaje: string) => {
     setVentana(null);
-    setHecho(mensaje);
+    avisarHecho(mensaje);
     setError(null);
     cargada.recargar();
   };
@@ -73,7 +78,7 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
       const { contenido, nombre } = await api.requisiciones.occ.excel(id);
       guardarArchivo(contenido, nombre);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     }
   }
 
@@ -82,7 +87,7 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
   const columnas: Columna<LineaOccEnElDetalle>[] = [
     { clave: 'numero', titulo: 'N.º', ancho: 50, anchoMinimo: 50, pintar: (l) => <Text style={estilos.fuerte}>{l.numero}</Text> },
     {
-      clave: 'beneficiario',
+      clave: 'beneficiario', principal: true,
       titulo: 'Beneficiario',
       ancho: 190,
       pintar: (l) => (
@@ -155,7 +160,7 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
     { clave: 'linea', titulo: 'Línea', ancho: 220, pintar: (p) => <Celda>{`${p.linea.numero}. ${p.linea.beneficiario}`}</Celda> },
     { clave: 'fecha', titulo: 'Fecha', ancho: 110, pintar: (p) => <Celda>{fechaDelCorte(p.fecha)}</Celda> },
     {
-      clave: 'valor',
+      clave: 'valor', principal: true,
       titulo: 'Valor',
       ancho: 200,
       pintar: (p) => (
@@ -174,7 +179,7 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
     },
     { clave: 'por', titulo: 'Registró', ancho: 220, pintar: (p) => <Celda>{`${p.registradoPor} · ${cuando(p.registradoEn)}`}</Celda> },
     {
-      clave: 'anular',
+      clave: 'anular', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,
@@ -187,7 +192,7 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
     { clave: 'en', titulo: 'Cuándo', ancho: 170, pintar: (e) => <Celda>{cuando(e.en)}</Celda> },
     { clave: 'por', titulo: 'Quién', ancho: 200, pintar: (e) => <Celda>{e.por}</Celda> },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué hizo',
       ancho: 560,
       pintar: (e) => (
@@ -208,18 +213,22 @@ export function VistaDeRequisicionOcc({ id, alVolver, volverA }: { id: string; a
       descripcion={`OCC · viernes de entrega ${fechaDelCorte(r.viernes)} · elaborada por ${r.elaboradaPor.nombre}`}
       error={cargada.error}
       cargando={cargada.cargando}
+      registro={r.codigo}
+      // Spec 050, RF-30, RF-32: lo que se puede hacer con la requisición, en el encabezado, cada botón con
+      // su permiso (`r.puede`). «Volver» se queda en el cuerpo.
+      acciones={
+        <>
+          {r.puede.armar ? <Boton titulo="Agregar línea" onPress={() => setVentana({ que: 'linea' })} /> : null}
+          {r.puede.armar ? <Boton titulo="Importar planilla" tono="secundario" onPress={() => setVentana({ que: 'importar' })} /> : null}
+          {r.puede.enviar && enviable ? <Boton titulo="Enviar para autorizar" onPress={() => setVentana({ que: 'enviar' })} /> : null}
+          {r.puede.responder ? <Boton titulo="Autorizar línea por línea" onPress={() => setVentana({ que: 'autorizar' })} /> : null}
+          {r.puede.devolver ? <Boton titulo="Devolver" tono="secundario" onPress={() => setVentana({ que: 'devolver' })} /> : null}
+          <Boton titulo="Descargar Excel" tono="secundario" onPress={descargar} />
+          {r.puede.cancelar ? <Boton titulo="Cancelar la requisición" tono="peligro" onPress={() => setVentana({ que: 'cancelar' })} /> : null}
+        </>
+      }
     >
-      <Acciones>
-        {volver}
-        {r.puede.armar ? <Boton titulo="Agregar línea" onPress={() => setVentana({ que: 'linea' })} /> : null}
-        {r.puede.armar ? <Boton titulo="Importar planilla" tono="secundario" onPress={() => setVentana({ que: 'importar' })} /> : null}
-        {r.puede.enviar && enviable ? <Boton titulo="Enviar para autorizar" onPress={() => setVentana({ que: 'enviar' })} /> : null}
-        {r.puede.responder ? <Boton titulo="Autorizar línea por línea" onPress={() => setVentana({ que: 'autorizar' })} /> : null}
-        {r.puede.devolver ? <Boton titulo="Devolver" tono="secundario" onPress={() => setVentana({ que: 'devolver' })} /> : null}
-        <Boton titulo="Descargar Excel" tono="secundario" onPress={descargar} />
-        {r.puede.cancelar ? <Boton titulo="Cancelar la requisición" tono="peligro" onPress={() => setVentana({ que: 'cancelar' })} /> : null}
-      </Acciones>
-      <Confirmado mensaje={hecho} />
+      <Acciones>{volver}</Acciones>
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       {devolucion ? <Aviso tono="error">{`Devuelta para corregir: ${devolucion.motivo ?? ''}`}</Aviso> : null}
       {r.puede.enviar && !enviable ? <Aviso tono="info">Agregue las líneas a mano o importe la planilla; después, envíela para autorizar.</Aviso> : null}

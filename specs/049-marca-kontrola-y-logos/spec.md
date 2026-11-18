@@ -1,6 +1,6 @@
 # Spec 049 — Marca Kontrola y logos de las empresas
 
-> Estado: **Cumplida** el 2026-11-18 (`validacion.md`, 56/56 RF vigentes; RF-18 retirado) · Cambio del 2026-11-18 (logos de Elemental y GeoLab, ícono de Proyectos y cards centradas: RF-51 a RF-57, D15–D18) revalidado el mismo día · Aprobada por Diego el 2026-11-18, con la clarificación del mismo día (D11–D14) · Fecha: 2026-11-18 · Primera de la tanda de UI/UX (049 marca, 050 responsive e intuitiva, 051 documentos en carpetas) · **Modifica la 040, la 045 y la 047** (archivos generados)
+> Estado: **Cumplida** el 2026-11-18 (`validacion.md`, 56/56 RF vigentes; RF-18 retirado) · Cambio del 2026-11-18 (logos de Elemental y GeoLab, ícono de Proyectos y cards centradas: RF-51 a RF-57, D15–D18) revalidado el mismo día · Aprobada por Diego el 2026-11-18, con la clarificación del mismo día (D11–D14) · Fecha: 2026-11-18 · Primera de la tanda de UI/UX (049 marca, 050 responsive e intuitiva, 051 documentos en carpetas) · **Modifica la 040, la 045 y la 047** (archivos generados) · **Modificada por la spec 050** (2026-11-18): la portada de cada empresa y obra pasa a ser el Asistente y se retira el Resumen del día (RF-43 ajustado en la T5) — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 
 ## Contexto y objetivo
 

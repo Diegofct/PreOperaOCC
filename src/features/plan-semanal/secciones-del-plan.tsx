@@ -21,7 +21,7 @@ import { useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
-import { Boton, Campo, Selector } from '@/features/panel/componentes';
+import { ANCHOS_DE_CAMPO, Boton, Campo, Formulario, Selector } from '@/features/panel/componentes';
 import type { PlanSemanalDetalle } from '@/features/panel/plan-semanal';
 import { TEXTO_CON_PESOS, type EstructuraDelPlan } from '@/shared/rules/plan-semanal';
 
@@ -301,11 +301,13 @@ export function SeccionesDelPlan({
           );
         }}
         pie={
-          <View style={estilos.fila}>
-            <CampoDeCantidad etiqueta="Volquetas requeridas" valor={volquetas.requeridas} onChange={(requeridas) => cambiar({ ...estructura, volquetas: { ...volquetas, requeridas } })} soloLectura={soloLectura} ancho={170} />
-            <CampoDeCantidad etiqueta="Volquetas propias" valor={volquetas.propias} onChange={(propias) => cambiar({ ...estructura, volquetas: { ...volquetas, propias } })} soloLectura={soloLectura} ancho={170} />
-            <CampoDeCantidad etiqueta="Volquetas externas" valor={volquetas.externas} onChange={(externas) => cambiar({ ...estructura, volquetas: { ...volquetas, externas } })} soloLectura={soloLectura} ancho={170} />
-          </View>
+          // Spec 050, RF-25: solo campos, en rejilla. Los renglones de arriba se quedan en su fila, porque
+          // llevan «Quitar» al lado y están medidos para caber en un renglón.
+          <Formulario desnudo>
+            <CampoDeCantidad etiqueta="Volquetas requeridas" valor={volquetas.requeridas} onChange={(requeridas) => cambiar({ ...estructura, volquetas: { ...volquetas, requeridas } })} soloLectura={soloLectura} ancho={ANCHOS_DE_CAMPO.medio} />
+            <CampoDeCantidad etiqueta="Volquetas propias" valor={volquetas.propias} onChange={(propias) => cambiar({ ...estructura, volquetas: { ...volquetas, propias } })} soloLectura={soloLectura} ancho={ANCHOS_DE_CAMPO.medio} />
+            <CampoDeCantidad etiqueta="Volquetas externas" valor={volquetas.externas} onChange={(externas) => cambiar({ ...estructura, volquetas: { ...volquetas, externas } })} soloLectura={soloLectura} ancho={ANCHOS_DE_CAMPO.medio} />
+          </Formulario>
         }
       />
 

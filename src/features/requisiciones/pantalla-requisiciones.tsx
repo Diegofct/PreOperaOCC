@@ -28,20 +28,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { FormularioDeSolicitud } from '@/features/compras/formulario-de-solicitud';
 import { PasosDeGerencia } from '@/features/compras/pasos-de-gerencia';
 import { VistaDeLaSolicitud } from '@/features/compras/vista-de-la-solicitud';
 import { useLugarDelPanel } from '@/features/empresas/contexto-empresa';
+import { CifrasDeEstado, estadosDelTramite } from '@/features/panel/cifras-de-estado';
 import { api } from '@/features/panel/cliente-api';
+import { contarPorEstado } from '@/features/panel/contar-por-estado';
 import {
-  Acciones,
   Aviso,
   BarraDeListado,
   Boton,
   CampoDeFecha,
   Casilla,
   Celda,
-  Confirmado,
   Etiqueta,
   Seccion,
   Selector,
@@ -101,6 +102,8 @@ const SIN_FILTROS: FiltrosDeRequisiciones = {
 const ESTADOS = [...ESTADOS_DE_SOLICITUD, ...ESTADOS_DE_PAGO].filter(
   (e, i, todos) => todos.findIndex((x) => x.id === e.id) === i,
 );
+/** Los mismos, como cifras encima de la lista (spec 050, RF-48). */
+const ESTADOS_COMO_CIFRAS = estadosDelTramite(ESTADOS);
 
 export default function PantallaRequisiciones() {
   const lugar = useLugarDelPanel();
@@ -124,7 +127,11 @@ export default function PantallaRequisiciones() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [delEnlace]);
   const [pidiendo, setPidiendo] = useState<TipoDeRequisicion | 'occ' | 'importar_occ' | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const [filtros, setFiltros] = useState<FiltrosDeRequisiciones>(SIN_FILTROS);
 
   const cargadas = useListado<Cargado>(
@@ -146,13 +153,13 @@ export default function PantallaRequisiciones() {
   const cargado = cargadas.datos[0];
   const filas = cargado?.requisiciones ?? [];
   const conValores = filas.some((f) => 'valor' in f);
-  const visibles = filas.filter((f) =>
-    pasaLosFiltrosDeRequisicion(
-      { ...f, pedidaPor: f.pedidaPor.id, textos: [f.resumen, f.pedidaPor.nombre, f.lugar.nombre] },
-      filtros,
-    ),
-  );
+  const pasaCon = (f: (typeof filas)[number], conFiltros: FiltrosDeRequisiciones) =>
+    pasaLosFiltrosDeRequisicion({ ...f, pedidaPor: f.pedidaPor.id, textos: [f.resumen, f.pedidaPor.nombre, f.lugar.nombre] }, conFiltros);
+  const visibles = filas.filter((f) => pasaCon(f, filtros));
   const cambiar = (cambio: Partial<FiltrosDeRequisiciones>) => setFiltros((f) => ({ ...f, ...cambio }));
+  // Spec 050, RF-54, RF-78: hay requisiciones, pero la búsqueda o los filtros no dejan ver ninguna.
+  const quitarFiltros = () => setFiltros(SIN_FILTROS);
+  const sinResultados = filas.length > 0 && visibles.length === 0 ? { alQuitar: quitarFiltros } : undefined;
 
   if (abierta) {
     const [tipo, id] = abierta.split(':');
@@ -247,7 +254,7 @@ export default function PantallaRequisiciones() {
       ),
     },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 100,
       anchoMinimo: 100,
@@ -286,7 +293,7 @@ export default function PantallaRequisiciones() {
     },
     { clave: 'elaborada', titulo: 'Elaborada por', ancho: 170, pintar: (r) => <Celda>{r.elaboradaPor.nombre}</Celda> },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 100,
       anchoMinimo: 100,
@@ -299,7 +306,7 @@ export default function PantallaRequisiciones() {
   const esperan = filas.filter((f) => f.esperaMiAprobacion).length;
   const listo = (mensaje: string) => {
     setPidiendo(null);
-    setHecho(mensaje);
+    avisarHecho(mensaje);
     cargadas.recargar();
   };
   return (
@@ -318,28 +325,34 @@ export default function PantallaRequisiciones() {
       }
       error={cargadas.error}
       cargando={cargadas.cargando}
+      // Spec 050, RF-30, RF-32: pedir es la acción principal, solo donde y para quien se puede pedir.
+      acciones={
+        (pedido && cargado?.sePuedePedir) || cargado?.sePuedePedirOcc ? (
+          <>
+            {pedido && cargado?.sePuedePedir ? (
+              <>
+                <Boton titulo="Nueva requisición de compra" onPress={() => setPidiendo('compra')} />
+                <Boton titulo="Nueva requisición de pago" tono="secundario" onPress={() => setPidiendo('pago')} />
+              </>
+            ) : null}
+            {cargado?.sePuedePedirOcc ? (
+              <>
+                <Boton titulo="Nueva requisición de pagos" onPress={() => setPidiendo('occ')} />
+                <Boton titulo="Importar planilla" tono="secundario" onPress={() => setPidiendo('importar_occ')} />
+              </>
+            ) : null}
+          </>
+        ) : undefined
+      }
     >
       {cargado?.sinAdministradora ? (
         <Aviso tono="error">No hay ninguna Administradora de Elemental activa: lo que espera ese paso lo aprueba la Gerencia.</Aviso>
-      ) : null}
-      <Confirmado mensaje={hecho} />
-      {pedido && cargado?.sePuedePedir ? (
-        <Acciones>
-          <Boton titulo="Nueva requisición de compra" onPress={() => setPidiendo('compra')} />
-          <Boton titulo="Nueva requisición de pago" tono="secundario" onPress={() => setPidiendo('pago')} />
-        </Acciones>
       ) : null}
       {pidiendo === 'compra' && pedido ? (
         <FormularioDeSolicitud requisicion lugar={pedido} alCerrar={() => setPidiendo(null)} alGuardar={listo} />
       ) : null}
       {pidiendo === 'pago' && pedido ? (
         <FormularioDePago requisicion lugar={pedido} alCerrar={() => setPidiendo(null)} alGuardar={listo} />
-      ) : null}
-      {cargado?.sePuedePedirOcc ? (
-        <Acciones>
-          <Boton titulo="Nueva requisición de pagos" onPress={() => setPidiendo('occ')} />
-          <Boton titulo="Importar planilla" tono="secundario" onPress={() => setPidiendo('importar_occ')} />
-        </Acciones>
       ) : null}
       {pidiendo === 'occ' ? (
         <VentanaNuevaOcc
@@ -368,7 +381,12 @@ export default function PantallaRequisiciones() {
           <Tabla
             columnas={columnasOcc}
             filas={pagosOcc}
-            vacio="Todavía no hay requisiciones de pagos. Cree la del próximo viernes o importe la planilla."
+            // Spec 050, RF-53: con la misma condición que el botón del encabezado.
+            vacio={{
+              icono: '🗎',
+              texto: 'Todavía no hay requisiciones de pagos. Cree la del próximo viernes o importe la planilla.',
+              accion: cargado?.sePuedePedirOcc ? <Boton titulo="Nueva requisición de pagos" onPress={() => setPidiendo('occ')} /> : undefined,
+            }}
           />
         </Seccion>
       ) : null}
@@ -378,7 +396,24 @@ export default function PantallaRequisiciones() {
         </Text>
       ) : null}
       <Seccion titulo={enOcc ? 'Requisiciones anteriores' : esperan > 0 ? `Requisiciones · ${esperan} esperan su aprobación` : 'Requisiciones'}>
-        <BarraDeListado busqueda={filtros.texto} onBuscar={(texto) => cambiar({ texto })} total={filas.length} mostradas={visibles.length}>
+        {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector. Cuentan con la búsqueda y
+            los demás filtros (RF-52), que aquí aplica la misma regla de la lista sin el estado. */}
+        <CifrasDeEstado
+          estados={ESTADOS_COMO_CIFRAS}
+          conteos={
+            cargadas.cargando
+              ? null
+              : contarPorEstado(filas, {
+                  textoDe: () => [],
+                  estadoDe: (f) => f.estado,
+                  busqueda: '',
+                  pasaOtrosFiltros: (f) => pasaCon(f, { ...filtros, estado: null }),
+                })
+          }
+          elegido={filtros.estado}
+          alElegir={(estado) => cambiar({ estado })}
+        />
+        <BarraDeListado onLimpiar={quitarFiltros} busqueda={filtros.texto} onBuscar={(texto) => cambiar({ texto })} total={filas.length} mostradas={visibles.length}>
           <Selector
             etiqueta="Clase"
             valor={filtros.tipo}
@@ -402,15 +437,6 @@ export default function PantallaRequisiciones() {
               ancho={200}
             />
           )}
-          <Selector
-            etiqueta="Estado"
-            valor={filtros.estado}
-            opciones={ESTADOS.map((e) => ({ valor: e.id, etiqueta: e.nombre }))}
-            onChange={(v) => cambiar({ estado: v ?? null })}
-            permiteVacio
-            vacio="Todos"
-            ancho={180}
-          />
           <CampoDeFecha etiqueta="Pedidas desde" valor={filtros.desde ?? ''} onChange={(v) => cambiar({ desde: v || null })} ancho={150} />
           <CampoDeFecha etiqueta="Hasta" valor={filtros.hasta ?? ''} onChange={(v) => cambiar({ hasta: v || null })} ancho={150} />
           <View style={estilos.casilla}>
@@ -418,14 +444,21 @@ export default function PantallaRequisiciones() {
           </View>
         </BarraDeListado>
         <Tabla
+          sinResultados={sinResultados}
           columnas={columnas}
           filas={visibles}
+          // Spec 050, RF-53: vacía de verdad, con el botón a quien puede pedir; con filtros, `sinResultados`.
           vacio={
-            filas.length === 0
-              ? enBandeja
-                ? 'No hay requisiciones esperando el último paso.'
-                : 'Todavía no hay requisiciones aquí.'
-              : 'Ninguna requisición coincide con la búsqueda.'
+            enBandeja
+              ? { icono: '✓', texto: 'No hay requisiciones esperando el último paso.' }
+              : {
+                  icono: '🗎',
+                  texto: 'Todavía no hay requisiciones aquí.',
+                  accion:
+                    pedido && cargado?.sePuedePedir ? (
+                      <Boton titulo="Nueva requisición de compra" onPress={() => setPidiendo('compra')} />
+                    ) : undefined,
+                }
           }
         />
       </Seccion>

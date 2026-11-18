@@ -101,7 +101,7 @@ export function EnsayosDeObra({
       ? [{ clave: 'obra', titulo: 'Obra', ancho: 90, pintar: (e: EnsayoDeObraFila) => <Celda>{e.obraCodigo}</Celda> }]
       : []),
     {
-      clave: 'ensayo',
+      clave: 'ensayo', principal: true,
       titulo: 'Ensayo',
       ancho: 170,
       pintar: (e) => (
@@ -137,7 +137,7 @@ export function EnsayosDeObra({
       pintar: (e) => (e.desdeWhatsapp ? <Etiqueta tono="neutro">WhatsApp</Etiqueta> : <Celda>Panel</Celda>),
     },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 130,
       pintar: (e) => (

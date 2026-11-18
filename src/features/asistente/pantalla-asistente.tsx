@@ -29,6 +29,7 @@ import {
 } from 'react-native';
 
 import { FuentePanel, Panel, Radio, Sombra, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 import { api, mensajeDe, preguntarAlAsistente } from '@/features/panel/cliente-api';
 import { Aviso } from '@/features/panel/componentes';
@@ -89,6 +90,8 @@ export default function PantallaAsistente() {
   const [borrador, setBorrador] = useState('');
   const [enCurso, setEnCurso] = useState<EnCurso | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisosDelPanel = useAvisos();
   /** El cupo que llega con `fin` o `error`, antes de que la lista se recargue. */
   const [cupoNuevo, setCupoNuevo] = useState<CupoDelAsistente | null>(null);
   const cancelar = useRef<AbortController | null>(null);
@@ -150,7 +153,7 @@ export default function PantallaAsistente() {
       // RF-77: si la persona la detuvo, la respuesta ya quedó guardada como interrumpida y con
       // «Reintentar»; no es un error que mostrar, ni hay que devolver la pregunta al campo.
       if (control.signal.aborted) return;
-      setError(mensajeDe(fallo));
+      avisosDelPanel.error(mensajeDe(fallo));
       setBorrador(pregunta);
       setArchivos(conArchivos);
     } finally {
@@ -203,7 +206,7 @@ export default function PantallaAsistente() {
       setConversacionId('');
       listado.recargar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisosDelPanel.error(mensajeDe(fallo));
     }
   }
 

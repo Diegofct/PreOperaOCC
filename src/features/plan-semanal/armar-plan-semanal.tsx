@@ -12,10 +12,12 @@
  * anotada en este navegador, y al volver a la página se retoma el progreso, o se ve el borrador si
  * ya terminó. Es una comodidad de quien la lanzó, no el estado, que vive en el servidor.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
+import type { PartesDeLaAccion } from '@/features/panel/marco';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, Casilla, Modal, Selector } from '@/features/panel/componentes';
@@ -78,10 +80,13 @@ export function ArmarPlanSemanal({
   obraId,
   lista,
   alTerminar,
+  children,
 }: {
   obraId: string;
   lista: ListaDePlanesSemanales;
   alTerminar: (planId: string) => void;
+  /** Spec 050, RF-30: los tres botones van al encabezado de la pantalla y el progreso se queda en ella. */
+  children: (partes: PartesDeLaAccion) => ReactNode;
 }) {
   // La pantalla monta este componente con `key` de la obra, así que el valor inicial basta.
   const [paso, setPaso] = useState<Paso>(() => {
@@ -92,6 +97,8 @@ export function ArmarPlanSemanal({
   const [sustituir, setSustituir] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [ahora, setAhora] = useState(() => Date.now());
 
   const consultar = useCallback(
@@ -164,7 +171,7 @@ export function ArmarPlanSemanal({
       anotar(obraId, lectura);
       setPaso({ tipo: 'corriendo', lectura, desde: Date.now() });
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -177,16 +184,25 @@ export function ArmarPlanSemanal({
 
   // RF-5: sin planificación aprobada no se arma ningún plan, y se dice en vez de dejar botones que fallan.
   if (!lista.hayPlanificacion) {
-    return <Aviso tono="info">Esta obra no tiene una planificación aprobada vigente. Primero hay que aprobar la planificación; después se arma el plan semanal.</Aviso>;
+    return children({
+      botones: null,
+      cuerpo: (
+        <Aviso tono="info">Esta obra no tiene una planificación aprobada vigente. Primero hay que aprobar la planificación; después se arma el plan semanal.</Aviso>
+      ),
+    });
   }
 
-  return (
-    <View style={estilos.columna}>
-      <Acciones>
-        <Boton titulo="Proponer con IA" tono="primario" onPress={() => void abrir('propuesta')} deshabilitado={ocupado} />
-        <Boton titulo="Subir Excel" tono="secundario" onPress={() => void abrir('excel')} deshabilitado={ocupado} />
-        <Boton titulo="Empezar en blanco" tono="secundario" onPress={() => void abrir('blanco')} deshabilitado={ocupado} />
-      </Acciones>
+  const botones = (
+    <>
+      <Boton titulo="Proponer con IA" tono="primario" onPress={() => void abrir('propuesta')} deshabilitado={ocupado} />
+      <Boton titulo="Subir Excel" tono="secundario" onPress={() => void abrir('excel')} deshabilitado={ocupado} />
+      <Boton titulo="Empezar en blanco" tono="secundario" onPress={() => void abrir('blanco')} deshabilitado={ocupado} />
+    </>
+  );
+
+  // Sin caja propia: un fragmento vacío no ocupa sitio en la columna de la pantalla.
+  const cuerpo = (
+    <>
       {error && !confirmando ? <Aviso tono="error">{error}</Aviso> : null}
 
       {paso.tipo === 'corriendo' ? (
@@ -240,8 +256,10 @@ export function ArmarPlanSemanal({
           </View>
         </Modal>
       ) : null}
-    </View>
+    </>
   );
+
+  return children({ botones, cuerpo });
 }
 
 const estilos = StyleSheet.create({

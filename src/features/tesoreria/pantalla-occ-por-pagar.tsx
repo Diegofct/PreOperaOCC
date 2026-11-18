@@ -12,8 +12,9 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api } from '@/features/panel/cliente-api';
-import { Boton, Celda, Cifra, Cifras, Confirmado, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
+import { Boton, Celda, Cifra, Cifras, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import type { LineaOccPorPagar } from '@/features/panel/requisiciones-occ';
 import { usePersona } from '@/features/panel/sesion';
@@ -31,7 +32,11 @@ export function PantallaOccPorPagar() {
   const paga = alcanza(persona.rol, 'tesoreria', 'escribir');
   const cargadas = useListado<Fila>(useCallback(() => api.requisiciones.occ.porPagar().then((l) => l.map((x) => ({ ...x, id: x.lineaId }))), []));
   const [pagando, setPagando] = useState<Fila | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const filas = cargadas.datos;
   const porPagar = filas.reduce((suma, l) => suma + l.porPagar, 0);
   const viernes = [...new Set(filas.map((l) => l.viernes))];
@@ -98,7 +103,7 @@ export function PantallaOccPorPagar() {
     ...(paga
       ? [
           {
-            clave: 'pagar',
+            clave: 'pagar', acciones: true,
             titulo: '',
             ancho: 110,
             anchoMinimo: 110,
@@ -115,7 +120,6 @@ export function PantallaOccPorPagar() {
       error={cargadas.error}
       cargando={cargadas.cargando}
     >
-      <Confirmado mensaje={hecho} />
       <Cifras>
         <Cifra titulo="Líneas por pagar" valor={String(filas.length)} tono={filas.length ? 'atencion' : 'neutro'} pie={viernes.length === 0 ? 'Nada pendiente' : `De ${viernes.length} ${viernes.length === 1 ? 'viernes' : 'viernes distintos'}`} />
         <Cifra titulo="Falta por pagar" valor={enPesos(porPagar)} />
@@ -132,7 +136,7 @@ export function PantallaOccPorPagar() {
           alCerrar={() => setPagando(null)}
           alPagar={(mensaje) => {
             setPagando(null);
-            setHecho(mensaje);
+            avisarHecho(mensaje);
             cargadas.recargar();
           }}
         />

@@ -27,6 +27,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, Campo, Casilla, Modal } from '@/features/panel/componentes';
 import { guardarArchivo } from '@/features/panel/guardar-archivo';
@@ -58,6 +59,8 @@ export function AccionesPlanSemanal({
   const [enviando, setEnviando] = useState(false);
   const [bajando, setBajando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisosDelPanel = useAvisos();
   const [cambio, setCambio] = useState(false);
 
   const puedeAprobar = p.puedeAprobar && !semanaTerminada;
@@ -89,7 +92,7 @@ export function AccionesPlanSemanal({
         // RF-63: otra persona lo ajustó, lo aprobó o lo anuló. Se avisa y se recarga.
         setCambio(fallo instanceof ErrorApi && fallo.estado === 409);
       }
-      setError(mensajeDe(fallo));
+      avisosDelPanel.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -102,7 +105,7 @@ export function AccionesPlanSemanal({
       const { contenido, nombre } = await api.planesSemanales.excel(p.id);
       guardarArchivo(contenido, nombre);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisosDelPanel.error(mensajeDe(fallo));
     } finally {
       setBajando(false);
     }

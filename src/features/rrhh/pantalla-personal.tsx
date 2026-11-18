@@ -37,7 +37,8 @@ import {
 import type { PersonaDelPersonal, PersonalDelLugar } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
-import { useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
+import { CifrasDeEstado, type EstadoDeLaLista } from '@/features/panel/cifras-de-estado';
+import { contarPorEstado, useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { CARGOS, nombreDeCargo } from '@/shared/catalogos/cargos';
 import { fechaDelCorte } from '@/shared/rules/cortes';
@@ -60,6 +61,19 @@ const SIN_PERSONAL: PersonalDelLugar = {
 
 /** `inactivo` no es un estado de la ficha: es la cuenta desactivada en Personas. */
 const INACTIVO = 'inactivo';
+
+/** Los estados como cifras encima de la lista, con su símbolo (spec 050, RF-48). */
+const SIMBOLO_LABORAL: Record<string, Pick<EstadoDeLaLista, 'simbolo' | 'tono'>> = {
+  activo: { simbolo: '✓', tono: 'bueno' },
+  vacaciones: { simbolo: '☀', tono: 'atencion' },
+  incapacidad: { simbolo: '+', tono: 'atencion' },
+  licencia: { simbolo: '◐', tono: 'atencion' },
+  retirado: { simbolo: '⊘', tono: 'neutro' },
+};
+const ESTADOS_COMO_CIFRAS: EstadoDeLaLista[] = [
+  ...ESTADOS_LABORALES.map((e) => ({ valor: e.id, etiqueta: e.nombre, ...SIMBOLO_LABORAL[e.id] })),
+  { valor: INACTIVO, etiqueta: 'Inactivo (sin acceso)', simbolo: '–', tono: 'neutro' },
+];
 
 /** Lo que se lee en la columna Estado: el de la ficha o, sin acceso, «Inactivo». */
 function estadoVisible(p: PersonaDelPersonal): string {
@@ -125,7 +139,22 @@ export default function PantallaPersonal() {
     },
     [empresa, obra, cargo, estado, soloConAvisos, verRetiradas],
   );
-  const listado = useListadoFiltrado(personas, (p) => [p.nombreCompleto, p.documento, p.usuario], pasaFiltros);
+  const textoDeLaPersona = (p: PersonaDelPersonal) => [p.nombreCompleto, p.documento, p.usuario];
+  const listado = useListadoFiltrado(personas, textoDeLaPersona, pasaFiltros, undefined, undefined, { hay: empresa !== null || obra !== null || cargo !== null || estado !== null || soloConAvisos, limpiar: () => { setEmpresa(null); setObra(null); setCargo(null); setEstado(null); setSoloConAvisos(false); } });
+  // Spec 050, RF-52: las cifras cuentan con la búsqueda y los demás filtros. Las retiradas cuentan aunque
+  // la casilla esté sin marcar: pulsar «Retirado» las muestra igual.
+  const conteos = cargados.cargando
+    ? null
+    : contarPorEstado(personas, {
+        textoDe: textoDeLaPersona,
+        estadoDe: estadoVisible,
+        busqueda: listado.busqueda,
+        pasaOtrosFiltros: (p) =>
+          (empresa === null || p.empresa === empresa) &&
+          (obra === null || p.obraId === obra) &&
+          (cargo === null || p.cargo === cargo) &&
+          (!soloConAvisos || p.avisos.length > 0),
+      });
   const retiradas = personas.filter((p) => p.estado === 'retirado').length;
 
   const columnas: Columna<PersonaDelPersonal>[] = [
@@ -219,7 +248,7 @@ export default function PantallaPersonal() {
         ),
     },
     {
-      clave: 'ficha',
+      clave: 'ficha', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,
@@ -280,7 +309,9 @@ export default function PantallaPersonal() {
       </Cifras>
 
       <Seccion titulo="Personas">
-        <BarraDeListado
+        {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector. */}
+        <CifrasDeEstado estados={ESTADOS_COMO_CIFRAS} conteos={conteos} elegido={estado} alElegir={setEstado} />
+        <BarraDeListado onLimpiar={listado.limpiar}
           busqueda={listado.busqueda}
           onBuscar={listado.buscar}
           // Las retiradas ocultas no cuentan: «1 de 2» sin haber buscado nada confunde.
@@ -318,24 +349,13 @@ export default function PantallaPersonal() {
             vacio="Todos los cargos"
             ancho={200}
           />
-          <Selector
-            etiqueta="Estado"
-            valor={estado}
-            opciones={[
-              ...ESTADOS_LABORALES.map((e) => ({ valor: e.id, etiqueta: e.nombre })),
-              { valor: INACTIVO, etiqueta: 'Inactivo (sin acceso)' },
-            ]}
-            onChange={setEstado}
-            permiteVacio
-            vacio="Todos los estados"
-            ancho={180}
-          />
         </BarraDeListado>
         <Acciones>
           <Casilla etiqueta="Solo con avisos" marcada={soloConAvisos} onChange={setSoloConAvisos} />
           <Casilla etiqueta="Ver retiradas" marcada={verRetiradas} onChange={setVerRetiradas} />
         </Acciones>
         <Tabla
+          sinResultados={listado.sinResultados}
           columnas={columnas}
           filas={listado.pagina}
           vacio={

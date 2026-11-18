@@ -1,6 +1,6 @@
 # Spec 008 — Almacenista y Encargado de Planta
 
-> Estado: Aprobada · Fecha: 2026-09-14 · Aprobada: 2026-09-15
+> Estado: Aprobada · Fecha: 2026-09-14 · Aprobada: 2026-09-15 · **Modificada por la spec 050** (2026-11-18): el almacenista y el encargado de planta entran al Asistente de su obra y no directo a su módulo (D12); el módulo sigue en el menú — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 
 ## Contexto y objetivo
 

@@ -13,9 +13,10 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
-import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Etiqueta, Modal } from '@/features/panel/componentes';
+import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Etiqueta, Formulario, Modal } from '@/features/panel/componentes';
 import type { ImportacionOccDetalle, RequisicionOccExistente } from '@/features/panel/requisiciones-occ';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { enPesos } from '@/shared/rules/pesos';
@@ -52,6 +53,8 @@ export function ImportarPlanillaOcc({
   const [viernes, setViernes] = useState(proximoViernes());
   const [existente, setExistente] = useState<RequisicionOccExistente['existente'] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [intentado, setIntentado] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
@@ -84,7 +87,7 @@ export function ImportarPlanillaOcc({
       setDetalle({ id, requisicionId: requisicionId ?? null, nombreArchivo: archivo.name, estado: 'en_curso', error: null, propuesta: null, version: 1 });
       setImportacionId(id);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -110,7 +113,7 @@ export function ImportarPlanillaOcc({
     } catch (fallo) {
       const cuerpo = fallo instanceof ErrorApi ? (fallo.cuerpo as Partial<RequisicionOccExistente> | undefined) : undefined;
       setExistente(cuerpo?.existente ?? null);
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -154,7 +157,7 @@ export function ImportarPlanillaOcc({
             </Aviso>
           ))}
           {requisicionId ? null : (
-            <CampoDeFecha etiqueta="Viernes de entrega *" valor={viernes} onChange={setViernes} min={fechaDeJornada()} error={intentado ? (faltaViernes ?? undefined) : undefined} />
+            <CampoDeFecha etiqueta="Viernes de entrega" obligatorio valor={viernes} onChange={setViernes} min={fechaDeJornada()} error={intentado ? (faltaViernes ?? undefined) : undefined} />
           )}
           {lineas.map((l, i) => (
             <View key={`${l.cita}-${i}`} style={[estilos.linea, l.marcados.length > 0 && estilos.lineaMarcada]}>
@@ -164,17 +167,17 @@ export function ImportarPlanillaOcc({
                 {l.marcados.length ? <Etiqueta tono="atencion">{`Revisar ${l.marcados.map((m) => NOMBRE_DEL_MARCADO[m]).join(', ')}`}</Etiqueta> : null}
                 <Boton titulo="Sacar de la propuesta" tono="secundario" onPress={() => setLineas((todas) => todas.filter((_, j) => j !== i))} />
               </View>
-              <View style={estilos.fila}>
+              <Formulario desnudo>
                 <CampoDeFecha etiqueta={marcado(l, 'fechaSolicitud') ? 'Fecha de solicitud (revisar)' : 'Fecha de solicitud'} valor={l.fechaSolicitud} onChange={(fechaSolicitud) => cambiar(i, { fechaSolicitud })} max={fechaDeJornada()} />
                 <Campo etiqueta={marcado(l, 'beneficiario') ? 'Beneficiario (revisar)' : 'Beneficiario'} valor={l.beneficiario} onChange={(beneficiario) => cambiar(i, { beneficiario })} ancho={260} />
                 <Campo etiqueta={marcado(l, 'valor') ? 'Valor (revisar)' : 'Valor'} valor={l.valorTexto} onChange={(valorTexto) => cambiar(i, { valorTexto })} ancho={150} />
-              </View>
+              </Formulario>
               <Campo etiqueta={marcado(l, 'concepto') ? 'Concepto (revisar)' : 'Concepto'} valor={l.concepto} onChange={(concepto) => cambiar(i, { concepto })} />
-              <View style={estilos.fila}>
+              <Formulario desnudo>
                 <Campo etiqueta="Especificaciones" valor={l.especificaciones} onChange={(especificaciones) => cambiar(i, { especificaciones })} ancho={300} />
                 <Campo etiqueta="Proveedor" valor={l.proveedor} onChange={(proveedor) => cambiar(i, { proveedor })} ancho={260} />
                 <Campo etiqueta="Observaciones" valor={l.observaciones} onChange={(observaciones) => cambiar(i, { observaciones })} ancho={300} />
-              </View>
+              </Formulario>
             </View>
           ))}
           {intentado && faltas.length ? <Aviso tono="error">{faltas.slice(0, 5).join(' ')}</Aviso> : null}

@@ -234,7 +234,7 @@ function PlanAbierto({
       )}
 
       <Text style={estilos.subtitulo}>Actividades</Text>
-      <Tabla filas={filas} columnas={columnas} vacio="Este plan todavía no tiene actividades." />
+      <Tabla tipo="cuadricula" filas={filas} columnas={columnas} vacio="Este plan todavía no tiene actividades." />
       {descuadradas.map((f) => (
         <Aviso key={f.id} tono="error">{`${[f.a.item, f.a.descripcion].filter(Boolean).join(' · ')}: ${f.descuadre}`}</Aviso>
       ))}
