@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
@@ -212,6 +213,8 @@ function VentanaDeImportar({
   const [previa, setPrevia] = useState<VistaPreviaDelPresupuesto | null>(null);
   const [nombre, setNombre] = useState('Presupuesto del contrato');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [ocupado, setOcupado] = useState<'leyendo' | 'creando' | null>(null);
   // RF-86: si la lectura pasa de unos segundos, es que la está haciendo la IA.
   const [tardando, setTardando] = useState(false);
@@ -232,7 +235,7 @@ function VentanaDeImportar({
     try {
       setPrevia(await api.presupuestos.vistaPrevia(obraId, f));
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setOcupado(null);
     }
@@ -244,7 +247,7 @@ function VentanaDeImportar({
     try {
       alCrear(await api.presupuestos.importar(obraId, nombre.trim() || 'Presupuesto del contrato', archivo!));
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setOcupado(null);
     }
@@ -618,19 +621,19 @@ function DetalleDePresupuesto({
                     />
                   </View>
                   {abierto ? (
-                    <Tabla columnas={COLUMNAS_DE_ITEMS} filas={c.items} vacio="Sin ítems." variante="desnuda" />
+                    <Tabla tipo="cuadricula" columnas={COLUMNAS_DE_ITEMS} filas={c.items} vacio="Sin ítems." variante="desnuda" />
                   ) : null}
                 </View>
               );
             })}
-            {rubrosDe(g.id).length > 0 ? <Tabla columnas={columnasDeRubros} filas={rubrosDe(g.id)} vacio="" /> : null}
+            {rubrosDe(g.id).length > 0 ? <Tabla tipo="cuadricula" columnas={columnasDeRubros} filas={rubrosDe(g.id)} vacio="" /> : null}
           </Seccion>
         );
       })}
 
       {rubrosDe(null).length > 0 ? (
         <Seccion titulo="Rubros de todo el contrato">
-          <Tabla columnas={columnasDeRubros} filas={rubrosDe(null)} vacio="" />
+          <Tabla tipo="cuadricula" columnas={columnasDeRubros} filas={rubrosDe(null)} vacio="" />
         </Seccion>
       ) : null}
     </View>

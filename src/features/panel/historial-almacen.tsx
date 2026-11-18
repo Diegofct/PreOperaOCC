@@ -47,6 +47,7 @@ import {
 } from '@/shared/rules/almacen';
 import { valorConSuUnidad, type TipoDeDocumento } from '@/shared/rules/almacen-importacion';
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
@@ -141,7 +142,7 @@ export function HistorialAlmacen({
   const columnas: Columna<MovimientoDeAlmacenFila>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 105, pintar: (m) => <Celda>{m.fecha}</Celda> },
     {
-      clave: 'tipo',
+      clave: 'tipo', principal: true,
       titulo: 'Tipo',
       ancho: 100,
       pintar: (m) => (
@@ -218,7 +219,7 @@ export function HistorialAlmacen({
       },
     },
     {
-      clave: 'estado',
+      clave: 'estado', acciones: true,
       titulo: '',
       ancho: 150,
       pintar: (m) =>
@@ -332,6 +333,8 @@ function VentanaAnularMovimiento({
   const [intentado, setIntentado] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
 
   const rechazo = rechazoDeAnulacion(movimiento, material.stock, material.unidad);
   const faltaMotivo = motivo.trim().length === 0;
@@ -349,7 +352,7 @@ function VentanaAnularMovimiento({
     } catch (fallo) {
       // El rechazo del servidor (otro movimiento entró en medio) se lee aquí: el
       // aviso de la página queda detrás del telón.
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }

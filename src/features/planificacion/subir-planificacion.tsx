@@ -15,13 +15,15 @@
  *  3. Si un frente no se pudo asociar a un grupo del presupuesto (RF-107), se escoge aquí y se
  *     vuelve a mandar el mismo archivo: la lectura guardada hace que no cueste otra vez.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
+import type { PartesDeLaAccion } from '@/features/panel/marco';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
-import { Acciones, Aviso, Boton, Casilla, Modal, Selector } from '@/features/panel/componentes';
+import { Acciones, Aviso, Boton, Casilla, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import type { EstadoDeLectura, PropuestaDeHojasRespuesta } from '@/features/panel/planificacion';
 import type { FrenteSinGrupo } from '@/shared/rules/planificacion';
 import { armarSeleccion, type FaltaDeSeleccion, type UsoDeHoja } from '@/shared/rules/planificacion-ia';
@@ -73,7 +75,16 @@ type Paso =
  * El botón de subir y, debajo, el progreso de una lectura de esta obra. `alTerminar` recibe el id
  * del borrador creado, para abrirlo.
  */
-export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alTerminar: (planificacionId: string) => void }) {
+export function SubirPlanificacion({
+  obraId,
+  alTerminar,
+  children,
+}: {
+  obraId: string;
+  alTerminar: (planificacionId: string) => void;
+  /** Spec 050, RF-30: el botón va al encabezado de la pantalla y la lectura del libro se queda en ella. */
+  children: (partes: PartesDeLaAccion) => ReactNode;
+}) {
   // Si este navegador dejó una lectura de esta obra, se retoma. La pantalla monta este componente
   // con `key` de la obra, así que el valor inicial basta.
   const [paso, setPaso] = useState<Paso>(() => {
@@ -82,6 +93,8 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
   });
   const [archivo, setArchivo] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [faltas, setFaltas] = useState<FaltaDeSeleccion[]>([]);
   const [ahora, setAhora] = useState(() => Date.now());
 
@@ -162,7 +175,7 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
       setPaso({ tipo: 'confirmar', respuesta });
     } catch (fallo) {
       setPaso({ tipo: 'nada' });
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     }
   }
 
@@ -183,7 +196,7 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
     } catch (fallo) {
       const cuerpo = fallo instanceof ErrorApi ? (fallo.cuerpo as { faltas?: FaltaDeSeleccion[] } | undefined) : undefined;
       setFaltas(cuerpo?.faltas ?? []);
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -200,16 +213,20 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
   const sinLineaBase = respuesta ? !respuesta.propuesta.hojas.some((h) => h.clase === 'linea_base') : false;
   const listo = Boolean(frente && programacion && (!sinLineaBase || confirmoProgramacion) && (!respuesta?.borrador || sustituir));
 
-  return (
-    <View style={estilos.columna}>
-      <Acciones>
+  const botones = (
+    <>
         <Boton
           titulo={paso.tipo === 'proponiendo' ? 'Revisando el libro…' : 'Subir Excel de planificación'}
           tono="primario"
           onPress={() => void subir()}
           deshabilitado={paso.tipo !== 'nada'}
         />
-      </Acciones>
+    </>
+  );
+
+  // Sin caja propia: un fragmento vacío no ocupa sitio en la columna de la pantalla.
+  const cuerpo = (
+    <>
       {error && paso.tipo !== 'confirmar' && paso.tipo !== 'grupo' ? <Aviso tono="error">{error}</Aviso> : null}
 
       {paso.tipo === 'leyendo' ? (
@@ -287,18 +304,20 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
               Un frente del libro cuadra igual con más de un grupo del presupuesto. Escoja a cuál corresponde; se crea el borrador
               sin volver a leer el libro.
             </Text>
-            {paso.candidatos.map((f) => (
-              <Selector
-                key={f.frente}
-                etiqueta={`Frente del libro: ${f.frente}`}
-                valor={grupos[f.frente] ?? null}
-                opciones={f.candidatos.map((c) => ({ valor: c.id, etiqueta: c.nombre, detalle: `${c.coincidencias} ítems coinciden` }))}
-                onChange={(v) => setGrupos((g) => ({ ...g, ...(v ? { [f.frente]: v } : {}) }))}
-                vacio="Escoja el grupo"
-                obligatorio
-                ancho={600}
-              />
-            ))}
+            {/* Spec 050, RF-25: un frente por campo, en rejilla y con el largo flexible. */}
+            <Formulario desnudo>
+              {paso.candidatos.map((f) => (
+                <Selector
+                  key={f.frente}
+                  etiqueta={`Frente del libro: ${f.frente}`}
+                  valor={grupos[f.frente] ?? null}
+                  opciones={f.candidatos.map((c) => ({ valor: c.id, etiqueta: c.nombre, detalle: `${c.coincidencias} ítems coinciden` }))}
+                  onChange={(v) => setGrupos((g) => ({ ...g, ...(v ? { [f.frente]: v } : {}) }))}
+                  vacio="Escoja el grupo"
+                  obligatorio
+                />
+              ))}
+            </Formulario>
             {!archivo ? <Aviso tono="info">Para escoger el grupo hace falta el archivo: vuelva a subirlo.</Aviso> : null}
             {error ? <Aviso tono="error">{error}</Aviso> : null}
             <Acciones>
@@ -313,8 +332,10 @@ export function SubirPlanificacion({ obraId, alTerminar }: { obraId: string; alT
           </View>
         </Modal>
       ) : null}
-    </View>
+    </>
   );
+
+  return children({ botones, cuerpo });
 }
 
 const estilos = StyleSheet.create({

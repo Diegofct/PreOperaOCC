@@ -1,6 +1,6 @@
 # Spec 028 — Asistente de consulta
 
-> Estado: **Cumplida** el 2026-10-22 (aprobada el 2026-10-21) · Cambio del 2026-10-22 (RF-74 a RF-84) **cumplido** el 2026-10-22 · Fecha: 2026-10-15 · Actualizada: 2026-10-22 (pantalla tipo chat, WhatsApp de varios días y anulados según el alcance)
+> Estado: **Cumplida** el 2026-10-22 (aprobada el 2026-10-21) · Cambio del 2026-10-22 (RF-74 a RF-84) **cumplido** el 2026-10-22 · Fecha: 2026-10-15 · Actualizada: 2026-10-22 (pantalla tipo chat, WhatsApp de varios días y anulados según el alcance) · **Modificada por la spec 050** (2026-11-18): RF-73 se queda sin pantalla: el recuadro del Asistente en el Inicio se retira, porque el Asistente es la portada de cada empresa y obra — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 >
 > Nombre provisional: **«Asistente»**. El usuario elegirá un nombre terminado en «-ía» (como Lucía o Sofía) relacionado
 > con obras civiles; cambiarlo solo toca textos.

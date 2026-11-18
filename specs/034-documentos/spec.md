@@ -1,6 +1,6 @@
 # Spec 034 — Documentos del grupo y de las obras
 
-> Estado: **Cumplida en dev** el 2026-10-28 (aprobada el mismo día; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28
+> Estado: **Cumplida en dev** el 2026-10-28 (aprobada el mismo día; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28 · **Modificada por la spec 050** (2026-11-18): «Subir documento» va en el encabezado de la pantalla, y una carpeta vacía ofrece subir el primero — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 > Respuestas del usuario del 2026-10-28 (D1 a D5, abajo): cada quien ve los documentos de lo suyo y gerencia los de todo; la obra también tiene Documentos; cargo nuevo «Encargado de OCC»; suben todos los que ven, anula solo gerencia; clase de proveedores; aviso a 30 días.
 
 ## Contexto y objetivo

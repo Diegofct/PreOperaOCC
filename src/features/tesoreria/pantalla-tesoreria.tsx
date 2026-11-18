@@ -39,7 +39,8 @@ import { PantallaGasto } from '@/features/compras/pantalla-gasto';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
 import { usePersona } from '@/features/panel/sesion';
-import { useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
+import { CifrasDeEstado, estadosDelTramite } from '@/features/panel/cifras-de-estado';
+import { contarPorEstado, useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
 import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { veElGasto } from '@/shared/rules/compras';
 import { fechaDelCorte } from '@/shared/rules/cortes';
@@ -137,7 +138,10 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
       }),
     [lugar, estado, soloUrgentes, desde, hasta],
   );
-  const listado = useListadoFiltrado(solicitudes, textoDelPago, pasa);
+  const listado = useListadoFiltrado(solicitudes, textoDelPago, pasa, undefined, undefined, { hay: lugar !== null || estado !== null || soloUrgentes || desde !== '' || hasta !== '', limpiar: () => { setLugar(null); setEstado(null); setSoloUrgentes(false); setDesde(''); setHasta(''); } });
+  // Spec 050, RF-52: las cifras cuentan con todos los filtros menos el de estado.
+  const pasaSinEstado = (s: SolicitudDePagoEnElLugar) =>
+    pasaLosFiltrosDePago(s, { lugar, estado: null, soloUrgentes, desde: desde || null, hasta: hasta || null, texto: '' });
 
   const columnas: Columna<SolicitudDePagoEnElLugar>[] = [
     {
@@ -212,7 +216,7 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
       ),
     },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 100,
       anchoMinimo: 100,
@@ -240,7 +244,23 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
       </Cifras>
 
       <Seccion titulo="Solicitudes de pago del grupo">
-        <BarraDeListado busqueda={listado.busqueda} onBuscar={listado.buscar} total={listado.total} mostradas={listado.coincidencias}>
+        {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector. */}
+        <CifrasDeEstado
+          estados={ESTADOS_COMO_CIFRAS}
+          conteos={
+            cargada.cargando
+              ? null
+              : contarPorEstado(solicitudes, {
+                  textoDe: textoDelPago,
+                  estadoDe: (s) => s.estado,
+                  busqueda: listado.busqueda,
+                  pasaOtrosFiltros: pasaSinEstado,
+                })
+          }
+          elegido={estado}
+          alElegir={setEstado}
+        />
+        <BarraDeListado onLimpiar={listado.limpiar} busqueda={listado.busqueda} onBuscar={listado.buscar} total={listado.total} mostradas={listado.coincidencias}>
           <Selector
             etiqueta="Para"
             valor={lugar}
@@ -250,15 +270,6 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
             vacio="Todo el grupo"
             ancho={200}
           />
-          <Selector
-            etiqueta="Estado"
-            valor={estado}
-            opciones={ESTADOS_DE_PAGO.map((e) => ({ valor: e.id, etiqueta: e.nombre }))}
-            onChange={setEstado}
-            permiteVacio
-            vacio="Todos los estados"
-            ancho={190}
-          />
           <CampoDeFecha etiqueta="Pedidas desde" valor={desde} onChange={setDesde} />
           <CampoDeFecha etiqueta="Hasta" valor={hasta} onChange={setHasta} min={desde || undefined} />
         </BarraDeListado>
@@ -266,6 +277,7 @@ function BandejaDeSolicitudes({ alAbrir }: { alAbrir: (id: string) => void }) {
           <Casilla etiqueta="Solo urgentes" marcada={soloUrgentes} onChange={setSoloUrgentes} />
         </Acciones>
         <Tabla
+          sinResultados={listado.sinResultados}
           columnas={columnas}
           filas={listado.pagina}
           vacio={solicitudes.length === 0 ? 'Todavía nadie ha pedido un pago.' : 'Ninguna solicitud coincide con la búsqueda o los filtros.'}
@@ -286,3 +298,6 @@ const estilos = StyleSheet.create({
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 });
+
+/** Los estados de una solicitud de pago como cifras (spec 050, RF-48). */
+const ESTADOS_COMO_CIFRAS = estadosDelTramite(ESTADOS_DE_PAGO);

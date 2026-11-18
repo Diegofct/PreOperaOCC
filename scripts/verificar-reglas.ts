@@ -414,11 +414,16 @@ import {
   AnchoMenuPlegado,
   AnchoMinimoDosColumnas,
   AnchoMinimoMenuFijo,
+  AnchoFormulario,
+  AnchoListado,
   AnchoMinimoPanel,
+  DuracionDeAviso,
   MaxContentWidthPanel,
   Spacing,
 } from '../src/constants/medidas';
-import { anchoMinimoDeColumna } from '../src/features/panel/columnas';
+import { anchoMinimoDeColumna, crecimientoDeColumna, partesDeLaTarjeta, seMuestraEnTarjetas } from '../src/features/panel/columnas';
+import { coincideConBusqueda, contarPorEstado } from '../src/features/panel/contar-por-estado';
+import { repartirFallo } from '../src/features/panel/repartir-fallo';
 import { filtrarOpciones, normalizar, ofreceBusqueda } from '../src/shared/rules/texto';
 import { actividadesDelParte, conservarOrigen } from '../src/features/bitacoras/servidor/secciones';
 import {
@@ -583,6 +588,10 @@ import {
   lugarDeLaRuta,
   menuDeEmpresa,
   menuDelLugar,
+  menuPorSecciones,
+  migasDelLugar,
+  portadaDelLugar,
+  portadaDelMenu,
   pestanasDeBitacora,
   pestanasDeReportes,
   tituloDelLugar,
@@ -1016,6 +1025,7 @@ import {
   leerOrdenGuardado,
   ordenarFilas,
   ordenTrasPulsar,
+  pulsacionesPara,
   type Orden,
 } from '../src/features/panel/ordenar';
 
@@ -11624,20 +11634,21 @@ prueba('033/RF-13 a RF-15, RF-29: gerencia ve el menú entero de cada empresa, c
   // Menús definitivos (cambio del 2026-10-27).
   // Desde la 046 (RF-47), la bandeja «Requisiciones»; en las obras, en GeoLab y en OCC,
   // «Requisiciones» en lugar de las dos solicitudes (RF-86), y en Elemental sin Compras (RF-90).
+  // Modificado por la spec 050 (RF-4 a RF-8): el Asistente primero y el resto en el orden de sus secciones.
   assert.deepEqual(paginas(menuDeEmpresa('elemental', 'admin')), [
-    'recursos-humanos', 'requisiciones', 'tesoreria', 'documentos', 'licitaciones', 'asistente',
+    'asistente', 'requisiciones', 'tesoreria', 'licitaciones', 'recursos-humanos', 'documentos',
   ]);
   // Con Recursos Humanos de consulta en OCC y Geolab desde la spec 035 (RF-3).
   assert.deepEqual(paginas(menuDeEmpresa('occ', 'admin')), [
-    'whatsapp', 'bitacora', 'documentos', 'recursos-humanos', 'reportes', 'vehiculos', 'preoperacionales',
-    'asignaciones', 'requisiciones', 'asistente',
+    'asistente', 'bitacora', 'preoperacionales', 'asignaciones', 'whatsapp', 'vehiculos', 'reportes',
+    'requisiciones', 'recursos-humanos', 'documentos',
   ]);
   assert.deepEqual(paginas(menuDeEmpresa('geolab', 'admin')), [
-    'bitacora', 'whatsapp', 'laboratorio', 'reportes', 'documentos', 'recursos-humanos', 'requisiciones',
-    'asistente',
+    'asistente', 'laboratorio', 'reportes', 'bitacora', 'whatsapp', 'requisiciones', 'recursos-humanos',
+    'documentos',
   ]);
-  assert.equal(menuDeEmpresa('occ', 'admin')[4].titulo, 'Reportes de vehículos y maquinaria');
-  assert.equal(menuDeEmpresa('geolab', 'admin')[3].titulo, 'Reportes de laboratorio');
+  assert.equal(menuDeEmpresa('occ', 'admin').find((m) => m.pagina === 'reportes')?.titulo, 'Reportes de vehículos y maquinaria');
+  assert.equal(menuDeEmpresa('geolab', 'admin').find((m) => m.pagina === 'reportes')?.titulo, 'Reportes de laboratorio');
   // Ninguno lleva ya la información de la empresa, la financiera ni el consolidado.
   for (const empresa of ['elemental', 'occ', 'geolab'] as const) {
     const permisos = menuDeEmpresa(empresa, 'admin').map((m) => m.permiso);
@@ -11649,17 +11660,18 @@ prueba('033/RF-17, RF-18: el menú de una obra, sin los módulos que la obra tie
   // Con Documentos después de Contrato y Presupuesto desde la spec 034 (RF-2).
   // Con Planificación y Cumplimiento después de Documentos desde la spec 043 (RF-86, RF-88), y el
   // Plan semanal detrás desde la 044 (RF-78).
+  // Modificado por la spec 050 (RF-4 a RF-8): el Asistente primero y el resto en el orden de sus secciones.
   assert.deepEqual(paginas(menuDeObra('admin')), [
-    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
-    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
-    'plan-semanal', 'requisiciones', 'asistente',
+    'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
+    'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'cantera', 'calidad', 'recursos-humanos',
+    'documentos', 'reportes',
   ]);
-  assert.equal(menuDeObra('admin')[2].titulo, 'Reportes e informes');
+  assert.equal(menuDeObra('admin').find((m) => m.pagina === 'reportes')?.titulo, 'Reportes e informes');
   // Calidad es el laboratorio de la obra: se apaga con él.
   const sinCanteraNiLaboratorio = { almacen: true, cantera: false, laboratorio: false };
   assert.deepEqual(paginas(menuDeObra('admin', sinCanteraNiLaboratorio)), [
-    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'almacen', 'preoperacionales',
-    'asignaciones', 'contrato', 'documentos', 'planificacion', 'cumplimiento', 'plan-semanal', 'requisiciones', 'asistente',
+    'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
+    'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'recursos-humanos', 'documentos', 'reportes',
   ]);
 });
 
@@ -11685,6 +11697,8 @@ prueba('033/RF-49: Licitaciones abre LicitApp en una pestaña nueva', () => {
     titulo: 'Licitaciones',
     ruta: 'https://licitapp-elementaling.cloud/',
     externa: true,
+    // Desde la 050 (RF-7), en la sección «Gestión».
+    seccion: 'Gestión',
   });
   // Las demás son del panel.
   // Desde la 046 (RF-90, cambio del 17-nov) Compras está dentro de Requisiciones.
@@ -11692,6 +11706,7 @@ prueba('033/RF-49: Licitaciones abre LicitApp en una pestaña nueva', () => {
     clave: 'requisiciones',
     titulo: 'Requisiciones',
     ruta: '/panel/elemental/requisiciones',
+    seccion: 'Gestión',
   });
 });
 
@@ -11771,9 +11786,9 @@ prueba('033/RF-52: las páginas que cambiaron de nombre llevan a la nueva', () =
   const laboratorista = { rol: 'laboratorista' as const, obraId: 'o9' };
   const occEmpresa = { tipo: 'empresa' as const, empresa: 'occ' as const, pagina: 'empresa' };
   assert.equal(rutaRenombradaPara(occEmpresa, gerencia), tesoreria);
-  assert.equal(rutaRenombradaPara(occEmpresa, residente), '/panel/proyectos/o1');
-  assert.equal(rutaRenombradaPara({ tipo: 'obra', obraId: 'o1', pagina: 'finanzas' }, residente), '/panel/proyectos/o1');
-  assert.equal(rutaRenombradaPara({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }, laboratorista), '/panel/geolab/laboratorio');
+  assert.equal(rutaRenombradaPara(occEmpresa, residente), '/panel/proyectos/o1/asistente'); // Modificado por la spec 050 (RF-89): su inicio es el Asistente.
+  assert.equal(rutaRenombradaPara({ tipo: 'obra', obraId: 'o1', pagina: 'finanzas' }, residente), '/panel/proyectos/o1/asistente');
+  assert.equal(rutaRenombradaPara({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }, laboratorista), '/panel/geolab/asistente'); // 050/RF-90
   assert.equal(
     rutaRenombradaPara({ tipo: 'empresa', empresa: 'geolab', pagina: 'personas' }, gerencia),
     '/panel/elemental/recursos-humanos?pestana=personas',
@@ -11796,10 +11811,11 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   // Con los menús definitivos (cambio del 2026-10-27), el mismo menú de la obra: Recursos
   // Humanos en consulta y las solicitudes de compra y de pago. Y Documentos de su obra
   // (spec 034, RF-5).
+  // Modificado por la spec 050 (RF-4 a RF-8): el Asistente primero y el resto en el orden de sus secciones.
   assert.deepEqual(paginas(menuDeObra('director_obra')), [
-    'bitacoras', 'whatsapp', 'reportes', 'recursos-humanos', 'calidad', 'almacen',
-    'preoperacionales', 'asignaciones', 'cantera', 'contrato', 'documentos', 'planificacion', 'cumplimiento',
-    'plan-semanal', 'requisiciones', 'asistente',
+    'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
+    'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'cantera', 'calidad', 'recursos-humanos',
+    'documentos', 'reportes',
   ]);
   // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21). Personas, que la
   // 041 le abrió para dar accesos de obra, no es una entrada del menú de la obra: es la pestaña
@@ -11810,16 +11826,16 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
     assert.deepEqual(antes.filter((m) => !ahora.has(m)), [], rol);
   }
   assert.deepEqual(paginas(menuDeObra('almacenista')), [
-    'almacen', 'requisiciones', 'asistente',
+    'asistente', 'requisiciones', 'almacen',
   ]);
-  assert.deepEqual(paginas(menuDeObra('encargado_planta')), ['cantera', 'asistente']);
+  assert.deepEqual(paginas(menuDeObra('encargado_planta')), ['asistente', 'cantera']);
   assert.deepEqual(paginas(menuDeObra('almacenista', { almacen: false, cantera: true, laboratorio: true })), [
-    'requisiciones', 'asistente',
+    'asistente', 'requisiciones',
   ]);
   // Con los documentos de Geolab desde la spec 034 (RF-7), y su Bitácora y sus Reportes de
   // WhatsApp desde la 038 (RF-27 a RF-29).
   assert.deepEqual(paginas(menuDeEmpresa('geolab', 'laboratorista')), [
-    'bitacora', 'whatsapp', 'laboratorio', 'documentos', 'recursos-humanos', 'requisiciones', 'asistente',
+    'asistente', 'laboratorio', 'bitacora', 'whatsapp', 'requisiciones', 'recursos-humanos', 'documentos',
   ]);
   for (const rol of ROLES.filter((r) => r !== 'admin')) {
     for (const accion of ['ver', 'listar', 'escribir', 'anular'] as const) {
@@ -11876,14 +11892,14 @@ prueba('033/RF-45, RF-46: la empresa de la persona, o la de su rol si no tiene',
 prueba('033/RF-6 a RF-9: cada rol entra a lo suyo', () => {
   assert.equal(destinoAlEntrar({ rol: 'admin', obras: [] }), '/panel');
   // El residente, directo a su obra: la portada es el resumen del día.
-  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1/asistente'); // Modificado por la spec 050 (RF-89).
   // Con varias obras o sin ninguna, la lista de Proyectos (RF-7 y caso límite).
   assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1', 'o2'] }), '/panel/proyectos');
   assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: [] }), '/panel/proyectos');
-  assert.equal(destinoAlEntrar({ rol: 'laboratorista', obras: ['o1'] }), '/panel/geolab/laboratorio');
+  assert.equal(destinoAlEntrar({ rol: 'laboratorista', obras: ['o1'] }), '/panel/geolab/asistente'); // 050/RF-90 (D12)
   // Almacenista y encargado de planta, a su módulo como hoy (008/RF-4).
-  assert.equal(destinoAlEntrar({ rol: 'almacenista', obras: ['o1'] }), '/panel/proyectos/o1/almacen');
-  assert.equal(destinoAlEntrar({ rol: 'encargado_planta', obras: ['o1'] }), '/panel/proyectos/o1/cantera');
+  assert.equal(destinoAlEntrar({ rol: 'almacenista', obras: ['o1'] }), '/panel/proyectos/o1/asistente'); // 050/RF-90 (D12)
+  assert.equal(destinoAlEntrar({ rol: 'encargado_planta', obras: ['o1'] }), '/panel/proyectos/o1/asistente'); // 050/RF-90 (D12)
   assert.equal(destinoAlEntrar({ rol: 'operador', obras: ['o1'] }), null);
 });
 
@@ -11907,8 +11923,8 @@ prueba('033/RF-47: las direcciones de antes llevan a su pantalla dentro de la em
   assert.equal(rutaNueva('/panel/personas', residente), '/panel/proyectos/o1/recursos-humanos');
   assert.equal(rutaNueva('/panel/personas', { rol: 'encargado_occ', obraId: null }), '/panel/occ/recursos-humanos');
   assert.equal(rutaNueva('/panel/personas', { rol: 'laboratorista', obraId: 'o1' }), '/panel/geolab/recursos-humanos');
-  assert.equal(rutaNueva('/panel/personas', { rol: 'almacenista', obraId: 'o1' }), '/panel/proyectos/o1/almacen');
-  assert.equal(rutaNueva('/panel/obras', residente), '/panel/proyectos/o1');
+  assert.equal(rutaNueva('/panel/personas', { rol: 'almacenista', obraId: 'o1' }), '/panel/proyectos/o1/asistente'); // 050/RF-90: su inicio es el Asistente
+  assert.equal(rutaNueva('/panel/obras', residente), '/panel/proyectos/o1/asistente');
   assert.equal(
     rutaNueva('/panel/personas', { rol: 'auxiliar_administrativa', obraId: null }),
     '/panel/elemental/recursos-humanos?pestana=personas',
@@ -12103,14 +12119,16 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   assert.deepEqual(occ.navegacion, [{ clave: 'empresas', titulo: '← Empresas', ruta: '/panel' }]);
   // 10 desde la 046 (RF-86, cambio del 17-nov): «Requisiciones» en lugar de las dos solicitudes.
   assert.equal(occ.entradas.length, 10);
-  assert.deepEqual(occ.entradas[7], { clave: 'asignaciones', titulo: 'Asignaciones', ruta: '/panel/occ/asignaciones' });
+  assert.deepEqual(occ.entradas.find((e) => e.clave === 'asignaciones'), {
+    clave: 'asignaciones', titulo: 'Asignaciones', ruta: '/panel/occ/asignaciones', seccion: 'Día a día',
+  });
 
   // El laboratorista en Geolab: sin «← Empresas», que no tiene a dónde ir.
   const geolab = menuDelLugar({ tipo: 'empresa', empresa: 'geolab', pagina: null }, 'laboratorista');
   assert.deepEqual(geolab.navegacion, []);
   // Con su Bitácora y sus Reportes de WhatsApp desde la spec 038 (RF-27 a RF-29).
   assert.deepEqual(titulos(geolab.entradas), [
-    'Bitácora', 'Reportes de WhatsApp', 'Laboratorio', 'Documentos', 'Recursos Humanos', 'Requisiciones', 'Asistente',
+    'Asistente', 'Laboratorio', 'Bitácora', 'Reportes de WhatsApp', 'Requisiciones', 'Recursos Humanos', 'Documentos',
   ]);
 
   // En una obra: «Cambiar de obra» para la gerencia, y sin los módulos apagados.
@@ -12151,7 +12169,9 @@ prueba('049: la pestaña dice Kontrola fuera de una empresa y la empresa dentro'
   // RF-11: dentro de una empresa, su nombre y no el del sistema.
   assert.equal(tituloDeLaPestana('/panel/occ/vehiculos'), 'Vehículos · OCC');
   // RF-43 y RF-50: dentro de una obra y en la lista de obras.
-  assert.equal(tituloDeLaPestana('/panel/proyectos/o1'), 'Resumen del día · Proyectos');
+  // Modificado por la spec 050 (RF-86): sin el Resumen del día, la portada de la obra lleva «Proyectos».
+  assert.equal(tituloDeLaPestana('/panel/proyectos/o1'), 'Proyectos');
+  assert.equal(tituloDeLaPestana('/panel/proyectos/o1/asistente'), 'Asistente · Proyectos');
   assert.equal(tituloDeLaPestana('/panel/proyectos'), 'Proyectos');
 });
 
@@ -12160,7 +12180,8 @@ prueba('033/RF-48: el título de la pestaña dice el módulo y la empresa', () =
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/geolab/reportes')), 'Reportes de laboratorio · Geolab');
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/elemental')), 'Elemental Ingeniería y Arquitectura');
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos/o1/bitacoras')), 'Bitácoras · Proyectos');
-  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos/o1')), 'Resumen del día · Proyectos');
+  // Modificado por la spec 050 (RF-86): sin el Resumen del día, la portada de la obra no tiene título propio.
+  assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos/o1')), 'Proyectos');
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/proyectos')), 'Proyectos');
   assert.equal(tituloDelLugar(null), null);
   // Tal cual lo pide la spec, sin el nombre del sistema: la empresa ya dice dónde se está.
@@ -12345,7 +12366,7 @@ prueba('034/RF-34: buscar sin mayúsculas ni tildes, en los cuatro campos', () =
 prueba('034/RF-12 a RF-17: el Encargado de OCC entra a OCC y solo a OCC', () => {
   const encargado = { rol: 'encargado_occ' as const, obraId: null };
   // RF-14: sin tarjetas, directo a OCC; ninguna otra empresa ni obra.
-  assert.equal(destinoAlEntrar({ rol: 'encargado_occ', obras: [] }), '/panel/occ');
+  assert.equal(destinoAlEntrar({ rol: 'encargado_occ', obras: [] }), '/panel/occ/asistente'); // Modificado por la spec 050 (RF-90).
   assert.ok(alcanzaLaEmpresa('encargado_occ', 'occ'));
   for (const empresa of ['elemental', 'geolab', 'proyectos'] as const) {
     assert.equal(alcanzaLaEmpresa('encargado_occ', empresa), false, empresa);
@@ -12399,13 +12420,12 @@ prueba('034/RF-12 a RF-17: el Encargado de OCC entra a OCC y solo a OCC', () => 
   assert.deepEqual(alcance.modulos, ['bitacoras', 'preoperacionales', 'whatsapp', 'reportes', 'vehiculos', 'solicitudes', 'bitacora_empresa']);
   // Las direcciones de antes lo llevan a OCC, nunca a una obra.
   assert.equal(rutaNueva('/panel/preoperacionales', encargado), '/panel/occ/preoperacionales');
-  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', encargado), '/panel/occ');
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', encargado), '/panel/occ'); // La portada de OCC, que desde la 050 abre el Asistente.
 });
 
 prueba('034/RF-2, RF-4 a RF-10: quién ve Documentos y dónde', () => {
-  // RF-2: en la obra, después de Contrato y Presupuesto.
-  const deObra = menuDeObra('admin').map((m) => m.pagina);
-  assert.equal(deObra.indexOf('documentos'), deObra.indexOf('contrato') + 1);
+  // RF-2: en la obra. Desde la 050 (RF-4) en «Personal y archivo», no detrás de Contrato y Presupuesto.
+  assert.equal(menuDeObra('admin').find((m) => m.pagina === 'documentos')?.seccion, 'Personal y archivo');
   // No tiene interruptor por obra: con todo apagado sigue.
   assert.ok(
     menuDeObra('director_obra', { almacen: false, cantera: false, laboratorio: false }).some((m) => m.pagina === 'documentos'),
@@ -12510,7 +12530,7 @@ prueba('035/RF-11: el selector de Acceso ofrece solo lo que cada rol puede dar',
 prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a Elemental', () => {
   const auxiliar = { rol: 'auxiliar_administrativa' as const, obraId: null };
   // RF-9: sin tarjetas. Desde la 040 entraba a Compras; desde la 046 (RF-92, 046, cambio del 17-nov), a Requisiciones.
-  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/asistente'); // Modificado por la spec 050 (RF-90).
   assert.ok(alcanzaLaEmpresa('auxiliar_administrativa', 'elemental'));
   for (const empresa of ['occ', 'geolab', 'proyectos'] as const) {
     assert.equal(alcanzaLaEmpresa('auxiliar_administrativa', empresa), false, empresa);
@@ -12521,7 +12541,8 @@ prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a 
   assert.deepEqual(menu.navegacion, []);
   assert.deepEqual(
     menu.entradas.map((m) => m.clave),
-    ['recursos-humanos', 'requisiciones', 'tesoreria', 'documentos', 'licitaciones', 'asistente'],
+    // Modificado por la spec 050 (RF-7, RF-8): el Asistente primero y luego Gestión · Personal y archivo.
+    ['asistente', 'requisiciones', 'tesoreria', 'licitaciones', 'recursos-humanos', 'documentos'],
   );
   // La dirección de antes del asistente la lleva al suyo, en Elemental.
   assert.equal(rutaNueva('/panel/asistente', auxiliar), '/panel/elemental/asistente');
@@ -12547,8 +12568,8 @@ prueba('035/RF-8 a RF-11: la Auxiliar Administrativa entra a Elemental y solo a 
   assert.equal(sinObraAsignada('auxiliar_administrativa', null), false);
   // Y las fotos de las obras no las alcanza: no tiene sus módulos.
   assert.equal(alcanzaLaImagen(sesionDe('auxiliar_administrativa', null), { existe: true, obraId: 'o1' }, 'bitacoras'), false);
-  // Lo de antes la lleva a su entrada (Requisiciones desde la 046, 046, cambio del 17-nov), nunca a una obra.
-  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', auxiliar), '/panel/elemental/requisiciones');
+  // Lo de antes la lleva a su entrada (Requisiciones desde la 046; el Asistente desde la 050), nunca a una obra.
+  assert.equal(rutaNueva('/panel/bitacoras?obraId=o1', auxiliar), '/panel/elemental/asistente'); // 050/RF-90
 });
 
 prueba('040/RF-1, RF-2: el acceso se llama «Auxiliar Administrativa», y el cargo también', () => {
@@ -12563,7 +12584,7 @@ prueba('040/RF-1, RF-2: el acceso se llama «Auxiliar Administrativa», y el car
 });
 
 prueba('040/RF-3: entra solo a Elemental, y directo a Requisiciones (antes Compras; 046, RF-92)', () => {
-  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/asistente'); // 050/RF-90
   for (const empresa of ['occ', 'geolab', 'proyectos'] as const) {
     assert.equal(alcanzaLaEmpresa('auxiliar_administrativa', empresa), false, empresa);
   }
@@ -13207,10 +13228,12 @@ prueba('040/RF-11, D5: sigue dando solo el acceso de operador', () => {
 
 prueba('035/RF-2 a RF-7: quién ve Recursos Humanos y dónde', () => {
   const tiene = (menu: { pagina: string }[]) => menu.some((m) => m.pagina === 'recursos-humanos');
-  // RF-3: en OCC y en Geolab, después de Documentos.
+  // RF-3: en OCC y en Geolab. Modificado por la spec 050 (RF-5, RF-6): en «Administración», antes de
+  // Documentos y no detrás.
   for (const empresa of ['occ', 'geolab'] as const) {
     const paginas = menuDeEmpresa(empresa, 'admin').map((m) => m.pagina);
-    assert.equal(paginas.indexOf('recursos-humanos'), paginas.indexOf('documentos') + 1, empresa);
+    assert.equal(paginas.indexOf('documentos'), paginas.indexOf('recursos-humanos') + 1, empresa);
+    assert.equal(menuDeEmpresa(empresa, 'admin').find((m) => m.pagina === 'recursos-humanos')?.seccion, 'Administración');
   }
   // RF-2, RF-4, RF-5: Elemental (gerencia y auxiliar), OCC (Encargado), Geolab (laboratorista), obra (residente).
   assert.ok(tiene(menuDeEmpresa('elemental', 'auxiliar_administrativa')));
@@ -15458,10 +15481,10 @@ prueba('041/RF-5, RF-24, RF-25: a dónde entra cada cargo de obra', () => {
   // El Director de Proyectos ve todas: la lista de Proyectos, tenga o no obra.
   assert.equal(destinoAlEntrar({ rol: 'director_proyectos', obras: [] }), '/panel/proyectos');
   // El Director de Obra: con una obra, directo a ella; con varias, la lista.
-  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1');
+  assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1'] }), '/panel/proyectos/o1/asistente'); // Modificado por la spec 050 (RF-89).
   assert.equal(destinoAlEntrar({ rol: 'director_obra', obras: ['o1', 'o2'] }), '/panel/proyectos');
   // El Residente, a su obra.
-  assert.equal(destinoAlEntrar({ rol: 'residente', obras: ['o1'] }), '/panel/proyectos/o1');
+  assert.equal(destinoAlEntrar({ rol: 'residente', obras: ['o1'] }), '/panel/proyectos/o1/asistente');
 });
 
 prueba('041/RF-5, RF-19: qué obras de Proyectos abre cada cargo por la ruta', () => {
@@ -21229,8 +21252,8 @@ prueba('046/RF-86, RF-47, RF-90, RF-92: «Requisiciones» en las obras, GeoLab y
     assert.equal(paginas(menuDeEmpresa('elemental', rol)).includes('compras'), false, rol);
   }
   // La Administradora y la Auxiliar entran a Requisiciones de Elemental.
-  assert.equal(destinoAlEntrar({ rol: 'administradora_elemental', obras: [] }), '/panel/elemental/requisiciones');
-  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/requisiciones');
+  assert.equal(destinoAlEntrar({ rol: 'administradora_elemental', obras: [] }), '/panel/elemental/asistente'); // Modificado por la spec 050 (RF-90).
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/asistente');
   // Las direcciones de antes llevan a Requisiciones; las de OCC siguen donde estaban.
   assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'solicitudes-compra' }), '/panel/proyectos/o1/requisiciones');
   assert.equal(rutaRenombrada({ tipo: 'obra', obraId: 'o1', pagina: 'solicitudes-pago' }), '/panel/proyectos/o1/requisiciones');
@@ -22235,6 +22258,226 @@ prueba('048/RF-65: dos renglones indirectos iguales no comparten llave (V8 de Ma
   assert.deepEqual(total.porLlave, { [volquetas[1].llave]: 500 });
 });
 
+prueba('050/RF-42, RF-43, RF-56 (D1 a D3): listados hasta 1600 px, formularios hasta 1100 y aviso de 4 s', () => {
+  assert.equal(AnchoListado, 1600);
+  assert.equal(AnchoFormulario, 1100);
+  assert.equal(DuracionDeAviso, 4000);
+  // Ninguno achica lo que ya cabía: un listado no baja de la medida contra la que se calibraron
+  // las columnas, y un formulario sigue siendo más angosto que un listado.
+  assert.ok(AnchoListado >= MaxContentWidthPanel);
+  assert.ok(AnchoFormulario < AnchoListado);
+});
+
+prueba('050/RF-1, RF-3 a RF-8: el menú de cada lugar, por secciones y con el Asistente primero', () => {
+  type Menu = ReturnType<typeof menuPorSecciones>;
+  const forma = (m: Menu) => m.secciones.map((s) => [s.titulo, ...s.enlaces.map((e) => e.clave)]);
+  const obra = menuPorSecciones({ tipo: 'obra', obraId: 'o1', pagina: null }, 'admin');
+  assert.equal(obra.asistente?.clave, 'asistente');
+  assert.deepEqual(forma(obra), [
+    ['Día a día', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp'],
+    ['Planeación y contrato', 'contrato', 'planificacion', 'plan-semanal', 'cumplimiento'],
+    ['Materiales y calidad', 'requisiciones', 'almacen', 'cantera', 'calidad'],
+    ['Personal y archivo', 'recursos-humanos', 'documentos', 'reportes'],
+  ]);
+  const occ = menuPorSecciones({ tipo: 'empresa', empresa: 'occ', pagina: null }, 'admin');
+  assert.deepEqual(forma(occ), [
+    ['Día a día', 'bitacora', 'preoperacionales', 'asignaciones', 'whatsapp'],
+    ['Flota', 'vehiculos', 'reportes'],
+    ['Administración', 'requisiciones', 'recursos-humanos', 'documentos'],
+  ]);
+  const geolab = menuPorSecciones({ tipo: 'empresa', empresa: 'geolab', pagina: null }, 'admin');
+  assert.deepEqual(forma(geolab), [
+    ['Laboratorio', 'laboratorio', 'reportes', 'bitacora', 'whatsapp'],
+    ['Administración', 'requisiciones', 'recursos-humanos', 'documentos'],
+  ]);
+  const elemental = menuPorSecciones({ tipo: 'empresa', empresa: 'elemental', pagina: null }, 'admin');
+  assert.deepEqual(forma(elemental), [
+    ['Gestión', 'requisiciones', 'tesoreria', 'licitaciones'],
+    ['Personal y archivo', 'recursos-humanos', 'documentos'],
+  ]);
+  // RF-8: el Asistente no está dentro de ninguna sección, en ningún lugar.
+  for (const m of [obra, occ, geolab, elemental]) {
+    assert.ok(m.secciones.every((s) => s.enlaces.every((e) => e.clave !== 'asistente')));
+    assert.equal(m.asistente?.clave, 'asistente');
+  }
+  // RF-3: toda entrada de cada menú está en una sola sección, y no sobra ni falta ninguna.
+  const casos = [
+    [obra, menuDeObra('admin')],
+    [occ, menuDeEmpresa('occ', 'admin')],
+    [geolab, menuDeEmpresa('geolab', 'admin')],
+    [elemental, menuDeEmpresa('elemental', 'admin')],
+  ] as const;
+  for (const [m, plano] of casos) {
+    const enSecciones = m.secciones.flatMap((s) => s.enlaces.map((e) => e.clave));
+    assert.equal(new Set(enSecciones).size, enSecciones.length);
+    assert.deepEqual(
+      [...enSecciones, 'asistente'].sort(),
+      plano.map((e) => e.pagina).sort(),
+    );
+  }
+  // El menú plano lee en el mismo orden: el Asistente y luego las secciones.
+  assert.equal(menuDeObra('admin')[0].pagina, 'asistente');
+  assert.equal(menuDeEmpresa('occ', 'admin')[0].pagina, 'asistente');
+});
+
+prueba('050/RF-9, RF-10: ninguna sección queda vacía, para ningún cargo ni con módulos apagados', () => {
+  const lugares = [
+    { tipo: 'obra', obraId: 'o1', pagina: null },
+    { tipo: 'empresa', empresa: 'occ', pagina: null },
+    { tipo: 'empresa', empresa: 'geolab', pagina: null },
+    { tipo: 'empresa', empresa: 'elemental', pagina: null },
+  ] as const;
+  const apagados = [
+    TODOS_LOS_MODULOS,
+    { almacen: false, cantera: false, laboratorio: false },
+    { almacen: false, cantera: true, laboratorio: true },
+  ];
+  for (const rol of ROLES) {
+    for (const lugar of lugares) {
+      for (const modulos of apagados) {
+        for (const s of menuPorSecciones(lugar, rol, modulos).secciones) {
+          assert.ok(s.enlaces.length > 0, `${rol} ${JSON.stringify(lugar)} ${s.titulo}`);
+        }
+      }
+    }
+  }
+  // El almacenista: una sola sección, «Materiales y calidad», más el Asistente.
+  const almacenista = menuPorSecciones({ tipo: 'obra', obraId: 'o1', pagina: null }, 'almacenista');
+  assert.equal(almacenista.asistente?.clave, 'asistente');
+  assert.deepEqual(
+    almacenista.secciones.map((s) => [s.titulo, ...s.enlaces.map((e) => e.clave)]),
+    [['Materiales y calidad', 'requisiciones', 'almacen']],
+  );
+  // Con Almacén y Cantera apagados, al encargado de planta no le queda ninguna sección.
+  const planta = menuPorSecciones({ tipo: 'obra', obraId: 'o1', pagina: null }, 'encargado_planta', {
+    almacen: false, cantera: false, laboratorio: true,
+  });
+  assert.deepEqual(planta.secciones, []);
+  // Una obra sin Almacén, Cantera ni Calidad sigue con «Materiales y calidad» por Requisiciones.
+  const sinMateriales = menuPorSecciones({ tipo: 'obra', obraId: 'o1', pagina: null }, 'admin', {
+    almacen: false, cantera: false, laboratorio: false,
+  });
+  assert.deepEqual(
+    sinMateriales.secciones.find((s) => s.titulo === 'Materiales y calidad')?.enlaces.map((e) => e.clave),
+    ['requisiciones'],
+  );
+  // Fuera de una empresa (las tarjetas de la gerencia) no hay secciones ni Asistente.
+  assert.deepEqual(menuPorSecciones(null, 'director_obra').secciones, []);
+  assert.equal(menuPorSecciones(null, 'admin').asistente, null);
+});
+
+prueba('050/RF-84, RF-88 a RF-90 (D9, D11, D12): todos entran al Asistente de su lugar; la gerencia, a las tarjetas', () => {
+  // RF-88: la gerencia sigue en las tarjetas de las empresas.
+  assert.equal(destinoAlEntrar({ rol: 'admin', obras: [] }), '/panel');
+  // RF-89: quien trabaja en una sola obra, al Asistente de su obra.
+  for (const rol of ['residente', 'director_obra', 'almacenista', 'encargado_planta'] as const) {
+    assert.equal(destinoAlEntrar({ rol, obras: ['o1'] }), '/panel/proyectos/o1/asistente', rol);
+  }
+  // Con varias obras, o sin ninguna, a la lista: no hay una obra que escoger por él.
+  for (const rol of ['residente', 'director_obra', 'almacenista', 'encargado_planta'] as const) {
+    assert.equal(destinoAlEntrar({ rol, obras: ['o1', 'o2'] }), '/panel/proyectos', rol);
+    assert.equal(destinoAlEntrar({ rol, obras: [] }), '/panel/proyectos', rol);
+  }
+  assert.equal(destinoAlEntrar({ rol: 'director_proyectos', obras: [] }), '/panel/proyectos');
+  // RF-90 (D12): los cargos con módulo propio, al Asistente de donde trabajan, no a su módulo.
+  assert.equal(destinoAlEntrar({ rol: 'laboratorista', obras: ['o1'] }), '/panel/geolab/asistente');
+  assert.equal(destinoAlEntrar({ rol: 'encargado_occ', obras: [] }), '/panel/occ/asistente');
+  assert.equal(destinoAlEntrar({ rol: 'auxiliar_administrativa', obras: [] }), '/panel/elemental/asistente');
+  assert.equal(destinoAlEntrar({ rol: 'administradora_elemental', obras: [] }), '/panel/elemental/asistente');
+  // El operador no entra al panel.
+  assert.equal(destinoAlEntrar({ rol: 'operador', obras: ['o1'] }), null);
+  // Todo destino de un cargo del panel es una página que su menú le deja abrir.
+  for (const rol of ROLES.filter((r) => r !== 'admin' && r !== 'operador')) {
+    const destino = destinoAlEntrar({ rol, obras: ['o1'] });
+    const lugar = destino ? lugarDeLaRuta(destino) : null;
+    if (!lugar || lugar.tipo === 'proyectos') continue;
+    const menu = menuPorSecciones(lugar, { rol, obraId: 'o1', obras: ['o1'] });
+    assert.equal(menu.asistente?.ruta, destino, rol);
+  }
+});
+
+prueba('050/RF-84, RF-85: la portada de una empresa u obra es su Asistente, o la primera entrada si no lo ve', () => {
+  const obra = { tipo: 'obra', obraId: 'o1', pagina: null } as const;
+  const occ = { tipo: 'empresa', empresa: 'occ', pagina: null } as const;
+  const elemental = { tipo: 'empresa', empresa: 'elemental', pagina: null } as const;
+  assert.equal(portadaDelLugar(obra, 'admin'), '/panel/proyectos/o1/asistente');
+  assert.equal(portadaDelLugar(occ, 'admin'), '/panel/occ/asistente');
+  assert.equal(portadaDelLugar(elemental, { rol: 'auxiliar_administrativa', obraId: null }), '/panel/elemental/asistente');
+  // RF-85: con un menú sin Asistente (hoy ningún cargo del panel está así, pero la tabla de permisos
+  // puede cambiar), la primera entrada de la primera sección. Licitaciones abre otra aplicación:
+  // nunca es la portada.
+  const sinAsistente = (m: ReturnType<typeof menuPorSecciones>) => ({ ...m, asistente: null });
+  assert.equal(portadaDelMenu(sinAsistente(menuPorSecciones(obra, 'admin'))), '/panel/proyectos/o1/bitacoras');
+  assert.equal(portadaDelMenu(sinAsistente(menuPorSecciones(elemental, 'admin'))), '/panel/elemental/requisiciones');
+  const soloExterna = sinAsistente(menuPorSecciones(elemental, 'admin'));
+  soloExterna.secciones = soloExterna.secciones
+    .map((s) => ({ ...s, enlaces: s.enlaces.filter((e) => e.externa) }))
+    .filter((s) => s.enlaces.length > 0);
+  assert.equal(portadaDelMenu(soloExterna), null);
+  // A un lugar al que no entra, ninguna: la pantalla dice «Sin acceso».
+  assert.equal(portadaDelLugar(obra, { rol: 'residente', obraId: 'o9', obras: ['o9'] }), null);
+  assert.equal(portadaDelLugar(occ, { rol: 'residente', obraId: 'o1', obras: ['o1'] }), null);
+  // Fuera de una empresa u obra no hay portada que dar.
+  assert.equal(portadaDelLugar(null, 'admin'), null);
+  assert.equal(portadaDelLugar({ tipo: 'proyectos' }, 'admin'), null);
+});
+
+prueba('050/RF-27, RF-28, RF-86: la ruta de arriba de cada pantalla, con enlace en todo paso menos el último', () => {
+  const obra = { obra: 'Consorcio Antioquia' };
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/occ/documentos'), obra), [
+    { titulo: 'OCC', ruta: '/panel/occ' },
+    { titulo: 'Documentos', ruta: null },
+  ]);
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/proyectos/o1/recursos-humanos'), obra), [
+    { titulo: 'Consorcio Antioquia', ruta: '/panel/proyectos/o1' },
+    { titulo: 'Recursos Humanos', ruta: null },
+  ]);
+  // Con un registro, el módulo gana su enlace y el registro es el último paso.
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/proyectos/o1/recursos-humanos'), obra, 'Juan Pérez'), [
+    { titulo: 'Consorcio Antioquia', ruta: '/panel/proyectos/o1' },
+    { titulo: 'Recursos Humanos', ruta: '/panel/proyectos/o1/recursos-humanos' },
+    { titulo: 'Juan Pérez', ruta: null },
+  ]);
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/geolab/reportes'), {}), [
+    { titulo: 'Geolab', ruta: '/panel/geolab' },
+    { titulo: 'Reportes de laboratorio', ruta: null },
+  ]);
+  // Mientras llega el nombre de la obra, «Obra»: la ruta no se queda sin su primer paso.
+  assert.equal(migasDelLugar(lugarDeLaRuta('/panel/proyectos/o1/almacen'), { obra: null })[0].titulo, 'Obra');
+  // En la portada de una empresa, solo su nombre, sin enlace a sí misma.
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/occ'), {}), [{ titulo: 'OCC', ruta: null }]);
+  // Una página que no es del menú (una dirección vieja) no inventa un paso.
+  assert.deepEqual(migasDelLugar(lugarDeLaRuta('/panel/occ/desconocida'), {}), [{ titulo: 'OCC', ruta: null }]);
+  // Fuera de una empresa u obra, sin ruta.
+  assert.deepEqual(migasDelLugar(null, {}), []);
+  assert.deepEqual(migasDelLugar({ tipo: 'proyectos' }, {}), []);
+  // RF-28: todos los pasos llevan enlace menos el último.
+  for (const migas of [
+    migasDelLugar(lugarDeLaRuta('/panel/elemental/tesoreria'), {}, 'Pago 12'),
+    migasDelLugar(lugarDeLaRuta('/panel/proyectos/o1/contrato'), obra),
+  ]) {
+    assert.equal(migas[migas.length - 1].ruta, null);
+    assert.ok(migas.slice(0, -1).every((m) => m.ruta !== null));
+  }
+  // RF-86: ningún título dice «Resumen del día».
+  for (const ruta of ['/panel/proyectos/o1', '/panel/proyectos/o1/asistente', '/panel/proyectos/o1/desconocida']) {
+    assert.ok(!(tituloDelLugar(lugarDeLaRuta(ruta)) ?? '').includes('Resumen del día'), ruta);
+  }
+});
+
+prueba('050/RF-86: el Resumen del día ya no existe en el panel', () => {
+  const raiz = path.join(__dirname, '..');
+  const archivos = (readdirSync(path.join(raiz, 'src'), { recursive: true }) as string[])
+    .filter((f) => /\.tsx$/.test(f))
+    .map((f) => path.join(raiz, 'src', f));
+  assert.ok(archivos.length > 50);
+  // Ni el texto ni los títulos que pintaba («Cómo va la obra», «Su obra hoy»).
+  const restos = /resumen del día|cómo va la obra|su obra hoy/i;
+  for (const archivo of archivos) {
+    assert.ok(!restos.test(readFileSync(archivo, 'utf8')), `${path.relative(raiz, archivo)} todavía habla del Resumen del día`);
+  }
+});
+
 verificarFirmaS3()
   .then(verificarFormulario)
   .then(verificarChoques)
@@ -22245,3 +22488,398 @@ verificarFirmaS3()
     console.error('\nFalló una verificación:', error);
     process.exit(1);
   });
+
+prueba('050/RF-25: ningún formulario del panel arma a mano la fila de sus campos', () => {
+  // El barrido de la T18, al cabo de los seis lotes (T13 a T18). Los campos van en `Formulario`, que
+  // reparte los anchos de la escala y alinea las etiquetas (RF-15 a RF-17), o van sueltos. Se buscan
+  // las dos maneras de saltárselo:
+  //  · un `View` con `width` numérico alrededor de un campo (lo que dice el plan);
+  //  · una fila hecha a mano (`flexDirection: 'row'`) que solo tiene campos. Era lo que de verdad
+  //    descuadraba: en la versión de antes de la 050 hay 32, y ninguna con `width`.
+  // Una fila mixta (campos con un texto, un botón o una casilla) no se cuenta: queda en su fila.
+  const carpeta = path.join(__dirname, '..', 'src');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => f.endsWith('.tsx'));
+  // Fuera: la app del operador (la 050 no la toca), los componentes de campo, donde se decide el
+  // ancho, y las cuadrículas editables (D5): la planificación y los tramos de cada día del horario.
+  const fuera =
+    /(^|[\\/])(\(operador\)|operador|components)[\\/]|[\\/]componentes\.tsx$|(editor-planificacion|meses-del-renglon|campo-cifra|editor-horario)\.tsx$/;
+  const CAMPOS = new Set(['Campo', 'CampoDeFecha', 'CamposDeFechas', 'Selector', 'SelectorDeVarios', 'SelectorDeHora', 'CampoObservacion', 'CampoCifra', 'CampoNumero', 'CampoDeCantidad', 'CampoDeTexto', 'CampoDeUbicacion']);
+  const hallados: string[] = [];
+  for (const ruta of fuentes) {
+    if (fuera.test(ruta)) continue;
+    const codigo = readFileSync(path.join(carpeta, ruta), 'utf8');
+    const conAncho = new Set<string>();
+    const enFila = new Set<string>();
+    for (const [, nombre, cuerpo] of codigo.matchAll(/(\w+): \{([^{}]*)\}/g)) {
+      if (/\bwidth: \d/.test(cuerpo)) conAncho.add(nombre);
+      if (/flexDirection: 'row'/.test(cuerpo)) enFila.add(nombre);
+    }
+    for (const m of codigo.matchAll(/<View\b[^>]*style=\{([^>]*?)\}\s*>/g)) {
+      const estilo = m[1];
+      const nombres = [...estilo.matchAll(/estilos\.(\w+)/g)].map(([, n]) => n);
+      // Lo que hay dentro hasta que la caja se cierra; si antes se abre otra, la fila es mixta.
+      const resto = codigo.slice(m.index + m[0].length);
+      const corte = resto.match(/<\/?View\b/);
+      if (!corte || corte[0] !== '</View') continue;
+      const etiquetas = [...resto.slice(0, corte.index).matchAll(/<([A-Z]\w*)/g)].map(([, t]) => t);
+      if (!etiquetas.some((t) => CAMPOS.has(t))) continue;
+      const anchoFijo = /\bwidth: \d/.test(estilo) || nombres.some((n) => conAncho.has(n));
+      const filaDeCampos = (/flexDirection: 'row'/.test(estilo) || nombres.some((n) => enFila.has(n))) && etiquetas.every((t) => CAMPOS.has(t));
+      if (anchoFijo || filaDeCampos) hallados.push(`${ruta}: ${m[0]}`);
+    }
+    // El grupo de botones (`Acciones`) con solo campos dentro: es una fila hecha a mano con otro
+    // nombre. Lo encontró la T21 en los filtros de la bitácora de OCC.
+    for (const m of codigo.matchAll(/<Acciones>/g)) {
+      const resto = codigo.slice(m.index + m[0].length);
+      const etiquetas = [...resto.slice(0, resto.indexOf('</Acciones>')).matchAll(/<([A-Z]\w*)/g)].map(([, t]) => t);
+      if (etiquetas.length > 0 && etiquetas.every((t) => CAMPOS.has(t))) hallados.push(`${ruta}: <Acciones> con solo campos`);
+    }
+  }
+  assert.deepEqual(hallados, []);
+});
+
+prueba('050/RF-26 a RF-32, RF-69: el encabezado de toda pantalla lleva la ruta, el título y la acción principal', () => {
+  // Los pasos los prueba `migasDelLugar` (T5); esto vigila que el marco de todas las pantallas los
+  // pinte con esa regla y con el nombre de obra compartido, y no con uno armado aparte.
+  const marco = readFileSync('src/features/panel/marco.tsx', 'utf8');
+  assert.match(marco, /<Migas registro=\{registro\} \/>/);
+  assert.match(marco, /acciones \? <View style=\{angosto \? estilos\.accionesAngosto : estilos\.acciones\}>\{acciones\}<\/View> : null/);
+  const migas = readFileSync('src/features/panel/migas.tsx', 'utf8');
+  assert.match(migas, /migasDelLugar\(lugar, \{ obra: obra\?\.nombre \?\? null \}, registro\)/);
+  assert.match(migas, /useObraDelLugar\(\)/);
+  // RF-29, RF-69: se recorta al tope del token y el nombre entero sale solo si se recortó.
+  assert.match(migas, /maxWidth: AnchoMaximoDeMiga/);
+  assert.match(migas, /recortado && \(encima \|\| pulsado\)/);
+  // Una sola petición de la obra para el menú, la puerta de las páginas y la ruta (sin calcularla tres veces).
+  const layout = readFileSync('src/app/panel/_layout.tsx', 'utf8');
+  assert.match(layout, /<ProveedorObraDelLugar>/);
+});
+
+prueba('050/RF-42, RF-43: las fichas y formularios de lectura llegan a 1100; lo demás, a 1600', () => {
+  const marco = readFileSync('src/features/panel/marco.tsx', 'utf8');
+  assert.match(marco, /columna: \{ width: '100%', maxWidth: AnchoListado,/);
+  assert.match(marco, /columnaFormulario: \{ maxWidth: AnchoFormulario \}/);
+  assert.match(marco, /ancho = 'listado'/);
+  for (const ruta of [
+    'contratos/pantalla-contrato',
+    'rrhh/vista-de-la-ficha',
+    'compras/vista-de-la-solicitud',
+    'tesoreria/vista-del-pago',
+    'laboratorio/pantalla-informe',
+  ]) {
+    const codigo = readFileSync(`src/features/${ruta}.tsx`, 'utf8');
+    const marcos = codigo.match(/<MarcoPantalla\b/g) ?? [];
+    const angostos = codigo.match(/<MarcoPantalla\s+ancho="formulario"/g) ?? [];
+    assert.ok(marcos.length > 0 && marcos.length === angostos.length, ruta);
+  }
+});
+
+prueba('050/RF-30, RF-32 (T21): el botón principal va en el encabezado, con su condición de permiso', () => {
+  const documentos = readFileSync('src/features/documentos/pantalla-documentos.tsx', 'utf8');
+  // Solo quien puede escribir documentos ve «Subir documento»; la carpeta no pinta el suyo.
+  assert.match(documentos, /acciones=\{puedeSubir && pedido \? <Boton titulo="Subir documento"/);
+  assert.match(documentos, /puedeSubir && pedido && !subida \?/);
+  const solicitud = readFileSync('src/features/compras/vista-de-la-solicitud.tsx', 'utf8');
+  assert.match(solicitud, /registro=\{s\.codigo\}/);
+  assert.match(solicitud, /acciones=\{\s*<>\s*\{s\.pasos\.includes\('corregir'\)/);
+  const dia = readFileSync('src/features/empresas/bitacora-occ-dia.tsx', 'utf8');
+  assert.match(dia, /acciones=\{\s*<>\s*\{!cerrada \? <Boton titulo="Cerrar el día"/);
+});
+
+prueba('050/RF-30, RF-32 (T22): nuevo ensayo, informe, abrir la bitácora y registrar viaje, en el encabezado', () => {
+  const leer = (r: string) => readFileSync(`src/features/${r}.tsx`, 'utf8');
+  assert.match(leer('laboratorio/pantalla-laboratorio'), /acciones=\{\s*puedeRegistrar && pestana !== 'obra' \? \(\s*<Boton\s+titulo=\{creando \? 'Creando…' : 'Nuevo ensayo'\}/);
+  assert.match(leer('laboratorio/pantalla-ensayo'), /registro=\{detalle\?\.numeroInforme \?\? undefined\}/);
+  assert.match(leer('laboratorio/pantalla-informe'), /acciones=\{\s*<Boton\s+titulo="Imprimir o guardar PDF"/);
+  assert.match(leer('panel/pantalla-partes'), /acciones=\{\s*!parte && !dia\.cargando \? \(\s*<Boton titulo="Abrir la bitácora de este día"/);
+  // RF-32: «Registrar viaje» solo para quien puede escribir en la cantera.
+  assert.match(leer('panel/pantalla-cantera'), /acciones=\{\s*puedeRegistrar && hayObra \? \(\s*<Boton\s+titulo="Registrar viaje"/);
+});
+
+prueba('050/RF-27, RF-30, RF-32 (T23): pedir requisiciones, la requisición OCC, la ficha y los informes, en el encabezado', () => {
+  const leer = (r: string) => readFileSync(`src/features/${r}.tsx`, 'utf8');
+  // RF-32: solo donde se puede pedir; antes y ahora, la misma condición.
+  const requisiciones = leer('requisiciones/pantalla-requisiciones');
+  assert.match(requisiciones, /acciones=\{\s*\(pedido && cargado\?\.sePuedePedir\) \|\| cargado\?\.sePuedePedirOcc \?/);
+  assert.doesNotMatch(requisiciones, /<Acciones>\s*<Boton titulo="Nueva requisición/);
+  const occ = leer('requisiciones/occ/vista-requisicion-occ');
+  assert.match(occ, /registro=\{r\.codigo\}/);
+  assert.match(occ, /\{r\.puede\.armar \? <Boton titulo="Agregar línea"/);
+  assert.match(leer('rrhh/vista-de-la-ficha'), /registro=\{persona\.nombreCompleto\}/);
+  assert.match(leer('reportes/pantalla-reportes'), /acciones=\{\s*faltaObra \? undefined : \(/);
+  assert.match(leer('planificacion/pantalla-cumplimiento'), /acciones=\{\s*<>\s*<Boton titulo=\{bajando === 'excel'/);
+});
+
+prueba('050/RF-30, RF-32 (T24): la vista de un pago lleva sus acciones arriba, y ningún «Nueva…» queda sin condición', () => {
+  const pago = readFileSync('src/features/tesoreria/vista-del-pago.tsx', 'utf8');
+  assert.match(pago, /registro=\{s\.codigo\}/);
+  assert.match(pago, /acciones=\{\s*<>\s*\{s\.pasos\.includes\('corregir'\)/);
+  // RF-32: un botón de crear en el encabezado siempre va detrás de una condición de permiso.
+  const carpeta = path.join(__dirname, '..', 'src', 'features');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => f.endsWith('.tsx'));
+  const sinCondicion: string[] = [];
+  for (const ruta of fuentes) {
+    const codigo = readFileSync(path.join(carpeta, ruta), 'utf8');
+    for (const m of codigo.matchAll(/acciones=\{\s*<Boton titulo="(Nueva|Nuevo|Registrar|Subir)[^"]*"/g)) sinCondicion.push(`${ruta}: ${m[0]}`);
+  }
+  assert.deepEqual(sinCondicion, []);
+});
+
+prueba('050/RF-33 a RF-37 (T25): la tarjeta de una fila, con su dato principal arriba y los botones al pie', () => {
+  // Sin marcas: la primera columna arriba, la de clave `acciones` al pie y lo demás en medio.
+  assert.deepEqual(
+    partesDeLaTarjeta([{ clave: 'nombre' }, { clave: 'cargo' }, { clave: 'obra' }, { clave: 'acciones' }]),
+    { principal: 'nombre', datos: ['cargo', 'obra'], acciones: ['acciones'] },
+  );
+  // Con marcas: una fecha primero no es lo principal, y unos botones con otra clave van al pie.
+  assert.deepEqual(
+    partesDeLaTarjeta([{ clave: 'fecha' }, { clave: 'codigo', principal: true }, { clave: 'valor' }, { clave: 'abrir', acciones: true }]),
+    { principal: 'codigo', datos: ['fecha', 'valor'], acciones: ['abrir'] },
+  );
+  // RF-37: sin columna de botones, sin pie.
+  assert.deepEqual(partesDeLaTarjeta([{ clave: 'a' }, { clave: 'b' }]), { principal: 'a', datos: ['b'], acciones: [] });
+  // Si la primera es la de botones, lo principal es la primera que no lo es.
+  assert.deepEqual(partesDeLaTarjeta([{ clave: 'acciones' }, { clave: 'x' }]), { principal: 'x', datos: [], acciones: ['acciones'] });
+});
+
+prueba('050/RF-33, RF-40, RF-41, RF-70, RF-71 (T26): una lista pasa a tarjetas en el celular o cuando no cabe en su marco', () => {
+  // RF-33: en el celular, siempre tarjetas.
+  assert.equal(seMuestraEnTarjetas({ tipo: 'lista', angosto: true, marco: 900, minimo: 400 }), true);
+  // RF-70: desde 768, si el marco es menor que la tabla encogida del todo.
+  assert.equal(seMuestraEnTarjetas({ tipo: 'lista', angosto: false, marco: 860, minimo: 1100 }), true);
+  // RF-41: si cabe, tabla.
+  assert.equal(seMuestraEnTarjetas({ tipo: 'lista', angosto: false, marco: 860, minimo: 700 }), false);
+  // Antes de medir (marco 0) se supone que cabe, como `useEsAngosto` en el primer pintado.
+  assert.equal(seMuestraEnTarjetas({ tipo: 'lista', angosto: false, marco: 0, minimo: 1100 }), false);
+  // RF-71: una cuadrícula nunca, ni en el celular.
+  assert.equal(seMuestraEnTarjetas({ tipo: 'cuadricula', angosto: true, marco: 300, minimo: 1100 }), false);
+});
+
+prueba('050/RF-38, RF-39 (T27): «Ordenar por» llega al orden escogido con las mismas pulsaciones de la tabla', () => {
+  const nombreAZ = { clave: 'nombre', sentido: 'asc' as const };
+  for (const objetivo of [
+    { clave: 'cargo', sentido: 'asc' as const },
+    { clave: 'cargo', sentido: 'desc' as const },
+    { clave: 'nombre', sentido: 'asc' as const },
+    { clave: 'nombre', sentido: 'desc' as const },
+  ]) {
+    let orden: { clave: string; sentido: 'asc' | 'desc' } = nombreAZ;
+    for (let i = 0; i < pulsacionesPara(nombreAZ, objetivo); i++) orden = ordenTrasPulsar(orden, objetivo.clave);
+    assert.deepEqual(orden, objetivo);
+  }
+  assert.equal(pulsacionesPara(nombreAZ, nombreAZ), 0);
+});
+
+prueba('050/RF-74 (T28): por encima de 1366 px las columnas crecen en proporción a su ancho', () => {
+  assert.equal(crecimientoDeColumna(200, 1366), 0);
+  assert.equal(crecimientoDeColumna(200, 1280), 0);
+  assert.equal(crecimientoDeColumna(200, 1920), 200);
+  // En proporción: una de 300 crece el triple que una de 100.
+  assert.equal(crecimientoDeColumna(300, 1920) / crecimientoDeColumna(100, 1920), 3);
+});
+
+prueba('050/RF-71 (T29, T30): lo que se llena celda por celda o es una matriz sigue como cuadrícula', () => {
+  const cuadriculas: Record<string, number> = {
+    'almacen-obra/revisar-importacion': 1,
+    'contratos/pestana-presupuesto': 3,
+    'plan-semanal/editor-plan-semanal': 1,
+    'planificacion/editor-planificacion': 2,
+  };
+  for (const [ruta, cuantas] of Object.entries(cuadriculas)) {
+    const codigo = readFileSync(`src/features/${ruta}.tsx`, 'utf8');
+    assert.equal((codigo.match(/<Tabla tipo="cuadricula"/g) ?? []).length, cuantas, ruta);
+  }
+});
+
+prueba('050/RF-46, RF-47 (T31): las tarjetas llevan sombra en vez de borde, y la pulsable la aumenta al pasar el puntero', () => {
+  const componentes = readFileSync('src/features/panel/componentes.tsx', 'utf8');
+  const superficie = componentes.slice(componentes.indexOf('const SUPERFICIE = {'), componentes.indexOf('} as const;', componentes.indexOf('const SUPERFICIE = {')));
+  assert.match(superficie, /boxShadow: Sombra\.tarjeta/);
+  assert.doesNotMatch(superficie, /borderWidth|borderColor/);
+  const empresas = readFileSync('src/features/empresas/pantalla-empresas.tsx', 'utf8');
+  assert.match(empresas, /tarjetaEncima: \{ boxShadow: Sombra\.elevada \}/);
+  assert.match(empresas, /transitionDuration: `\$\{Movimiento\.rapido\}ms`/);
+});
+
+prueba('050/RF-48, RF-52 (T32): las cifras de estado cuentan toda la lista que cumple la búsqueda y los otros filtros', () => {
+  // 25 filas en 3 estados, de dos obras; los nombres pares dicen «volqueta».
+  const estados = ['pendiente', 'aprobada', 'rechazada'] as const;
+  const filas = Array.from({ length: 25 }, (_, i) => ({
+    id: String(i),
+    nombre: i % 2 === 0 ? `Volqueta ${i}` : `Cemento ${i}`,
+    obra: i < 15 ? 'A' : 'B',
+    estado: estados[i % 3],
+  }));
+  const textoDe = (f: (typeof filas)[number]) => [f.nombre];
+  const estadoDe = (f: (typeof filas)[number]) => f.estado;
+  // Sin búsqueda ni filtros: 9 + 8 + 8 = 25, aunque la página muestre 10.
+  assert.deepEqual(contarPorEstado(filas, { textoDe, estadoDe, busqueda: '' }), { pendiente: 9, aprobada: 8, rechazada: 8 });
+  // Búsqueda sin tilde ni mayúscula, y el filtro de obra: las pares de la obra A (0, 2, …, 14).
+  const conteo = contarPorEstado(filas, { textoDe, estadoDe, busqueda: 'VOLQUÉTA', pasaOtrosFiltros: (f) => f.obra === 'A' });
+  // 0,6,12 → pendiente; 4,10 → aprobada; 2,8,14 → rechazada.
+  assert.deepEqual(conteo, { pendiente: 3, aprobada: 2, rechazada: 3 });
+  // El total de las cifras es el de la lista filtrada entera, no el de una página de 10.
+  assert.equal(Object.values(conteo).reduce((a, b) => a + b, 0), 8);
+  assert.equal(coincideConBusqueda(['Topógrafo'], 'topografo'), true);
+  assert.equal(coincideConBusqueda(['Topógrafo'], ''), true);
+  assert.equal(coincideConBusqueda([null, undefined], 'x'), false);
+});
+
+prueba('050/RF-49 a RF-51, RF-77 (T32): la cifra elegida se marca con algo más que color, se quita al pulsarla y no miente mientras carga', () => {
+  const cifras = readFileSync('src/features/panel/cifras-de-estado.tsx', 'utf8');
+  assert.match(cifras, /onPress=\{\(\) => alElegir\(activo \? null : e\.valor\)\}/); // RF-49, RF-50
+  assert.match(cifras, /activo \? `✓ \$\{e\.etiqueta\}` : e\.etiqueta/); // RF-51: símbolo
+  assert.match(cifras, /cifraActiva: \{ borderColor: Panel\.foco \}/); // RF-51: borde
+  assert.match(cifras, /cuantos === null \? '…' : String\(cuantos\)/); // RF-77
+});
+
+prueba('050/RF-48, RF-75, RF-76 (T33): requisiciones, tesorería, vehículos y preoperacionales filtran por estado con cifras', () => {
+  for (const ruta of [
+    'requisiciones/pantalla-requisiciones',
+    'tesoreria/pantalla-tesoreria',
+    'panel/pantalla-vehiculos',
+    'panel/pantalla-preoperacionales',
+  ]) {
+    const codigo = readFileSync(`src/features/${ruta}.tsx`, 'utf8');
+    assert.match(codigo, /<CifrasDeEstado\b/, ruta);
+    assert.doesNotMatch(codigo, /etiqueta="(Estado|Resultado)"/, ruta);
+  }
+  // RF-76: las casillas se quedan.
+  assert.match(readFileSync('src/features/tesoreria/pantalla-tesoreria.tsx', 'utf8'), /<Casilla etiqueta="Solo urgentes"/);
+});
+
+prueba('050/RF-48, RF-75 (T34): en las siete listas con filtro de estado ya no queda el selector, sino las cifras', () => {
+  for (const ruta of [
+    'requisiciones/pantalla-requisiciones',
+    'tesoreria/pantalla-tesoreria',
+    'panel/pantalla-vehiculos',
+    'panel/pantalla-preoperacionales',
+    'laboratorio/pantalla-laboratorio',
+    'panel/whatsapp/pantalla-bandeja',
+    'rrhh/pantalla-personal',
+  ]) {
+    const codigo = readFileSync(`src/features/${ruta}.tsx`, 'utf8');
+    assert.match(codigo, /<CifrasDeEstado\b/, ruta);
+    assert.doesNotMatch(codigo, /<Selector\s+etiqueta="(Estado|Resultado)"/, ruta);
+  }
+});
+
+prueba('050/RF-53, RF-54, RF-78 (T35): sin resultados no es lo mismo que vacía, y se pueden quitar los filtros', () => {
+  const componentes = readFileSync('src/features/panel/componentes.tsx', 'utf8');
+  assert.match(componentes, /No hay resultados con estos filtros\./);
+  assert.match(componentes, /<Boton titulo="Quitar los filtros" tono="secundario" onPress=\{sinResultados\.alQuitar\} \/>/);
+  const listado = readFileSync('src/features/panel/usar-listado-filtrado.ts', 'utf8');
+  assert.match(listado, /sinResultados: filas\.length > 0 && coincidentes\.length === 0 \? \{ alQuitar: limpiar \} : undefined/);
+  for (const ruta of [
+    'documentos/pantalla-documentos',
+    'panel/pantalla-almacen',
+    'panel/pantalla-personas',
+    'panel/pantalla-preoperacionales',
+    'panel/pantalla-vehiculos',
+    'requisiciones/pantalla-requisiciones',
+    'rrhh/pantalla-personal',
+    'tesoreria/pantalla-compras-por-pagar',
+    'tesoreria/pantalla-tesoreria',
+  ]) {
+    const codigo = readFileSync(`src/features/${ruta}.tsx`, 'utf8');
+    assert.match(codigo, /sinResultados=\{/, ruta);
+    assert.match(codigo, /<BarraDeListado onLimpiar=\{/, ruta);
+  }
+});
+
+prueba('050/RF-53 (T36): una lista vacía ofrece crear el primero, con la misma condición que el botón del encabezado', () => {
+  const leer = (r: string) => readFileSync(`src/features/${r}.tsx`, 'utf8');
+  assert.match(leer('documentos/pantalla-documentos'), /accion:\s*puedeSubir && pedido \? \(\s*<Boton\s+titulo="Subir documento"/);
+  const requisiciones = leer('requisiciones/pantalla-requisiciones');
+  assert.match(requisiciones, /pedido && cargado\?\.sePuedePedir \? \(\s*<Boton titulo="Nueva requisición de compra"/);
+  assert.match(requisiciones, /accion: cargado\?\.sePuedePedirOcc \? <Boton titulo="Nueva requisición de pagos"/);
+  assert.match(leer('laboratorio/pantalla-laboratorio'), /accion: puedeRegistrar \? \(\s*<Boton\s+titulo=\{creando \? 'Creando…' : 'Nuevo ensayo'\}/);
+  assert.match(leer('panel/pantalla-cantera'), /registrarPrimero=\{\s*puedeRegistrar \? \(/);
+});
+
+prueba('050/RF-56 a RF-60, RF-81, RF-82 (T37): los avisos se apilan, el de éxito se va solo y el de error se cierra', () => {
+  const avisos = readFileSync('src/features/panel/avisos.tsx', 'utf8');
+  assert.match(avisos, /setAvisos\(\(todos\) => \[\{ id, tono, texto \}, \.\.\.todos\]\)/); // RF-58: el más nuevo encima
+  assert.match(avisos, /if \(aviso\.tono !== 'exito'\) return;\s*const reloj = setTimeout\(\(\) => alQuitar\(aviso\.id\), DuracionDeAviso\)/); // RF-56
+  assert.match(avisos, /error \? \(\s*<Pressable onPress=\{\(\) => alQuitar\(aviso\.id\)\}/); // RF-57: Cerrar
+  // RF-59: ningún «Deshacer» en el código (el comentario de cabecera explica por qué no lo hay).
+  assert.doesNotMatch(avisos.replace(/\/\*[\s\S]*?\*\//g, ''), /Deshacer/);
+  assert.match(avisos, /\{error \? '✕' : '✓'\}/); // RF-60
+  // RF-81: encima del Stack, en el marco de la sesión.
+  assert.match(readFileSync('src/features/panel/marco-sesion.tsx', 'utf8'), /<ProveedorDeAvisos>\s*\{children\}/);
+});
+
+prueba('050/RF-57, RF-79 (T38): un fallo de campo va solo debajo del campo; cualquier otro, al aviso', () => {
+  // Un campo: debajo de él, sin «Revise los campos marcados» y sin aviso (RF-79).
+  assert.deepEqual(repartirFallo({ documento: 'Ya hay una persona con esa cédula.' }, 'Ya hay una persona con esa cédula.'), {
+    campos: { documento: 'Ya hay una persona con esa cédula.' },
+    aviso: null,
+  });
+  // Varios campos: cada uno con el suyo, tampoco aviso.
+  assert.deepEqual(repartirFallo({ a: 'x', b: 'y' }, 'x'), { campos: { a: 'x', b: 'y' }, aviso: null });
+  // Ningún campo (sin conexión, otra persona ya lo cambió, el servidor): al aviso (RF-57).
+  assert.deepEqual(repartirFallo({}, 'No hay conexión con el servidor.'), { campos: {}, aviso: 'No hay conexión con el servidor.' });
+});
+
+prueba('050/RF-57, RF-79, RF-80 (T38): solo reparte en los campos quien los pinta; los demás, al aviso', () => {
+  const ventana = readFileSync('src/features/panel/usar-accion-de-ventana.ts', 'utf8');
+  assert.match(ventana, /export function useAccionDeVentana\(\{ conCampos = false \}/);
+  assert.match(ventana, /fallo instanceof ErrorApi && conCampos \? \(fallo\.campos \?\? \{\}\) : \{\}/);
+  const marco = readFileSync('src/features/panel/marco.tsx', 'utf8');
+  assert.match(marco, /\{ conCampos = false \}: \{ conCampos\?: boolean \} = \{\}/);
+  assert.doesNotMatch(marco, /Revise los campos marcados/);
+  // La ventana de corregir una persona pinta el motivo de la cédula debajo de su campo.
+  assert.match(readFileSync('src/features/panel/pantalla-personas.tsx', 'utf8'), /etiqueta="Documento" valor=\{documento\} onChange=\{setDocumento\} error=\{accion\.campoConError\('documento'\)\}/);
+});
+
+prueba('050/RF-55 (T39): lo que salió bien va al aviso de abajo, y ya nadie usa el renglón verde `Confirmado`', () => {
+  const carpeta = path.join(__dirname, '..', 'src');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+  const conConfirmado = fuentes.filter((ruta) => /\bConfirmado\b/.test(readFileSync(path.join(carpeta, ruta), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')));
+  assert.deepEqual(conConfirmado, []);
+  assert.doesNotMatch(readFileSync('src/features/panel/componentes.tsx', 'utf8'), /export function Confirmado/);
+  for (const ruta of ['compras/vista-de-la-solicitud', 'requisiciones/pantalla-requisiciones', 'tesoreria/vista-del-pago']) {
+    assert.match(readFileSync(`src/features/${ruta}.tsx`, 'utf8'), /const avisos = useAvisos\(\);/, ruta);
+  }
+});
+
+prueba('050/RF-57, RF-80 (T40): un fallo al guardar va al aviso; en línea solo quedan los errores de carga', () => {
+  // Los únicos `setError(mensajeDe(…))` que quedan son de cargar algo, no de una acción: el de
+  // `MarcoPantalla` y los de cinco efectos que traen datos al abrir una ventana o una sección.
+  const carpeta = path.join(__dirname, '..', 'src', 'features');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => f.endsWith('.tsx'));
+  const enLinea = fuentes
+    .flatMap((ruta) => (readFileSync(path.join(carpeta, ruta), 'utf8').match(/setError\(mensajeDe\(/g) ?? []).map(() => ruta.split(path.sep).join('/')))
+    .sort();
+  assert.deepEqual(enLinea, [
+    'compras/formulario-de-solicitud.tsx',
+    'panel/marco.tsx',
+    'panel/whatsapp/propuesta-reporte.tsx',
+    'requisiciones/cadena-y-decision.tsx',
+    'requisiciones/occ/importar-planilla-occ.tsx',
+    'tesoreria/formulario-de-pago.tsx',
+  ]);
+});
+
+prueba('050/RF-61, RF-83 (T41): cancelar el cambio de contraseña por gusto deja el panel donde estaba', () => {
+  const marco = readFileSync('src/features/panel/marco-sesion.tsx', 'utf8');
+  // El obligatorio, en lugar del panel y sin «Cancelar».
+  assert.match(marco, /if \(estado === 'debe_cambiar'\) return <PantallaCambiarClave \/>;/);
+  // El de gusto, encima: el panel (`children`) sigue montado y sin desmontar el `Stack`.
+  assert.doesNotMatch(marco, /if \(cambiandoClave\) return/);
+  assert.match(marco, /\{children\}\s*\{\/\*[\s\S]*?\*\/\}\s*\{cambiandoClave \? \(\s*<View style=\{estilos\.capaDeClave\}>\s*<PantallaCambiarClave onCancelar=/);
+});
+
+prueba('050/RF-30 (cambio de Diego, 18-nov): Plan semanal y Planificación llevan sus acciones en el encabezado', () => {
+  const leer = (r: string) => readFileSync(`src/features/${r}.tsx`, 'utf8');
+  // Cada flujo entrega dos piezas: los botones y el cuerpo (progreso y ventanas), del mismo estado.
+  for (const ruta of ['plan-semanal/armar-plan-semanal', 'planificacion/crear-desde-presupuesto', 'planificacion/subir-planificacion']) {
+    const codigo = leer(ruta);
+    assert.match(codigo, /children: \(partes: PartesDeLaAccion\) => ReactNode;/, ruta);
+    assert.match(codigo, /return children\(\{ botones, cuerpo \}\);/, ruta);
+  }
+  assert.match(leer('plan-semanal/pantalla-plan-semanal'), /acciones=\{botones \?\? undefined\}/);
+  assert.match(leer('planificacion/pantalla-planificacion'), /\{subir\.botones\}\s*\{crear\.botones\}/);
+  // Sin permiso, sin botones.
+  assert.match(leer('planificacion/pantalla-planificacion'), /if \(!obraId \|\| !puedeSubir\) return pintar\(SIN_ACCION, SIN_ACCION\);/);
+});

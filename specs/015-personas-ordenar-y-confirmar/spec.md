@@ -1,6 +1,6 @@
 # Spec 015 — Personas: ordenar la tabla y confirmar en una ventana
 
-> Estado: **Cumplida** · Fecha: 2026-09-21 · Cumplida: 2026-09-21 · Cambio: 2026-09-22 (el
+> Estado: **Cumplida** · Fecha: 2026-09-21 · Cumplida: 2026-09-21 · Cambio: 2026-09-22 (el · **Modificada por la spec 050** (2026-11-18): cuando el servidor señala un solo campo, el motivo va debajo de ese campo y no arriba de la ventana (050/RF-79, cambia RF-33); en el celular el orden se escoge con «Ordenar por» — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 > resultado de una acción se ve en la ventana, RF-25 a RF-33), cumplido el 2026-09-22
 
 ## Contexto y objetivo

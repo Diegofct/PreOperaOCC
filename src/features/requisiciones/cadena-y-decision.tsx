@@ -27,9 +27,10 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
-import { AccionesFormulario, Aviso, Boton, Campo, Etiqueta, Modal, Seccion } from '@/features/panel/componentes';
+import { AccionesFormulario, Aviso, Boton, Campo, Etiqueta, Formulario, Modal, Seccion } from '@/features/panel/componentes';
 import type { CadenaDeLaRequisicion, OpcionesParaImputar, RequisicionEnElDetalle } from '@/features/panel/requisiciones';
 import { usePersona } from '@/features/panel/sesion';
 import { veLosValores } from '@/shared/rules/compras';
@@ -221,6 +222,8 @@ function VentanaDeAprobar({
   );
   const [valor, setValor] = useState(recorte.tipo === 'pago' && recorte.valor ? String(recorte.valor) : '');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   // Spec 048: los valores que faltan (RF-14) y, a quien recorta, las imputaciones (RF-36).
@@ -285,7 +288,7 @@ function VentanaDeAprobar({
       if (recorta && recorte.tipo === 'pago' && valor.trim() && aPesos(valor) !== recorte.valor) extra.valorAprobado = aPesos(valor);
       await alAprobar(extra);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -297,8 +300,10 @@ function VentanaDeAprobar({
           ? 'Puede bajar una cantidad, quitar un renglón con 0 o aprobar un valor menor. Lo demás se aprueba tal como se pidió.'
           : 'Se aprueba tal como se pidió y pasa al siguiente paso. Si algo no cuadra, devuélvala con lo que hay que corregir.'}
       </Text>
-      {recorta && recorte.tipo === 'compra'
-        ? recorte.renglones.map((r) => (
+      {recorta && recorte.tipo === 'compra' ? (
+        // Spec 050, RF-15 a RF-17: las cantidades de los renglones en rejilla, alineadas.
+        <Formulario desnudo>
+          {recorte.renglones.map((r) => (
             <Campo
               key={r.id}
               etiqueta={`${r.orden}. ${r.descripcion} (${r.unidad})`}
@@ -307,8 +312,9 @@ function VentanaDeAprobar({
               ayuda={`Pedido: ${String(r.cantidad).replace('.', ',')}`}
               ancho={320}
             />
-          ))
-        : null}
+          ))}
+        </Formulario>
+      ) : null}
       {recorta && recorte.tipo === 'pago' ? (
         <Campo
           etiqueta="Valor aprobado (pesos)"
@@ -323,17 +329,19 @@ function VentanaDeAprobar({
           <Text style={estilos.texto}>
             Lo pidió el Almacenista, que no pone valores: escriba el valor estimado de cada renglón antes de aprobar.
           </Text>
-          {faltanValores.map((r) => (
-            <Campo
-              key={r.id}
-              etiqueta={`Valor estimado de ${r.orden}. ${r.descripcion}`}
-              obligatorio
-              valor={valores[r.id] ?? ''}
-              onChange={(v) => setValores((x) => ({ ...x, [r.id]: v }))}
-              ayuda="En pesos, sin centavos."
-              ancho={320}
-            />
-          ))}
+          <Formulario desnudo>
+            {faltanValores.map((r) => (
+              <Campo
+                key={r.id}
+                etiqueta={`Valor estimado de ${r.orden}. ${r.descripcion}`}
+                obligatorio
+                valor={valores[r.id] ?? ''}
+                onChange={(v) => setValores((x) => ({ ...x, [r.id]: v }))}
+                ayuda="En pesos, sin centavos."
+                ancho={320}
+              />
+            ))}
+          </Formulario>
         </>
       ) : null}
       {reimputa ? (

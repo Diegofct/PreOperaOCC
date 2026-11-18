@@ -5,14 +5,15 @@
  */
 
 import { usePathname } from 'expo-router';
-import { useCallback } from 'react';
+import { createElement, useCallback, type ReactNode } from 'react';
 
 import { api } from '@/features/panel/cliente-api';
 import type { ObraFila } from '@/features/panel/contratos';
 import { useListado } from '@/features/panel/marco';
+import { ContextoObraDelLugar, useObraDelLugar, type ObraDelLugar } from '@/features/panel/obra-del-lugar';
 import { usePersona } from '@/features/panel/sesion';
 import { lugarDeLaRuta, type LugarDelPanel } from '@/shared/rules/empresas';
-import { rolVeTodasLasObras, type ModulosDeObra } from '@/shared/rules/permisos';
+import { rolVeTodasLasObras } from '@/shared/rules/permisos';
 
 export function useLugarDelPanel(): LugarDelPanel | null {
   return lugarDeLaRuta(usePathname());
@@ -27,13 +28,6 @@ export function useObraDeLaRuta(): string | null {
   return lugar?.tipo === 'obra' ? lugar.obraId : null;
 }
 
-export interface ObraDelLugar {
-  id: string;
-  nombre: string;
-  /** Los módulos que lleva (spec 017): el menú esconde los apagados (RF-18). */
-  modulos: ModulosDeObra;
-}
-
 /**
  * Nombre y módulos de la obra de la dirección (RF-10, RF-18). Quien está adscrito a ella
  * los trae en la sesión; quien ve todas —la gerencia y, desde la 041, el Director de
@@ -43,7 +37,7 @@ export interface ObraDelLugar {
  * Spec 041: «adscrito» es estar entre **sus** obras, no ser la de la sesión al cargar. El
  * Director de Obra con dos obras ve el nombre y el menú de la que tiene abierta (RF-22).
  */
-export function useObraDelLugar(): ObraDelLugar | null {
+function useCalcularObraDelLugar(): ObraDelLugar | null {
   const persona = usePersona();
   const obraId = useObraDeLaRuta();
   const todas = rolVeTodasLasObras(persona.rol);
@@ -63,3 +57,13 @@ export function useObraDelLugar(): ObraDelLugar | null {
     modulos: { almacen: obra.almacenActivo, cantera: obra.canteraActivo, laboratorio: obra.laboratorioActivo },
   };
 }
+
+/**
+ * Calcula la obra del lugar una sola vez para todo el panel (spec 050): la leen el menú, la puerta
+ * de las páginas de obra y la ruta de arriba de cada pantalla, con `useObraDelLugar`.
+ */
+export function ProveedorObraDelLugar({ children }: { children: ReactNode }) {
+  return createElement(ContextoObraDelLugar.Provider, { value: useCalcularObraDelLugar() }, children);
+}
+
+export { useObraDelLugar, type ObraDelLugar };

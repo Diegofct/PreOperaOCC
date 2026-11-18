@@ -36,7 +36,7 @@ import {
   lugarDeLaRuta,
   menuDeEmpresa,
   menuDeObra,
-  rutaDeEmpresa,
+  portadaDelLugar,
   rutaRenombradaPara,
   type EmpresaId,
 } from '@/shared/rules/empresas';
@@ -136,12 +136,13 @@ export function PaginaDeEmpresa({ empresa }: { empresa: EmpresaConMenu }) {
   return <Pantalla />;
 }
 
-/** `/panel/<empresa>`: la primera página de su menú (RF-5). */
+/** `/panel/<empresa>`: su portada, que desde la spec 050 es el Asistente (RF-5; 050/RF-84). */
 export function PortadaDeEmpresa({ empresa }: { empresa: EmpresaConMenu }) {
   const persona = usePersona();
-  const primera = alcanzaLaEmpresa(persona.rol, empresa) ? menuDeEmpresa(empresa, persona.rol)[0] : undefined;
-  if (!primera) return <PantallaSinAcceso />;
-  return <Redirect href={rutaDeEmpresa(empresa, primera.pagina) as Href} />;
+  // Spec 050, RF-84, RF-85: su Asistente, o la primera entrada del menú si el cargo no lo ve.
+  const portada = portadaDelLugar({ tipo: 'empresa', empresa, pagina: null }, persona);
+  if (!portada) return <PantallaSinAcceso />;
+  return <Redirect href={portada as Href} />;
 }
 
 /**

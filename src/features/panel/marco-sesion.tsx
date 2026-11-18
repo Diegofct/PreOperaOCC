@@ -20,6 +20,7 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { Panel } from '@/constants/theme';
 import { tituloConSistema } from '@/shared/catalogos/marca';
 
+import { ProveedorDeAvisos } from './avisos';
 import PantallaCambiarClave from './pantalla-cambiar-clave';
 import PantallaIngreso from './pantalla-ingreso';
 import { useSesionPanel } from './sesion';
@@ -67,15 +68,36 @@ export function MarcoSesion({ children }: { children: ReactNode }) {
   }
 
   if (estado === 'fuera') return <PantallaIngreso />;
-  // Obligatorio o voluntario, el cambio de contraseña se pinta igual y desde
-  // aquí: es la única capa que está por encima del `Stack`.
+  // El obligatorio se pinta en lugar del panel y sin «Cancelar» (RF-83): no hay a dónde volver hasta
+  // que se cambie. El que se pide por gusto va encima, más abajo.
   if (estado === 'debe_cambiar') return <PantallaCambiarClave />;
-  if (cambiandoClave) return <PantallaCambiarClave onCancelar={() => pedirCambioDeClave(false)} />;
 
-  return <>{children}</>;
+  // Spec 050, RF-81: los avisos encima del `Stack`, así sobreviven al cambio de pantalla.
+  return (
+    <ProveedorDeAvisos>
+      {children}
+      {/* Spec 050, RF-61: el cambio por gusto se pinta **encima** del panel, que sigue montado debajo.
+          Antes se devolvía en su lugar y el `Stack` se desmontaba: al cancelar se volvía al inicio, sin
+          la pantalla, la búsqueda ni los filtros de antes. Así, «Cancelar» deja todo donde estaba. */}
+      {cambiandoClave ? (
+        <View style={estilos.capaDeClave}>
+          <PantallaCambiarClave onCancelar={() => pedirCambioDeClave(false)} />
+        </View>
+      ) : null}
+    </ProveedorDeAvisos>
+  );
 }
 
 const estilos = StyleSheet.create({
+  /** Cubre toda la ventana, opaca: el panel sigue debajo, pero no se ve ni se toca mientras se cambia la clave. */
+  capaDeClave: {
+    position: 'fixed' as 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Panel.fondo,
+  },
   centro: {
     flex: 1,
     alignItems: 'center',

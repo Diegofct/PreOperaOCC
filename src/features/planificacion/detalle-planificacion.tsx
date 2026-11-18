@@ -12,6 +12,7 @@
 import { useCallback, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useAvisos } from '@/features/panel/avisos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, Aviso, Boton, Cifra, Cifras, Etiqueta, Seccion } from '@/features/panel/componentes';
 import { guardarArchivo } from '@/features/panel/guardar-archivo';
@@ -60,6 +61,8 @@ export function DetallePlanificacion({
   const detalle = useListado<PlanificacionDetalle>(useCallback(() => api.planificaciones.de(id).then((d) => [d]), [id]));
   const [bajando, setBajando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const { rol } = usePersona();
   const p = detalle.datos[0];
   // Spec 045, RF-46: corrigen el borrador la Gerencia y el Director de Proyectos.
@@ -72,7 +75,7 @@ export function DetallePlanificacion({
       const { contenido, nombre } = await api.planificaciones.excel(id);
       guardarArchivo(contenido, nombre);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setBajando(false);
     }

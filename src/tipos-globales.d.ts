@@ -18,3 +18,13 @@ declare module '*/drizzle/local/migrations' {
   };
   export default migraciones;
 }
+
+/**
+ * `react-dom` viene con React Native Web y está en `package.json`, pero sin sus tipos. El panel solo usa
+ * `createPortal`, para los avisos (`capa-de-avisos.web.tsx`, spec 050): se declara esa función y nada más,
+ * en vez de añadir `@types/react-dom` como dependencia.
+ */
+declare module 'react-dom' {
+  import type { ReactNode, ReactPortal } from 'react';
+  export function createPortal(children: ReactNode, contenedor: Element | DocumentFragment): ReactPortal;
+}

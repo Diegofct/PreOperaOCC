@@ -11,10 +11,11 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLosDocumentos } from '@/features/panel/cliente-api';
-import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Modal, Selector } from '@/features/panel/componentes';
+import { AccionesFormulario, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, CampoDeFecha, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import type { PagoPedido, SolicitudDePagoDetallada } from '@/features/panel/contratos';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, revisarDocumento } from '@/shared/rules/documentos';
@@ -30,6 +31,8 @@ function VentanaDeAprobar({ s, alCerrar, alAprobar }: { s: SolicitudDePagoDetall
   const pedido = s.valor ?? 0;
   const [valor, setValor] = useState(String(pedido));
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const elegido = aPesos(valor);
   const { falta } = aprobacionDelPago(pedido, Number.isNaN(elegido) ? 0 : elegido);
@@ -54,7 +57,7 @@ function VentanaDeAprobar({ s, alCerrar, alAprobar }: { s: SolicitudDePagoDetall
               });
               alAprobar(elegido === pedido ? `Solicitud ${s.codigo} aprobada.` : `Solicitud ${s.codigo} aprobada por ${enPesos(elegido)}.`);
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
               setEnviando(false);
             }
           }}
@@ -94,6 +97,8 @@ export function VentanaDePago({
   const [comprobante, setComprobante] = useState<File | null>(null);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const datos = { fecha, valor: aPesos(valor), medio: medio ?? '', referencia };
   const faltas = faltasDelPago(datos, falta);
@@ -131,7 +136,7 @@ export function VentanaDePago({
       }
       alPagar(await registrar({ ...datos, documentoId }));
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -139,21 +144,20 @@ export function VentanaDePago({
   return (
     <Modal titulo={`Registrar un pago · ${codigo}`} onCerrar={alCerrar}>
       <Text style={estilos.texto}>{`Falta por pagar ${enPesos(falta)}. Para un anticipo, baje el valor.`}</Text>
-      <View style={estilos.fila}>
-        <Campo etiqueta="Valor (pesos)" obligatorio valor={valor} onChange={setValor} ancho={200} />
+      {/* Spec 050, RF-25: en rejilla, con los anchos de la escala. */}
+      <Formulario desnudo>
+        <Campo etiqueta="Valor (pesos)" obligatorio valor={valor} onChange={setValor} ancho={ANCHOS_DE_CAMPO.medio} />
         <CampoDeFecha etiqueta="Fecha del pago" valor={fecha} onChange={setFecha} max={fechaDeJornada()} />
-      </View>
-      <View style={[estilos.fila, estilos.arriba]}>
         <Selector
           etiqueta="Medio"
           obligatorio
           valor={medio}
           opciones={MEDIOS_DE_PAGO.map((m) => ({ valor: m.id, etiqueta: m.nombre }))}
           onChange={setMedio}
-          ancho={200}
+          ancho={ANCHOS_DE_CAMPO.medio}
         />
-        <Campo etiqueta="Referencia" valor={referencia} onChange={setReferencia} ayuda="Opcional: número de transferencia o de cheque." ancho={260} />
-      </View>
+        <Campo etiqueta="Referencia" valor={referencia} onChange={setReferencia} ayuda="Opcional: número de transferencia o de cheque." ancho={ANCHOS_DE_CAMPO.medio} />
+      </Formulario>
       <View style={estilos.inicio}>
         <Boton titulo={comprobante ? 'Cambiar comprobante' : 'Adjuntar comprobante'} tono="secundario" onPress={adjuntar} />
         <Text style={estilos.apoyo}>{comprobante ? comprobante.name : 'Opcional. PDF o imagen, hasta 20 MB.'}</Text>
@@ -174,20 +178,23 @@ function VentanaDeAnularPago({ s, alCerrar, alAnular }: { s: SolicitudDePagoDeta
   const [pago, setPago] = useState<string | null>(vigentes.length === 1 ? vigentes[0].id : null);
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const elegido = vigentes.find((p) => p.id === pago);
   return (
     <Modal titulo={`Anular un pago · ${s.codigo}`} onCerrar={alCerrar} angosta>
       <Text style={estilos.texto}>El pago queda en la solicitud, tachado y con el motivo. Lo que falta por pagar vuelve a subir.</Text>
-      <Selector
-        etiqueta="Pago"
-        valor={pago}
-        opciones={vigentes.map((p) => ({ valor: p.id, etiqueta: enPesos(p.valor), detalle: [fechaDelCorte(p.fecha), nombreDeMedio(p.medio), p.referencia].filter(Boolean).join(' · ') }))}
-        onChange={setPago}
-        vacio="Elija el pago"
-        ancho={360}
-      />
-      <Campo etiqueta="Motivo" obligatorio valor={motivo} onChange={setMotivo} multilinea compacto />
+      <Formulario desnudo>
+        <Selector
+          etiqueta="Pago"
+          valor={pago}
+          opciones={vigentes.map((p) => ({ valor: p.id, etiqueta: enPesos(p.valor), detalle: [fechaDelCorte(p.fecha), nombreDeMedio(p.medio), p.referencia].filter(Boolean).join(' · ') }))}
+          onChange={setPago}
+          vacio="Elija el pago"
+        />
+        <Campo etiqueta="Motivo" obligatorio valor={motivo} onChange={setMotivo} multilinea compacto />
+      </Formulario>
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       <AccionesFormulario>
         <Boton titulo="Volver" tono="secundario" onPress={alCerrar} />
@@ -203,7 +210,7 @@ function VentanaDeAnularPago({ s, alCerrar, alAnular }: { s: SolicitudDePagoDeta
               await api.tesoreria.anularPago(elegido.id, { version: s.version, motivo });
               alAnular(`Pago de ${enPesos(elegido.valor)} anulado.`);
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
               setEnviando(false);
             }
           }}
@@ -291,8 +298,6 @@ export function PasosDeTesoreria({
 }
 
 const estilos = StyleSheet.create({
-  fila: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.two },
-  arriba: { alignItems: 'flex-start' },
   inicio: { gap: Spacing.one, alignItems: 'flex-start' },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },

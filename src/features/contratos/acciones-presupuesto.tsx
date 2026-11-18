@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
 import { Acciones, AccionesFormulario, Aviso, Boton, Campo, Modal } from '@/features/panel/componentes';
 import type { PresupuestoDetalle } from '@/features/panel/contratos';
@@ -38,6 +39,8 @@ function VentanaDeTexto({
 }) {
   const [texto, setTexto] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   return (
     <Modal titulo={titulo} onCerrar={alCerrar} angosta>
@@ -56,7 +59,7 @@ function VentanaDeTexto({
             try {
               await alAceptar(texto.trim());
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
             } finally {
               setEnviando(false);
             }

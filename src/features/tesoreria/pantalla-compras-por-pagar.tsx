@@ -10,8 +10,9 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api } from '@/features/panel/cliente-api';
-import { BarraDeListado, Boton, Celda, Cifra, Cifras, Confirmado, Paginacion, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
+import { BarraDeListado, Boton, Celda, Cifra, Cifras, Paginacion, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
 import type { CompraPorPagar } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { POR_PAGINA } from '@/features/panel/paginas';
@@ -31,7 +32,11 @@ export function PantallaComprasPorPagar() {
   const cargadas = useListado<CompraPorPagar>(useCallback(() => api.tesoreria.comprasPorPagar(), []));
   const listado = useListadoFiltrado(cargadas.datos, textoDeLaCompra);
   const [pagando, setPagando] = useState<CompraPorPagar | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const porPagar = cargadas.datos.reduce((suma, c) => suma + c.porPagar, 0);
 
   const columnas: Columna<CompraPorPagar>[] = [
@@ -64,7 +69,7 @@ export function PantallaComprasPorPagar() {
     ...(paga
       ? [
           {
-            clave: 'pagar',
+            clave: 'pagar', acciones: true,
             titulo: '',
             ancho: 110,
             anchoMinimo: 110,
@@ -81,14 +86,14 @@ export function PantallaComprasPorPagar() {
       error={cargadas.error}
       cargando={cargadas.cargando}
     >
-      <Confirmado mensaje={hecho} />
       <Cifras>
         <Cifra titulo="Compras por pagar" valor={String(cargadas.datos.length)} tono={cargadas.datos.length ? 'atencion' : 'neutro'} />
         <Cifra titulo="Falta por pagar" valor={enPesos(porPagar)} />
       </Cifras>
       <Seccion titulo="Compras sin pagar del todo">
-        <BarraDeListado busqueda={listado.busqueda} onBuscar={listado.buscar} total={listado.total} mostradas={listado.coincidencias} />
+        <BarraDeListado onLimpiar={listado.limpiar} busqueda={listado.busqueda} onBuscar={listado.buscar} total={listado.total} mostradas={listado.coincidencias} />
         <Tabla
+          sinResultados={listado.sinResultados}
           columnas={columnas}
           filas={listado.pagina}
           vacio={cargadas.datos.length === 0 ? 'No hay compras por pagar.' : 'Ninguna compra coincide con la búsqueda.'}
@@ -111,7 +116,7 @@ export function PantallaComprasPorPagar() {
           alCerrar={() => setPagando(null)}
           alPagar={(mensaje) => {
             setPagando(null);
-            setHecho(mensaje);
+            avisarHecho(mensaje);
             cargadas.recargar();
           }}
         />

@@ -1,6 +1,6 @@
 # Spec 026 — Máquinas reconocidas por nombre, medidores al día, fechas con calendario y panel para celular
 
-> Estado: **Cumplida**, con el cambio del 2026-10-13 (RF-49 a RF-53) cumplido el 2026-10-14. Cumplida el 2026-10-11 (ver `validacion.md`); aprobada el 2026-10-09, cambio del 2026-10-10 (RF-42 a RF-48) aprobado el 2026-10-10
+> Estado: **Cumplida**, con el cambio del 2026-10-13 (RF-49 a RF-53) cumplido el 2026-10-14. Cumplida el 2026-10-11 (ver `validacion.md`); aprobada el 2026-10-09, cambio del 2026-10-10 (RF-42 a RF-48) aprobado el 2026-10-10 · **Modificada por la spec 050** (2026-11-18): RF-36: en el celular, y donde no caben, las listas pasan a tarjetas en lugar de desplazarse a lo ancho; las cuadrículas siguen desplazándose dentro de su marco — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
 > · Fecha: 2026-10-09 · Cambia la spec 024 (máquinas no reconocidas), la 025 (orden
 > del historial, 025/RF-52) y la 003 (lecturas de los vehículos con decimales)
 

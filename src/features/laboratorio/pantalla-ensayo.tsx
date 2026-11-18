@@ -146,6 +146,18 @@ export default function PantallaEnsayo() {
       descripcion="Determinación de los tamaños de las partículas de suelos — INV E-123-13."
       error={ensayo.error}
       cargando={ensayo.cargando}
+      registro={detalle?.numeroInforme ?? undefined}
+      // Spec 050, RF-30: el informe en el encabezado. Registrar, enviar, aprobar y devolver se quedan en
+      // el cuerpo, junto al formulario: dependen de lo que está sin guardar en él.
+      acciones={
+        detalle ? (
+          <Boton
+            titulo="Informe para imprimir"
+            tono="secundario"
+            onPress={() => router.push({ pathname: '/panel/laboratorio/[id]/informe', params: { id: detalle.id } })}
+          />
+        ) : undefined
+      }
     >
       {/*
        * Con clave: al cambiar de ensayo, o al volver a pedirlo porque otro se adelantó
@@ -292,15 +304,6 @@ function FormularioDeEnsayo({
           veredicto={resultado.completo ? (resultado.veredicto?.global ?? null) : null}
         />
       </View>
-      <Acciones>
-        <Boton
-          titulo="Informe para imprimir"
-          tono="secundario"
-          onPress={() =>
-            router.push({ pathname: '/panel/laboratorio/[id]/informe', params: { id: detalle.id } })
-          }
-        />
-      </Acciones>
       {mensaje ? <Aviso tono={mensaje.tono}>{mensaje.texto}</Aviso> : null}
       <AccionesDelEnsayo
         detalle={detalle}

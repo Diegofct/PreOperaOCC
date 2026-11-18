@@ -37,7 +37,7 @@ export function TablaDePlanificacion({ filas, conValores }: { filas: FilaDePlani
   const columnas: Columna<FilaDePlanificacion>[] = [
     { clave: 'orden', titulo: '#', ancho: 40, pintar: (f) => <Celda>{f.orden || '—'}</Celda> },
     {
-      clave: 'va',
+      clave: 'va', principal: true,
       titulo: 'Va a',
       ancho: 330,
       pintar: (f) => (

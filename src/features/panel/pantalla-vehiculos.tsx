@@ -17,6 +17,7 @@ import { formatoPendiente, formatoPrestadoDe } from '@/shared/catalogos/tipos-ve
 import { leerLectura, mostrarLectura } from '@/shared/rules/lecturas';
 import { AVISO_FALTA_PLACA, identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
+import { useAvisos } from './avisos';
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -27,7 +28,6 @@ import {
   Campo,
   Celda,
   Confirmacion,
-  Confirmado,
   Etiqueta,
   Formulario,
   Paginacion,
@@ -45,7 +45,8 @@ import {
 } from './contratos';
 import { MarcoPantalla, useListado } from './marco';
 import { SeccionLlantas } from './seccion-llantas';
-import { POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
+import { CifrasDeEstado, type EstadoDeLaLista } from './cifras-de-estado';
+import { contarPorEstado, POR_PAGINA, useListadoFiltrado } from './usar-listado-filtrado';
 import { VentanaCorregirVehiculo } from './ventana-vehiculo';
 
 
@@ -60,7 +61,7 @@ function nombreDe(v: VehiculoFila): string {
 }
 
 export default function PantallaVehiculos() {
-  const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []));
+  const vehiculos = useListado<VehiculoFila>(useCallback(() => api.vehiculos.listar(), []), { conCampos: true });
   const tipos = useListado<TipoVehiculoFila>(useCallback(() => api.tiposVehiculo.listar(), []));
   const obras = useListado<ObraFila>(useCallback(() => api.obras.listar(), []));
 
@@ -90,21 +91,23 @@ export default function PantallaVehiculos() {
 
   const filtrado = useListadoFiltrado(
     vehiculos.datos,
-    // El código interno ya es la placa (spec 032); se sigue buscando por él porque
-    // los equipos sin placa conservan su código «WA-…» y así se encuentran.
-    // Y por sus nombres en WhatsApp (spec 038, D11).
-    (v) => [v.placa, v.codigoInterno, v.marca, v.modelo, v.tipoNombre, v.obraNombre, ...(v.nombresWhatsapp ?? [])],
+    textoDelVehiculo,
     useCallback(
       (v: VehiculoFila) =>
         (obraFiltro === null || v.obraId === obraFiltro) &&
         (estadoFiltro === null || v.estado === estadoFiltro),
       [obraFiltro, estadoFiltro],
     ),
+    undefined, undefined, { hay: obraFiltro !== null || estadoFiltro !== null, limpiar: () => { setObraFiltro(null); setEstadoFiltro(null); } },
   );
 
   const [editando, setEditando] = useState<VehiculoFila | null>(null);
   const [porDarDeBaja, setPorDarDeBaja] = useState<VehiculoFila | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
 
   async function crear() {
     if (!tipoVehiculoId) return;
@@ -124,7 +127,7 @@ export default function PantallaVehiculos() {
     );
 
     if (creado) {
-      setHecho(placa.trim().toUpperCase() + ' quedó registrado.');
+      avisarHecho(placa.trim().toUpperCase() + ' quedó registrado.');
       setPlaca('');
       setMarca('');
       setModelo('');
@@ -213,7 +216,6 @@ export default function PantallaVehiculos() {
             titulo="Dar de baja"
             tono="peligro"
             onPress={() => {
-              setHecho(null);
               setPorDarDeBaja(v);
             }}
           />
@@ -301,7 +303,6 @@ export default function PantallaVehiculos() {
         </Formulario>
       </Seccion>
 
-      <Confirmado mensaje={hecho} />
 
       {porDarDeBaja ? (
         <Confirmacion
@@ -314,7 +315,7 @@ export default function PantallaVehiculos() {
             await api.vehiculos.darDeBaja(equipo.id);
             setPorDarDeBaja(null);
             vehiculos.recargar();
-            setHecho(nombreDe(equipo) + ' quedó dado de baja.');
+            avisarHecho(nombreDe(equipo) + ' quedó dado de baja.');
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -327,14 +328,31 @@ export default function PantallaVehiculos() {
           onCerrar={() => setEditando(null)}
           onGuardado={(codigo) => {
             setEditando(null);
-            setHecho(codigo + ' quedó corregido.');
+            avisarHecho(codigo + ' quedó corregido.');
             vehiculos.recargar();
           }}
         />
       ) : null}
 
       <Seccion titulo="Flota registrada">
-        <BarraDeListado
+        {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector; cuentan con la búsqueda y
+            la obra elegidas (RF-52). */}
+        <CifrasDeEstado
+          estados={ESTADOS_DE_LA_FLOTA}
+          conteos={
+            vehiculos.cargando
+              ? null
+              : contarPorEstado(vehiculos.datos, {
+                  textoDe: textoDelVehiculo,
+                  estadoDe: (v) => v.estado,
+                  busqueda: filtrado.busqueda,
+                  pasaOtrosFiltros: (v) => obraFiltro === null || v.obraId === obraFiltro,
+                })
+          }
+          elegido={estadoFiltro}
+          alElegir={setEstadoFiltro}
+        />
+        <BarraDeListado onLimpiar={filtrado.limpiar}
           busqueda={filtrado.busqueda}
           onBuscar={filtrado.buscar}
           total={filtrado.total}
@@ -349,21 +367,10 @@ export default function PantallaVehiculos() {
             vacio="Todas las obras"
             ancho={200}
           />
-          <Selector
-            etiqueta="Estado"
-            valor={estadoFiltro}
-            opciones={ESTADOS_VEHICULO.map((e) => ({
-              valor: e,
-              etiqueta: ETIQUETA_ESTADO_VEHICULO[e],
-            }))}
-            onChange={setEstadoFiltro}
-            permiteVacio
-            vacio="Todos los estados"
-            ancho={190}
-          />
         </BarraDeListado>
 
         <Tabla
+          sinResultados={filtrado.sinResultados}
           columnas={columnas}
           filas={filtrado.pagina}
           vacio={
@@ -385,3 +392,23 @@ export default function PantallaVehiculos() {
     </MarcoPantalla>
   );
 }
+
+/** Lo que se busca en un equipo: lo mismo para la lista y para sus cifras. */
+function textoDelVehiculo(v: VehiculoFila): (string | null | undefined)[] {
+  // El código interno ya es la placa (spec 032); se sigue buscando por él porque los equipos sin placa
+  // conservan su código «WA-…» y así se encuentran. Y por sus nombres en WhatsApp (spec 038, D11).
+  return [v.placa, v.codigoInterno, v.marca, v.modelo, v.tipoNombre, v.obraNombre, ...(v.nombresWhatsapp ?? [])];
+}
+
+/** Los estados de la flota con su símbolo, en el orden de `ESTADOS_VEHICULO` (spec 050, RF-48). */
+const SIMBOLO_Y_TONO: Record<(typeof ESTADOS_VEHICULO)[number], Pick<EstadoDeLaLista, 'simbolo' | 'tono'>> = {
+  operativo: { simbolo: '✓', tono: 'bueno' },
+  en_mantenimiento: { simbolo: '⚙', tono: 'atencion' },
+  fuera_servicio: { simbolo: '■', tono: 'neutro' },
+  no_apto: { simbolo: '✕', tono: 'malo' },
+};
+const ESTADOS_DE_LA_FLOTA: EstadoDeLaLista[] = ESTADOS_VEHICULO.map((e) => ({
+  valor: e,
+  etiqueta: ETIQUETA_ESTADO_VEHICULO[e],
+  ...SIMBOLO_Y_TONO[e],
+}));

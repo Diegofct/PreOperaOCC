@@ -35,7 +35,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
 import type { ImportacionConfirmada, ImportacionDetalle, RevisionDelRepetido } from '@/features/panel/almacen-importacion';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
-import { Acciones, Aviso, Boton, Campo, CampoDeFecha, Casilla, Celda, Etiqueta, Selector, Tabla, type Columna } from '@/features/panel/componentes';
+import { Acciones, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, CampoDeFecha, Casilla, Celda, Etiqueta, Formulario, Selector, Tabla, type Columna } from '@/features/panel/componentes';
 import { abreviaturaDeUnidad } from '@/shared/catalogos/almacen';
 import {
   estadoDelRenglon,
@@ -243,19 +243,26 @@ export function RevisarImportacion({
   return (
     <View style={estilos.columna}>
       <Text style={estilos.subtitulo}>El documento</Text>
-      <View style={estilos.fila}>
-        <Campo etiqueta="Proveedor" valor={documento.proveedor ?? ''} onChange={(v) => ponerEnDocumento({ proveedor: v || null })} ancho={280} />
+      {/* Spec 050, RF-25: en rejilla, con los anchos de la escala (lo encontró el barrido de la T18). */}
+      <Formulario desnudo>
+        <Campo etiqueta="Proveedor" valor={documento.proveedor ?? ''} onChange={(v) => ponerEnDocumento({ proveedor: v || null })} ancho={ANCHOS_DE_CAMPO.medio} />
         <Selector
           etiqueta="Tipo"
           valor={documento.tipo}
           opciones={TIPOS_DE_DOCUMENTO.map((t) => ({ valor: t, etiqueta: NOMBRE_DEL_TIPO[t] }))}
           onChange={(v) => v && ponerEnDocumento({ tipo: v as TipoDeDocumento })}
-          ancho={150}
+          ancho={ANCHOS_DE_CAMPO.corto}
         />
-        <Campo etiqueta="Número" valor={documento.numero ?? ''} onChange={(v) => ponerEnDocumento({ numero: v || null })} ancho={160} />
-        <CampoDeFecha etiqueta="Fecha de los ingresos" valor={documento.fecha} onChange={(fecha) => ponerEnDocumento({ fecha })} ancho={180} />
-        <Campo etiqueta="Entregado por" valor={documento.entregadoPor} onChange={(entregadoPor) => ponerEnDocumento({ entregadoPor })} ancho={240} obligatorio />
-      </View>
+        <Campo etiqueta="Número" valor={documento.numero ?? ''} onChange={(v) => ponerEnDocumento({ numero: v || null })} ancho={ANCHOS_DE_CAMPO.corto} />
+        <CampoDeFecha etiqueta="Fecha de los ingresos" valor={documento.fecha} onChange={(fecha) => ponerEnDocumento({ fecha })} ancho={ANCHOS_DE_CAMPO.medio} />
+        <Campo
+          etiqueta="Entregado por"
+          valor={documento.entregadoPor}
+          onChange={(entregadoPor) => ponerEnDocumento({ entregadoPor })}
+          ancho={ANCHOS_DE_CAMPO.medio}
+          obligatorio
+        />
+      </Formulario>
 
       {/* RF-71, RF-75: lo que se dice sin impedir. */}
       {inicial.avisos.map((aviso, n) => (
@@ -267,7 +274,7 @@ export function RevisarImportacion({
       {repetido.tipo === 'sin_clave' ? <Aviso tono="info">Falta el proveedor o el número: no se pudo revisar si este documento ya se importó.</Aviso> : null}
 
       <Text style={estilos.subtitulo}>{`Materiales (${renglones.length})`}</Text>
-      <Tabla
+      <Tabla tipo="cuadricula"
         filas={renglones.map((r, n) => ({ id: String(n), n, r }))}
         columnas={columnas}
         vacio="No queda ningún renglón. Descarte la propuesta o vuelva a subir el documento."
@@ -345,7 +352,6 @@ export function RevisarImportacion({
 const estilos = StyleSheet.create({
   columna: { gap: 12 },
   columnaCorta: { gap: 6 },
-  fila: { flexDirection: 'row', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' },
   celda: { gap: 4 },
   marcas: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' },
   subtitulo: { fontFamily: FuentePanel.texto, fontWeight: '600', fontSize: TextoPanel.cuerpo, color: Panel.texto },

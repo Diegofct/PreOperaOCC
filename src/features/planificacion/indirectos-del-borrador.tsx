@@ -20,7 +20,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
-import { Acciones, Boton, Campo, Casilla, Celda, Etiqueta, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
+import { Acciones, ANCHOS_DE_CAMPO, Boton, Campo, Casilla, Celda, Etiqueta, Formulario, Seccion, Selector, Tabla, type Columna } from '@/features/panel/componentes';
 import { NOMBRE_DEL_CONCEPTO } from '@/shared/rules/cumplimiento-de-obra';
 import { enPesos } from '@/shared/rules/pesos';
 import {
@@ -167,22 +167,23 @@ export function IndirectosDelBorrador({
     <View style={estilos.columna}>
       <Seccion titulo="Factores de esta planificación">
         <View style={estilos.columna}>
-          <View style={estilos.fila}>
+          {/* Spec 050, RF-25: en rejilla, con los anchos de la escala. */}
+          <Formulario desnudo>
             <CampoCifra
               etiqueta="Factor prestacional"
               valor={factorPrestacional}
               alCambiar={(n) => alCambiarFactores(n ?? 0, recargoHorasExtras)}
-              ancho={200}
+              ancho={ANCHOS_DE_CAMPO.medio}
               ayuda="Multiplica el salario del personal."
             />
             <CampoCifra
               etiqueta="Recargo de horas extras"
               valor={recargoHorasExtras}
               alCambiar={(n) => alCambiarFactores(factorPrestacional, n ?? 0)}
-              ancho={200}
+              ancho={ANCHOS_DE_CAMPO.medio}
               ayuda="Se suma al factor en el personal operativo."
             />
-          </View>
+          </Formulario>
           {/* RF-121. */}
           {estructura.indirectosCopiadosDe ? (
             <Text style={estilos.pie}>{`Los indirectos se copiaron de ${estructura.indirectosCopiadosDe.obra} · v${estructura.indirectosCopiadosDe.version}.`}</Text>
@@ -193,13 +194,12 @@ export function IndirectosDelBorrador({
       {renglonAbierto ? (
         <Seccion titulo={`Renglón: ${renglonAbierto.descripcion}`}>
           <View key={renglonAbierto.id + renglonAbierto.forma} style={estilos.columna}>
-            <View style={estilos.fila}>
+            <Formulario desnudo>
               <Campo
                 etiqueta="Descripción"
                 valor={renglonAbierto.descripcion}
                 onChange={(v) => cambiar(renglonAbierto.id, { ...renglonAbierto, descripcion: v })}
                 obligatorio
-                ancho={420}
               />
               <Selector
                 etiqueta="Forma de cálculo"
@@ -208,55 +208,55 @@ export function IndirectosDelBorrador({
                 onChange={(f) => f && cambiar(renglonAbierto.id, conForma(renglonAbierto, f as FormaDeIndirecto, plazo?.arranque ?? null, plazo?.meses ?? null))}
                 vacio="Escoja la forma"
                 obligatorio
-                ancho={220}
+                ancho={ANCHOS_DE_CAMPO.medio}
               />
-            </View>
-            <View style={estilos.fila}>
+            </Formulario>
+            <Formulario desnudo>
               {renglonAbierto.forma === 'fijo' ? (
-                <CampoCifra etiqueta="Valor" valor={renglonAbierto.valor} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, valor: n })} ancho={200} />
+                <CampoCifra etiqueta="Valor" valor={renglonAbierto.valor} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, valor: n })} ancho={ANCHOS_DE_CAMPO.medio} />
               ) : null}
               {renglonAbierto.forma === 'porcentaje' ? (
                 <CampoCifra
                   etiqueta="Porcentaje del importe real total"
                   valor={renglonAbierto.porcentaje}
                   alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, porcentaje: n })}
-                  ancho={260}
+                  ancho={ANCHOS_DE_CAMPO.medio}
                   ayuda="En fracción: 0,02 es el 2 %."
                 />
               ) : null}
               {renglonAbierto.forma === 'mensual' ? (
                 <>
-                  <CampoCifra etiqueta="Cantidad" valor={renglonAbierto.cantidad} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, cantidad: n })} ancho={120} />
+                  <CampoCifra etiqueta="Cantidad" valor={renglonAbierto.cantidad} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, cantidad: n })} ancho={ANCHOS_DE_CAMPO.corto} />
                   <CampoCifra
                     etiqueta="Valor mensual"
                     valor={renglonAbierto.valorMensual}
                     alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, valorMensual: n })}
-                    ancho={180}
+                    ancho={ANCHOS_DE_CAMPO.medio}
                   />
                   <CampoCifra
                     etiqueta="Adicional mensual"
                     valor={renglonAbierto.valorMensualAdicional}
                     alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, valorMensualAdicional: n })}
-                    ancho={180}
+                    ancho={ANCHOS_DE_CAMPO.medio}
                     ayuda="Consumible o servicios; vacío es cero."
                   />
                 </>
               ) : null}
               {renglonAbierto.forma === 'personal' ? (
                 <>
-                  <CampoCifra etiqueta="Salario" valor={renglonAbierto.salario} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, salario: n })} ancho={160} />
+                  <CampoCifra etiqueta="Salario" valor={renglonAbierto.salario} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, salario: n })} ancho={ANCHOS_DE_CAMPO.corto} />
                   <CampoCifra
                     etiqueta="Acomodación"
                     valor={renglonAbierto.acomodacion}
                     alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, acomodacion: n })}
-                    ancho={150}
+                    ancho={ANCHOS_DE_CAMPO.corto}
                   />
-                  <CampoCifra etiqueta="Viáticos" valor={renglonAbierto.viaticos} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, viaticos: n })} ancho={150} />
+                  <CampoCifra etiqueta="Viáticos" valor={renglonAbierto.viaticos} alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, viaticos: n })} ancho={ANCHOS_DE_CAMPO.corto} />
                   <CampoCifra
                     etiqueta="Dedicación"
                     valor={renglonAbierto.dedicacion}
                     alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, dedicacion: n })}
-                    ancho={130}
+                    ancho={ANCHOS_DE_CAMPO.corto}
                     ayuda="1 es tiempo completo."
                   />
                 </>
@@ -268,17 +268,17 @@ export function IndirectosDelBorrador({
                     valor={renglonAbierto.mesInicio ?? ''}
                     onChange={(v) => cambiar(renglonAbierto.id, { ...renglonAbierto, mesInicio: v.trim() === '' ? null : v.trim() })}
                     ayuda="Como 2026-03."
-                    ancho={140}
+                    ancho={ANCHOS_DE_CAMPO.corto}
                   />
                   <CampoCifra
                     etiqueta="Meses"
                     valor={renglonAbierto.tiempoEjecucion}
                     alCambiar={(n) => cambiar(renglonAbierto.id, { ...renglonAbierto, tiempoEjecucion: n })}
-                    ancho={110}
+                    ancho={ANCHOS_DE_CAMPO.corto}
                   />
                 </>
               ) : null}
-            </View>
+            </Formulario>
             {renglonAbierto.forma === 'personal' ? (
               <Casilla
                 etiqueta="Operativo: suma el recargo de horas extras al factor prestacional."
@@ -327,7 +327,6 @@ export function IndirectosDelBorrador({
 
 const estilos = StyleSheet.create({
   columna: { gap: 12 },
-  fila: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
   botones: { flexDirection: 'row', gap: 8 },
   celdaConMarca: { gap: 4 },
   pie: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },

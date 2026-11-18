@@ -14,6 +14,7 @@ import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
+  ANCHOS_DE_CAMPO,
   Aviso,
   Boton,
   Campo,
@@ -21,6 +22,7 @@ import {
   Celda,
   Cifra,
   Cifras,
+  Formulario,
   Seccion,
   Selector,
   Tabla,
@@ -88,10 +90,11 @@ export function UsoDelAsistentePanel() {
         <Text style={estilos.nota}>
           Cuántas preguntas hizo cada persona y cuánto costaron, estimado con el precio de la IA. No se ve lo que preguntaron.
         </Text>
-        <View style={estilos.fila}>
+        {/* Spec 050, RF-25: en rejilla y no en filas alineadas por abajo, que subían el recuadro con error. */}
+        <Formulario desnudo>
           <CampoDeFecha etiqueta="Desde" valor={desde} onChange={setDesde} max={hasta} />
           <CampoDeFecha etiqueta="Hasta" valor={hasta} onChange={setHasta} min={desde} />
-        </View>
+        </Formulario>
         <Cifras>
           <Cifra titulo="Preguntas" valor={String(total.preguntas)} pie="respondidas en el periodo" />
           <Cifra titulo="Costo estimado" valor={enDolares(total.costo)} pie="de la IA" />
@@ -105,9 +108,9 @@ export function UsoDelAsistentePanel() {
           {`El de todos: ${limites?.todos ?? `${LIMITE_DEL_DIA} (el de siempre)`}. El de una persona manda sobre el de todos. Se reinicia a medianoche, hora de Colombia.`}
         </Text>
         {aviso ? <Aviso tono={aviso.tono}>{aviso.texto}</Aviso> : null}
-        <View style={estilos.fila}>
-          <Campo etiqueta="Límite de todos" valor={limiteDeTodos} onChange={setLimiteDeTodos} soloNumeros ancho={180} />
-        </View>
+        <Formulario desnudo>
+          <Campo etiqueta="Límite de todos" valor={limiteDeTodos} onChange={setLimiteDeTodos} soloNumeros ancho={ANCHOS_DE_CAMPO.medio} />
+        </Formulario>
         <Acciones>
           <Boton titulo="Guardar el de todos" onPress={() => poner(null, limiteDeTodos)} deshabilitado={!limiteDeTodos.trim()} />
           {limites?.todos != null ? (
@@ -115,10 +118,10 @@ export function UsoDelAsistentePanel() {
           ) : null}
         </Acciones>
 
-        <View style={estilos.fila}>
-          <Selector etiqueta="Persona" valor={personaElegida} opciones={opcionesDePersona} onChange={setPersonaElegida} ancho={300} />
-          <Campo etiqueta="Su límite" valor={limiteDePersona} onChange={setLimiteDePersona} soloNumeros ancho={140} />
-        </View>
+        <Formulario desnudo>
+          <Selector etiqueta="Persona" valor={personaElegida} opciones={opcionesDePersona} onChange={setPersonaElegida} />
+          <Campo etiqueta="Su límite" valor={limiteDePersona} onChange={setLimiteDePersona} soloNumeros ancho={ANCHOS_DE_CAMPO.medio} />
+        </Formulario>
         <Acciones>
           <Boton
             titulo="Guardar el de la persona"
@@ -144,7 +147,6 @@ export function UsoDelAsistentePanel() {
 
 const estilos = StyleSheet.create({
   columna: { gap: Spacing.four },
-  fila: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.three },
   lista: { gap: Spacing.two },
   limite: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },

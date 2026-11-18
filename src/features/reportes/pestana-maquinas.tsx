@@ -136,7 +136,7 @@ export function PestanaMaquinas({
     },
     mantenimiento,
     {
-      clave: 'detalle',
+      clave: 'detalle', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,

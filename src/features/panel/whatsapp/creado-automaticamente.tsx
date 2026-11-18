@@ -19,20 +19,23 @@ import type { TipoCreado } from '@/shared/rules/whatsapp-automatico';
 
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
+import { useAvisos } from '../avisos';
 import { api, mensajeDe } from '../cliente-api';
 import {
+  ANCHOS_DE_CAMPO,
   Acciones,
   Aviso,
   Ayuda,
   Boton,
   Celda,
+  Formulario,
   Modal,
+  Paginacion,
   Seccion,
   Selector,
   Tabla,
   type Columna,
   type Opcion,
-  Paginacion,
 } from '../componentes';
 import type { CreadoFila } from '../contratos';
 import { useListado } from '../marco';
@@ -67,6 +70,8 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
   const [uniendo, setUniendo] = useState<FilaCreada | null>(null);
   const [hecho, setHecho] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
 
   // El rango de días en que se creó (spec 025, RF-47). Lo de antes sin revisar se avisa.
   const fechas = useFiltroDeFechas();
@@ -90,7 +95,7 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
       setHecho(`«${c.nombre}» quedó revisado.`);
       lista.recargar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     }
   }
 
@@ -103,7 +108,7 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
       pintar: (c) => <Celda>{dia(c.creadoEn)}</Celda>,
     },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué',
       ancho: 260,
       anchoMinimo: 180,
@@ -149,7 +154,8 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
         Lo que el sistema registró solo porque no existía. Si está bien, márquelo revisado. Si era alguien o algo que ya
         estaba registrado con otro nombre, use «Es el mismo que…».
       </Ayuda>
-      <Acciones>
+      {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+      <Formulario desnudo>
         {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
@@ -158,11 +164,11 @@ export function CreadoAutomaticamente({ opcionesDeObra }: { opcionesDeObra: Opci
             onChange={setObraId}
             vacio="Todas las obras"
             permiteVacio
-            ancho={280}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
         ) : null}
         <CamposDeFechas filtro={fechas} />
-      </Acciones>
+      </Formulario>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {error ? <Aviso tono="error">{error}</Aviso> : null}
       {lista.error ? <Aviso tono="error">{lista.error}</Aviso> : null}
@@ -246,6 +252,8 @@ function VentanaUnir({
   const candidatos = useCandidatos(creado);
   const [elegido, setElegido] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [uniendo, setUniendo] = useState(false);
 
   async function unir() {
@@ -263,7 +271,7 @@ function VentanaUnir({
       ].filter(Boolean);
       alUnir(`«${creado.nombre}» quedó unido con ${nombre}.${partes.length ? ` ${partes.join('; ')}.` : ''}`);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setUniendo(false);
     }

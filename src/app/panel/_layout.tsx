@@ -5,13 +5,14 @@ import { StyleSheet, View } from 'react-native';
 import '@/features/panel/fuentes.css';
 
 import { Panel } from '@/constants/theme';
+import { ProveedorObraDelLugar } from '@/features/empresas/contexto-empresa';
 import { BarraSuperior } from '@/features/panel/barra-superior';
 import { ProveedorMenu } from '@/features/panel/estado-menu';
 import { iconoDeLaPestana } from '@/features/panel/icono-de-la-pestana';
 import { MarcoSesion } from '@/features/panel/marco-sesion';
 import { MenuLateral, TelonDelMenu } from '@/features/panel/menu-lateral';
 import { tituloDeLaPestana } from '@/features/panel/modulos';
-import { ProveedorSesionPanel } from '@/features/panel/sesion';
+import { ProveedorSesionPanel, useSesionPanel } from '@/features/panel/sesion';
 
 /**
  * El panel de administración.
@@ -47,22 +48,26 @@ export default function LayoutPanel() {
       <IconoDeLaPestana />
       <MarcoSesion>
         <ProveedorMenu>
-          <TituloDeLaPestana />
-          <View style={estilos.panel}>
-            <BarraSuperior />
-            <View style={estilos.cuerpo}>
-              <MenuLateral />
-              <View style={estilos.contenido}>
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: Panel.fondo },
-                  }}
-                />
-                <TelonDelMenu />
+          {/* La obra de la dirección se pide una vez y la leen el menú, la puerta de las páginas de
+              obra y la ruta de arriba de cada pantalla (spec 050). */}
+          <ProveedorObraDelLugar>
+            <TituloDeLaPestana />
+            <View style={estilos.panel}>
+              <BarraSuperior />
+              <View style={estilos.cuerpo}>
+                <MenuLateral />
+                <View style={estilos.contenido}>
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: Panel.fondo },
+                    }}
+                  />
+                  <TelonDelMenu />
+                </View>
               </View>
             </View>
-          </View>
+          </ProveedorObraDelLugar>
         </ProveedorMenu>
       </MarcoSesion>
     </ProveedorSesionPanel>
@@ -77,11 +82,14 @@ export default function LayoutPanel() {
  */
 function TituloDeLaPestana() {
   const ruta = usePathname();
+  // Spec 050, RF-61: el cambio de contraseña por gusto va encima del panel, que sigue montado; al
+  // cancelarlo, el título de la pantalla tiene que volver (lo pone `MarcoSesion` mientras dura).
+  const { cambiandoClave } = useSesionPanel();
   useEffect(() => {
     // La guarda es por el paquete nativo, donde estas pantallas entran inertes.
-    if (typeof document === 'undefined') return;
+    if (typeof document === 'undefined' || cambiandoClave) return;
     document.title = tituloDeLaPestana(ruta);
-  }, [ruta]);
+  }, [ruta, cambiandoClave]);
   return null;
 }
 

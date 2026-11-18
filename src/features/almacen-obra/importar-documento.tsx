@@ -22,6 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import type { ImportacionConfirmada, ImportacionDetalle, ImportacionPendienteFila } from '@/features/panel/almacen-importacion';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
@@ -76,6 +77,8 @@ export function ImportarDocumento({
   /** RF-38: lo que entró en la última confirmación. */
   const [confirmada, setConfirmada] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [ahora, setAhora] = useState(() => Date.now());
 
   const leyendo = pendientes.datos.filter((p) => p.estado === 'en_curso').map((p) => p.id);
@@ -113,7 +116,7 @@ export function ImportarDocumento({
       pendientes.recargar();
     } catch (fallo) {
       // RF-4 a RF-6, RF-59 a RF-61: el motivo lo redacta el servidor.
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setSubiendo(false);
     }
@@ -125,7 +128,7 @@ export function ImportarDocumento({
       await api.almacen.importaciones.descartar(id);
       pendientes.recargar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     }
   }
 

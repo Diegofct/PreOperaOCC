@@ -106,3 +106,14 @@ export function ordenarFilas<T>(
     return comparar(desempate(filaA), desempate(filaB));
   });
 }
+
+/**
+ * Cuántas pulsaciones de título llevan del orden actual al que se escoge en «Ordenar por» (spec 050,
+ * RF-39). En tarjetas no hay títulos que pulsar, pero las pantallas solo saben ordenar por pulsación
+ * (`ordenTrasPulsar`); así el selector reutiliza ese camino —y lo que la pantalla recuerda del orden—
+ * en vez de abrir otro. Otra columna: una para la A a la Z, dos para la Z a la A. La misma: cero o una.
+ */
+export function pulsacionesPara(actual: Orden, objetivo: Orden): number {
+  if (actual.clave !== objetivo.clave) return objetivo.sentido === 'asc' ? 1 : 2;
+  return actual.sentido === objetivo.sentido ? 0 : 1;
+}

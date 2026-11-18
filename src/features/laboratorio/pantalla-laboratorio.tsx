@@ -35,10 +35,13 @@ import { fechaDeJornada, restarDias } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
 
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
+import { CifrasDeEstado, type EstadoDeLaLista } from '@/features/panel/cifras-de-estado';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
+import { contarPorEstado } from '@/features/panel/contar-por-estado';
 import {
   Acciones,
   Aviso,
+  Ayuda,
   Boton,
   CampoDeFecha,
   Celda,
@@ -63,9 +66,14 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 /** Cuántos días hacia atrás muestra el listado al abrirlo. */
 const DIAS_POR_DEFECTO = 30;
 
-const OPCIONES_DE_ESTADO: Opcion[] = (
-  ['borrador', 'enviado', 'devuelto', 'aprobado', 'anulado'] as const
-).map((estado) => ({ valor: estado, etiqueta: ETIQUETA_ESTADO_ENSAYO[estado] }));
+/** Los estados de un ensayo como cifras, con su símbolo (spec 050, RF-48). */
+const ESTADOS_COMO_CIFRAS: EstadoDeLaLista[] = [
+  { valor: 'borrador', etiqueta: ETIQUETA_ESTADO_ENSAYO.borrador, simbolo: '✎', tono: 'neutro' },
+  { valor: 'enviado', etiqueta: ETIQUETA_ESTADO_ENSAYO.enviado, simbolo: '→', tono: 'atencion' },
+  { valor: 'devuelto', etiqueta: ETIQUETA_ESTADO_ENSAYO.devuelto, simbolo: '↩', tono: 'atencion' },
+  { valor: 'aprobado', etiqueta: ETIQUETA_ESTADO_ENSAYO.aprobado, simbolo: '✓', tono: 'bueno' },
+  { valor: 'anulado', etiqueta: ETIQUETA_ESTADO_ENSAYO.anulado, simbolo: '⊘', tono: 'neutro' },
+];
 
 /**
  * Las granulometrías del módulo y los ensayos de las bitácoras (spec 029, RF-24). En
@@ -147,6 +155,13 @@ export default function PantallaLaboratorio() {
     estado: estado as EstadoVisibleEnsayo | null,
     veredicto: veredicto as FiltroDeVeredicto | null,
   });
+  // Spec 050, RF-52: las cifras de estado cuentan con los demás filtros, la misma regla sin el estado.
+  const conteos = ensayos.cargando
+    ? null
+    : contarPorEstado(
+        filtrarEnsayos(ensayos.datos, { material, franjaId, estado: null, veredicto: veredicto as FiltroDeVeredicto | null }),
+        { textoDe: () => [], estadoDe: (e) => e.estado, busqueda: '' },
+      );
 
   const materiales: Opcion[] = [
     ...new Set(ensayos.datos.flatMap((e) => (e.material ? [e.material] : []))),
@@ -229,7 +244,7 @@ export default function PantallaLaboratorio() {
       pintar: (e) => <EtiquetaDeEstado estado={e.estado} />,
     },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 90,
       pintar: (e) => (
@@ -261,6 +276,16 @@ export default function PantallaLaboratorio() {
       }
       error={obras.error}
       cargando={obras.cargando}
+      // Spec 050, RF-30, RF-32: solo quien registra ensayos, y solo en la pestaña de granulometrías.
+      acciones={
+        puedeRegistrar && pestana !== 'obra' ? (
+          <Boton
+            titulo={creando ? 'Creando…' : 'Nuevo ensayo'}
+            onPress={nuevoEnsayo}
+            deshabilitado={creando || faltaObraParaRegistrar}
+          />
+        ) : undefined
+      }
     >
       {puedeAprobar && pendientes > 0 ? (
         <Aviso tono="info">
@@ -288,6 +313,8 @@ export default function PantallaLaboratorio() {
           {errorAlCrear ? <Aviso tono="error">{errorAlCrear}</Aviso> : null}
 
           <Seccion titulo="Granulometrías">
+            {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector. */}
+            <CifrasDeEstado estados={ESTADOS_COMO_CIFRAS} conteos={conteos} elegido={estado} alElegir={setEstado} />
             <Formulario>
               {esGerencia && !obraDeLaRuta ? (
                 <Selector
@@ -343,15 +370,6 @@ export default function PantallaLaboratorio() {
                 ancho={200}
               />
               <Selector
-                etiqueta="Estado"
-                valor={estado}
-                opciones={OPCIONES_DE_ESTADO}
-                onChange={setEstado}
-                permiteVacio
-                vacio="Todos"
-                ancho={150}
-              />
-              <Selector
                 etiqueta="Veredicto"
                 valor={veredicto}
                 opciones={OPCIONES_DE_VEREDICTO}
@@ -362,17 +380,8 @@ export default function PantallaLaboratorio() {
               />
             </Formulario>
 
-            {puedeRegistrar ? (
-              <Acciones>
-                <Boton
-                  titulo={creando ? 'Creando…' : 'Nuevo ensayo'}
-                  onPress={nuevoEnsayo}
-                  deshabilitado={creando || faltaObraParaRegistrar}
-                />
-                {faltaObraParaRegistrar ? (
-                  <Celda>Elija arriba la obra en la que se registra.</Celda>
-                ) : null}
-              </Acciones>
+            {puedeRegistrar && faltaObraParaRegistrar ? (
+              <Ayuda>Para un ensayo nuevo, elija arriba la obra en la que se registra.</Ayuda>
             ) : null}
           </Seccion>
 
@@ -384,7 +393,18 @@ export default function PantallaLaboratorio() {
                 ensayos.cargando
                   ? 'Cargando los ensayos…'
                   : ensayos.datos.length === 0
-                    ? 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.'
+                    ? {
+                        icono: '⚗',
+                        texto: 'No hay ensayos con fecha de ejecución en este periodo, ni borradores sin fecha.',
+                        // Spec 050, RF-53: la misma condición que «Nuevo ensayo» del encabezado.
+                        accion: puedeRegistrar ? (
+                          <Boton
+                            titulo={creando ? 'Creando…' : 'Nuevo ensayo'}
+                            onPress={nuevoEnsayo}
+                            deshabilitado={creando || faltaObraParaRegistrar}
+                          />
+                        ) : undefined,
+                      }
                     : 'Ningún ensayo coincide con los filtros elegidos.'
               }
             />

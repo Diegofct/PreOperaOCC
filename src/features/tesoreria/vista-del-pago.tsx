@@ -10,10 +10,11 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { CarpetaDeDocumentos, useDocumentosDelLugar } from '@/features/documentos/pantalla-documentos';
 import { api, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
-import { Acciones, Aviso, Boton, Celda, Confirmado, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
+import { Acciones, Aviso, Boton, Celda, Etiqueta, Seccion, Tabla, type Columna } from '@/features/panel/componentes';
 import type { PagoRegistrado, SolicitudDePagoDetallada } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
@@ -95,11 +96,15 @@ export function VistaDelPago({
   const conValores = s !== undefined && 'valor' in s;
   const documentos = useDocumentosDelLugar(conValores ? { solicitudPagoId: id } : null);
   const [ventana, setVentana] = useState<'corregir' | 'cancelar' | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
 
   const listo = (mensaje: string) => {
     setVentana(null);
-    setHecho(mensaje);
+    avisarHecho(mensaje);
     cargada.recargar();
     documentos.recargar();
   };
@@ -107,7 +112,7 @@ export function VistaDelPago({
   const volver = <Boton titulo={`← Volver a ${volverA}`} tono="secundario" onPress={alVolver} />;
   if (!s) {
     return (
-      <MarcoPantalla titulo="Solicitud de pago" descripcion="" error={cargada.error} cargando={cargada.cargando}>
+      <MarcoPantalla ancho="formulario" titulo="Solicitud de pago" descripcion="" error={cargada.error} cargando={cargada.cargando}>
         <Acciones>{volver}</Acciones>
       </MarcoPantalla>
     );
@@ -123,7 +128,7 @@ export function VistaDelPago({
   const columnasPagos: Columna<PagoRegistrado>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 110, pintar: (p) => <Celda>{fechaDelCorte(p.fecha)}</Celda> },
     {
-      clave: 'valor',
+      clave: 'valor', principal: true,
       titulo: 'Valor',
       ancho: 150,
       pintar: (p) => (
@@ -159,7 +164,7 @@ export function VistaDelPago({
     { clave: 'en', titulo: 'Cuándo', ancho: 170, pintar: (e) => <Celda>{cuando(e.en)}</Celda> },
     { clave: 'por', titulo: 'Quién', ancho: 180, pintar: (e) => <Celda>{e.por}</Celda> },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué hizo',
       ancho: 420,
       pintar: (e) => (
@@ -181,30 +186,36 @@ export function VistaDelPago({
 
   return (
     <MarcoPantalla
+      ancho="formulario"
       titulo={`${s.requisicion ? 'Requisición' : 'Solicitud'} ${s.codigo}`}
+      // Spec 050, RF-27: el código es el tercer paso de la ruta.
+      registro={s.codigo}
       descripcion={`${s.lugar.nombre} · pedida por ${s.pedidaPor.nombre} el ${cuando(s.pedidaEn)}`}
       error={cargada.error}
       cargando={cargada.cargando}
+      // Spec 050, RF-30, RF-32: lo que se puede hacer con el pago, en el encabezado, cada botón con su
+      // condición (`pasos`, a quién le toca decidir). «Volver» se queda en el cuerpo.
+      acciones={
+        <>
+          {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
+          {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
+          {s.requisicion ? (
+            <BotonesDeDecision
+              tipo="pago"
+              id={s.id}
+              codigo={s.codigo}
+              version={s.version}
+              requisicion={s.requisicion}
+              recorte={{ tipo: 'pago', valor: s.valor, imputacion: s.planificacion?.imputacion ?? null, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
+              listo={listo}
+            />
+          ) : null}
+          {accionesExtra?.(s, listo)}
+          {s.pasos.includes('cancelar') ? <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} /> : null}
+        </>
+      }
     >
-      <Acciones>
-        {volver}
-        {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
-        {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
-        {s.requisicion ? (
-          <BotonesDeDecision
-            tipo="pago"
-            id={s.id}
-            codigo={s.codigo}
-            version={s.version}
-            requisicion={s.requisicion}
-            recorte={{ tipo: 'pago', valor: s.valor, imputacion: s.planificacion?.imputacion ?? null, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
-            listo={listo}
-          />
-        ) : null}
-        {accionesExtra?.(s, listo)}
-        {s.pasos.includes('cancelar') ? <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} /> : null}
-      </Acciones>
-      <Confirmado mensaje={hecho} />
+      <Acciones>{volver}</Acciones>
       {devolucion ? <Aviso tono="error">{`Devuelta para corregir: ${devolucion.motivo ?? ''}`}</Aviso> : null}
 
       <Seccion titulo={s.requisicion ? 'La requisición' : 'La solicitud'}>

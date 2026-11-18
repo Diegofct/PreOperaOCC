@@ -13,6 +13,7 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { CarpetaDeDocumentos, useDocumentosDelLugar } from '@/features/documentos/pantalla-documentos';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
 import {
@@ -23,7 +24,6 @@ import {
   Campo,
   CampoDeFecha,
   Celda,
-  Confirmado,
   Etiqueta,
   Modal,
   Seccion,
@@ -126,6 +126,8 @@ export function VentanaDeMotivo({
 }) {
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   return (
     <Modal titulo={titulo} onCerrar={alCerrar} angosta>
@@ -144,7 +146,7 @@ export function VentanaDeMotivo({
             try {
               await alConfirmar(motivo);
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
               setEnviando(false);
             }
           }}
@@ -181,6 +183,8 @@ function VentanaDeRecibir({
   const [nota, setNota] = useState('');
   const [soporte, setSoporte] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   const recibos = porRecibir
@@ -200,7 +204,7 @@ function VentanaDeRecibir({
       });
       alRecibir(r.estado === 'recibida' ? 'Recibido. La solicitud quedó completa.' : 'Recibido. Todavía falta algo por llegar.');
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
     }
   }
@@ -276,12 +280,16 @@ export function VistaDeLaSolicitud({
   );
   const documentos = useDocumentosDelLugar({ solicitudId: id });
   const [ventana, setVentana] = useState<'corregir' | 'cancelar' | 'recibir' | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const s = cargada.datos[0];
 
   const listo = (mensaje: string) => {
     setVentana(null);
-    setHecho(mensaje);
+    avisarHecho(mensaje);
     cargada.recargar();
     documentos.recargar();
   };
@@ -289,7 +297,7 @@ export function VistaDeLaSolicitud({
   const volver = <Boton titulo={`← Volver a ${volverA}`} tono="secundario" onPress={alVolver} />;
   if (!s) {
     return (
-      <MarcoPantalla titulo="Solicitud de compra" descripcion="" error={cargada.error} cargando={cargada.cargando}>
+      <MarcoPantalla ancho="formulario" titulo="Solicitud de compra" descripcion="" error={cargada.error} cargando={cargada.cargando}>
         <Acciones>{volver}</Acciones>
       </MarcoPantalla>
     );
@@ -314,7 +322,7 @@ export function VistaDeLaSolicitud({
     : [];
   const columnasRenglones: Columna<Renglon>[] = [
     { clave: 'orden', titulo: '#', ancho: 40, pintar: (r) => <Celda>{String(r.orden)}</Celda> },
-    { clave: 'que', titulo: 'Qué se pide', ancho: s.requisicion ? 230 : 260, pintar: (r) => <Celda>{r.descripcion}</Celda> },
+    { clave: 'que', principal: true, titulo: 'Qué se pide', ancho: s.requisicion ? 230 : 260, pintar: (r) => <Celda>{r.descripcion}</Celda> },
     { clave: 'pedido', titulo: 'Pedido', ancho: 110, pintar: (r) => <Celda>{`${cantidad(r.cantidad)} ${r.unidad}`}</Celda> },
     {
       clave: 'aprobado',
@@ -391,7 +399,7 @@ export function VistaDeLaSolicitud({
   const columnasRecibos: Columna<Recepcion>[] = [
     { clave: 'fecha', titulo: 'Llegó el', ancho: 110, pintar: (r) => <Celda>{fechaDelCorte(r.fecha)}</Celda> },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué',
       ancho: 260,
       pintar: (x) => {
@@ -415,7 +423,7 @@ export function VistaDeLaSolicitud({
     { clave: 'en', titulo: 'Cuándo', ancho: 170, pintar: (e) => <Celda>{cuando(e.en)}</Celda> },
     { clave: 'por', titulo: 'Quién', ancho: 180, pintar: (e) => <Celda>{e.por}</Celda> },
     {
-      clave: 'que',
+      clave: 'que', principal: true,
       titulo: 'Qué hizo',
       ancho: 420,
       pintar: (e) => (
@@ -437,33 +445,39 @@ export function VistaDeLaSolicitud({
 
   return (
     <MarcoPantalla
+      ancho="formulario"
       titulo={`${s.requisicion ? 'Requisición' : 'Solicitud'} ${s.codigo}`}
+      // Spec 050, RF-27: el código es el tercer paso de la ruta (… › Requisiciones › RC-0012).
+      registro={s.codigo}
       descripcion={`${s.lugar.nombre} · pedida por ${s.pedidaPor.nombre} el ${cuando(s.pedidaEn)}`}
       error={cargada.error}
       cargando={cargada.cargando}
+      // Spec 050, RF-30, RF-32: lo que se puede hacer con la solicitud, en el encabezado. Cada botón
+      // conserva su condición: el paso que le toca (`pasos`) o a quién le toca decidir.
+      acciones={
+        <>
+          {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
+          {s.pasos.includes('recibir') ? <Boton titulo="Recibir lo que llegó" onPress={() => setVentana('recibir')} /> : null}
+          {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
+          {s.requisicion ? (
+            <BotonesDeDecision
+              tipo="compra"
+              id={s.id}
+              codigo={s.codigo}
+              version={s.version}
+              requisicion={s.requisicion}
+              recorte={{ tipo: 'compra', renglones: s.renglones, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
+              listo={listo}
+            />
+          ) : null}
+          {accionesExtra?.(s, listo)}
+          {s.pasos.includes('cancelar') ? (
+            <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} />
+          ) : null}
+        </>
+      }
     >
-      <Acciones>
-        {volver}
-        {s.pasos.includes('corregir') ? <Boton titulo="Corregir" onPress={() => setVentana('corregir')} /> : null}
-        {s.pasos.includes('recibir') ? <Boton titulo="Recibir lo que llegó" onPress={() => setVentana('recibir')} /> : null}
-        {/* Spec 046 (RF-25 a RF-34): decidir en su paso, solo a quien le toca. */}
-        {s.requisicion ? (
-          <BotonesDeDecision
-            tipo="compra"
-            id={s.id}
-            codigo={s.codigo}
-            version={s.version}
-            requisicion={s.requisicion}
-            recorte={{ tipo: 'compra', renglones: s.renglones, obraId: s.lugar.tipo === 'obra' ? s.lugar.id : null }}
-            listo={listo}
-          />
-        ) : null}
-        {accionesExtra?.(s, listo)}
-        {s.pasos.includes('cancelar') ? (
-          <Boton titulo={s.requisicion ? 'Cancelar la requisición' : 'Cancelar la solicitud'} tono="peligro" onPress={() => setVentana('cancelar')} />
-        ) : null}
-      </Acciones>
-      <Confirmado mensaje={hecho} />
+      <Acciones>{volver}</Acciones>
       {devolucion ? <Aviso tono="error">{`Devuelta para corregir: ${devolucion.motivo ?? ''}`}</Aviso> : null}
 
       <Seccion titulo={s.requisicion ? 'La requisición' : 'La solicitud'}>

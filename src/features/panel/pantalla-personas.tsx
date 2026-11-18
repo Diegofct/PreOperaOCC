@@ -66,6 +66,7 @@ import { EMPRESAS, empresaDelAccesoSinObra, esEmpresa, type EmpresaId } from '@/
 import { alcanza, puedeCambiarRol, puedeGenerarClave, rolesQuePuedeDar } from '@/shared/rules/permisos';
 
 
+import { useAvisos } from './avisos';
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -77,7 +78,6 @@ import {
   Casilla,
   Celda,
   Confirmacion,
-  Confirmado,
   Etiqueta,
   Modal,
   Formulario,
@@ -202,6 +202,7 @@ export default function PantallaPersonas() {
         ),
       [obraDeLaRuta, empresaDelLugar, puedeRevisar],
     ),
+    { conCampos: true },
   );
   const obras = useListado<ObraFila>(
     useCallback(() => (puedeListarObras ? api.obras.listar() : Promise.resolve([])), [puedeListarObras]),
@@ -330,6 +331,7 @@ export default function PantallaPersonas() {
         ),
       [orden, ordenDeColumna],
     ),
+    undefined, { hay: obraFiltro !== null || accesoFiltro !== null || empresaFiltro !== null, limpiar: () => { setObraFiltro(null); setAccesoFiltro(null); setEmpresaFiltro(null); } },
   );
 
   /** A quién se está corrigiendo. `null` mientras no haya ventana abierta. */
@@ -339,7 +341,11 @@ export default function PantallaPersonas() {
   const [porDarDeBaja, setPorDarDeBaja] = useState<PersonaFila | null>(null);
 
   /** Lo último que salió bien. Se dice sin interrumpir y se borra al siguiente gesto. */
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
 
   async function crear() {
     const creada = await personas.ejecutar(() =>
@@ -356,7 +362,7 @@ export default function PantallaPersonas() {
       }),
     );
     if (creada) {
-      setHecho(`${nombreCompleto} quedó registrada.`);
+      avisarHecho(`${nombreCompleto} quedó registrada.`);
       setUsuario('');
       setNombreCompleto('');
       setDocumento('');
@@ -373,9 +379,8 @@ export default function PantallaPersonas() {
 
   /** Residente estaba bien: se apaga el aviso sin cambiarle nada (041/RF-51). */
   async function marcarRevisada(p: PersonaFila) {
-    setHecho(null);
     const bien = await personas.ejecutar(() => api.personas.marcarRevisada(p.id));
-    if (bien) setHecho(`${p.nombreCompleto} quedó revisada.`);
+    if (bien) avisarHecho(`${p.nombreCompleto} quedó revisada.`);
   }
 
   const columnas: Columna<PersonaFila>[] = [
@@ -387,7 +392,7 @@ export default function PantallaPersonas() {
       ordenar: ORDEN_DE_COLUMNA.usuario,
     },
     {
-      clave: 'nombre',
+      clave: 'nombre', principal: true,
       titulo: 'Nombre completo',
       ancho: 210,
       pintar: (p) => (
@@ -480,7 +485,6 @@ export default function PantallaPersonas() {
                 titulo="Dar de baja"
                 tono="peligro"
                 onPress={() => {
-                  setHecho(null);
                   setPorDarDeBaja(p);
                 }}
               />
@@ -622,7 +626,6 @@ export default function PantallaPersonas() {
         </Formulario>
       </Seccion>
 
-      <Confirmado mensaje={hecho} />
 
       {porDarDeBaja ? (
         <Confirmacion
@@ -644,7 +647,7 @@ export default function PantallaPersonas() {
             await api.personas.darDeBaja(porDarDeBaja.id);
             setPorDarDeBaja(null);
             personas.recargar();
-            setHecho(`${quien} quedó dada de baja.`);
+            avisarHecho(`${quien} quedó dada de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -658,7 +661,7 @@ export default function PantallaPersonas() {
           onCerrar={() => setEditando(null)}
           onGuardado={(nombre) => {
             setEditando(null);
-            setHecho(`${nombre} quedó corregida.`);
+            avisarHecho(`${nombre} quedó corregida.`);
             personas.recargar();
           }}
         />
@@ -672,7 +675,7 @@ export default function PantallaPersonas() {
               : `${porRevisar.length} personas pasaron a Residente con el cambio de accesos: falta revisar si les corresponde otro.`}
           </Aviso>
         ) : null}
-        <BarraDeListado
+        <BarraDeListado onLimpiar={filtrado.limpiar}
           busqueda={filtrado.busqueda}
           onBuscar={filtrado.buscar}
           total={filtrado.total}
@@ -719,6 +722,7 @@ export default function PantallaPersonas() {
         </BarraDeListado>
 
         <Tabla
+          sinResultados={filtrado.sinResultados}
           columnas={columnas}
           filas={filtrado.pagina}
           orden={orden}
@@ -809,7 +813,7 @@ function VentanaCorregirPersona({
    * motivo sale aquí dentro, y además bajo el campo que el servidor señale
    * (RF-25, RF-27).
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
 
   const faltaNombre = nombreCompleto.trim().length === 0;
 
@@ -857,9 +861,11 @@ function VentanaCorregirPersona({
           error={faltaNombre ? 'El nombre no puede quedar vacío.' : accion.campoConError('nombreCompleto')}
           ancho={280}
         />
-        <Campo etiqueta="Documento" valor={documento} onChange={setDocumento} ancho={160} />
+        {/* Spec 050, RF-79: el motivo de un campo va debajo de él; sin esto, una cédula repetida no se veía. */}
+        <Campo etiqueta="Documento" valor={documento} onChange={setDocumento} error={accion.campoConError('documento')} ancho={160} />
         <Selector
           etiqueta="Cargo"
+          error={accion.campoConError('cargo')}
           valor={cargo}
           opciones={CARGOS.map((c) => ({ valor: c.id, etiqueta: c.nombre }))}
           onChange={(v) => {

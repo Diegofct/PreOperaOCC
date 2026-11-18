@@ -17,6 +17,7 @@
  */
 import { useCallback, useState } from 'react';
 
+import { useAvisos } from './avisos';
 import { api } from './cliente-api';
 import {
   Acciones,
@@ -27,7 +28,6 @@ import {
   Celda,
   Etiqueta,
   Confirmacion,
-  Confirmado,
   Formulario,
   Modal,
   Seccion,
@@ -65,15 +65,18 @@ export function CatalogosCantera({
   puedeRegistrar: boolean;
   alCambiar: () => void;
 }) {
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const avisar = (mensaje: string) => {
-    setHecho(mensaje);
+    avisarHecho(mensaje);
     alCambiar();
   };
 
   return (
     <>
-      <Confirmado mensaje={hecho} />
       <SeccionSitios obraId={obraId} puedeRegistrar={puedeRegistrar} alHacer={avisar} />
       <SeccionMateriales obraId={obraId} puedeRegistrar={puedeRegistrar} alHacer={avisar} />
     </>
@@ -93,6 +96,7 @@ function SeccionSitios({
 }) {
   const sitios = useListado<SitioDeCanteraFila>(
     useCallback(() => api.cantera.sitios.listar(obraId), [obraId]),
+    { conCampos: true },
   );
 
   const [nombre, setNombre] = useState('');
@@ -251,6 +255,7 @@ function SeccionMateriales({
 }) {
   const materiales = useListado<MaterialDeCanteraFila>(
     useCallback(() => api.cantera.materiales.listar(obraId), [obraId]),
+    { conCampos: true },
   );
 
   const [nombre, setNombre] = useState('');
@@ -414,7 +419,7 @@ function VentanaCorregir({
    * telón. Antes se leía `ErrorApi.campos.nombre` a mano y cualquier otro campo
    * se perdía en la página; el hook los reparte todos.
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
   const faltaNombre = nombre.trim().length === 0;
 
   async function guardar() {

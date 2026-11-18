@@ -70,6 +70,7 @@ import {
   type ViajeDelReporte,
 } from '@/shared/rules/whatsapp';
 
+import { useAvisos } from '../avisos';
 import { api, mensajeDe } from '../cliente-api';
 import {
   Acciones,
@@ -189,6 +190,8 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
   const [detalle, setDetalle] = useState<DetalleDePropuesta | null>(null);
   const [reporte, setReporte] = useState<ReporteDelDia | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [hecho, setHecho] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [cambiado, setCambiado] = useState(false);
@@ -272,7 +275,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
       setPulso((p) => p + 1);
       setHecho('Corrección guardada.');
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }
@@ -343,7 +346,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
           : `Aprobado: pasó a la bitácora del ${hechoAsi.fecha}${hechoAsi.viajes > 0 ? `, y ${hechoAsi.viajes === 1 ? '1 viaje' : `${hechoAsi.viajes} viajes`} a Control Cantera` : ''}.`,
       );
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setDecidiendo(false);
       // Se vuelve a pedir siempre: aprobado, o con las faltas del servidor en su renglón.
@@ -363,7 +366,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
       setHecho('Descartado. Queda en «Descartados» con el motivo.');
       setPulso((p) => p + 1);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setDescartando(false);
     } finally {
       setDecidiendo(false);
@@ -377,7 +380,7 @@ export function DetalleDeReporte({ id, alVolver }: { id: string; alVolver: () =>
       setHecho('Devuelto a la bandeja: ya está entre los pendientes.');
       setPulso((p) => p + 1);
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setDecidiendo(false);
     }

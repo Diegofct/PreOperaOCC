@@ -145,6 +145,15 @@ export default function PantallaReportes() {
       descripcion={DESCRIPCION[lugar?.tipo === 'empresa' && lugar.empresa !== 'elemental' ? lugar.empresa : 'obra']}
       error={obras.error}
       cargando={obras.cargando}
+      // Spec 050, RF-30: sacar el reporte es la acción de esta pantalla, una vez escogida la obra.
+      acciones={
+        faltaObra ? undefined : (
+          <>
+            <Boton titulo="Descargar Excel" tono="secundario" onPress={descargarExcel} />
+            <Boton titulo="Imprimir" tono="secundario" onPress={imprimir} />
+          </>
+        )
+      }
     >
       <View style={estilos.encabezado}>
         {esGerencia && !obraDeLaRuta ? (
@@ -178,12 +187,6 @@ export default function PantallaReportes() {
         </View>
       </View>
 
-      {faltaObra ? null : (
-        <Acciones>
-          <Boton titulo="Descargar Excel" tono="secundario" onPress={descargarExcel} />
-          <Boton titulo="Imprimir" tono="secundario" onPress={imprimir} />
-        </Acciones>
-      )}
       {avisoDeSalida ? <Aviso tono="error">{avisoDeSalida}</Aviso> : null}
 
       <Acciones>

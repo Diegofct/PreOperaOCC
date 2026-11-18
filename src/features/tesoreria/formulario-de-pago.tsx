@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
 import type { LugarDeRequisiciones, OpcionesParaImputar } from '@/features/panel/requisiciones';
@@ -29,7 +30,7 @@ import {
 } from '@/features/requisiciones/campo-de-imputacion';
 import { veLosValores } from '@/shared/rules/compras';
 import { imputacionPropuesta, type ImputacionDelRenglon } from '@/shared/rules/requisicion-planificacion';
-import { AccionesFormulario, Aviso, Boton, Campo, CampoDeFecha, Casilla, Modal, Selector } from '@/features/panel/componentes';
+import { AccionesFormulario, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, CampoDeFecha, Casilla, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import { ACEPTA_DOCUMENTOS, BYTES_DE_FIRMA, clasesDe, revisarDocumento } from '@/shared/rules/documentos';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { CONCEPTOS_DE_PAGO, faltasDelPagoPorCampo, type DatosDeLaSolicitudDePago } from '@/shared/rules/pagos';
@@ -66,6 +67,8 @@ export function FormularioDePago({
   const [adjuntos, setAdjuntos] = useState<{ archivo: File; clase: string | null }[]>([]);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   // Spec 048: solo las de obra se imputan (RF-1, RF-3).
@@ -155,7 +158,7 @@ export function FormularioDePago({
           : await api.tesoreria.crear(lugar, datos);
       }
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
       return;
     }
@@ -192,11 +195,12 @@ export function FormularioDePago({
       onCerrar={alCerrar}
       amplia
     >
-      <View style={estilos.fila}>
-        <Campo etiqueta="A quién se le paga" obligatorio valor={beneficiario} onChange={setBeneficiario} error={ver(faltas.beneficiario)} ancho={320} />
-        <Campo etiqueta="NIT o cédula" valor={documento} onChange={setDocumento} ayuda="Opcional." ancho={200} />
-      </View>
-      <View style={estilos.fila}>
+      {/* Spec 050, RF-25: en rejilla, con los anchos de la escala. */}
+      <Formulario desnudo>
+        <Campo etiqueta="A quién se le paga" obligatorio valor={beneficiario} onChange={setBeneficiario} error={ver(faltas.beneficiario)} />
+        <Campo etiqueta="NIT o cédula" valor={documento} onChange={setDocumento} ayuda="Opcional." ancho={ANCHOS_DE_CAMPO.medio} />
+      </Formulario>
+      <Formulario desnudo>
         <Selector
           etiqueta="Concepto"
           obligatorio
@@ -205,10 +209,10 @@ export function FormularioDePago({
           onChange={setConcepto}
           vacio="Elija el concepto"
           error={ver(faltas.concepto)}
-          ancho={280}
+          ancho={ANCHOS_DE_CAMPO.medio}
         />
-        <Campo etiqueta="Valor (pesos)" obligatorio valor={valor} onChange={setValor} error={ver(faltas.valor)} ayuda="Sin centavos." ancho={200} />
-      </View>
+        <Campo etiqueta="Valor (pesos)" obligatorio valor={valor} onChange={setValor} error={ver(faltas.valor)} ayuda="Sin centavos." ancho={ANCHOS_DE_CAMPO.medio} />
+      </Formulario>
       <Campo
         etiqueta="Para qué"
         obligatorio
@@ -219,8 +223,9 @@ export function FormularioDePago({
         error={ver(faltas.paraQue)}
         ayuda="Por ejemplo: acarreo de material de la cantera a la obra."
       />
+      {/* La fecha con la casilla al lado es una fila mixta: se queda en su fila. El «*» lo pone `obligatorio` (RF-18). */}
       <View style={estilos.fila}>
-        <CampoDeFecha etiqueta="Para cuándo *" valor={paraCuando} onChange={setParaCuando} min={fechaDeJornada()} error={ver(faltas.paraCuando)} />
+        <CampoDeFecha etiqueta="Para cuándo" obligatorio valor={paraCuando} onChange={setParaCuando} min={fechaDeJornada()} error={ver(faltas.paraCuando)} />
         <View style={estilos.casilla}>
           <Casilla etiqueta="Es urgente" marcada={urgente} onChange={setUrgente} />
         </View>

@@ -29,17 +29,19 @@ import { nombreDeEmpresa, rutaDeEmpresa, rutaDeObra } from '@/shared/rules/empre
 
 import { api } from '../cliente-api';
 import {
+  ANCHOS_DE_CAMPO,
   Acciones,
   Aviso,
   Boton,
   Celda,
   Etiqueta,
+  Formulario,
+  Paginacion,
   Seccion,
   Selector,
   Tabla,
   type Columna,
   type Opcion,
-  Paginacion,
 } from '../componentes';
 import type { GrupoFila, ObraFila, PropuestaFila } from '../contratos';
 import { MarcoPantalla, useListado } from '../marco';
@@ -50,7 +52,8 @@ import { NoSePudoGuardar } from './no-se-pudo-guardar';
 import { DetalleDeReporte } from './propuesta-reporte';
 import { ReportesEsperados } from './reportes-esperados';
 import { usePersona } from '../sesion';
-import { POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
+import { CifrasDeEstado, type EstadoDeLaLista } from '../cifras-de-estado';
+import { contarPorEstado, POR_PAGINA, usePaginacion } from '../usar-listado-filtrado';
 
 /** Día y hora en la obra, corto: «3 oct, 07:30 p. m.». */
 function momento(iso: string | null): string {
@@ -72,6 +75,17 @@ const ESTADOS: { valor: EstadoMensajeWhatsapp; etiqueta: string }[] = [
   { valor: 'aprobado', etiqueta: 'Aprobados a mano' },
   { valor: 'descartado', etiqueta: 'Descartados' },
 ];
+
+/** Los mismos estados como cifras, con su símbolo (spec 050, RF-48). */
+const SIMBOLO_DEL_MENSAJE: Record<EstadoMensajeWhatsapp, Pick<EstadoDeLaLista, 'simbolo' | 'tono'>> = {
+  guardado: { simbolo: '✓', tono: 'bueno' },
+  en_espera: { simbolo: '◐', tono: 'atencion' },
+  pendiente: { simbolo: '!', tono: 'atencion' },
+  ignorado: { simbolo: '–', tono: 'neutro' },
+  aprobado: { simbolo: '✓', tono: 'bueno' },
+  descartado: { simbolo: '✕', tono: 'malo' },
+};
+const ESTADOS_COMO_CIFRAS: EstadoDeLaLista[] = ESTADOS.map((e) => ({ ...e, ...SIMBOLO_DEL_MENSAJE[e.valor] }));
 
 /** Las pestañas del módulo (spec 024, RF-55 a RF-64). Las siguientes llegan con sus tareas. */
 const PESTANAS = [
@@ -225,7 +239,8 @@ export default function PantallaBandeja() {
   const conGrupo = empresa === 'occ' || empresa === 'geolab';
   const eligeOrigen = conGrupo && alcanza(rol, 'whatsapp', 'listar');
   const [origen, setOrigen] = useState<string>('todos');
-  const [estado, setEstado] = useState<EstadoMensajeWhatsapp>('guardado');
+  // Sin estado, todos (spec 050, RF-50); al abrir, los guardados, como siempre.
+  const [estado, setEstado] = useState<string | null>('guardado');
   const [obraDelSelector, setObraId] = useState<string | null>(null);
   // Spec 033, RF-24: dentro de una obra de Proyectos, solo lo de esa obra y sin selector.
   const obraDeLaRuta = useObraDeLaRuta();
@@ -241,8 +256,16 @@ export default function PantallaBandeja() {
   const { desde, hasta } = fechas.consultado;
   const propuestas = useListado<PropuestaFila>(
     useCallback(
-      () => api.whatsapp.propuestas.listar(estado, obraId, { desde, hasta }, empresa, conGrupo ? origen : undefined),
-      [estado, obraId, desde, hasta, empresa, conGrupo, origen],
+      // Spec 050, RF-48, RF-52: los seis estados a la vez, con los mismos filtros, para que las cifras los
+      // cuenten todos; el estado se filtra aquí. El servidor solo da uno por petición, y el plan de la 050
+      // no cambia la API. Cambiar de cifra ya no vuelve a pedir nada.
+      () =>
+        Promise.all(
+          ESTADOS.map((e) =>
+            api.whatsapp.propuestas.listar(e.valor, obraId, { desde, hasta }, empresa, conGrupo ? origen : undefined),
+          ),
+        ).then((listas) => listas.flat()),
+      [obraId, desde, hasta, empresa, conGrupo, origen],
     ),
   );
 
@@ -278,7 +301,7 @@ export default function PantallaBandeja() {
       pintar: (p) => <Celda lineas={2}>{etiquetaDeCategoria(p.categoria)}</Celda>,
     },
     {
-      clave: 'resumen',
+      clave: 'resumen', principal: true,
       titulo: 'Qué entendió la IA',
       ancho: 255,
       // La que cede cuando falta sitio (spec 022, RF-27): es la de más texto y se
@@ -332,7 +355,7 @@ export default function PantallaBandeja() {
       },
     },
     {
-      clave: 'abrir',
+      clave: 'abrir', acciones: true,
       titulo: '',
       ancho: 100,
       // No por debajo de su botón: «Revisar» mide 87 (spec 022, RF-27).
@@ -353,7 +376,8 @@ export default function PantallaBandeja() {
   ];
 
   // Páginas de 15 (spec 025, RF-55 a RF-58).
-  const paginaDelHistorial = usePaginacion(propuestas.datos, `${estado}|${obraId}|${desde}|${hasta}`);
+  const delEstado = estado ? propuestas.datos.filter((p) => p.estado === estado) : propuestas.datos;
+  const paginaDelHistorial = usePaginacion(delEstado, `${estado}|${obraId}|${desde}|${hasta}`);
 
   return (
     <MarcoPantalla
@@ -399,14 +423,15 @@ export default function PantallaBandeja() {
 
       {abierta || pestana !== 'historial' ? null : (
       <Seccion titulo="Historial">
-        <Acciones>
-          <Selector
-            etiqueta="Estado"
-            valor={estado}
-            opciones={ESTADOS.map((e) => ({ valor: e.valor, etiqueta: e.etiqueta }))}
-            onChange={(v) => setEstado((v as EstadoMensajeWhatsapp | null) ?? 'guardado')}
-            ancho={200}
-          />
+        {/* Spec 050, RF-48, RF-75: una cifra por estado en lugar del selector. */}
+        <CifrasDeEstado
+          estados={ESTADOS_COMO_CIFRAS}
+          conteos={propuestas.cargando ? null : contarPorEstado(propuestas.datos, { textoDe: () => [], estadoDe: (p) => p.estado, busqueda: '' })}
+          elegido={estado}
+          alElegir={setEstado}
+        />
+        {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+        <Formulario desnudo>
           {eligeOrigen ? (
             <Selector
               etiqueta="Origen"
@@ -417,7 +442,7 @@ export default function PantallaBandeja() {
                 { valor: 'obras', etiqueta: 'Obras' },
               ]}
               onChange={(v) => setOrigen(v ?? 'todos')}
-              ancho={200}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
           ) : null}
           {esGerencia && !obraDeLaRuta && (!conGrupo || origen !== 'grupo') ? (
@@ -428,16 +453,20 @@ export default function PantallaBandeja() {
               onChange={setObraId}
               vacio="Todas las obras"
               permiteVacio
-              ancho={280}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
           ) : null}
           <CamposDeFechas filtro={fechas} />
-        </Acciones>
+        </Formulario>
         <>
           <Tabla
             columnas={columnas}
             filas={paginaDelHistorial.pagina}
-            vacio={`No hay reportes en «${ESTADOS.find((e) => e.valor === estado)!.etiqueta}» entre el ${desde} y el ${hasta}.`}
+            vacio={
+              estado
+                ? `No hay reportes en «${ESTADOS.find((e) => e.valor === estado)?.etiqueta ?? estado}» entre el ${desde} y el ${hasta}.`
+                : `No hay reportes entre el ${desde} y el ${hasta}.`
+            }
           />
           <Paginacion
             pagina={paginaDelHistorial.paginaActual}
@@ -552,7 +581,7 @@ function GruposDeWhatsapp({
       ),
     },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       // No por debajo de su botón: «Cambiar» y «Asociar» miden 91 (spec 022, RF-27).

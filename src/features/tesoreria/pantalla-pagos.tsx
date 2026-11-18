@@ -11,6 +11,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { VentanaDeMotivo } from '@/features/compras/vista-de-la-solicitud';
 import { api } from '@/features/panel/cliente-api';
 import {
@@ -20,7 +21,6 @@ import {
   Celda,
   Cifra,
   Cifras,
-  Confirmado,
   Etiqueta,
   RenglonDeCampos,
   Seccion,
@@ -45,7 +45,11 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
   const rango = rangoDeFechas(desde, hasta, hoy);
   const error = 'error' in rango ? MENSAJES_DE_RANGO[rango.error] : null;
   const [anulando, setAnulando] = useState<Pago | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
 
   const cargados = useListado<PagosDelRango>(
     useCallback(
@@ -66,7 +70,7 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
   const columnasPagos: Columna<Pago>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 110, pintar: (p) => <Celda>{fechaDelCorte(p.fecha)}</Celda> },
     {
-      clave: 'origen',
+      clave: 'origen', principal: true,
       titulo: 'De',
       ancho: 250,
       pintar: (p) => (
@@ -92,7 +96,7 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
       ),
     },
     {
-      clave: 'accion',
+      clave: 'accion', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,
@@ -115,7 +119,6 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
       error={cargados.error}
       cargando={cargados.cargando}
     >
-      <Confirmado mensaje={hecho} />
       <RenglonDeCampos>
         <CampoDeFecha etiqueta="Pagados desde" valor={desde} onChange={setDesde} max={hoy} />
         <CampoDeFecha etiqueta="Hasta" valor={hasta} onChange={setHasta} min={desde || undefined} />
@@ -151,7 +154,7 @@ export function PantallaPagos({ alAbrir }: { alAbrir: (solicitudPagoId: string) 
           alConfirmar={async (motivo) => {
             await api.tesoreria.anularPago(anulando.id, { motivo });
             setAnulando(null);
-            setHecho(`Pago de ${enPesos(anulando.valor)} a ${anulando.origen.quien} anulado.`);
+            avisarHecho(`Pago de ${enPesos(anulando.valor)} a ${anulando.origen.quien} anulado.`);
             cargados.recargar();
           }}
         />

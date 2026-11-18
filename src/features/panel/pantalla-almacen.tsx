@@ -45,6 +45,7 @@ import { alcanza } from '@/shared/rules/permisos';
 import { ImportarDocumento } from '@/features/almacen-obra/importar-documento';
 import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from './cliente-api';
 import {
   Acciones,
@@ -54,7 +55,6 @@ import {
   Campo,
   Celda,
   Confirmacion,
-  Confirmado,
   Etiqueta,
   Formulario,
   Paginacion,
@@ -97,6 +97,7 @@ export default function PantallaAlmacen() {
 
   const materiales = useListado<MaterialDeAlmacenFila>(
     useCallback(() => api.almacen.materiales.listar(), []),
+    { conCampos: true },
   );
   // Solo la gerencia elige obra: a los demás el servidor les rechazaría el listado.
   const obras = useListado<ObraFila>(
@@ -134,6 +135,7 @@ export default function PantallaAlmacen() {
       (m: MaterialDeAlmacenFila) => obraFiltro === null || m.obraId === obraFiltro,
       [obraFiltro],
     ),
+    undefined, undefined, { hay: !obraDeLaRuta && obraFiltroElegido !== null, limpiar: () => setObraFiltro(null) },
   );
 
   const [editando, setEditando] = useState<MaterialDeAlmacenFila | null>(null);
@@ -149,23 +151,25 @@ export default function PantallaAlmacen() {
   } | null>(null);
 
   function abrirMovimiento(material: MaterialDeAlmacenFila, tipo: TipoMovimiento) {
-    setHecho(null);
     materiales.setError(null);
     setMoviendo({ material, tipo });
   }
   const [porDarDeBaja, setPorDarDeBaja] = useState<MaterialDeAlmacenFila | null>(null);
-  const [hecho, setHecho] = useState<string | null>(null);
+  // Spec 050, RF-55: lo que salió bien va al aviso de abajo, que se va solo.
+  const avisos = useAvisos();
+  const avisarHecho = (texto: string | null) => {
+    if (texto) avisos.exito(texto);
+  };
   const [descargando, setDescargando] = useState(false);
 
   async function descargarExcel() {
-    setHecho(null);
     setDescargando(true);
     try {
       const { contenido, nombre } = await api.almacen.descargar(esGerencia ? obraFiltro : null);
       guardarArchivo(contenido, nombre);
     } catch (fallo) {
       // Arriba de la página, como los demás fallos del almacén.
-      materiales.setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setDescargando(false);
     }
@@ -183,7 +187,7 @@ export default function PantallaAlmacen() {
       }),
     );
     if (listo) {
-      setHecho(`${nombreRegistrado} quedó registrado.`);
+      avisarHecho(`${nombreRegistrado} quedó registrado.`);
       setElegido(null);
       setNombre('');
       setUnidad(null);
@@ -191,7 +195,6 @@ export default function PantallaAlmacen() {
   }
 
   function pedirBaja(material: MaterialDeAlmacenFila) {
-    setHecho(null);
     // RF-7, dicho antes de pedir confirmación y con el texto del servidor: con
     // stock, preguntar «¿seguro?» para luego rechazarlo sería hacerle perder el
     // tiempo a quien lo intenta.
@@ -350,7 +353,6 @@ export default function PantallaAlmacen() {
         </Seccion>
       ) : null}
 
-      <Confirmado mensaje={hecho} />
 
       {porDarDeBaja ? (
         <Confirmacion
@@ -363,7 +365,7 @@ export default function PantallaAlmacen() {
             await api.almacen.materiales.darDeBaja(material.id);
             setPorDarDeBaja(null);
             materiales.recargar();
-            setHecho(`${material.nombre} quedó dado de baja.`);
+            avisarHecho(`${material.nombre} quedó dado de baja.`);
           }}
           onCancelar={() => setPorDarDeBaja(null)}
         />
@@ -376,7 +378,7 @@ export default function PantallaAlmacen() {
           onCerrar={() => setMoviendo(null)}
           onGuardado={(mensaje) => {
             setMoviendo(null);
-            setHecho(mensaje);
+            avisarHecho(mensaje);
             // El stock de la tabla sale del servidor: se vuelve a pedir, no se suma aquí.
             materiales.recargar();
           }}
@@ -389,14 +391,14 @@ export default function PantallaAlmacen() {
           onCerrar={() => setEditando(null)}
           onGuardado={(corregido) => {
             setEditando(null);
-            setHecho(`${corregido} quedó corregido.`);
+            avisarHecho(`${corregido} quedó corregido.`);
             materiales.recargar();
           }}
         />
       ) : null}
 
       <Seccion titulo="Materiales y stock">
-        <BarraDeListado
+        <BarraDeListado onLimpiar={filtrado.limpiar}
           busqueda={filtrado.busqueda}
           onBuscar={filtrado.buscar}
           total={filtrado.total}
@@ -424,6 +426,7 @@ export default function PantallaAlmacen() {
         </BarraDeListado>
 
         <Tabla
+          sinResultados={filtrado.sinResultados}
           columnas={columnas}
           filas={filtrado.pagina}
           vacio={
@@ -449,7 +452,7 @@ export default function PantallaAlmacen() {
           puedeAnular={alcanza(rol, 'almacen', 'anular')}
           onCerrar={() => setHistorialDe(null)}
           onAnulado={(mensaje) => {
-            setHecho(mensaje);
+            avisarHecho(mensaje);
             materiales.recargar();
           }}
         />

@@ -29,6 +29,7 @@ import {
   Boton,
   Celda,
   FilaDeFormulario,
+  Formulario,
   Seccion,
   Selector,
   type Opcion,
@@ -126,7 +127,7 @@ export function ReportesEsperados({ opcionesDeObra, empresa }: { opcionesDeObra:
         </Ayuda>
       )}
       {esGerencia && !obraDeLaRuta && !deEmpresa ? (
-        <Acciones>
+        <Formulario desnudo>
           <Selector
             etiqueta="Obra"
             valor={obraId}
@@ -139,7 +140,7 @@ export function ReportesEsperados({ opcionesDeObra, empresa }: { opcionesDeObra:
             vacio="Elija la obra"
             ancho={300}
           />
-        </Acciones>
+        </Formulario>
       ) : null}
       {datos.error ? <Aviso tono="error">{datos.error}</Aviso> : null}
       {error ? <Aviso tono="error">{error}</Aviso> : null}

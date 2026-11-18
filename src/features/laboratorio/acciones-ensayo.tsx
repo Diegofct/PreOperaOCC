@@ -240,7 +240,7 @@ function VentanaDePaso({
   onAdelantado: (motivo: string) => void;
 }) {
   const texto = TEXTO_DE_PASO[paso];
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
   const [escrito, setEscrito] = useState('');
   const [intentado, setIntentado] = useState(false);
   const falta = texto.campo !== undefined && escrito.trim().length === 0;

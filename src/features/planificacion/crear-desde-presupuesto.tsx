@@ -16,12 +16,14 @@
  * servidor (RF-28): quien la abre desde otro equipo ve la misma espera, con el tiempo que lleva
  * desde que empezó, y al terminar se le abre el borrador igual que a quien la lanzó.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
+import type { PartesDeLaAccion } from '@/features/panel/marco';
 import { api, ErrorApi, mensajeDe } from '@/features/panel/cliente-api';
-import { Acciones, Aviso, Boton, Campo, Casilla, Modal, Selector } from '@/features/panel/componentes';
+import { Acciones, ANCHOS_DE_CAMPO, Aviso, Boton, Campo, Casilla, Formulario, Modal, Selector } from '@/features/panel/componentes';
 import type { FuenteDeIndirectosFila, PlanificacionFila } from '@/features/panel/planificacion';
 import { fechaDeJornada } from '@/shared/rules/jornada';
 import { validarPlazo } from '@/shared/rules/planificacion';
@@ -65,10 +67,13 @@ export function CrearDesdePresupuesto({
   obraId,
   borrador,
   alTerminar,
+  children,
 }: {
   obraId: string;
   borrador: PlanificacionFila | undefined;
   alTerminar: (planificacionId: string) => void;
+  /** Spec 050, RF-30: el botón va al encabezado de la pantalla y el progreso se queda en ella. */
+  children: (partes: PartesDeLaAccion) => ReactNode;
 }) {
   const [paso, setPaso] = useState<Paso>(() => {
     const anotada = propuestaAnotada(obraId);
@@ -76,6 +81,8 @@ export function CrearDesdePresupuesto({
   });
   const [ahora, setAhora] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   // Lo que se pide.
@@ -106,7 +113,7 @@ export function CrearDesdePresupuesto({
       }
       setFuentes(await api.planificaciones.paraCopiarIndirectos());
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     }
   }
 
@@ -181,17 +188,21 @@ export function CrearDesdePresupuesto({
       anotarPropuesta(obraId, lecturaId);
       setPaso({ tipo: 'proponiendo', lecturaId, desde: ahoraMismo() });
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
   }
 
-  return (
-    <View style={estilos.columna}>
-      <Acciones>
+  const botones = (
+    <>
         <Boton titulo="Crear desde el presupuesto" tono="secundario" onPress={() => void abrir()} deshabilitado={paso.tipo !== 'nada'} />
-      </Acciones>
+    </>
+  );
+
+  // Sin caja propia: un fragmento vacío no ocupa sitio en la columna de la pantalla.
+  const cuerpo = (
+    <>
       {error && paso.tipo === 'nada' ? <Aviso tono="error">{error}</Aviso> : null}
 
       {paso.tipo === 'proponiendo' ? (
@@ -207,47 +218,48 @@ export function CrearDesdePresupuesto({
               Se copian los ítems y rubros del presupuesto vigente con su medida real igual a la contractual y sin costos. La IA
               propone en qué mes empieza cada uno y cuánto dura; después todo se corrige en pantalla.
             </Text>
-            <Campo
-              etiqueta="Plazo de la obra, en meses"
-              valor={meses}
-              onChange={setMeses}
-              soloNumeros
-              obligatorio
-              ancho={240}
-              error={errorDelPlazo && !errorDelPlazo.includes('arranque') ? errorDelPlazo : undefined}
-            />
-            <Campo
-              etiqueta="Mes de arranque"
-              valor={arranque}
-              onChange={setArranque}
-              ayuda="El mes 1 del plazo, como 2026-01. Puede ser un mes ya pasado."
-              obligatorio
-              ancho={240}
-              error={errorDelPlazo?.includes('arranque') ? errorDelPlazo : undefined}
-            />
-            {grupos && grupos.length > 1 ? (
-              <Selector
-                etiqueta="Grupo (frente) que se planifica"
-                valor={grupoId}
-                opciones={grupos.map((g) => ({ valor: g.id, etiqueta: g.nombre }))}
-                onChange={setGrupoId}
-                vacio="Escoja el grupo"
+            {/* Spec 050, RF-25: plazo y arranque lado a lado, los selectores con el largo flexible. */}
+            <Formulario desnudo>
+              <Campo
+                etiqueta="Plazo de la obra, en meses"
+                valor={meses}
+                onChange={setMeses}
+                soloNumeros
                 obligatorio
-                ancho={600}
+                ancho={ANCHOS_DE_CAMPO.medio}
+                error={errorDelPlazo && !errorDelPlazo.includes('arranque') ? errorDelPlazo : undefined}
               />
-            ) : null}
-            <Selector
-              etiqueta="Copiar los costos indirectos de"
-              valor={copiarDe}
-              opciones={fuentes.map((f) => ({
-                valor: f.id,
-                etiqueta: `${f.obra} · v${f.numeroVersion}`,
-                detalle: `${f.estado === 'vigente' ? 'Vigente' : 'Reemplazada'} · ${f.renglones} renglones`,
-              }))}
-              onChange={setCopiarDe}
-              vacio={fuentes.length === 0 ? 'No hay planificaciones con indirectos por renglón' : 'No copiar: empezar sin indirectos'}
-              ancho={600}
-            />
+              <Campo
+                etiqueta="Mes de arranque"
+                valor={arranque}
+                onChange={setArranque}
+                ayuda="El mes 1 del plazo, como 2026-01. Puede ser un mes ya pasado."
+                obligatorio
+                ancho={ANCHOS_DE_CAMPO.medio}
+                error={errorDelPlazo?.includes('arranque') ? errorDelPlazo : undefined}
+              />
+              {grupos && grupos.length > 1 ? (
+                <Selector
+                  etiqueta="Grupo (frente) que se planifica"
+                  valor={grupoId}
+                  opciones={grupos.map((g) => ({ valor: g.id, etiqueta: g.nombre }))}
+                  onChange={setGrupoId}
+                  vacio="Escoja el grupo"
+                  obligatorio
+                />
+              ) : null}
+              <Selector
+                etiqueta="Copiar los costos indirectos de"
+                valor={copiarDe}
+                opciones={fuentes.map((f) => ({
+                  valor: f.id,
+                  etiqueta: `${f.obra} · v${f.numeroVersion}`,
+                  detalle: `${f.estado === 'vigente' ? 'Vigente' : 'Reemplazada'} · ${f.renglones} renglones`,
+                }))}
+                onChange={setCopiarDe}
+                vacio={fuentes.length === 0 ? 'No hay planificaciones con indirectos por renglón' : 'No copiar: empezar sin indirectos'}
+              />
+            </Formulario>
             {borrador ? (
               <Casilla
                 etiqueta={`Sustituir el borrador v${borrador.numeroVersion}. El anterior queda descartado, no se borra.`}
@@ -263,8 +275,10 @@ export function CrearDesdePresupuesto({
           </View>
         </Modal>
       ) : null}
-    </View>
+    </>
   );
+
+  return children({ botones, cuerpo });
 }
 
 const estilos = StyleSheet.create({

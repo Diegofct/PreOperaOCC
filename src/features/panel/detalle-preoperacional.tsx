@@ -27,8 +27,9 @@ import {
 import { mostrarLectura } from '@/shared/rules/lecturas';
 import { alcanza } from '@/shared/rules/permisos';
 
+import { useAvisos } from './avisos';
 import { api, mensajeDe } from './cliente-api';
-import { Acciones, Aviso, Boton, Campo, Etiqueta, Seccion, Titulo } from './componentes';
+import { Acciones, Aviso, Boton, Campo, Etiqueta, Formulario, Seccion, Titulo } from './componentes';
 import {
   ETIQUETA_RESULTADO,
   type ImagenDelRegistro,
@@ -57,6 +58,8 @@ export function DetallePreoperacional({
   const [anulando, setAnulando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
 
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const persona = usePersona();
   const puedeAnular = alcanza(persona?.rol ?? 'operador', 'preoperacionales', 'anular');
 
@@ -68,7 +71,7 @@ export function DetallePreoperacional({
       await api.preoperacionales.anular(id, motivo);
       onAnulado();
     } catch (fallo) {
-      detalle.setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setOcupado(false);
     }
@@ -265,14 +268,16 @@ export function DetallePreoperacional({
         {!p.anuladoEn && puedeAnular ? (
           anulando ? (
             <Seccion titulo="Anular este preoperacional">
-              <Campo
-                etiqueta="Motivo"
-                obligatorio
-                valor={motivo}
-                onChange={setMotivo}
-                ayuda="Queda guardado con su nombre. La máquina volverá a aparecer como pendiente del día, y habrá que levantar otro."
-                ancho={420}
-              />
+              {/* Spec 050, RF-25: en rejilla y sin ancho a mano, el motivo ocupa el largo flexible. */}
+              <Formulario desnudo>
+                <Campo
+                  etiqueta="Motivo"
+                  obligatorio
+                  valor={motivo}
+                  onChange={setMotivo}
+                  ayuda="Queda guardado con su nombre. La máquina volverá a aparecer como pendiente del día, y habrá que levantar otro."
+                />
+              </Formulario>
               <Acciones>
                 <Boton
                   titulo="Confirmar anulación"

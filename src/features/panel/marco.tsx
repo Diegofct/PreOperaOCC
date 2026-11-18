@@ -14,7 +14,8 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 
 import {
   FuentePanel,
-  MaxContentWidthPanel,
+  AnchoFormulario,
+  AnchoListado,
   Panel,
   Spacing,
   TextoPanel,
@@ -28,10 +29,26 @@ import {
   type Modulo,
 } from '@/shared/rules/permisos';
 
+import { useAvisos } from './avisos';
 import { ErrorApi, mensajeDe } from './cliente-api';
 import { Aviso, Titulo } from './componentes';
+import { Migas } from './migas';
+import { repartirFallo } from './repartir-fallo';
 import { useObraEnUso } from './obra-en-uso';
 import { usePersona } from './sesion';
+import { useEsAngosto } from './usar-ancho';
+
+/**
+ * Un flujo que se lanza con un botón y sigue con avisos de progreso y ventanas —proponer con IA, subir un
+ * Excel, crear desde el presupuesto— se entrega en dos piezas (spec 050, RF-30): los `botones`, que van al
+ * encabezado de la pantalla (`MarcoPantalla.acciones`), y el `cuerpo`, que se queda en la página. Las dos salen
+ * del mismo componente, que guarda el estado del flujo: así el botón y su progreso no se separan de verdad,
+ * solo se pintan en dos sitios.
+ */
+export interface PartesDeLaAccion {
+  botones: ReactNode;
+  cuerpo: ReactNode;
+}
 
 export interface Listado<T> {
   datos: T[];
@@ -40,7 +57,12 @@ export interface Listado<T> {
   /** Vuelve a pedir el listado. Se llama después de cada alta o baja. */
   recargar: () => void;
   /** Ejecuta una acción y recarga si sale bien; si falla, deja el mensaje puesto. */
-  ejecutar: (accion: () => Promise<unknown>) => Promise<boolean>;
+  /**
+   * Corre una acción y vuelve a pedir el listado si sale bien (spec 050, RF-55, RF-57, RF-79): con
+   * `exito`, ese aviso; si falla por un campo, el motivo debajo del campo (`errorDe`); si falla por otra
+   * cosa, el aviso de error. El error de la pantalla queda para lo que falla al cargar.
+   */
+  ejecutar: (accion: () => Promise<unknown>, opciones?: { exito?: string }) => Promise<boolean>;
   setError: (mensaje: string | null) => void;
   /**
    * El error del servidor para un campo del formulario, si lo hubo en el último
@@ -49,7 +71,14 @@ export interface Listado<T> {
   errorDe: (campo: string) => string | undefined;
 }
 
-export function useListado<T>(cargar: () => Promise<T[]>): Listado<T> {
+/**
+ * @param conCampos  la pantalla pinta `errorDe` en los campos de su formulario. Sin eso, un motivo «de campo»
+ *   que falle en `ejecutar` no se vería en ningún sitio, así que va al aviso de error (spec 050, RF-57, RF-79).
+ */
+export function useListado<T>(
+  cargar: () => Promise<T[]>,
+  { conCampos = false }: { conCampos?: boolean } = {},
+): Listado<T> {
   const [datos, setDatos] = useState<T[]>([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,28 +122,27 @@ export function useListado<T>(cargar: () => Promise<T[]>): Listado<T> {
    */
   const recargar = useCallback(() => setPulso((p) => p + 1), []);
 
+  const avisos = useAvisos();
   const ejecutar = useCallback(
-    async (accion: () => Promise<unknown>) => {
+    async (accion: () => Promise<unknown>, opciones?: { exito?: string }) => {
       try {
         await accion();
-        setError(null);
         setCamposConError({});
         setPulso((p) => p + 1);
+        if (opciones?.exito) avisos.exito(opciones.exito);
         return true;
       } catch (fallo) {
-        // Si el servidor dice qué campo falló, el motivo va debajo de ese campo
-        // (spec 007, RF-18) y arriba queda solo el aviso de que hay algo que
-        // corregir. El aviso no se quita del todo: si una pantalla no pinta ese
-        // campo, al menos se sabe que algo falló.
-        const campos = fallo instanceof ErrorApi ? (fallo.campos ?? {}) : {};
+        // Spec 050, RF-57, RF-79: el motivo debajo de su campo, o en el aviso de error; nunca en el
+        // renglón de la pantalla, que se ve detrás de una ventana o lejos del botón que se pulsó.
+        // Solo si la pantalla pinta `errorDe` en sus campos (`conCampos`): si no, el motivo no se vería.
+        const señalados = fallo instanceof ErrorApi && conCampos ? (fallo.campos ?? {}) : {};
+        const { campos, aviso } = repartirFallo(señalados, mensajeDe(fallo));
         setCamposConError(campos);
-        setError(
-          Object.keys(campos).length > 0 ? 'Revise los campos marcados.' : mensajeDe(fallo),
-        );
+        if (aviso) avisos.error(aviso);
         return false;
       }
     },
-    [],
+    [avisos, conCampos],
   );
 
   const errorDe = useCallback((campo: string) => camposConError[campo], [camposConError]);
@@ -141,10 +169,30 @@ export function MarcoPantalla({
   modulo,
   refDesplazamiento,
   exigeObra,
+  acciones,
+  registro,
+  ancho = 'listado',
   children,
 }: {
   titulo: string;
   descripcion: string;
+  /**
+   * La acción principal de la pantalla —«Nueva requisición», «Subir documento»— (spec 050, RF-30 a
+   * RF-32): a la derecha del título, y debajo y a lo ancho en el celular. Quien la pasa decide si el
+   * cargo puede hacerla; si no puede, no pasa nada y no sale (RF-32).
+   */
+  acciones?: ReactNode;
+  /**
+   * El nombre del registro que se está viendo —una solicitud, una persona—, que es el tercer paso
+   * de la ruta de arriba (RF-27). Sin él, la ruta termina en el módulo.
+   */
+  registro?: string;
+  /**
+   * Hasta dónde llega la pantalla en un monitor grande (spec 050, RF-42, RF-43, D1, D2): un listado
+   * o un tablero, hasta 1600; un formulario o una ficha que se lee de arriba abajo, hasta 1100, para
+   * no tener que mover la vista de un extremo al otro de la pantalla en cada renglón.
+   */
+  ancho?: 'listado' | 'formulario';
   error?: string | null;
   cargando?: boolean;
   modulo?: Modulo;
@@ -177,6 +225,7 @@ export function MarcoPantalla({
   // después del aviso de cargo: si tampoco es de su cargo, eso es lo que hay que
   // decirle.
   const apagado = Boolean(modulo && enUso && moduloApagado(modulo, enUso.modulos));
+  const angosto = useEsAngosto();
 
   return (
     <ScrollView
@@ -184,10 +233,16 @@ export function MarcoPantalla({
       style={estilos.pantalla}
       contentContainerStyle={estilos.contenedor}
     >
-      <View style={estilos.columna}>
-        <View style={estilos.encabezado}>
-          <Titulo>{titulo}</Titulo>
-          <Text style={estilos.descripcion}>{descripcion}</Text>
+      <View style={[estilos.columna, ancho === 'formulario' && estilos.columnaFormulario]}>
+        {/* Spec 050, RF-26 a RF-32: la ruta, el título y su descripción, con la acción principal a
+            la derecha; en el celular, debajo y a lo ancho. */}
+        <View style={[estilos.encabezado, angosto && estilos.encabezadoAngosto]}>
+          <View style={[estilos.textosDelEncabezado, angosto && estilos.textosAngostos]}>
+            <Migas registro={registro} />
+            <Titulo>{titulo}</Titulo>
+            <Text style={estilos.descripcion}>{descripcion}</Text>
+          </View>
+          {acciones ? <View style={angosto ? estilos.accionesAngosto : estilos.acciones}>{acciones}</View> : null}
         </View>
 
         {avisoAjeno ? (
@@ -227,8 +282,23 @@ const estilos = StyleSheet.create({
   pantalla: { flex: 1, backgroundColor: Panel.fondo },
   contenedor: { alignItems: 'center', padding: Spacing.four, paddingBottom: Spacing.six },
   // 20 y no 24 entre secciones (spec 039, RF-24).
-  columna: { width: '100%', maxWidth: MaxContentWidthPanel, gap: Spacing.three + Spacing.one },
-  encabezado: { gap: Spacing.one, maxWidth: 720 },
+  columna: { width: '100%', maxWidth: AnchoListado, gap: Spacing.three + Spacing.one },
+  columnaFormulario: { maxWidth: AnchoFormulario },
+  encabezado: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  encabezadoAngosto: { flexDirection: 'column', alignItems: 'stretch' },
+  // El texto no pasa de una medida de lectura, aunque la pantalla mida 1600.
+  textosDelEncabezado: { flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0, maxWidth: 720, gap: Spacing.one },
+  // En columna, `flexBasis: 0` le daba alto cero y el botón se montaba encima del título (RF-31).
+  textosAngostos: { flexBasis: 'auto', flexGrow: 0 },
+  acciones: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  // RF-31: debajo del título y a lo ancho, un botón por renglón.
+  accionesAngosto: { flexDirection: 'column', alignItems: 'stretch', gap: Spacing.two },
   descripcion: {
     fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.cuerpo,

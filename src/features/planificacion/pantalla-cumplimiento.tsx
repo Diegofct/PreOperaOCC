@@ -89,6 +89,13 @@ export default function PantallaCumplimiento() {
       descripcion="Qué se cumplió de la planificación aprobada en la semana o el mes, con lo que registran los partes diarios."
       error={informe.error}
       cargando={informe.cargando}
+      // Spec 050, RF-30: sacar el informe es la acción de esta pantalla.
+      acciones={
+        <>
+          <Boton titulo={bajando === 'excel' ? 'Preparando…' : 'Descargar Excel'} tono="secundario" onPress={() => void bajar('excel')} deshabilitado={bajando !== null} />
+          <Boton titulo={bajando === 'pdf' ? 'Preparando…' : 'Descargar PDF'} tono="secundario" onPress={() => void bajar('pdf')} deshabilitado={bajando !== null} />
+        </>
+      }
     >
       <View style={estilos.columna}>
         <Acciones>
@@ -106,10 +113,6 @@ export default function PantallaCumplimiento() {
           <CampoDeFecha etiqueta="Ir a la fecha" valor={fecha} onChange={(v) => v && setFecha(v)} max={hoy} />
         </View>
 
-        <Acciones>
-          <Boton titulo={bajando === 'excel' ? 'Preparando…' : 'Descargar Excel'} tono="secundario" onPress={() => void bajar('excel')} deshabilitado={bajando !== null} />
-          <Boton titulo={bajando === 'pdf' ? 'Preparando…' : 'Descargar PDF'} tono="secundario" onPress={() => void bajar('pdf')} deshabilitado={bajando !== null} />
-        </Acciones>
         {errorDeDescarga ? <Aviso tono="error">{errorDeDescarga}</Aviso> : null}
 
         {datos ? <Informe datos={datos} /> : null}
@@ -150,7 +153,7 @@ function Informe({ datos }: { datos: InformeRespuesta }) {
   const columnas: Columna<FilaEnCantidades & { id: string }>[] = [
     { clave: 'capitulo', titulo: 'Capítulo', ancho: 150, pintar: (f) => <Celda>{f.capitulo}</Celda>, ordenar: (f) => f.capitulo },
     { clave: 'item', titulo: 'Ítem', ancho: 60, pintar: (f) => <Celda>{f.item}</Celda>, ordenar: (f) => f.item },
-    { clave: 'descripcion', titulo: 'Descripción', ancho: 180, pintar: (f) => <Celda>{`${f.descripcion}${f.unidad ? ` (${f.unidad})` : ''}`}</Celda> },
+    { clave: 'descripcion', principal: true, titulo: 'Descripción', ancho: 180, pintar: (f) => <Celda>{`${f.descripcion}${f.unidad ? ` (${f.unidad})` : ''}`}</Celda> },
     {
       clave: 'meta',
       titulo: 'Meta',
@@ -186,7 +189,7 @@ function Informe({ datos }: { datos: InformeRespuesta }) {
   const columnasDeFuera: Columna<ActividadFueraDeLaPlanificacion & { id: string }>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 100, pintar: (a) => <Celda>{diaCorto(a.fecha)}</Celda>, ordenar: (a) => a.fecha },
     { clave: 'item', titulo: 'Ítem', ancho: 70, pintar: (a) => <Celda>{a.item ?? '—'}</Celda> },
-    { clave: 'nombre', titulo: 'Actividad', ancho: 300, pintar: (a) => <Celda>{a.nombre}</Celda> },
+    { clave: 'nombre', principal: true, titulo: 'Actividad', ancho: 300, pintar: (a) => <Celda>{a.nombre}</Celda> },
     { clave: 'descripcion', titulo: 'Descripción', ancho: 360, pintar: (a) => <Celda>{a.descripcion}</Celda> },
     { clave: 'cantidad', titulo: 'Cantidad', ancho: 120, pintar: (a) => <Celda>{`${cantidad(a.cantidad)}${a.unidad ? ` ${a.unidad}` : ''}`}</Celda> },
     {

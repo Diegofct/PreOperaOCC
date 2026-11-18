@@ -18,6 +18,7 @@ import { useObraDeLaRuta } from '@/features/empresas/contexto-empresa';
 
 import { api } from '../cliente-api';
 import {
+  ANCHOS_DE_CAMPO,
   Acciones,
   Aviso,
   Boton,
@@ -25,12 +26,13 @@ import {
   Celda,
   Confirmacion,
   Etiqueta,
+  Formulario,
+  Paginacion,
   Seccion,
   Selector,
   Tabla,
   type Columna,
   type Opcion,
-  Paginacion,
 } from '../componentes';
 import type { DiaDeWhatsapp } from '../contratos';
 import { useListado } from '../marco';
@@ -167,7 +169,8 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
 
   return (
     <Seccion titulo="Estado del día">
-      <Acciones>
+      {/* Spec 050, RF-25: los filtros en rejilla, con las etiquetas a la misma altura. */}
+      <Formulario desnudo>
         {esGerencia && !obraDeLaRuta ? (
           <Selector
             etiqueta="Obra"
@@ -176,7 +179,7 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
             onChange={setObraId}
             vacio="Todas las obras"
             permiteVacio
-            ancho={260}
+            ancho={ANCHOS_DE_CAMPO.medio}
           />
         ) : null}
         <CampoDeFecha
@@ -193,7 +196,7 @@ export function EstadoDelDia({ opcionesDeObra }: { opcionesDeObra: Opcion[] }) {
           error={FECHA.test(hasta) ? undefined : 'AAAA-MM-DD'}
           min={desde || undefined}
         />
-      </Acciones>
+      </Formulario>
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
       {dias.error ? <Aviso tono="error">{dias.error}</Aviso> : null}
       <>

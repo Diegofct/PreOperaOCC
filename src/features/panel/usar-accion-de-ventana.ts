@@ -24,22 +24,32 @@
  */
 import { useCallback, useState } from 'react';
 
+import { useAvisos } from './avisos';
 import { ErrorApi, mensajeDe } from './cliente-api';
+import { repartirFallo } from './repartir-fallo';
 
 export interface AccionDeVentana {
   /** Mientras corre: los botones se deshabilitan y el de la acción dice «…». */
   ejecutando: boolean;
-  /** El motivo del último fallo, para pintarlo arriba de la ventana. */
+  /**
+   * Desde la 050 siempre `null`: el motivo va debajo de su campo o al aviso de error (RF-57, RF-79). Se
+   * queda para que las ventanas que lo pintan no tengan que cambiar todas a la vez.
+   */
   error: string | null;
   /** Lo que el servidor dijo de un campo concreto, para pasárselo a su `Campo`. */
   campoConError: (campo: string) => string | undefined;
-  /** Corre la acción y devuelve si salió bien. No cierra nada. */
-  ejecutar: (accion: () => Promise<unknown>) => Promise<boolean>;
+  /** Corre la acción y devuelve si salió bien. No cierra nada. Con `exito`, ese aviso (RF-55). */
+  ejecutar: (accion: () => Promise<unknown>, opciones?: { exito?: string }) => Promise<boolean>;
   /** Borra el error y los campos marcados, sin correr nada. */
   limpiar: () => void;
 }
 
-export function useAccionDeVentana(): AccionDeVentana {
+/**
+ * @param conCampos  la ventana pasa `campoConError` a sus campos. Sin eso, un motivo «de campo» no se vería
+ *   en ningún sitio —el código repetido de una obra, en una ventana que no lo pinta—, así que va al aviso de
+ *   error como cualquier otro (spec 050, RF-57, RF-79).
+ */
+export function useAccionDeVentana({ conCampos = false }: { conCampos?: boolean } = {}): AccionDeVentana {
   const [ejecutando, setEjecutando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [camposConError, setCamposConError] = useState<Record<string, string>>({});
@@ -49,48 +59,37 @@ export function useAccionDeVentana(): AccionDeVentana {
     setCamposConError({});
   }, []);
 
-  const ejecutar = useCallback(async (accion: () => Promise<unknown>) => {
-    setEjecutando(true);
-    setError(null);
-    setCamposConError({});
-    try {
-      await accion();
-      return true;
-    } catch (fallo) {
-      /*
-       * **El mismo texto no sale dos veces** (RF-33). Según cuántos campos
-       * señale el servidor, el motivo va arriba o va debajo, nunca en los dos
-       * sitios:
-       *
-       *  · Ningún campo, o **uno solo**: el motivo arriba, y el campo no lo
-       *    repite. Es el caso que motivó la spec —«Esa obra no lleva el módulo
-       *    Almacén.»—, donde además el campo señalado era `rol` mientras lo que
-       *    se había cambiado era la obra: repetirlo abajo despistaba.
-       *  · **Varios**: cada uno con el suyo debajo, y arriba solo el aviso de
-       *    que hay que corregir. Aquí el detalle está en los campos y una frase
-       *    suelta arriba no puede resumir tres cosas distintas.
-       *
-       * Arriba va lo que mande el servidor, y no un texto nuestro, porque su
-       * contrato dice que `error` es «un mensaje que se le puede mostrar tal
-       * cual a una persona» (ver `@/features/servidor/respuestas`); en los de
-       * validación es el del primer campo, nunca un relleno.
-       */
-      const campos = fallo instanceof ErrorApi ? (fallo.campos ?? {}) : {};
-      const motivo = mensajeDe(fallo);
-      const distintos = new Set(Object.values(campos));
-      const varios = distintos.size > 1;
-
-      setError(varios ? 'Revise los campos marcados.' : motivo);
-      // Con un solo motivo, el de arriba ya lo dice: debajo no se repite.
-      setCamposConError(varios ? campos : {});
-      return false;
-    } finally {
-      // En `finally` y no en cada rama: si esto se olvidara tras un fallo, la
-      // ventana quedaría con los botones muertos y sin forma de reintentar,
-      // que es justo lo que RF-25 pide que no pase.
-      setEjecutando(false);
-    }
-  }, []);
+  const avisos = useAvisos();
+  const ejecutar = useCallback(
+    async (accion: () => Promise<unknown>, opciones?: { exito?: string }) => {
+      setEjecutando(true);
+      setError(null);
+      setCamposConError({});
+      try {
+        await accion();
+        if (opciones?.exito) avisos.exito(opciones.exito);
+        return true;
+      } catch (fallo) {
+        /*
+         * Spec 050, RF-57, RF-79 (cambia la 015, RF-33). Si el servidor señala campos, cada motivo va
+         * debajo del suyo y en ningún otro sitio. Si no, al aviso de error, que se ve encima de la
+         * ventana: el caso que motivó este hook en la 015 («Esa obra no lleva el módulo Almacén.») ya no
+         * se queda sin leer. La ventana sigue abierta con lo escrito (RF-80): este hook no cierra nada.
+         */
+        const señalados = fallo instanceof ErrorApi && conCampos ? (fallo.campos ?? {}) : {};
+        const { campos, aviso } = repartirFallo(señalados, mensajeDe(fallo));
+        setCamposConError(campos);
+        if (aviso) avisos.error(aviso);
+        return false;
+      } finally {
+        // En `finally` y no en cada rama: si esto se olvidara tras un fallo, la
+        // ventana quedaría con los botones muertos y sin forma de reintentar,
+        // que es justo lo que RF-25 pide que no pase.
+        setEjecutando(false);
+      }
+    },
+    [avisos, conCampos],
+  );
 
   const campoConError = useCallback(
     (campo: string) => camposConError[campo],

@@ -20,8 +20,9 @@ import {
 import { leerLectura } from '@/shared/rules/lecturas';
 import { identificacionDelVehiculo } from '@/shared/rules/vehiculos';
 
+import { useAvisos } from '../avisos';
 import { api, ErrorApi, mensajeDe } from '../cliente-api';
-import { AccionesFormulario, Aviso, Ayuda, Boton, Campo, FilaDeFormulario, Modal, Selector } from '../componentes';
+import { AccionesFormulario, ANCHOS_DE_CAMPO, Aviso, Ayuda, Boton, Campo, Formulario, Modal, Selector } from '../componentes';
 import type { ExcepcionFila, VehiculoFila } from '../contratos';
 import { useListado } from '../marco';
 
@@ -61,6 +62,8 @@ export function VentanaCompletarDeEmpresa({
   const [unidad, setUnidad] = useState<string | null>(texto(original.unidad) || null);
   const [faltas, setFaltas] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [guardando, setGuardando] = useState(false);
 
   const opcionesDeEquipo = vehiculos.datos.map((v) => ({
@@ -100,7 +103,7 @@ export function VentanaCompletarDeEmpresa({
     } catch (fallo) {
       const cuerpo = fallo instanceof ErrorApi ? (fallo.cuerpo as { faltas?: { mensaje: string }[] } | undefined) : undefined;
       setFaltas((cuerpo?.faltas ?? []).map((f) => f.mensaje));
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setGuardando(false);
     }
@@ -112,7 +115,8 @@ export function VentanaCompletarDeEmpresa({
       {texto(original.escrito) ? <Ayuda>{`En el mensaje decía: «${texto(original.escrito)}»`}</Ayuda> : null}
       {excepcion.fecha ? <Ayuda>{`Día: ${excepcion.fecha}`}</Ayuda> : null}
       {vehiculos.error ? <Aviso tono="error">{vehiculos.error}</Aviso> : null}
-      <FilaDeFormulario ultima>
+      {/* Spec 050, RF-25: en rejilla, como los formularios; la fila de la bitácora lleva relleno y línea propios. */}
+      <Formulario desnudo>
         <Selector
           etiqueta="Equipo"
           obligatorio
@@ -133,7 +137,7 @@ export function VentanaCompletarDeEmpresa({
                 { valor: 'inoperativo', etiqueta: 'Inoperativo' },
               ]}
               onChange={setEstado}
-              ancho={200}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
             <Campo etiqueta="Motivo u observación" valor={detalle} onChange={setDetalle} ancho={300} />
           </>
@@ -150,7 +154,7 @@ export function VentanaCompletarDeEmpresa({
                 { valor: 'operativo', etiqueta: 'Volvió a estar operativo' },
               ]}
               onChange={setEstado}
-              ancho={240}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
             <Campo etiqueta="Lo que dijo el grupo" valor={detalle} onChange={setDetalle} ancho={300} />
           </>
@@ -163,14 +167,14 @@ export function VentanaCompletarDeEmpresa({
               valor={tipo}
               opciones={TIPOS_DE_TRABAJO.map((t) => ({ valor: t, etiqueta: NOMBRE_DE_TIPO_DE_TRABAJO[t] }))}
               onChange={setTipo}
-              ancho={260}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
             <Campo etiqueta="Qué se hizo" obligatorio valor={detalle} onChange={setDetalle} multilinea />
           </>
         ) : null}
         {seccion === 'lecturas' ? (
           <>
-            <Campo etiqueta="Lectura" obligatorio valor={valor} onChange={setValor} soloNumeros ancho={160} />
+            <Campo etiqueta="Lectura" obligatorio valor={valor} onChange={setValor} soloNumeros ancho={ANCHOS_DE_CAMPO.corto} />
             <Selector
               etiqueta="Unidad"
               obligatorio
@@ -180,11 +184,11 @@ export function VentanaCompletarDeEmpresa({
                 { valor: 'horas', etiqueta: 'Horas' },
               ]}
               onChange={setUnidad}
-              ancho={180}
+              ancho={ANCHOS_DE_CAMPO.medio}
             />
           </>
         ) : null}
-      </FilaDeFormulario>
+      </Formulario>
       {faltas.length > 0 ? <Aviso tono="error">{faltas.join(' ')}</Aviso> : error ? <Aviso tono="error">{error}</Aviso> : null}
       <AccionesFormulario>
         <Boton titulo={guardando ? 'Guardando…' : 'Guardar'} deshabilitado={guardando || falta} onPress={guardar} />

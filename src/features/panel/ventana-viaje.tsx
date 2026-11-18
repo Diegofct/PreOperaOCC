@@ -136,7 +136,7 @@ export function VentanaViaje({
    * ventana: distingue «todavía no ha pulsado Guardar» de «pulsó y falta algo»,
    * y eso lo decide `validarViaje`, no el servidor.
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
 
   const aLaObra = destino === DESTINO_OBRA;
   const viaje = { fecha, hora, materialId, vehiculoId, conductorId, origenId, destino, pr, metros, vale };

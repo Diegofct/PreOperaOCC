@@ -18,6 +18,7 @@ import { useCallback, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { CarpetaDeDocumentos, useDocumentosDelLugar } from '@/features/documentos/pantalla-documentos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
@@ -118,7 +119,7 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
 
   if (!datos || !textos) {
     return (
-      <MarcoPantalla titulo="Ficha" descripcion="La ficha laboral de la persona." error={cargada.error} cargando={cargada.cargando}>
+      <MarcoPantalla ancho="formulario" titulo="Ficha" descripcion="La ficha laboral de la persona." error={cargada.error} cargando={cargada.cargando}>
         <Acciones>
           <Boton titulo="← Volver al personal" tono="secundario" onPress={alVolver} />
         </Acciones>
@@ -234,7 +235,7 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
     },
     { clave: 'por', titulo: 'Quién', ancho: 200, pintar: (e) => <Celda>{e.por}</Celda> },
     {
-      clave: 'campos',
+      clave: 'campos', principal: true,
       titulo: 'Qué cambió',
       ancho: 420,
       pintar: (e) => (
@@ -251,7 +252,11 @@ export function VistaDeLaFicha({ id, alVolver }: { id: string; alVolver: () => v
 
   return (
     <MarcoPantalla
+      ancho="formulario"
       titulo={persona.nombreCompleto}
+      // Spec 050, RF-27: … › Recursos Humanos › el nombre. Guardar y Retirar se quedan al pie de la ficha,
+      // que es un formulario.
+      registro={persona.nombreCompleto}
       descripcion={
         puedeEditar
           ? 'Su ficha laboral. Lo que falte se puede dejar vacío y completar después: la ficha queda marcada como incompleta mientras le falten el ingreso, el contrato, la EPS o la ARL.'
@@ -487,6 +492,8 @@ function VentanaDeRetirar({
   const [fecha, setFecha] = useState(fechaDeJornada());
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const faltasDeDatos = faltasDelRetiro({ fecha, motivo }, fechaIngreso);
 
@@ -496,7 +503,7 @@ function VentanaDeRetirar({
     try {
       await alRetirar(fecha, motivo.trim());
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }

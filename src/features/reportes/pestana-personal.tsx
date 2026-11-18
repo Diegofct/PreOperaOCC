@@ -187,7 +187,7 @@ export function PestanaPersonal({ consulta }: { consulta: ConsultaDeReporte }) {
     novedades,
     avisos,
     {
-      clave: 'detalle',
+      clave: 'detalle', acciones: true,
       titulo: '',
       ancho: 110,
       anchoMinimo: 110,

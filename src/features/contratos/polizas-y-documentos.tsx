@@ -14,16 +14,19 @@ import { useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { api, mensajeDe } from '@/features/panel/cliente-api';
 import {
   Acciones,
   AccionesFormulario,
+  ANCHOS_DE_CAMPO,
   Aviso,
   Boton,
   Campo,
   CampoDeFecha,
   Celda,
   Etiqueta,
+  Formulario,
   Modal,
   Seccion,
   Selector,
@@ -108,6 +111,8 @@ function VentanaDePoliza({
   const [hasta, setHasta] = useState('');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const valorEnPesos = valor.replace(/\D/g, '') ? Number(valor.replace(/\D/g, '')) : null;
   const falta = !amparo
@@ -132,7 +137,7 @@ function VentanaDePoliza({
       else await api.contrato.crearPoliza(datos);
       alGuardar(reemplaza ? 'Póliza reemplazada.' : 'Póliza registrada.');
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -143,25 +148,27 @@ function VentanaDePoliza({
       {reemplaza ? (
         <Text style={estilos.nota}>La nueva queda activa y esta pasa a «Reemplazada». No se borra.</Text>
       ) : null}
-      <Selector
-        etiqueta="Amparo"
-        valor={amparo}
-        opciones={AMPAROS.map((a) => ({ valor: a.id, etiqueta: a.nombre }))}
-        onChange={(v) => setAmparo((v as Amparo | null) ?? null)}
-        vacio="Elija el amparo"
-      />
-      <Campo etiqueta="Aseguradora" obligatorio valor={aseguradora} onChange={setAseguradora} />
-      <Campo etiqueta="Número de la póliza" obligatorio valor={numero} onChange={setNumero} />
-      <Campo
-        etiqueta="Valor asegurado"
-        valor={valor}
-        onChange={setValor}
-        ayuda={valorEnPesos !== null ? enPesos(valorEnPesos) : 'En pesos, opcional.'}
-      />
-      <View style={estilos.fila}>
+      {/* Spec 050, RF-15 a RF-17: en rejilla, con los anchos de la escala. */}
+      <Formulario desnudo>
+        <Selector
+          etiqueta="Amparo"
+          valor={amparo}
+          opciones={AMPAROS.map((a) => ({ valor: a.id, etiqueta: a.nombre }))}
+          onChange={(v) => setAmparo((v as Amparo | null) ?? null)}
+          vacio="Elija el amparo"
+        />
+        <Campo etiqueta="Aseguradora" obligatorio valor={aseguradora} onChange={setAseguradora} />
+        <Campo etiqueta="Número de la póliza" obligatorio valor={numero} onChange={setNumero} ancho={ANCHOS_DE_CAMPO.medio} />
+        <Campo
+          etiqueta="Valor asegurado"
+          valor={valor}
+          onChange={setValor}
+          ayuda={valorEnPesos !== null ? enPesos(valorEnPesos) : 'En pesos, opcional.'}
+          ancho={ANCHOS_DE_CAMPO.medio}
+        />
         <CampoDeFecha etiqueta="Vigente desde" valor={desde} onChange={setDesde} />
         <CampoDeFecha etiqueta="Hasta" valor={hasta} onChange={setHasta} min={desde || undefined} />
-      </View>
+      </Formulario>
       <CampoDeArchivo
         archivo={archivo}
         alElegir={(f, e) => {
@@ -196,6 +203,8 @@ export function VentanaDeAnular({
 }) {
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   return (
     <Modal titulo={titulo} onCerrar={alCerrar} angosta>
@@ -214,7 +223,7 @@ export function VentanaDeAnular({
             try {
               await alAnular(motivo);
             } catch (fallo) {
-              setError(mensajeDe(fallo));
+              avisos.error(mensajeDe(fallo));
             } finally {
               setEnviando(false);
             }
@@ -317,7 +326,7 @@ export function PolizasYDocumentos({ leido, recargar }: { leido: ContratoDeObra;
   const nombreDeClase = (clase: ClaseDeDocumento) => CLASES_DE_DOCUMENTO.find((c) => c.id === clase)?.nombre ?? clase;
   const columnasDeDocumentos: Columna<DocumentoDelContrato>[] = [
     { clave: 'fecha', titulo: 'Fecha', ancho: 110, pintar: (d) => <Celda>{fecha(d.fecha)}</Celda> },
-    { clave: 'clase', titulo: 'Documento', ancho: 180, pintar: (d) => <Celda>{nombreDeClase(d.clase)}</Celda> },
+    { clave: 'clase', principal: true, titulo: 'Documento', ancho: 180, pintar: (d) => <Celda>{nombreDeClase(d.clase)}</Celda> },
     {
       clave: 'descripcion',
       titulo: 'Descripción',
@@ -436,6 +445,8 @@ function VentanaDeDocumento({
   const [descripcion, setDescripcion] = useState('');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
   const falta = !clase
     ? 'Elija la clase de documento.'
@@ -453,7 +464,7 @@ function VentanaDeDocumento({
       await api.contrato.crearDocumento({ obraId, clase: clase!, fecha: cuando, descripcion, mediaId });
       alGuardar('Documento subido.');
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -461,15 +472,17 @@ function VentanaDeDocumento({
 
   return (
     <Modal titulo="Subir documento" onCerrar={alCerrar}>
-      <Selector
-        etiqueta="Documento"
-        valor={clase}
-        opciones={CLASES_DE_DOCUMENTO.map((c) => ({ valor: c.id, etiqueta: c.nombre }))}
-        onChange={(v) => setClase((v as ClaseDeDocumento | null) ?? null)}
-        vacio="Elija la clase"
-      />
-      <CampoDeFecha etiqueta="Fecha" valor={cuando} onChange={setCuando} />
-      <Campo etiqueta="Descripción" valor={descripcion} onChange={setDescripcion} multilinea />
+      <Formulario desnudo>
+        <Selector
+          etiqueta="Documento"
+          valor={clase}
+          opciones={CLASES_DE_DOCUMENTO.map((c) => ({ valor: c.id, etiqueta: c.nombre }))}
+          onChange={(v) => setClase((v as ClaseDeDocumento | null) ?? null)}
+          vacio="Elija la clase"
+        />
+        <CampoDeFecha etiqueta="Fecha" valor={cuando} onChange={setCuando} />
+        <Campo etiqueta="Descripción" valor={descripcion} onChange={setDescripcion} multilinea />
+      </Formulario>
       <CampoDeArchivo
         archivo={archivo}
         obligatorio

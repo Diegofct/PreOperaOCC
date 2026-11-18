@@ -17,6 +17,7 @@ import { useCallback, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { VentanaDeAnular } from '@/features/contratos/polizas-y-documentos';
 import { useLugarDelPanel } from '@/features/empresas/contexto-empresa';
@@ -34,6 +35,7 @@ import {
   Cifra,
   Cifras,
   Etiqueta,
+  Formulario,
   Modal,
   Paginacion,
   Seccion,
@@ -106,9 +108,14 @@ export default function PantallaDocumentos() {
 
   const nombreDelLugar =
     lugar?.tipo === 'empresa' ? nombreDeEmpresa(lugar.empresa) : lugar?.tipo === 'obra' ? 'la obra' : '';
+  const puedeSubir = alcanza(rol, 'documentos', 'escribir');
+  // Spec 050, RF-30, RF-32: aquí subir es la acción principal y va en el encabezado, solo para quien
+  // puede. La ventana sigue siendo de la carpeta; desde aquí solo se abre.
+  const [subiendo, setSubiendo] = useState(false);
 
   return (
     <MarcoPantalla
+      acciones={puedeSubir && pedido ? <Boton titulo="Subir documento" onPress={() => setSubiendo(true)} /> : undefined}
       titulo="Documentos"
       descripcion={`Los documentos de ${nombreDelLugar}: búsquelos por nombre, proveedor o archivo, y vea cuáles están vencidos o por vencer. Nada se borra: lo que sobra se anula con motivo.`}
       error={cargados.error}
@@ -118,8 +125,9 @@ export default function PantallaDocumentos() {
         cargados={cargados}
         pedido={pedido}
         deQuien={pedido && 'empresa' in pedido ? pedido.empresa : 'obra'}
-        puedeSubir={alcanza(rol, 'documentos', 'escribir')}
+        puedeSubir={puedeSubir}
         puedeAnular={alcanza(rol, 'documentos', 'anular')}
+        subida={{ abierta: subiendo, alCambiar: setSubiendo }}
       />
     </MarcoPantalla>
   );
@@ -140,6 +148,7 @@ export function CarpetaDeDocumentos({
   claveDeBusqueda,
   titulo = 'Documentos',
   sinPrecio = false,
+  subida,
 }: {
   cargados: DocumentosCargados;
   pedido: LugarDeLosDocumentos | null;
@@ -151,14 +160,23 @@ export function CarpetaDeDocumentos({
   titulo?: string;
   /** Spec 036, RF-31: quien no ve los valores no sube cotizaciones, órdenes ni facturas. */
   sinPrecio?: boolean;
+  /**
+   * Spec 050, RF-30: cuando subir es la acción principal de la pantalla, el botón va en su
+   * encabezado y desde ahí se abre la ventana; la carpeta no pinta el suyo. Sin esto, como siempre:
+   * en la ficha, en una solicitud y en un pago, subir es secundario y va dentro de la sección.
+   */
+  subida?: { abierta: boolean; alCambiar: (abierta: boolean) => void };
 }) {
   const { documentos, resumen } = cargados.datos[0] ?? SIN_DOCUMENTOS;
   const [ventana, setVentana] = useState<{ tipo: 'subir' } | { tipo: 'anular'; documento: DocumentoDelLugar } | null>(
     null,
   );
   const [hecho, setHecho] = useState<string | null>(null);
+  const subirAbierta = subida ? subida.abierta : ventana?.tipo === 'subir';
+  const cerrarSubir = () => (subida ? subida.alCambiar(false) : setVentana(null));
   const listo = (texto: string) => {
     setVentana(null);
+    subida?.alCambiar(false);
     setHecho(texto);
     cargados.recargar();
   };
@@ -178,6 +196,7 @@ export function CarpetaDeDocumentos({
     pasaFiltros,
     undefined,
     claveDeBusqueda,
+    { hay: clase !== null || soloConAviso || verAnulados, limpiar: () => { setClase(null); setSoloConAviso(false); setVerAnulados(false); } },
   );
   const vigentes = documentos.filter((d) => d.anulado === null).length;
   const anulados = documentos.length - vigentes;
@@ -281,12 +300,12 @@ export function CarpetaDeDocumentos({
       {hecho ? <Aviso tono="exito">{hecho}</Aviso> : null}
 
       <Seccion titulo={titulo}>
-        {puedeSubir && pedido ? (
+        {puedeSubir && pedido && !subida ? (
           <Acciones>
             <Boton titulo="Subir documento" onPress={() => setVentana({ tipo: 'subir' })} />
           </Acciones>
         ) : null}
-        <BarraDeListado
+        <BarraDeListado onLimpiar={listado.limpiar}
           busqueda={listado.busqueda}
           onBuscar={listado.buscar}
           // Los anulados ocultos no cuentan: «1 de 2» sin haber buscado nada confunde.
@@ -310,15 +329,21 @@ export function CarpetaDeDocumentos({
           <Casilla etiqueta="Ver anulados" marcada={verAnulados} onChange={setVerAnulados} />
         </Acciones>
         <Tabla
+          sinResultados={listado.sinResultados}
           columnas={columnas}
           filas={listado.pagina}
-          vacio={
-            documentos.length === 0
-              ? puedeSubir
-                ? 'Todavía no hay documentos aquí. Suba el primero con «Subir documento».'
-                : 'Todavía no hay documentos aquí.'
-              : 'Ningún documento coincide con la búsqueda o los filtros.'
-          }
+          // Spec 050, RF-53: el ícono, la frase y, a quien puede subir, el botón para el primero.
+          vacio={{
+            icono: '🗀',
+            texto: 'Todavía no hay documentos aquí.',
+            accion:
+              puedeSubir && pedido ? (
+                <Boton
+                  titulo="Subir documento"
+                  onPress={() => (subida ? subida.alCambiar(true) : setVentana({ tipo: 'subir' }))}
+                />
+              ) : undefined,
+          }}
         />
         <Paginacion
           pagina={listado.paginaActual}
@@ -328,12 +353,12 @@ export function CarpetaDeDocumentos({
         />
       </Seccion>
 
-      {ventana?.tipo === 'subir' && pedido ? (
+      {subirAbierta && pedido ? (
         <VentanaDeSubir
           pedido={pedido}
           lugar={deQuien}
           sinPrecio={sinPrecio}
-          alCerrar={() => setVentana(null)}
+          alCerrar={cerrarSubir}
           alGuardar={() => listo('Documento subido.')}
         />
       ) : null}
@@ -378,6 +403,8 @@ function VentanaDeSubir({
   const [descripcion, setDescripcion] = useState('');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   const falta =
@@ -408,7 +435,7 @@ function VentanaDeSubir({
       );
       alGuardar();
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
     } finally {
       setEnviando(false);
     }
@@ -431,19 +458,22 @@ function VentanaDeSubir({
           {archivo ? archivo.name : 'PDF, imagen (JPG, PNG, WEBP), Word o Excel, hasta 20 MB.'}
         </Text>
       </View>
-      <Campo etiqueta="Nombre" obligatorio valor={nombre} onChange={setNombre} ayuda="Por ejemplo: Cámara de comercio octubre 2026." />
-      <CampoDeFecha etiqueta="Fecha del documento" valor={fecha} onChange={setFecha} />
-      {lugar === 'solicitud' || lugar === 'pago' ? null : (
-        <CampoDeFecha
-          etiqueta="Vence"
-          valor={vence}
-          onChange={setVence}
-          min={fecha || undefined}
-          ayuda="Déjelo vacío si no vence. Avisa desde 30 días antes."
-        />
-      )}
-      <Campo etiqueta="Proveedor o tercero" valor={proveedor} onChange={setProveedor} ayuda="Opcional. Sirve para buscarlo después." />
-      <Campo etiqueta="Descripción" valor={descripcion} onChange={setDescripcion} multilinea compacto />
+      {/* Spec 050, RF-15 a RF-17: en rejilla, con los anchos de la escala. */}
+      <Formulario desnudo>
+        <Campo etiqueta="Nombre" obligatorio valor={nombre} onChange={setNombre} ayuda="Por ejemplo: Cámara de comercio octubre 2026." />
+        <CampoDeFecha etiqueta="Fecha del documento" valor={fecha} onChange={setFecha} />
+        {lugar === 'solicitud' || lugar === 'pago' ? null : (
+          <CampoDeFecha
+            etiqueta="Vence"
+            valor={vence}
+            onChange={setVence}
+            min={fecha || undefined}
+            ayuda="Déjelo vacío si no vence. Avisa desde 30 días antes."
+          />
+        )}
+        <Campo etiqueta="Proveedor o tercero" valor={proveedor} onChange={setProveedor} ayuda="Opcional. Sirve para buscarlo después." />
+        <Campo etiqueta="Descripción" valor={descripcion} onChange={setDescripcion} multilinea compacto />
+      </Formulario>
       {error ? <Aviso tono="error">{error}</Aviso> : falta ? <Text style={estilos.apoyo}>{falta}</Text> : null}
       <AccionesFormulario>
         <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />

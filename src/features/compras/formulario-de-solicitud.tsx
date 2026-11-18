@@ -23,7 +23,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { FuentePanel, Grosor, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { useAvisos } from '@/features/panel/avisos';
 import { elegirArchivo } from '@/features/contratos/elegir-archivo';
 import { api, mensajeDe, type LugarDeLasSolicitudes } from '@/features/panel/cliente-api';
 import type { LugarDeRequisiciones, OpcionesParaImputar } from '@/features/panel/requisiciones';
@@ -39,7 +40,9 @@ import {
   Boton,
   Campo,
   CampoDeFecha,
+  ANCHOS_DE_CAMPO,
   Casilla,
+  Formulario,
   Modal,
   Selector,
 } from '@/features/panel/componentes';
@@ -145,6 +148,8 @@ export function FormularioDeSolicitud({
   const [adjuntos, setAdjuntos] = useState<{ archivo: File; clase: string | null }[]>([]);
   const [intentado, setIntentado] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
+  const avisos = useAvisos();
   const [enviando, setEnviando] = useState(false);
 
   // Spec 048: las opciones para imputar de la obra, con sus cifras si se ven (RF-6, RF-9).
@@ -267,7 +272,7 @@ export function FormularioDeSolicitud({
         guardada = await api.compras.crear(lugar, datos);
       }
     } catch (fallo) {
-      setError(mensajeDe(fallo));
+      avisos.error(mensajeDe(fallo));
       setEnviando(false);
       return;
     }
@@ -301,74 +306,87 @@ export function FormularioDeSolicitud({
       {renglones.map((r, i) => {
         const f = faltas.porRenglon[i];
         return (
+          // Spec 050, RF-22, RF-23: cada renglón es una tarjeta con su cabecera y sus campos en dos
+          // filas alineadas. Antes era una sola fila con ocho anchos escritos a mano que, al
+          // partirse, dejaba cada etiqueta a una altura distinta.
           <View key={i} style={estilos.renglon}>
-            <Text style={estilos.numero}>{i + 1}</Text>
-            {materiales.length ? (
-              <Selector
-                etiqueta="Del catálogo del Almacén"
-                valor={r.materialId}
-                opciones={materiales.map((m) => ({ valor: m.id, etiqueta: m.nombre, detalle: abreviaturaDeUnidad(m.unidad) }))}
-                onChange={(id) => elegirMaterial(i, id)}
-                permiteVacio
-                vacio="Escribirlo a mano"
-                ancho={220}
-              />
-            ) : null}
-            <Campo
-              etiqueta="Qué se necesita"
-              obligatorio
-              valor={r.descripcion}
-              onChange={(v) => cambiarRenglon(i, { descripcion: v, materialId: null })}
-              // Junto al campo basta lo corto: «del renglón 2» ya lo dice la fila.
-              error={ver(f?.descripcion ? 'Diga qué se necesita.' : null)}
-              ancho={280}
-            />
-            <Campo
-              etiqueta="Cantidad"
-              obligatorio
-              valor={r.cantidad}
-              onChange={(v) => cambiarRenglon(i, { cantidad: v })}
-              error={ver(f?.cantidad ? 'Mayor que cero.' : null)}
-              ancho={130}
-            />
-            <Campo
-              etiqueta="Unidad"
-              obligatorio
-              valor={r.unidad}
-              onChange={(v) => cambiarRenglon(i, { unidad: v, materialId: null })}
-              error={ver(f?.unidad ? 'Falta la unidad.' : null)}
-              ayuda={i === 0 ? 'Bulto, kg, m3, caja, u…' : undefined}
-              ancho={130}
-            />
-            {requisicion ? (
-              <>
-                <CampoDeFecha
-                  etiqueta="Para cuándo *"
-                  valor={r.necesitaEl}
-                  onChange={(v) => cambiarRenglon(i, { necesitaEl: v })}
-                  min={fechaDeJornada()}
-                  error={ver(f?.necesitaEl ? (r.necesitaEl ? 'No puede ser antes de hoy.' : 'Diga para cuándo.') : null)}
+            <View style={estilos.cabeceraDelRenglon}>
+              <Text style={estilos.numero}>Renglón {i + 1}</Text>
+              {renglones.length > 1 ? (
+                <Boton titulo="Quitar" tono="secundario" onPress={() => setRenglones((todos) => todos.filter((_, j) => j !== i))} />
+              ) : null}
+            </View>
+            <Formulario desnudo>
+              {materiales.length ? (
+                <Selector
+                  etiqueta="Del catálogo del Almacén"
+                  valor={r.materialId}
+                  opciones={materiales.map((m) => ({ valor: m.id, etiqueta: m.nombre, detalle: abreviaturaDeUnidad(m.unidad) }))}
+                  onChange={(id) => elegirMaterial(i, id)}
+                  permiteVacio
+                  vacio="Escribirlo a mano"
+                  ancho={ANCHOS_DE_CAMPO.medio}
                 />
-                <Campo
-                  etiqueta="Para qué"
-                  obligatorio
-                  valor={r.paraQue}
-                  onChange={(v) => cambiarRenglon(i, { paraQue: v })}
-                  error={ver(f?.paraQue ? 'Diga para qué.' : null)}
-                  ayuda={i === 0 ? 'Por ejemplo: andenes del K2.' : undefined}
-                  ancho={240}
-                />
-              </>
-            ) : null}
-            {deObra && conValores ? (
+              ) : null}
               <Campo
-                etiqueta="Valor estimado (pesos)"
+                etiqueta="Qué se necesita"
                 obligatorio
-                valor={r.valorEstimado}
-                onChange={(v) => cambiarRenglon(i, { valorEstimado: v })}
-                error={ver(f?.valorEstimado ? 'En pesos, mayor que cero.' : null)}
-                ancho={180}
+                valor={r.descripcion}
+                onChange={(v) => cambiarRenglon(i, { descripcion: v, materialId: null })}
+                // Junto al campo basta lo corto: «del renglón 2» ya lo dice la fila.
+                error={ver(f?.descripcion ? 'Diga qué se necesita.' : null)}
               />
+              <Campo
+                etiqueta="Cantidad"
+                obligatorio
+                valor={r.cantidad}
+                onChange={(v) => cambiarRenglon(i, { cantidad: v })}
+                error={ver(f?.cantidad ? 'Mayor que cero.' : null)}
+                ancho={ANCHOS_DE_CAMPO.corto}
+              />
+              <Campo
+                etiqueta="Unidad"
+                obligatorio
+                valor={r.unidad}
+                onChange={(v) => cambiarRenglon(i, { unidad: v, materialId: null })}
+                error={ver(f?.unidad ? 'Falta la unidad.' : null)}
+                ayuda={i === 0 ? 'Bulto, kg, m3, caja, u…' : undefined}
+                ancho={ANCHOS_DE_CAMPO.corto}
+              />
+            </Formulario>
+            {requisicion || (deObra && conValores) ? (
+              <Formulario desnudo>
+                {requisicion ? (
+                  <>
+                    <CampoDeFecha
+                      etiqueta="Para cuándo"
+                      obligatorio
+                      valor={r.necesitaEl}
+                      onChange={(v) => cambiarRenglon(i, { necesitaEl: v })}
+                      min={fechaDeJornada()}
+                      error={ver(f?.necesitaEl ? (r.necesitaEl ? 'No puede ser antes de hoy.' : 'Diga para cuándo.') : null)}
+                    />
+                    <Campo
+                      etiqueta="Para qué"
+                      obligatorio
+                      valor={r.paraQue}
+                      onChange={(v) => cambiarRenglon(i, { paraQue: v })}
+                      error={ver(f?.paraQue ? 'Diga para qué.' : null)}
+                      ayuda={i === 0 ? 'Por ejemplo: andenes del K2.' : undefined}
+                    />
+                  </>
+                ) : null}
+                {deObra && conValores ? (
+                  <Campo
+                    etiqueta="Valor estimado (pesos)"
+                    obligatorio
+                    valor={r.valorEstimado}
+                    onChange={(v) => cambiarRenglon(i, { valorEstimado: v })}
+                    error={ver(f?.valorEstimado ? 'En pesos, mayor que cero.' : null)}
+                    ancho={ANCHOS_DE_CAMPO.medio}
+                  />
+                ) : null}
+              </Formulario>
             ) : null}
             {deObra ? (
               <View style={estilos.imputacion}>
@@ -382,9 +400,6 @@ export function FormularioDeSolicitud({
                 />
               </View>
             ) : null}
-            {renglones.length > 1 ? (
-              <Boton titulo="Quitar" tono="secundario" onPress={() => setRenglones((todos) => todos.filter((_, j) => j !== i))} />
-            ) : null}
           </View>
         );
       })}
@@ -397,7 +412,8 @@ export function FormularioDeSolicitud({
       <View style={estilos.fila}>
         {requisicion ? null : (
           <CampoDeFecha
-            etiqueta="Para cuándo *"
+            etiqueta="Para cuándo"
+            obligatorio
             valor={paraCuando}
             onChange={setParaCuando}
             min={fechaDeJornada()}
@@ -480,13 +496,22 @@ const estilos = StyleSheet.create({
     color: Panel.texto,
     marginTop: Spacing.two,
   },
-  renglon: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.two },
-  numero: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.textoApoyo, paddingBottom: Spacing.two },
+  /** Un renglón, como tarjeta dentro de la ventana (spec 050, RF-22). */
+  renglon: {
+    gap: Spacing.two + Spacing.one,
+    padding: Spacing.three,
+    borderWidth: Grosor.linea,
+    borderColor: Panel.bordeSuave,
+    borderRadius: Radio.md,
+    backgroundColor: Panel.fondo,
+  },
+  cabeceraDelRenglon: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  numero: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, fontWeight: '700', color: Panel.texto },
   fila: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: Spacing.two },
   casilla: { paddingBottom: Spacing.two },
   inicio: { gap: Spacing.one, alignItems: 'flex-start' },
   // La imputación ocupa su propia línea dentro del renglón: el selector y sus cifras son anchos.
-  imputacion: { flexBasis: '100%', paddingLeft: Spacing.three },
+  imputacion: { width: '100%' },
   archivo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto, minWidth: 200, paddingBottom: Spacing.two },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
 });

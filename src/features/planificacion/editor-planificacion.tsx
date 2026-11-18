@@ -332,7 +332,7 @@ export function EditorPlanificacion({
 
       {pestana === 'items' ? (
         <Seccion titulo="Ítems">
-          <Tabla filas={filas} columnas={columnas} vacio="Este borrador no tiene ítems." />
+          <Tabla tipo="cuadricula" filas={filas} columnas={columnas} vacio="Este borrador no tiene ítems." />
         </Seccion>
       ) : null}
 
@@ -404,7 +404,7 @@ export function EditorPlanificacion({
 
       {pestana === 'rubros' ? (
         <Seccion titulo="Rubros">
-          <Tabla filas={filasDeRubros} columnas={columnasDeRubros} vacio="Este borrador no tiene rubros." />
+          <Tabla tipo="cuadricula" filas={filasDeRubros} columnas={columnasDeRubros} vacio="Este borrador no tiene rubros." />
         </Seccion>
       ) : null}
 

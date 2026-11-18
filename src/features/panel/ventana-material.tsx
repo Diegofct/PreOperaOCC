@@ -53,7 +53,7 @@ export function VentanaCorregirMaterial({
    * se quedaban aquí —`nombre` y `unidad`— y cualquier otro se iba al aviso de la
    * página, detrás del telón; ahora el hook los trata todos igual.
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
 
   // Con movimientos, la regla ya sabe que cualquier otra unidad se rechaza; se
   // le pregunta por una unidad distinta cualquiera para obtener su texto.

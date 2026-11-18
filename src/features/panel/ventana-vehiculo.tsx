@@ -68,7 +68,7 @@ export function VentanaCorregirVehiculo({
    * `ErrorApi.campos` a mano; ahora lo hace el hook para todos los
    * campos, que es lo mismo sin tener que acordarse en cada ventana.
    */
-  const accion = useAccionDeVentana();
+  const accion = useAccionDeVentana({ conCampos: true });
 
   // Spec 032, RF-9: la placa no se puede borrar; sin placa, la serie.
   const faltaPlaca = placa.trim().length === 0;
