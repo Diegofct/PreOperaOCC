@@ -7,9 +7,13 @@
  *    pidió la respuesta y cuándo se generó el PDF (RF-25);
  *  · la pregunta, la respuesta tal como se dio —sin volver a consultar nada (RF-27)— y
  *    sus fuentes;
- *  · la leyenda de RF-26.
+ *  · la leyenda de RF-26;
+ *  · desde la spec 049, el título «Asistente · Kontrola» (RF-32) y la línea de Kontrola al pie
+ *    de cada página (RF-48).
  */
 import type { MensajeDelAsistente } from '@/features/panel/contratos';
+import { PIE_PARA_IMPRIMIR } from '@/features/panel/pie-para-imprimir';
+import { MARCA } from '@/shared/catalogos/marca';
 import { LEYENDA_DEL_ARCHIVO } from '@/shared/rules/archivos-del-asistente';
 
 import { bloquesDe } from './markdown';
@@ -98,11 +102,11 @@ export function paginaDeLaRespuesta(datos: {
   thead { display: table-header-group; }
   .leyenda { margin-top: 18px; padding-top: 8px; border-top: 1px solid #ccc; color: #555; font-style: italic; }
   .acciones { margin-bottom: 12px; }
-  @media print { .acciones { display: none; } }
+  @media print { .acciones { display: none; } }${PIE_PARA_IMPRIMIR.css}
 </style></head>
 <body>
 <div class="acciones"><button onclick="window.print()">Imprimir o guardar como PDF</button></div>
-<h1>Asistente · Control de Obra OCC</h1>
+<h1>Asistente · ${MARCA.sistema}</h1>
 <dl class="datos">
   <dt>Obra</dt><dd>${escapar(obra)}</dd>
   <dt>Periodo</dt><dd>${escapar(periodo)}</dd>
@@ -116,5 +120,6 @@ export function paginaDeLaRespuesta(datos: {
 ${respuestaEnHtml(datos.respuesta.texto)}
 ${fuentes}
 <p class="leyenda">${escapar(LEYENDA_DEL_PDF)}</p>
+${PIE_PARA_IMPRIMIR.html}
 </body></html>`;
 }

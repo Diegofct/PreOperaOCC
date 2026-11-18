@@ -12,6 +12,7 @@
 import ExcelJS from 'exceljs';
 import { eq } from 'drizzle-orm';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras } from '@/db/servidor/esquema';
 import { textoDelPeriodo } from '@/features/reportes/exportar';
@@ -44,8 +45,8 @@ export async function excelDelPlan(sesion: PersonaEnSesion, plan: FilaDelPlan): 
   const subtitulo = `${semana} · ${ESTADO[plan.estado]} · generado el ${generado}`;
 
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'Control de Obra OCC';
   const vehiculos = new Map(flota.map((v) => [v.id, v.codigo]));
   for (const hoja of hojasDelPlan(detalle.vista, vehiculos)) escribirHoja(libro, hoja, titulo, subtitulo);
+  marcarLibro(libro);
   return { archivo: (await libro.xlsx.writeBuffer()) as ArrayBuffer, nombre: nombreDelPlan(obra?.codigo ?? 'obra', plan.semana) };
 }

@@ -23,6 +23,7 @@ import { and, eq, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import ExcelJS from 'exceljs';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 import { baseServidor } from '@/db/servidor/cliente';
 import { almacenMateriales, almacenMovimientos, obras, usuarios } from '@/db/servidor/esquema';
 import { filtroDeModulo, filtroDeObra, veTodasLasObras } from '@/features/servidor/alcance';
@@ -167,10 +168,10 @@ export async function libroDelAlmacen(
   );
 
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'PreOperaOCC';
   escribirHoja(libro, 'Movimientos', hojas.movimientos);
   escribirHoja(libro, 'Existencias', hojas.existencias);
 
+  marcarLibro(libro);
   return {
     archivo: await libro.xlsx.writeBuffer(),
     nombre: nombreDelArchivo(obra?.codigo ?? null, fechaDeJornada()),

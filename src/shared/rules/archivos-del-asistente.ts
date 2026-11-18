@@ -15,6 +15,8 @@
  * Una columna de números va como números, y el que la escribe le da formato de pesos, entero o
  * decimal; una de fechas `AAAA-MM-DD`, como fecha. Así se suman y se filtran en Excel.
  */
+import { MARCA } from '@/shared/catalogos/marca';
+
 import { FORMATOS_DE_ARCHIVO, type FormatoDeArchivo, type FuenteDeRespuesta } from './asistente';
 import { plazoEnDias } from './contrato';
 import { fechaDelCorte } from './cortes';
@@ -240,7 +242,7 @@ export function encabezadoDelArchivo(datos: { quien: string; generadoEn: string;
       }),
     ),
   ];
-  return { grupo: 'Grupo OCC · Control de Obra', pedidoPor: datos.quien, generado: fechaYHora(datos.generadoEn), fuentes };
+  return { grupo: MARCA.encabezado, pedidoPor: datos.quien, generado: fechaYHora(datos.generadoEn), fuentes };
 }
 
 /** D7: el último día en que se descarga, en Colombia: el mismo día de generado más 30. */

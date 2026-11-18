@@ -2,16 +2,18 @@
  * La tarjeta de las pantallas de acceso: ingresar y cambiar la contraseña.
  * Spec 022, RF-29 a RF-31.
  *
- * Una tarjeta blanca centrada sobre el crema, con el logo de OCC arriba, como el
+ * Una tarjeta blanca centrada sobre el crema, con la marca arriba, como el
  * ingreso de egg.live. Vive aparte porque la usan las dos pantallas y la spec pide
  * que se vean iguales (RF-31): dos copias acabarían separándose.
  *
  * Aquí no hay barra ni menú —todavía no hay sesión, o la contraseña temporal no
- * deja pasar—, así que la marca la lleva la tarjeta. El logo va sobre blanco, que
- * es para lo que está dibujado.
+ * deja pasar—, así que la marca la lleva la tarjeta.
+ *
+ * Desde la spec 049 la marca es la del Grupo HS con Kontrola (RF-5 a RF-9), no el logo de
+ * OCC: el sistema es de todo el grupo. La dibuja `LogotipoGrupo`.
  */
 import type { ReactNode } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
   EspaciadoLetra,
@@ -23,6 +25,8 @@ import {
   Spacing,
   TextoPanel,
 } from '@/constants/theme';
+
+import { LogotipoGrupo } from './logotipo-grupo';
 
 export function TarjetaDeAcceso({
   titulo,
@@ -39,15 +43,7 @@ export function TarjetaDeAcceso({
     // de llegar al botón. Con `flexGrow` sigue centrada cuando cabe.
     <ScrollView style={estilos.pantalla} contentContainerStyle={estilos.centro}>
       <View style={estilos.tarjeta}>
-        <View style={estilos.marca}>
-          <Image
-            source={require('@/../assets/obras_civiles_transparente.png')}
-            style={estilos.logotipo}
-            resizeMode="contain"
-            accessibilityLabel="Obras Civiles Colombianas"
-          />
-          <Text style={estilos.sistema}>Control de Obra</Text>
-        </View>
+        <LogotipoGrupo variante="tarjeta" />
 
         <View style={estilos.encabezado}>
           <Text style={estilos.titulo} accessibilityRole="header">
@@ -92,17 +88,6 @@ const estilos = StyleSheet.create({
     backgroundColor: Panel.superficie,
     // Sutil: la tarjeta se apoya en el crema, no flota sobre nada.
     boxShadow: Sombra.elevada,
-  },
-  marca: { alignItems: 'center', gap: Spacing.two },
-  // A la proporción del dibujo (1,8 : 1), como en la barra superior.
-  logotipo: { width: 116, height: 64 },
-  sistema: {
-    fontFamily: FuentePanel.rotulo,
-    fontSize: TextoPanel.micro,
-    fontWeight: '500',
-    letterSpacing: EspaciadoLetra.rotulo,
-    textTransform: 'uppercase',
-    color: Panel.textoApoyo,
   },
   encabezado: { gap: Spacing.one, alignItems: 'center' },
   titulo: {

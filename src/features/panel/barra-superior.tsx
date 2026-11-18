@@ -7,17 +7,16 @@
  * módulos la barra de antes se partía en dos renglones; esta mide lo mismo con
  * uno que con veinte.
  *
- * Es una píldora grafito separada de los bordes, al estilo de egg.live (RF-15). El
- * logotipo de OCC lleva «OBRAS» en negro, y sobre grafito esa mitad del nombre
- * desaparecería: por eso va sobre su propia pastilla clara, sin tocar el logo
- * (la spec deja el logo fuera de alcance).
+ * Es una píldora grafito separada de los bordes, al estilo de egg.live (RF-15). A la
+ * izquierda va la marca: desde la spec 049, la del Grupo HS con Kontrola (RF-1 a RF-4),
+ * no el logo de OCC, porque el sistema es de todo el grupo. La dibuja `LogotipoGrupo`.
  *
  * A la derecha va quién está dentro y con qué cargo. No es decoración: en un
  * computador compartido de obra, saber con qué cuenta se está trabajando evita
  * que alguien registre algo a nombre de otro sin darse cuenta.
  */
 import { useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   EspaciadoLetra,
@@ -33,6 +32,7 @@ import {
 import { ETIQUETA_ROL } from './contratos';
 import { useMenu } from './estado-menu';
 import { Icono, type NombreDeIcono } from './iconos';
+import { LogotipoGrupo } from './logotipo-grupo';
 import { useSesionPanel } from './sesion';
 
 export function BarraSuperior() {
@@ -56,19 +56,7 @@ export function BarraSuperior() {
               <Text style={estilos.botonMenuTexto}>☰</Text>
             </Pressable>
           ) : null}
-          <View style={estilos.fondoLogotipo}>
-            <Image
-              source={require('@/../assets/obras_civiles_transparente.png')}
-              style={estilos.logotipo}
-              resizeMode="contain"
-              accessibilityLabel="Obras Civiles Colombianas"
-            />
-          </View>
-          {celular ? null : (
-            <Text style={estilos.nombreSistema} numberOfLines={1}>
-              Control de Obra
-            </Text>
-          )}
+          <LogotipoGrupo variante="barra" compacto={celular} />
         </View>
 
         <View style={estilos.cuenta}>
@@ -169,22 +157,6 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
     flexShrink: 1,
-  },
-  /** La pastilla clara del logotipo: sobre grafito, «OBRAS» no se vería. */
-  fondoLogotipo: {
-    paddingHorizontal: Spacing.three,
-    paddingVertical: 0,
-    borderRadius: Radio.pastilla,
-    backgroundColor: Panel.superficie,
-  },
-  // A la proporción del dibujo (1,8 : 1), para que `contain` no deje aire a los lados.
-  logotipo: { width: 80, height: 44 },
-  nombreSistema: {
-    fontFamily: FuentePanel.texto,
-    fontSize: TextoPanel.seccion,
-    fontWeight: '700',
-    letterSpacing: EspaciadoLetra.titulo / 2,
-    color: Panel.textoBarra,
   },
 
   cuenta: {

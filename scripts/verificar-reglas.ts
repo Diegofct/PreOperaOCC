@@ -8,8 +8,12 @@
  * no se pueda enviar un formato incompleto, y que los medidores no retrocedan.
  */
 import assert from 'node:assert/strict';
+import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { inflateSync } from 'node:zlib';
+import { PDFDocument, PDFRawStream } from 'pdf-lib';
 
 import {
   generarClaveTemporal,
@@ -575,6 +579,7 @@ import {
   reparoDelAccesoSinObra,
   reparoDeObrasDelAcceso,
   empresaDelLugar,
+  cabeceraDelMenu,
   lugarDeLaRuta,
   menuDeEmpresa,
   menuDelLugar,
@@ -771,6 +776,11 @@ import {
   type ItemLeidoPorIa,
 } from '../src/shared/rules/formulario-presupuesto-ia';
 import { hojasDelLibro } from '../src/features/presupuestos/servidor/leer-excel';
+import { marcarLibro } from '../src/features/servidor/marca-de-archivos';
+import { pdfDelAsistente } from '../src/features/asistente/servidor/archivos/pdf';
+import { wordDelAsistente } from '../src/features/asistente/servidor/archivos/word';
+import { PIE_PARA_IMPRIMIR } from '../src/features/panel/pie-para-imprimir';
+import { iconoDeLaPestana } from '../src/features/panel/icono-de-la-pestana';
 import {
   actividadDelCatalogo,
   buscarActividad,
@@ -791,6 +801,7 @@ import {
   regimenDelMenu,
 } from '../src/shared/rules/menu';
 import { moduloDeLaRuta, tituloDeLaPestana } from '../src/features/panel/modulos';
+import { MARCA, tituloConSistema } from '../src/shared/catalogos/marca';
 import {
   CLAVE_PREFERENCIA_MENU,
   guardarPreferencia,
@@ -3301,20 +3312,21 @@ prueba('una foto solo la ve quien alcanza la obra de su registro (defecto de med
 prueba('la pestaña dice en qué pantalla se está (defecto de títulos, 2026-10-06)', () => {
   // Expo Router 57 no copia el título del `Stack` a la pestaña (`documentTitle` va
   // apagado), así que los títulos declarados nunca se veían. Ahora salen de la ruta.
-  assert.equal(tituloDeLaPestana('/panel'), 'Control de Obra OCC');
-  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Control de Obra OCC');
-  assert.equal(tituloDeLaPestana('/panel/whatsapp'), 'Reportes de WhatsApp · Control de Obra OCC');
-  assert.equal(tituloDeLaPestana('/panel/cantera'), 'Control Cantera · Control de Obra OCC');
+  // Desde la spec 049 el sistema se llama Kontrola (RF-10).
+  assert.equal(tituloDeLaPestana('/panel'), 'Kontrola');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Kontrola');
+  assert.equal(tituloDeLaPestana('/panel/whatsapp'), 'Reportes de WhatsApp · Kontrola');
+  assert.equal(tituloDeLaPestana('/panel/cantera'), 'Control Cantera · Kontrola');
   assert.equal(
     tituloDeLaPestana('/panel/laboratorio/abc'),
-    'Ensayo de granulometría · Control de Obra OCC',
+    'Ensayo de granulometría · Kontrola',
   );
   assert.equal(
     tituloDeLaPestana('/panel/laboratorio/abc/informe'),
-    'Informe de granulometría · Control de Obra OCC',
+    'Informe de granulometría · Kontrola',
   );
   // Una ruta que no es de ningún módulo queda con el nombre del sistema.
-  assert.equal(tituloDeLaPestana('/panel/desconocido'), 'Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/desconocido'), 'Kontrola');
 });
 
 prueba('cada rol entra por su módulo', () => {
@@ -11245,6 +11257,78 @@ async function verificarFormulario() {
     assert.equal(leido.cuadra, true);
   });
 
+  await pruebaAsync('049/RF-30, RF-48: el PDF y el Word del Asistente llevan a Kontrola de autor y el pie en cada página', async () => {
+    // 150 filas: más de una página en los dos, para ver que el pie se repite.
+    const contenido = {
+      titulo: 'Prueba de la marca',
+      encabezado: encabezadoDelArchivo({ quien: 'Ana Pérez', generadoEn: '2026-11-18T14:00:00.000Z', fuentes: [] }),
+      bloques: [{ tipo: 'tabla' as const, tabla: aTabla('Filas', Array.from({ length: 150 }, (_, i) => `fila ${i}`)) }],
+    };
+
+    // Sin `updateMetadata: false`, pdf-lib pone su propio nombre de productor al abrirlo.
+    const pdf = await PDFDocument.load(await pdfDelAsistente(contenido), { updateMetadata: false });
+    assert.equal(pdf.getAuthor(), 'Kontrola · Grupo HS');
+    assert.equal(pdf.getCreator(), 'Kontrola · Grupo HS');
+    assert.equal(pdf.getProducer(), 'Kontrola · Grupo HS');
+    assert.ok(pdf.getPageCount() > 1);
+    // Helvetica escribe cada texto como bytes WinAnsi en hexadecimal, dentro de flujos comprimidos.
+    const pieEnHex = Buffer.from(textoParaPdf('Generado con Kontrola · Grupo HS'), 'latin1').toString('hex');
+    let pies = 0;
+    for (const [, objeto] of pdf.context.enumerateIndirectObjects()) {
+      if (!(objeto instanceof PDFRawStream)) continue;
+      let texto: string;
+      try {
+        texto = inflateSync(objeto.contents).toString('latin1').toLowerCase();
+      } catch {
+        continue;
+      }
+      pies += texto.split(pieEnHex).length - 1;
+    }
+    assert.equal(pies, pdf.getPageCount());
+
+    const word = await JSZip.loadAsync(await wordDelAsistente(contenido));
+    const leer = (ruta: string) => word.file(ruta)?.async('string') ?? Promise.resolve('');
+    assert.match(await leer('docProps/core.xml'), /<dc:creator>Kontrola · Grupo HS<\/dc:creator>/);
+    assert.match(await leer('docProps/core.xml'), /<cp:lastModifiedBy>Kontrola · Grupo HS<\/cp:lastModifiedBy>/);
+    assert.match(await leer('word/footer1.xml'), /Generado con Kontrola · Grupo HS/);
+    // El pie de Word se repite solo en cada página si la sección lo referencia.
+    assert.match(await leer('word/document.xml'), /<w:sectPr><w:footerReference w:type="default" r:id="rIdPie"\/>/);
+    assert.match(await leer('word/_rels/document.xml.rels'), /Id="rIdPie"[^>]*Target="footer1.xml"/);
+    assert.match(await leer('[Content_Types].xml'), /PartName="\/word\/footer1.xml"/);
+    assert.match(await leer('[Content_Types].xml'), /PartName="\/docProps\/core.xml"/);
+    assert.match(await leer('_rels/.rels'), /Target="docProps\/core.xml"/);
+  });
+
+  await pruebaAsync('049/RF-30, RF-46, RF-47: el Excel lleva la marca en el pie de página, nunca en una celda', async () => {
+    const libro = new ExcelJS.Workbook();
+    for (const nombre of ['Resumen', 'Detalle']) {
+      const hoja = libro.addWorksheet(nombre);
+      hoja.addRow(['Ítem', 'Valor']);
+      hoja.addRow(['Excavación', 1000]);
+      hoja.addRow(['Relleno', 2000]);
+    }
+    marcarLibro(libro);
+    assert.equal(libro.creator, 'Kontrola · Grupo HS');
+    for (const hoja of libro.worksheets) {
+      assert.equal(hoja.headerFooter.oddFooter, '&CGenerado con Kontrola · Grupo HS');
+      assert.equal(hoja.headerFooter.evenFooter, '&CGenerado con Kontrola · Grupo HS');
+    }
+    // Escrito y vuelto a leer con el mismo lector de las importaciones (RF-47): las mismas
+    // tres filas y ninguna celda con la marca.
+    const escrito = await libro.xlsx.writeBuffer();
+    const bytes = new Uint8Array(escrito as ArrayBuffer);
+    const hojas = await hojasDelLibro(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    assert.equal(hojas.length, 2);
+    for (const filas of hojas) {
+      assert.equal(filas.length, 3);
+      assert.ok(!JSON.stringify(filas).includes('Kontrola'));
+    }
+    const releido = new ExcelJS.Workbook();
+    await releido.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    assert.equal(releido.creator, 'Kontrola · Grupo HS');
+    assert.equal(releido.worksheets[1].headerFooter.oddFooter, '&CGenerado con Kontrola · Grupo HS');
+  });
+
   const libro = readFileSync(
     path.join(__dirname, '..', 'docs', 'Planificación CONSORCIO CARTAGENA (V4-CON AJUSTE DEL CANAL Y LA VIA) 26-09-2026.xlsx'),
   );
@@ -12054,6 +12138,23 @@ prueba('033/RF-10, RF-11, RF-18, RF-20: el menú lateral de cada lugar', () => {
   assert.ok(menuDelLugar({ tipo: 'empresa', empresa: 'geolab', pagina: null }, { rol: 'laboratorista', obraId: 'o1' }).entradas.length > 0);
 });
 
+prueba('049: la pestaña dice Kontrola fuera de una empresa y la empresa dentro', () => {
+  // RF-39: «Kontrola» dentro de un texto, «KONTROLA» en los logotipos.
+  assert.equal(MARCA.sistema, 'Kontrola');
+  assert.equal(MARCA.logotipo, 'KONTROLA');
+  assert.equal(MARCA.grupo, 'Grupo HS');
+  // RF-10, RF-12, RF-13: fuera de Elemental, OCC, GeoLab y Proyectos, y sin sesión.
+  assert.equal(tituloConSistema('Ingresar'), 'Ingresar · Kontrola');
+  assert.equal(tituloConSistema('Cambiar contraseña'), 'Cambiar contraseña · Kontrola');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Kontrola');
+  assert.equal(tituloDeLaPestana('/panel'), 'Kontrola');
+  // RF-11: dentro de una empresa, su nombre y no el del sistema.
+  assert.equal(tituloDeLaPestana('/panel/occ/vehiculos'), 'Vehículos · OCC');
+  // RF-43 y RF-50: dentro de una obra y en la lista de obras.
+  assert.equal(tituloDeLaPestana('/panel/proyectos/o1'), 'Resumen del día · Proyectos');
+  assert.equal(tituloDeLaPestana('/panel/proyectos'), 'Proyectos');
+});
+
 prueba('033/RF-48: el título de la pestaña dice el módulo y la empresa', () => {
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/occ/vehiculos')), 'Vehículos · OCC');
   assert.equal(tituloDelLugar(lugarDeLaRuta('/panel/geolab/reportes')), 'Reportes de laboratorio · Geolab');
@@ -12065,7 +12166,7 @@ prueba('033/RF-48: el título de la pestaña dice el módulo y la empresa', () =
   // Tal cual lo pide la spec, sin el nombre del sistema: la empresa ya dice dónde se está.
   assert.equal(tituloDeLaPestana('/panel/occ/vehiculos'), 'Vehículos · OCC');
   // Las de antes, que redirigen, y el ensayo siguen como siempre.
-  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Control de Obra OCC');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Kontrola');
 });
 
 prueba('033/RF-34: lo que se escribe en un campo de pesos', () => {
@@ -12707,6 +12808,202 @@ prueba('040/RF-20, RF-21: una tabla del archivo sale de los datos de la consulta
   assert.deepEqual(aTabla('Sueltos', ['a', 'b']).filas, [['a'], ['b']]);
 });
 
+prueba('049/RF-29, RF-30, RF-33, RF-37: todo Excel que se descarga pasa por la marca', () => {
+  // Un Excel que se escribe (`writeBuffer`) es uno que se descarga; los que solo se leen
+  // (las importaciones) no llevan marca. Cada uno tiene que llamar `marcarLibro`, y nadie
+  // pone su propio autor: así fue como hubo tres nombres distintos.
+  const carpeta = path.join(__dirname, '..', 'src');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+  let libros = 0;
+  for (const ruta of fuentes) {
+    const fuente = readFileSync(path.join(carpeta, ruta), 'utf8');
+    if (/new ExcelJS\.Workbook\(\)/.test(fuente) && /\.xlsx\.writeBuffer\(/.test(fuente)) {
+      libros++;
+      assert.match(fuente, /marcarLibro\(libro\)/, ruta);
+    }
+    if (!ruta.endsWith('marca-de-archivos.ts')) assert.doesNotMatch(fuente, /\.creator\s*=/, ruta);
+  }
+  // Almacén, Asistente, plan semanal, planificación, presupuesto, reportes y requisición de OCC.
+  assert.equal(libros, 7);
+});
+
+prueba('049/RF-32, RF-33, RF-48: las páginas para imprimir llevan la línea de Kontrola en cada página', () => {
+  // La pieza común: en el margen de cada página impresa, con la caja de margen de `@page`, y
+  // en pantalla una sola vez al final (al imprimir se oculta, porque ya va en cada página).
+  assert.match(PIE_PARA_IMPRIMIR.css, /@bottom-center\s*\{\s*content: "Generado con Kontrola · Grupo HS"/);
+  assert.match(PIE_PARA_IMPRIMIR.css, /@media print\s*\{\s*\.pie-kontrola\s*\{\s*display: none/);
+  assert.equal(PIE_PARA_IMPRIMIR.html, '<p class="pie-kontrola">Generado con Kontrola · Grupo HS</p>');
+
+  const hojas = [{ nombre: 'Personal', encabezados: ['Persona'], filas: [['Ana']] }];
+  const reporte = paginaParaImprimir({ titulo: 'Personal · Obra', subtitulo: 'Semana', hojas, esMes: false });
+  assert.ok(reporte.includes(PIE_PARA_IMPRIMIR.css));
+  assert.equal(reporte.split(PIE_PARA_IMPRIMIR.html).length - 1, 1);
+
+  // La del Asistente se lee como texto: su Markdown vive junto a la pantalla y no carga en Node.
+  const asistente = readFileSync('src/features/asistente/imprimir.ts', 'utf8');
+  assert.match(asistente, /<h1>Asistente · \$\{MARCA\.sistema\}<\/h1>/); // RF-32
+  assert.match(asistente, /\$\{PIE_PARA_IMPRIMIR\.css\}/);
+  assert.match(asistente, /\$\{PIE_PARA_IMPRIMIR\.html\}/);
+  assert.doesNotMatch(asistente, /Control de Obra/);
+});
+
+prueba('049/RF-39, RNF: el logotipo del grupo sale del tema y de la marca, nada a mano', () => {
+  const fuente = readFileSync('src/features/panel/logotipo-grupo.tsx', 'utf8');
+  // Ni colores, ni tamaños de letra, ni fuentes, ni textos de marca escritos a mano.
+  assert.doesNotMatch(fuente, /#[0-9a-f]{3,8}\b/i);
+  assert.doesNotMatch(fuente, /rgba?\(/);
+  assert.doesNotMatch(fuente, /fontSize:\s*\d/);
+  assert.doesNotMatch(fuente, /fontFamily:\s*['"]/);
+  assert.doesNotMatch(fuente, /['"]Grupo HS['"]|['"]KONTROLA['"]/);
+  // Las dos variantes del plan: la barra grafito y la tarjeta del ingreso.
+  assert.match(fuente, /variante: 'barra' \| 'tarjeta'/);
+  // Los dos tamaños nuevos viven en el tema (que carga React Native: se lee como texto).
+  const tema = readFileSync('src/constants/theme.ts', 'utf8');
+  const tamano = (nombre: string) => Number(new RegExp(String.raw`\n  ${nombre}: (\d+),`).exec(tema)?.[1]);
+  assert.ok(tamano('logotipo') > tamano('seccion'));
+  assert.ok(tamano('logotipoGrande') > tamano('cifra'));
+});
+
+prueba('049/RF-1 a RF-9: la barra y el ingreso llevan el logotipo del grupo, no el logo de OCC', () => {
+  for (const archivo of ['barra-superior.tsx', 'tarjeta-de-acceso.tsx']) {
+    const fuente = readFileSync(`src/features/panel/${archivo}`, 'utf8');
+    assert.doesNotMatch(fuente, /obras_civiles_transparente/, archivo);
+    assert.doesNotMatch(fuente, /Control de Obra/, archivo);
+    assert.match(fuente, /<LogotipoGrupo variante="(barra|tarjeta)"/, archivo);
+  }
+  // RF-3: en el celular, la barra solo con «Grupo HS».
+  assert.match(readFileSync('src/features/panel/barra-superior.tsx', 'utf8'), /<LogotipoGrupo variante="barra" compacto=\{celular\} \/>/);
+});
+
+prueba('049/RF-14: el ícono de la pestaña es una K amarilla sobre grafito', () => {
+  const icono = iconoDeLaPestana();
+  assert.match(icono, /^data:image\/svg\+xml,/);
+  const svg = decodeURIComponent(icono.slice('data:image/svg+xml,'.length));
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 32 32">/);
+  // El fondo grafito de la barra y la letra en el amarillo de acento.
+  assert.match(svg, /<rect [^>]*fill="#1B1B1B"/);
+  assert.match(svg, /<text [^>]*fill="#FFCD00"[^>]*>K<\/text>/);
+});
+
+prueba('049/RF-16, RF-27, RF-51, RF-52, RF-57: un solo catálogo de logos, con el de cada empresa', () => {
+  // Se lee como texto: un `require` de imagen no carga en Node.
+  const logos = readFileSync('src/features/empresas/logos.ts', 'utf8');
+  const imagenes = [...logos.matchAll(/(\w+): \{ fuente: require\('([^']+)'\)/g)].map((m) => [m[1], m[2]]);
+  // Cambio del 2026-11-18: Elemental y OCC recortados (RF-57); GeoLab tal cual, su fondo es parte del logo.
+  assert.deepEqual(imagenes, [
+    ['elemental', '@/../assets/elemental-recortado.jpg'],
+    ['occ', '@/../assets/occ-recortado.png'],
+    ['geolab', '@/../assets/logo-geolab.jpeg'],
+  ]);
+  // RF-19: Proyectos va con ícono, sin imagen.
+  assert.match(logos, /\bproyectos: null/);
+  for (const [, archivo] of imagenes) assert.ok(readdirSync('assets').includes(archivo.replace('@/../assets/', '')), archivo);
+
+  // La marca de empresa lee ese catálogo y el tema: nada a mano.
+  const marca = readFileSync('src/features/empresas/marca-de-empresa.tsx', 'utf8');
+  assert.match(marca, /logoDeEmpresa\(/);
+  assert.match(marca, /resizeMode="contain"/); // RNF: sin deformarse
+  assert.match(marca, /CajaDeLogo\[tamano\]/);
+  assert.doesNotMatch(marca, /require\(/);
+  assert.doesNotMatch(marca, /#[0-9a-f]{3,8}\b/i);
+  assert.doesNotMatch(marca, /fontSize:\s*\d/);
+});
+
+prueba('049/RF-15 a RF-20: cada card de empresa lleva su marca encima, con lo de siempre debajo', () => {
+  const fuente = readFileSync('src/features/empresas/pantalla-empresas.tsx', 'utf8');
+  assert.match(fuente, /<MarcaDeEmpresa empresa=\{empresa\.id\} tamano="card" \/>/);
+  // Sin logo, el nombre ya va como logotipo: no se repite debajo.
+  assert.match(fuente, /logoDeEmpresa\(empresa\.id\) \|\| empresa\.id === 'proyectos'/);
+  // RF-20: la función, el saldo o «sin información» y las obras activas siguen ahí.
+  for (const parte of ['empresa.funcion', 'SIN_INFORMACION_FINANCIERA', 'obrasActivas']) assert.ok(fuente.includes(parte), parte);
+});
+
+prueba('049/RF-21 a RF-26, RF-44: la cabecera del menú dice dónde se está, con la marca de la empresa', () => {
+  // RF-26: Gerencia en la portada de las empresas.
+  assert.deepEqual(cabeceraDelMenu(null, null), { marca: null, titulo: 'Empresas' });
+  // RF-21, RF-22: dentro de una empresa, su marca; el nombre lo lleva la marca (logo o logotipo).
+  assert.deepEqual(cabeceraDelMenu(lugarDeLaRuta('/panel/occ/vehiculos'), null), { marca: 'occ', titulo: null });
+  assert.deepEqual(cabeceraDelMenu(lugarDeLaRuta('/panel/elemental'), null), { marca: 'elemental', titulo: null });
+  // RF-44: la lista de obras, el ícono de Proyectos y «Proyectos».
+  assert.deepEqual(cabeceraDelMenu(lugarDeLaRuta('/panel/proyectos'), null), { marca: 'proyectos', titulo: 'Proyectos' });
+  // RF-23, RF-24: dentro de una obra, el ícono y el nombre de la obra; mientras carga, «…».
+  assert.deepEqual(cabeceraDelMenu(lugarDeLaRuta('/panel/proyectos/o1'), 'CONSORCIO MAGDALENA 787'), {
+    marca: 'proyectos',
+    titulo: 'CONSORCIO MAGDALENA 787',
+  });
+  assert.deepEqual(cabeceraDelMenu(lugarDeLaRuta('/panel/proyectos/o1/bitacoras'), null), { marca: 'proyectos', titulo: '…' });
+
+  // RF-25, RF-42: el menú pinta la marca abierto y plegado, y el nombre en hasta dos líneas.
+  const menu = readFileSync('src/features/panel/menu-lateral.tsx', 'utf8');
+  assert.match(menu, /<MarcaDeEmpresa empresa=\{bloque\.marca\} tamano="menu" \/>/);
+  assert.match(menu, /<MarcaDeEmpresa empresa=\{bloque\.marca\} tamano="menuPlegado" \/>/);
+  assert.match(menu, /<Text style=\{estilos\.tituloGrupo\} numberOfLines=\{2\}>/);
+});
+
+prueba('049/RF-36, RF-37, RF-41: ningún texto del panel ni de lo que genera nombra el sistema como antes', () => {
+  const carpeta = path.join(__dirname, '..', 'src');
+  const fuentes = (readdirSync(carpeta, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
+  // RF-41: la app del operador sigue como «PreOpera OCC»; no entra al barrido.
+  const delOperador = (ruta: string) => /(^|[\\/])(operador|\(operador\))[\\/]/.test(ruta);
+  // Con mayúsculas a propósito: «preoperaocc» es el identificador interno (la base del celular,
+  // las claves del navegador), fuera de alcance; y «el grupo de OCC» en WhatsApp es la empresa (RF-38).
+  const viejos = /Control de Obra|PreOpera ?OCC|Grupo OCC/;
+  const hallados: string[] = [];
+  for (const ruta of fuentes) {
+    if (delOperador(ruta)) continue;
+    // Sin comentarios: ahí se cuenta la historia de por qué cambió el nombre.
+    const codigo = readFileSync(path.join(carpeta, ruta), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    if (viejos.test(codigo)) hallados.push(ruta);
+  }
+  assert.deepEqual(hallados, []);
+  // La app del operador no cambia de nombre.
+  assert.match(readFileSync(path.join(carpeta, 'features', 'operador', 'layout-operador.tsx'), 'utf8'), /title: 'PreOpera OCC'/);
+});
+
+prueba('049/RF-19, RF-53: Proyectos tiene un ícono propio, el mismo en la card, el menú y «Cambiar de obra»', () => {
+  const iconos = readFileSync('src/features/panel/iconos.tsx', 'utf8');
+  assert.match(iconos, /\| 'proyectos'/);
+  assert.match(iconos, /\n {2}proyectos: \(/);
+  // La card y la cabecera del menú pintan Proyectos con `MarcaDeEmpresa`, que usa ese dibujo.
+  assert.match(readFileSync('src/features/empresas/marca-de-empresa.tsx', 'utf8'), /<Icono nombre="proyectos"/);
+  const menu = readFileSync('src/features/panel/menu-lateral.tsx', 'utf8');
+  assert.match(menu, /'cambiar-obra': 'proyectos'/);
+  assert.match(menu, /\n {2}proyectos: 'proyectos'/);
+});
+
+prueba('049/RF-52, RF-54 a RF-56: las cards centran la marca en una franja pareja, sin agrandar ningún logo', () => {
+  const cards = readFileSync('src/features/empresas/pantalla-empresas.tsx', 'utf8');
+  // RF-55: la misma franja en las cuatro, para que los nombres empiecen a la misma altura.
+  assert.match(cards, /franjaDeMarca: \{[^}]*height: CajaDeLogo\.card\.alto/);
+  // RF-54, RF-56: marca, nombre y función centrados.
+  assert.match(cards, /franjaDeMarca: \{[^}]*alignItems: 'center'/);
+  for (const estilo of ['nombre', 'funcion']) assert.match(cards, new RegExp(String.raw`\n {2}${estilo}: \{[^}]*textAlign: 'center'`), estilo);
+
+  const marca = readFileSync('src/features/empresas/marca-de-empresa.tsx', 'utf8');
+  // RF-52, D17: el logo cabe en su caja y nunca pasa de su tamaño de archivo, que da el catálogo.
+  assert.match(marca, /Math\.min\(1, caja\.ancho \/ logo\.ancho, caja\.alto \/ logo\.alto\)/);
+  const logos = readFileSync('src/features/empresas/logos.ts', 'utf8');
+  for (const [archivo, ancho, alto] of [['elemental-recortado.jpg', 1200, 424], ['occ-recortado.png', 1200, 675], ['logo-geolab.jpeg', 85, 84]] as const) {
+    assert.match(logos, new RegExp(String.raw`require\('@/\.\./assets/${archivo.replace('.', '\\.')}'\), ancho: ${ancho}, alto: ${alto}`), archivo);
+  }
+  // El blanco de un JPG se funde con el crema del menú.
+  assert.match(marca, /mixBlendMode: 'multiply'/);
+});
+
+prueba('049/RF-34, RF-35: el Asistente se presenta como el de Kontrola, del Grupo HS', () => {
+  // Se lee como texto: importar la conversación arrastraría el cliente de la IA a la verificación.
+  const conversacion = readFileSync('src/features/asistente/servidor/conversacion.ts', 'utf8');
+  const instrucciones = conversacion.slice(conversacion.indexOf('export const INSTRUCCIONES ='));
+  const presentacion = instrucciones.slice(0, instrucciones.indexOf('\n'));
+  assert.match(presentacion, /Asistente de Kontrola/);
+  assert.match(presentacion, /Grupo HS/);
+  // RF-35: el Grupo HS es el dueño de las cuatro.
+  for (const parte of [/Elemental/, /OCC/, /Geolab/i, /las obras/]) assert.match(presentacion, parte);
+  assert.doesNotMatch(presentacion, /grupo de OCC|Control de Obra/);
+});
+
 prueba('040/RF-22: el nombre y el encabezado del archivo', () => {
   assert.equal(nombreDelArchivoDelAsistente('Compras por aprobar', '2026-11-05', 'xlsx'), 'Compras por aprobar 2026-11-05.xlsx');
   assert.equal(nombreDelArchivoDelAsistente('Bitácora: semana 1/2 "obra"?', '2026-11-05', 'pdf'), 'Bitácora semana 12 obra 2026-11-05.pdf');
@@ -12721,7 +13018,8 @@ prueba('040/RF-22: el nombre y el encabezado del archivo', () => {
       { modulo: 'bitacoras', etiqueta: 'Bitácora del 4-nov', fecha: '2026-11-04', ruta: '/x', obra: 'OBR-001 · Obra A', desde: '2026-11-01', hasta: '2026-11-04' },
     ],
   });
-  assert.equal(encabezado.grupo, 'Grupo OCC · Control de Obra');
+  // Desde la spec 049 (RF-31): primero el grupo, como iba antes «Grupo OCC».
+  assert.equal(encabezado.grupo, 'Grupo HS · Kontrola');
   assert.equal(encabezado.pedidoPor, 'Ana Pérez, auxiliar administrativa');
   // La hora de Colombia: 14:10 UTC son las 9:10 a. m.
   assert.equal(encabezado.generado, '5-nov-2026, 9:10 a. m.');

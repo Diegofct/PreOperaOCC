@@ -9,6 +9,7 @@
 import ExcelJS from 'exceljs';
 
 import type { PersonaEnSesion } from '@/features/servidor/guardia';
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 
 import { nombreDelArchivoOcc, planillaOcc } from '../exportar-occ';
 import { detalleDeRequisicionOcc } from './requisicion-occ';
@@ -46,7 +47,6 @@ export async function libroDeLaRequisicionOcc(sesion: PersonaEnSesion, id: strin
   });
 
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'PreOperaOCC';
   const hoja = libro.addWorksheet('REQUISICIONES');
   ANCHOS.forEach((ancho, i) => (hoja.getColumn(i + 1).width = ancho));
 
@@ -80,5 +80,6 @@ export async function libroDeLaRequisicionOcc(sesion: PersonaEnSesion, id: strin
     renglon.getCell(10).alignment = { wrapText: true, vertical: 'top' };
   });
 
+  marcarLibro(libro);
   return { archivo: await libro.xlsx.writeBuffer(), nombre: nombreDelArchivoOcc(detalle.codigo, detalle.viernes) };
 }

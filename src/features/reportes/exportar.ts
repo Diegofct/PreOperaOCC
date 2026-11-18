@@ -10,6 +10,7 @@
  * Excel se puedan sumar y filtrar. Las horas del personal vienen en minutos y salen en
  * horas.
  */
+import { PIE_PARA_IMPRIMIR } from '@/features/panel/pie-para-imprimir';
 import type { PeriodoDeReporte } from '@/shared/rules/periodos';
 import { nombreDeNovedad } from '@/shared/catalogos/bitacora';
 import { NOMBRE_DE_CLASE, type ClaseDeMantenimiento } from '@/shared/rules/mantenimiento';
@@ -346,13 +347,14 @@ export function paginaParaImprimir(datos: {
   tr { break-inside: avoid; page-break-inside: avoid; }
   thead { display: table-header-group; }
   .acciones { margin-bottom: 12px; }
-  @media print { .acciones { display: none; } }
+  @media print { .acciones { display: none; } }${PIE_PARA_IMPRIMIR.css}
 </style></head>
 <body>
 <div class="acciones"><button onclick="window.print()">Imprimir o guardar como PDF</button></div>
 <h1>${escapar(datos.titulo)}</h1>
 <p class="subtitulo">${escapar(datos.subtitulo)}</p>
 ${tablas}
+${PIE_PARA_IMPRIMIR.html}
 </body></html>`;
 }
 

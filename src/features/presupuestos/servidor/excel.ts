@@ -10,6 +10,7 @@
  */
 import ExcelJS from 'exceljs';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 import { NOMBRE_DE_ESTADO_DE_PRESUPUESTO, resumenDelPresupuesto, type EstructuraDePresupuesto } from '@/shared/rules/presupuesto';
 import { etiquetaDeUnidad } from '@/shared/catalogos/presupuesto';
 
@@ -50,7 +51,6 @@ export function nombreDelArchivoDelPresupuesto(codigoDeObra: string, version: nu
 export async function libroDelPresupuesto(p: PresupuestoParaExportar): Promise<ArrayBuffer> {
   const resumen = resumenDelPresupuesto(p.estructura);
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'Control de Obra OCC';
   const hoja = libro.addWorksheet('Presupuesto');
 
   hoja.addRow([`${p.nombre} · v${p.numeroVersion} (${NOMBRE_DE_ESTADO_DE_PRESUPUESTO[p.estado]})`]).font = {
@@ -124,5 +124,6 @@ export async function libroDelPresupuesto(p: PresupuestoParaExportar): Promise<A
   anchos.forEach((ancho, i) => (hoja.getColumn(i + 1).width = ancho));
   hoja.getColumn(5).alignment = { wrapText: true, vertical: 'top' };
 
+  marcarLibro(libro);
   return (await libro.xlsx.writeBuffer()) as ArrayBuffer;
 }

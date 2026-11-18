@@ -1,6 +1,6 @@
 # Spec 040 — Auxiliar Administrativa, asistente ampliado y archivos
 
-> Estado: **Cumplida en desarrollo** (2026-11-05; ver `validacion.md`) · Aprobada el 2026-11-05 · Fecha: 2026-11-04 · Dudas D1–D9 resueltas con la propuesta · Va a producción dentro de la T23 de la 033, con la migración 0039 (escrita a mano) detrás de la 0038.
+> Estado: **Cumplida en desarrollo** (2026-11-05; ver `validacion.md`) · Aprobada el 2026-11-05 · Fecha: 2026-11-04 · Dudas D1–D9 resueltas con la propuesta · Va a producción dentro de la T23 de la 033, con la migración 0039 (escrita a mano) detrás de la 0038. · **Modificada por la spec 049** (2026-11-18): los PDF, Excel y Word del asistente llevan «Grupo HS · Kontrola» en el encabezado, Kontrola de autor y la línea «Generado con Kontrola · Grupo HS» al pie; el asistente se presenta como el de Kontrola, del Grupo HS — ver `specs/049-marca-kontrola-y-logos/spec.md`
 
 ## Contexto y objetivo
 

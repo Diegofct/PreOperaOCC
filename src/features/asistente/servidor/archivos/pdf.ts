@@ -5,13 +5,15 @@
  * A4 horizontal, porque las tablas suelen ser anchas. Arriba el encabezado (el grupo, quién lo
  * pidió, cuándo y las fuentes); después los bloques en el orden en que vienen. Una tabla larga
  * pasa de página repitiendo sus títulos; cada celda se parte hasta en tres líneas y lo que no
- * cabe termina en «…». Abajo, en cada página, la leyenda y el número de página.
+ * cabe termina en «…». Abajo, en cada página, la leyenda y el número de página, y debajo, centrada,
+ * la línea de Kontrola (spec 049, RF-48), que lleva todo documento que sale del sistema.
  *
  * La fuente es Helvetica, que viene con todo lector de PDF y no hay que incrustar; solo sabe
  * dibujar WinAnsi, así que todo texto pasa por `textoParaPdf` (plan, riesgos).
  */
 import { PDFDocument, rgb, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 
+import { MARCA } from '@/shared/catalogos/marca';
 import {
   celdaEnTexto,
   LEYENDA_DEL_ARCHIVO,
@@ -173,7 +175,10 @@ function dibujarTabla(hoja: Hoja, tabla: TablaDelArchivo) {
 export async function pdfDelAsistente(contenido: ContenidoDelArchivo): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(textoParaPdf(contenido.titulo));
-  doc.setCreator('Asistente · Control de Obra');
+  // Spec 049, RF-30: el autor de todo archivo generado.
+  doc.setAuthor(MARCA.autor);
+  doc.setCreator(MARCA.autor);
+  doc.setProducer(MARCA.autor);
   const fuentes = { normal: await doc.embedFont(StandardFonts.Helvetica), negrita: await doc.embedFont(StandardFonts.HelveticaBold) };
   const hoja = new Hoja(doc, fuentes);
 
@@ -206,12 +211,20 @@ export async function pdfDelAsistente(contenido: ContenidoDelArchivo): Promise<U
 
   const paginas = doc.getPages();
   const leyenda = textoParaPdf(contenido.leyenda ?? LEYENDA_DEL_ARCHIVO);
+  const pie = textoParaPdf(MARCA.pie);
   paginas.forEach((pagina, i) => {
     pagina.drawText(leyenda, { x: MARGEN, y: MARGEN - 10, size: 7, font: fuentes.normal, color: GRIS });
     const numero = `Página ${i + 1} de ${paginas.length}`;
     pagina.drawText(numero, {
       x: ANCHO - MARGEN - fuentes.normal.widthOfTextAtSize(numero, 7),
       y: MARGEN - 10,
+      size: 7,
+      font: fuentes.normal,
+      color: GRIS,
+    });
+    pagina.drawText(pie, {
+      x: (ANCHO - fuentes.normal.widthOfTextAtSize(pie, 7)) / 2,
+      y: MARGEN - 20,
       size: 7,
       font: fuentes.normal,
       color: GRIS,

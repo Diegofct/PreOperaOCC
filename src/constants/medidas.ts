@@ -204,3 +204,20 @@ export const EspaciadoLetra = {
  * más ancha (1268) en 869 de 904, el contenido más angosto que la spec promete.
  */
 export const EncogimientoColumna = 0.65;
+
+/**
+ * Las cajas donde va el logo de una empresa (spec 049). El logo se ajusta dentro con
+ * `contain`, conservando su proporción (RNF: uno de 2048 px no se deforma); si la
+ * empresa no tiene logo, su nombre como logotipo de texto ocupa la misma caja, y la
+ * card o el menú no cambian de alto cuando llegue la imagen.
+ *
+ * - `card`: el inicio de Gerencia, encima del nombre.
+ * - `menu`: la cabecera del menú abierto (248 menos sus márgenes). 56 de alto y no 48: los
+ *   logos son apaisados, y con 48 el de OCC quedaba de 83 de ancho (cambio del 2026-11-18).
+ * - `menuPlegado`: el riel de 72, un cuadro.
+ */
+export const CajaDeLogo = {
+  card: { ancho: 160, alto: 64 },
+  menu: { ancho: 184, alto: 56 },
+  menuPlegado: { ancho: 40, alto: 40 },
+} as const;

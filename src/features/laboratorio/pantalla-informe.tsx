@@ -27,12 +27,20 @@
  * Un borrador, un enviado o un devuelto salen con una marca que dice que no están
  * aprobados (RF-97); un anulado, con ANULADO y el motivo (RF-98). Un papel sin esa marca
  * es un acta que alguien podría tomar por buena.
+ *
+ * ── La línea de Kontrola ──
+ *
+ * El formato sigue siendo de GEOLAB, con su logo (spec 049, RF-28). Debajo de las firmas
+ * va «Generado con Kontrola · Grupo HS» (RF-29, RF-48), dentro de la hoja y no en el
+ * margen de `@page`: el informe es una sola hoja fija, y así sale igual en pantalla y en
+ * el papel.
  */
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect } from 'react';
 import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 
 import { Estado, FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
+import { MARCA } from '@/shared/catalogos/marca';
 import { SERIE_DE_TAMICES, tamizPorId } from '@/shared/catalogos/tamices';
 import {
   ETIQUETA_ESTADO_ENSAYO,
@@ -316,6 +324,8 @@ function Hoja({ detalle }: { detalle: EnsayoDetalle }) {
         <Firma rotulo="REVISÓ" firma={detalle.revisado} />
         <Firma rotulo="APROBÓ" firma={detalle.aprobado} />
       </View>
+
+      <Text style={estilos.pieKontrola}>{MARCA.pie}</Text>
     </View>
   );
 }
@@ -474,6 +484,13 @@ const estilos = StyleSheet.create({
   malo: { color: Estado.noConforme },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.micro, color: Panel.texto },
   firmas: { flexDirection: 'row', gap: Spacing.four, marginTop: Spacing.two },
+  pieKontrola: {
+    marginTop: Spacing.three,
+    textAlign: 'center',
+    fontFamily: FuentePanel.texto,
+    fontSize: TextoPanel.micro,
+    color: Panel.textoApoyo,
+  },
   firma: {
     flex: 1,
     borderTopWidth: 1,
