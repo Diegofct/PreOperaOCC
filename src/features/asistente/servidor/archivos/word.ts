@@ -7,10 +7,13 @@
  *
  * Horizontal, como el PDF, porque las tablas suelen ser anchas. La fila de títulos de una tabla
  * se repite en cada página (`w:tblHeader`). Lo mínimo que Word exige: `[Content_Types].xml`,
- * `_rels/.rels` y `word/document.xml`.
+ * `_rels/.rels` y `word/document.xml`. Desde la spec 049 van además las propiedades del
+ * documento, con Kontrola de autor (RF-30), y un pie de página con la línea de Kontrola, que
+ * Word repite solo en cada página porque la sección lo referencia (RF-48).
  */
 import JSZip from 'jszip';
 
+import { MARCA } from '@/shared/catalogos/marca';
 import {
   celdaEnTexto,
   LEYENDA_DEL_ARCHIVO,
@@ -28,11 +31,20 @@ const TIPOS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
+<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
 </Types>`;
 
 const RELACIONES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+</Relationships>`;
+
+/** Las relaciones del documento: solo el pie de página. */
+const RELACIONES_DEL_DOCUMENTO = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rIdPie" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
 </Relationships>`;
 
 /** Lo que no puede ir crudo en XML, y los caracteres de control que Word no abre. */
@@ -91,6 +103,23 @@ function tabla(t: TablaDelArchivo): string {
   );
 }
 
+/** Spec 049, RF-30: el autor y quien lo modificó por última vez. */
+function propiedades(titulo: string): string {
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+    `<dc:title>${xml(titulo)}</dc:title><dc:creator>${xml(MARCA.autor)}</dc:creator><cp:lastModifiedBy>${xml(MARCA.autor)}</cp:lastModifiedBy>` +
+    '</cp:coreProperties>'
+  );
+}
+
+/** Spec 049, RF-48: la línea de Kontrola, centrada al pie de cada página. */
+const PIE_DE_PAGINA =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+  `<w:p><w:pPr><w:jc w:val="center"/></w:pPr>${run(MARCA.pie, { tamano: 14, gris: true })}</w:p>` +
+  '</w:ftr>';
+
 export async function wordDelAsistente(contenido: ContenidoDelArchivo): Promise<Uint8Array> {
   const { encabezado } = contenido;
   const cuerpo: string[] = [
@@ -117,14 +146,17 @@ export async function wordDelAsistente(contenido: ContenidoDelArchivo): Promise<
 
   const documento =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>' +
     cuerpo.join('') +
-    '<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>' +
+    '<w:sectPr><w:footerReference w:type="default" r:id="rIdPie"/><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>' +
     '</w:body></w:document>';
 
   const zip = new JSZip();
   zip.file('[Content_Types].xml', TIPOS);
   zip.file('_rels/.rels', RELACIONES);
   zip.file('word/document.xml', documento);
+  zip.file('word/_rels/document.xml.rels', RELACIONES_DEL_DOCUMENTO);
+  zip.file('word/footer1.xml', PIE_DE_PAGINA);
+  zip.file('docProps/core.xml', propiedades(contenido.titulo));
   return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
 }

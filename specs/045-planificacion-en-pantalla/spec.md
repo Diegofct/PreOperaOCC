@@ -1,6 +1,6 @@
 # Spec 045 — Planificación hecha en pantalla, con IA y costos indirectos
 
-> Estado: **Cumplida** (validada el 2026-11-16, `validacion.md`) · Fecha: 2026-11-13 · Aprobada por Diego el 2026-11-13 (primera versión, con P1–P5); clarificación del mismo día resuelta con D11–D15 · Cambio del 2026-11-16: periodo deducido de los indirectos del Excel (RF-168 a RF-171, D17) · RF-15 precisado en la validación del 2026-11-16 · Primera de la tanda 045–048 (**modifica la 043**; es la base de la 048, que amarra las requisiciones a la planificación)
+> Estado: **Cumplida** (validada el 2026-11-16, `validacion.md`) · Fecha: 2026-11-13 · Aprobada por Diego el 2026-11-13 (primera versión, con P1–P5); clarificación del mismo día resuelta con D11–D15 · Cambio del 2026-11-16: periodo deducido de los indirectos del Excel (RF-168 a RF-171, D17) · RF-15 precisado en la validación del 2026-11-16 · Primera de la tanda 045–048 (**modifica la 043**; es la base de la 048, que amarra las requisiciones a la planificación) · **Modificada por la spec 049** (2026-11-18): las descargas de la planificación (Excel y PDF) llevan Kontrola de autor y la línea «Generado con Kontrola · Grupo HS» al pie — ver `specs/049-marca-kontrola-y-logos/spec.md`
 
 ## Contexto y objetivo
 

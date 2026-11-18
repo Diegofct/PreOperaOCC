@@ -41,7 +41,9 @@ export type NombreDeIcono =
   | 'finanzas'
   | 'compras'
   | 'documentos'
-  | 'licitaciones';
+  | 'licitaciones'
+  // Proyectos (spec 049, RF-53): una grúa sobre una obra a medio levantar.
+  | 'proyectos';
 
 const DIBUJOS = {
   inicio: (
@@ -116,6 +118,17 @@ const DIBUJOS = {
     </>
   ),
   // Un casco y no un cono: a 20 px el cono se confundía con el matraz de Laboratorio.
+  proyectos: (
+    <>
+      <Path d="M3 21h18" />
+      <Path d="M6 21V4" />
+      <Path d="M3 5h16" />
+      <Path d="M6 8l3-3" />
+      <Path d="M16 5v3" />
+      <Rect x={11} y={11} width={8} height={10} rx={1} />
+      <Path d="M14 14h2M14 17.5h2" />
+    </>
+  ),
   obras: (
     <>
       <Path d="M3 18h18" />

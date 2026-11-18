@@ -1,6 +1,6 @@
 # Spec 047 — Requisición de pagos de OCC, con su formato, autorización línea por línea e importación con IA
 
-> Estado: **Cumplida el 2026-11-17** (`validacion.md`, 82/82 RF, pantallas revisadas en el navegador) · **Aprobada por Diego el 2026-11-17** (entrevista D1–D7, dudas D8–D10 y clarificación D11–D12 del mismo día) · Fecha: 2026-11-17 · Tercera de la tanda 045–048 (plan del 2026-11-13). **Modifica la 046** (RF-87 y RF-88: la requisición de OCC deja de ser la genérica que va directo a la Administradora). Entrevista con Diego del 2026-11-17 (D1–D7). Formato de origen: `assets/Formato requisiciones pagos OCC.xlsx`, hoja REQUISICIONES.
+> Estado: **Cumplida el 2026-11-17** (`validacion.md`, 82/82 RF, pantallas revisadas en el navegador) · **Aprobada por Diego el 2026-11-17** (entrevista D1–D7, dudas D8–D10 y clarificación D11–D12 del mismo día) · Fecha: 2026-11-17 · Tercera de la tanda 045–048 (plan del 2026-11-13). **Modifica la 046** (RF-87 y RF-88: la requisición de OCC deja de ser la genérica que va directo a la Administradora). Entrevista con Diego del 2026-11-17 (D1–D7). Formato de origen: `assets/Formato requisiciones pagos OCC.xlsx`, hoja REQUISICIONES. · **Modificada por la spec 049** (2026-11-18): el Excel de la requisición de OCC lleva Kontrola de autor y la línea «Generado con Kontrola · Grupo HS» en el pie de página de impresión, nunca en una celda — ver `specs/049-marca-kontrola-y-logos/spec.md`
 
 ## Contexto y objetivo
 

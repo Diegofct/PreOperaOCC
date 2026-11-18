@@ -7,6 +7,7 @@ import '@/features/panel/fuentes.css';
 import { Panel } from '@/constants/theme';
 import { BarraSuperior } from '@/features/panel/barra-superior';
 import { ProveedorMenu } from '@/features/panel/estado-menu';
+import { iconoDeLaPestana } from '@/features/panel/icono-de-la-pestana';
 import { MarcoSesion } from '@/features/panel/marco-sesion';
 import { MenuLateral, TelonDelMenu } from '@/features/panel/menu-lateral';
 import { tituloDeLaPestana } from '@/features/panel/modulos';
@@ -36,10 +37,14 @@ import { ProveedorSesionPanel } from '@/features/panel/sesion';
  *
  * Las pantallas no se declaran una por una con su `title`: Expo Router 57 no lo
  * lleva a la pestaña, y el título sale de la ruta con `tituloDeLaPestana`.
+ *
+ * El ícono de la pestaña (spec 049, RF-14) se pone **fuera** de `MarcoSesion`: así
+ * vale también en el ingreso, que se ve antes de que haya panel.
  */
 export default function LayoutPanel() {
   return (
     <ProveedorSesionPanel>
+      <IconoDeLaPestana />
       <MarcoSesion>
         <ProveedorMenu>
           <TituloDeLaPestana />
@@ -77,6 +82,27 @@ function TituloDeLaPestana() {
     if (typeof document === 'undefined') return;
     document.title = tituloDeLaPestana(ruta);
   }, [ruta]);
+  return null;
+}
+
+/**
+ * Pone la K de Kontrola como ícono de la pestaña (ver `iconoDeLaPestana`). Si el
+ * documento ya trae un `<link rel="icon">` —el de Expo—, se le cambia la dirección;
+ * si no, se crea. No se quita al salir: el panel es lo único que se abre en el navegador.
+ */
+function IconoDeLaPestana() {
+  useEffect(() => {
+    // La guarda es por el paquete nativo, donde estas pantallas entran inertes.
+    if (typeof document === 'undefined') return;
+    let enlace = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+    if (!enlace) {
+      enlace = document.createElement('link');
+      enlace.rel = 'icon';
+      document.head.appendChild(enlace);
+    }
+    enlace.type = 'image/svg+xml';
+    enlace.href = iconoDeLaPestana();
+  }, []);
   return null;
 }
 

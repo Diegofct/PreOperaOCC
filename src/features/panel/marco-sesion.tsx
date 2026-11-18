@@ -18,13 +18,16 @@ import type { ReactNode } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { Panel } from '@/constants/theme';
+import { tituloConSistema } from '@/shared/catalogos/marca';
 
 import PantallaCambiarClave from './pantalla-cambiar-clave';
 import PantallaIngreso from './pantalla-ingreso';
 import { useSesionPanel } from './sesion';
 
 /**
- * El título de la pestaña mientras no hay sesión.
+ * El título de la pestaña mientras no hay sesión, o mientras se cambia la contraseña
+ * (obligatorio o por gusto: spec 049, RF-13). Al cancelar un cambio por gusto el panel
+ * se vuelve a montar, y su `TituloDeLaPestana` repone el de la pantalla.
  *
  * El `Stack` de rutas pone el título de la pantalla a la que se va, pero cuando
  * no hay sesión **ese `Stack` ni siquiera se monta**: el contenido se sustituye
@@ -48,9 +51,10 @@ export function MarcoSesion({ children }: { children: ReactNode }) {
 
   useTituloDeLaPestana(
     estado === 'fuera'
-      ? 'Ingresar · Control de Obra OCC'
-      : estado === 'debe_cambiar'
-        ? 'Cambiar contraseña · Control de Obra OCC'
+      ? tituloConSistema('Ingresar')
+      : // Spec 049, RF-13: obligatorio o por gusto, mientras se cambia la contraseña.
+        estado === 'debe_cambiar' || cambiandoClave
+        ? tituloConSistema('Cambiar contraseña')
         : null,
   );
 

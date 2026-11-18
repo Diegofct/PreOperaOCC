@@ -10,6 +10,7 @@
  * la tabla y se olvida aquí, TypeScript lo dice — el `Record` obliga a que estén
  * todos.
  */
+import { MARCA, tituloConSistema } from '@/shared/catalogos/marca';
 import { lugarDeLaRuta, tituloDelLugar } from '@/shared/rules/empresas';
 import type { Modulo } from '@/shared/rules/permisos';
 
@@ -54,7 +55,6 @@ export function moduloDeLaRuta(ruta: string): Modulo | null {
   return null;
 }
 
-const SISTEMA = 'Control de Obra OCC';
 
 /**
  * El título de la pestaña del navegador para una dirección del panel.
@@ -70,12 +70,12 @@ export function tituloDeLaPestana(ruta: string): string {
   const enEmpresa = tituloDelLugar(lugarDeLaRuta(ruta));
   if (enEmpresa) return enEmpresa;
   if (/^\/panel\/laboratorio\/[^/]+\/informe\/?$/.test(ruta)) {
-    return `Informe de granulometría · ${SISTEMA}`;
+    return tituloConSistema('Informe de granulometría');
   }
   if (/^\/panel\/laboratorio\/[^/]+\/?$/.test(ruta)) {
-    return `Ensayo de granulometría · ${SISTEMA}`;
+    return tituloConSistema('Ensayo de granulometría');
   }
   const modulo = moduloDeLaRuta(ruta);
-  if (!modulo || modulo === 'inicio') return SISTEMA;
-  return `${ENLACES_DE_MODULO[modulo].titulo} · ${SISTEMA}`;
+  if (!modulo || modulo === 'inicio') return MARCA.sistema;
+  return tituloConSistema(ENLACES_DE_MODULO[modulo].titulo);
 }

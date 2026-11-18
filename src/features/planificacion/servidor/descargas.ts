@@ -9,6 +9,7 @@
 import ExcelJS from 'exceljs';
 import { eq } from 'drizzle-orm';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 import { baseServidor } from '@/db/servidor/cliente';
 import { obras } from '@/db/servidor/esquema';
 import { pdfDelAsistente } from '@/features/asistente/servidor/archivos/pdf';
@@ -37,8 +38,8 @@ export async function excelDelInforme(
   const subtitulo = `${textoDelPeriodo(informe.periodo)} · generado el ${generado}`;
 
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'Control de Obra OCC';
   for (const hoja of hojasDelInforme(informe)) escribirHoja(libro, hoja, titulo, subtitulo);
+  marcarLibro(libro);
   return { archivo: (await libro.xlsx.writeBuffer()) as ArrayBuffer, nombre: nombreDelInforme(obra?.codigo ?? 'obra', informe.periodo, 'xlsx') };
 }
 

@@ -722,6 +722,27 @@ export function tituloDelLugar(lugar: LugarDelPanel | null): string | null {
   return `${pagina?.titulo ?? 'Resumen del día'} · Proyectos`;
 }
 
+/**
+ * La cabecera del bloque de páginas del menú (spec 049, RF-21 a RF-26, RF-44): la marca de
+ * la empresa donde se está y un título.
+ *
+ * - En la portada de las empresas (Gerencia), «Empresas» y sin marca (RF-26).
+ * - Dentro de Elemental, OCC o Geolab, su marca y sin título: el logo, o el nombre como
+ *   logotipo si aún no hay logo, ya dice cuál es (RF-21, RF-22).
+ * - En la lista de obras, el ícono de Proyectos y «Proyectos» (RF-44).
+ * - Dentro de una obra, el ícono de Proyectos y el nombre de la obra (RF-23, RF-24); mientras
+ *   ese nombre llega, «…».
+ */
+export function cabeceraDelMenu(
+  lugar: LugarDelPanel | null,
+  nombreDeObra: string | null,
+): { marca: EmpresaId | null; titulo: string | null } {
+  if (!lugar) return { marca: null, titulo: 'Empresas' };
+  if (lugar.tipo === 'empresa') return { marca: lugar.empresa, titulo: null };
+  if (lugar.tipo === 'proyectos') return { marca: 'proyectos', titulo: nombreDeEmpresa('proyectos') };
+  return { marca: 'proyectos', titulo: nombreDeObra ?? '…' };
+}
+
 /* ── Lo que muestra cada empresa en pantallas compartidas ──────────────── */
 
 /**

@@ -6,13 +6,17 @@
  *
  * Una columna en el celular; dos o cuatro en ventana ancha (requisito no funcional),
  * nunca tres: con tres, la cuarta queda sola en su renglón.
+ *
+ * Desde la spec 049 cada tarjeta abre con la marca de su empresa (RF-15 a RF-19): el logo,
+ * el ícono de las obras en Proyectos, o el nombre como logotipo de texto si la empresa aún
+ * no tiene logo. En ese último caso el nombre no se repite debajo: ya está arriba.
  */
 
 import { Link, type Href } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { EspaciadoLetra, FuentePanel, Grosor, Movimiento, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
+import { CajaDeLogo, EspaciadoLetra, FuentePanel, Grosor, Movimiento, Panel, Radio, Spacing, TextoPanel } from '@/constants/theme';
 import { api } from '@/features/panel/cliente-api';
 import type { EmpresaFila } from '@/features/panel/contratos';
 import { useMenu } from '@/features/panel/estado-menu';
@@ -21,6 +25,9 @@ import { fechaDelCorte, SIN_INFORMACION_FINANCIERA } from '@/shared/rules/cortes
 import { rutaDeEmpresa, rutaDeProyectos } from '@/shared/rules/empresas';
 import { anchoDelContenido } from '@/shared/rules/menu';
 import { enPesos } from '@/shared/rules/pesos';
+
+import { logoDeEmpresa } from './logos';
+import { MarcaDeEmpresa } from './marca-de-empresa';
 
 /** El ancho por debajo del cual una tarjeta ya no lee bien su saldo. */
 const ANCHO_MINIMO_DE_TARJETA = 210;
@@ -64,6 +71,8 @@ function TarjetaDeEmpresa({ empresa, ancho }: { empresa: EmpresaFila; ancho: str
   const [enfocada, setEnfocada] = useState(false);
   const ruta = empresa.id === 'proyectos' ? rutaDeProyectos() : rutaDeEmpresa(empresa.id);
   const financiero = empresa.financiero;
+  // Sin logo, la marca ya es el nombre escrito: repetirlo debajo diría lo mismo dos veces.
+  const conNombreAparte = logoDeEmpresa(empresa.id) || empresa.id === 'proyectos';
   // En Proyectos el saldo es la suma de sus obras, a la fecha del corte más antiguo (RF-2).
   const rotulo = financiero
     ? `${empresa.id === 'proyectos' ? 'Saldo de las obras' : 'Saldo'} al ${fechaDelCorte(financiero.fechaCorte)}`
@@ -92,8 +101,12 @@ function TarjetaDeEmpresa({ empresa, ancho }: { empresa: EmpresaFila; ancho: str
             enfocada && estilos.tarjetaEnfocada,
           ]}
         >
+          {/* Una franja del mismo alto en las cuatro: los nombres empiezan a la misma altura (RF-55). */}
+          <View style={estilos.franjaDeMarca}>
+            <MarcaDeEmpresa empresa={empresa.id} tamano="card" />
+          </View>
           <View style={estilos.cabecera}>
-            <Text style={estilos.nombre}>{empresa.nombre}</Text>
+            {conNombreAparte ? <Text style={estilos.nombre}>{empresa.nombre}</Text> : null}
             <Text style={estilos.funcion}>{empresa.funcion}</Text>
           </View>
           {financiero && rotulo ? (
@@ -121,6 +134,8 @@ const estilos = StyleSheet.create({
   tarjeta: {
     // La misma altura en todo el renglón, aunque una diga más que otra.
     flexGrow: 1,
+    // Todo centrado: la marca, el nombre, la función y las cifras (cambio del 2026-11-18, RF-54, RF-56).
+    alignItems: 'center',
     gap: Spacing.three,
     padding: Spacing.four,
     borderRadius: Radio.lg,
@@ -132,15 +147,22 @@ const estilos = StyleSheet.create({
   },
   tarjetaEncima: { borderColor: Panel.borde, backgroundColor: Panel.fondoHover },
   tarjetaEnfocada: { boxShadow: `0 0 0 ${Grosor.marca}px ${Panel.foco}` },
-  cabecera: { gap: Spacing.one },
+  franjaDeMarca: {
+    alignSelf: 'stretch',
+    height: CajaDeLogo.card.alto,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cabecera: { gap: Spacing.one, alignItems: 'center' },
   nombre: {
     fontFamily: FuentePanel.texto,
     fontSize: TextoPanel.seccion,
     fontWeight: '700',
     color: Panel.texto,
+    textAlign: 'center',
   },
-  funcion: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
-  cifra: { gap: Spacing.one },
+  funcion: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo, textAlign: 'center' },
+  cifra: { gap: Spacing.one, alignItems: 'center' },
   rotulo: {
     fontFamily: FuentePanel.rotulo,
     fontSize: TextoPanel.micro,
@@ -155,6 +177,6 @@ const estilos = StyleSheet.create({
     letterSpacing: EspaciadoLetra.titulo,
     color: Panel.texto,
   },
-  sinInformacion: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.textoApoyo },
-  pie: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, fontWeight: '600', color: Panel.texto },
+  sinInformacion: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.textoApoyo, textAlign: 'center' },
+  pie: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, fontWeight: '600', color: Panel.texto, textAlign: 'center' },
 });

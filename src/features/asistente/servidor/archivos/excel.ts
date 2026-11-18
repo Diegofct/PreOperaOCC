@@ -12,6 +12,7 @@
  */
 import ExcelJS from 'exceljs';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
 import { celdaEnTexto, parrafosDeMarkdown, type FormatoDeColumna } from '@/shared/rules/archivos-del-asistente';
 
 import type { ContenidoDelArchivo } from './contenido';
@@ -38,7 +39,6 @@ function nombreDeHoja(titulo: string, usados: Set<string>): string {
 
 export async function libroDelAsistente(contenido: ContenidoDelArchivo): Promise<Uint8Array> {
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'Asistente · Control de Obra';
   const subtitulo = `Pedido por ${contenido.encabezado.pedidoPor} · generado el ${contenido.encabezado.generado}`;
   const usados = new Set<string>();
 
@@ -80,5 +80,6 @@ export async function libroDelAsistente(contenido: ContenidoDelArchivo): Promise
       );
     }
   }
+  marcarLibro(libro);
   return new Uint8Array((await libro.xlsx.writeBuffer()) as ArrayBuffer);
 }

@@ -34,12 +34,12 @@ import {
 } from '@/constants/theme';
 
 import { useLugarDelPanel, useObraDelLugar } from '@/features/empresas/contexto-empresa';
+import { MarcaDeEmpresa } from '@/features/empresas/marca-de-empresa';
 import {
-  empresaDelLugar,
-  esEmpresa,
-  menuDelLugar,
-  nombreDeEmpresa,
+  cabeceraDelMenu,
+  type EmpresaId,
   type EnlaceDelMenu as Enlace,
+  menuDelLugar,
 } from '@/shared/rules/empresas';
 import { MODULOS, type Modulo } from '@/shared/rules/permisos';
 
@@ -57,6 +57,8 @@ interface Etiqueta {
 /** Un bloque del menú: la navegación, o las páginas bajo el nombre de la empresa. */
 interface Bloque {
   clave: string;
+  /** La empresa cuya marca encabeza el bloque (spec 049, RF-21 a RF-25). */
+  marca: EmpresaId | null;
   titulo: string | null;
   subtitulo: string | null;
   enlaces: Enlace[];
@@ -66,7 +68,7 @@ interface Bloque {
 const ICONOS: Record<string, NombreDeIcono> = {
   // El texto ya lleva la flecha («← Empresas», RF-11): el ícono es la casa de las tarjetas.
   empresas: 'inicio',
-  'cambiar-obra': 'obras',
+  'cambiar-obra': 'proyectos',
   // Los de los menús definitivos (cambio del 2026-10-27).
   'recursos-humanos': 'personas',
   compras: 'compras',
@@ -82,7 +84,7 @@ const ICONOS: Record<string, NombreDeIcono> = {
   elemental: 'empresa',
   occ: 'empresa',
   geolab: 'empresa',
-  proyectos: 'obras',
+  proyectos: 'proyectos',
 };
 
 function iconoDe(clave: string): NombreDeIcono {
@@ -103,24 +105,29 @@ function MenuConSesion() {
   const lugar = useLugarDelPanel();
   const obra = useObraDelLugar();
   const menu = menuDelLugar(lugar, persona, obra?.modulos);
-  const empresa = empresaDelLugar(lugar);
+  // Spec 049: la marca de la empresa y el título; dentro de una obra, su nombre (RF-24).
+  const cabecera = cabeceraDelMenu(lugar, obra?.nombre ?? null);
+  const enObra = lugar?.tipo === 'obra';
   const activo = lugar && lugar.tipo !== 'proyectos' ? lugar.pagina : null;
 
   const bloques: Bloque[] = [
     {
       clave: 'navegacion',
+      marca: null,
       titulo: null,
       subtitulo: null,
       enlaces: menu.navegacion,
     },
     {
       clave: 'paginas',
-      // El nombre de la empresa, y el de la obra en Proyectos (RF-10).
-      titulo: empresa && esEmpresa(empresa) ? nombreDeEmpresa(empresa) : lugar ? null : 'Empresas',
-      subtitulo: lugar?.tipo === 'obra' ? (obra?.nombre ?? '…') : null,
+      // La marca de la empresa (spec 049); el nombre de la obra va debajo del ícono de
+      // Proyectos, en la letra que se lee (RF-24), y no como rótulo en mayúsculas.
+      marca: cabecera.marca,
+      titulo: enObra ? null : cabecera.titulo,
+      subtitulo: enObra ? cabecera.titulo : null,
       enlaces: menu.entradas,
     },
-  ].filter((b) => b.enlaces.length > 0 || b.titulo !== null);
+  ].filter((b) => b.enlaces.length > 0 || b.titulo !== null || b.marca !== null);
 
   const [desplazado, setDesplazado] = useState(0);
   const [etiqueta, setEtiqueta] = useState<Etiqueta | null>(null);
@@ -219,16 +226,28 @@ function Grupo({
 
   return (
     <View style={estilos.grupo} onLayout={(e) => setArriba(e.nativeEvent.layout.y)}>
-      {bloque.titulo === null ? null : abierto ? (
+      {bloque.titulo === null && bloque.marca === null ? null : abierto ? (
         <View style={estilos.cabecera}>
-          <Text style={estilos.tituloGrupo} numberOfLines={2}>
-            {bloque.titulo}
-          </Text>
+          {bloque.marca ? (
+            <View style={estilos.marcaAbierta}>
+              <MarcaDeEmpresa empresa={bloque.marca} tamano="menu" />
+            </View>
+          ) : null}
+          {bloque.titulo ? (
+            <Text style={estilos.tituloGrupo} numberOfLines={2}>
+              {bloque.titulo}
+            </Text>
+          ) : null}
           {bloque.subtitulo ? (
             <Text style={estilos.subtituloGrupo} numberOfLines={2}>
               {bloque.subtitulo}
             </Text>
           ) : null}
+        </View>
+      ) : bloque.marca ? (
+        // Plegado, la marca en pequeño en lugar del título (spec 049, RF-25).
+        <View style={estilos.marcaPlegada}>
+          <MarcaDeEmpresa empresa={bloque.marca} tamano="menuPlegado" />
         </View>
       ) : primero ? null : (
         // Plegado no hay sitio para el título: una raya separa los grupos.
@@ -419,6 +438,10 @@ const estilos = StyleSheet.create({
   grupo: { gap: Spacing.half },
   /** El nombre de la empresa y, debajo, el de la obra (spec 033, RF-10). */
   cabecera: { gap: Spacing.half, paddingBottom: Spacing.one },
+  // El fondo del menú, también aquí: el logo se multiplica con lo que tiene detrás para que el
+  // blanco de un JPG desaparezca, y sin un fondo propio se mezclaba con una capa transparente.
+  marcaAbierta: { paddingHorizontal: Spacing.two + Spacing.half * 3, paddingBottom: Spacing.one, backgroundColor: Panel.fondo },
+  marcaPlegada: { alignItems: 'center', paddingBottom: Spacing.two, backgroundColor: Panel.fondo },
   subtituloGrupo: {
     paddingHorizontal: Spacing.two + Spacing.half * 3,
     fontFamily: FuentePanel.texto,

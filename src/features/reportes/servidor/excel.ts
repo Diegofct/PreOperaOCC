@@ -11,6 +11,8 @@
  */
 import ExcelJS from 'exceljs';
 
+import { marcarLibro } from '@/features/servidor/marca-de-archivos';
+
 import {
   hojasDelReporte,
   nombreDelArchivo,
@@ -63,9 +65,9 @@ export async function libroDelReporte(
   const subtitulo = `${textoDelPeriodo(pedido.periodo)} · generado el ${generado}`;
 
   const libro = new ExcelJS.Workbook();
-  libro.creator = 'Control de Obra OCC';
   for (const hoja of hojasDelReporte(pestana, datos)) escribirHoja(libro, hoja, titulo, subtitulo);
 
+  marcarLibro(libro);
   return {
     archivo: (await libro.xlsx.writeBuffer()) as ArrayBuffer,
     nombre: nombreDelArchivo(pestana, obra?.codigo ?? 'obra', pedido.periodo),

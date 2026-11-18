@@ -102,6 +102,10 @@ export const TextoPanel = {
   titulo: 26,
   /** La cifra grande de una tarjeta de resumen. */
   cifra: 30,
+  /** «Grupo HS» en la barra superior (spec 049): por encima del título de sección, por debajo del de pantalla. */
+  logotipo: 22,
+  /** «Grupo HS» en el ingreso: lo primero que se ve, más grande que cualquier cifra. */
+  logotipoGrande: 40,
 } as const;
 
 /**
