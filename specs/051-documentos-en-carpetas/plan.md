@@ -227,6 +227,31 @@ la base. Una carpeta existe mientras tenga algún documento; no hay tabla de car
 - **La ventana de subir de la ficha, la requisición y el pago** cambia de archivo: se revisan las tres en el
   barrido (fotos de «después»).
 
+## Segundo cambio del 2026-11-20: el título mientras se busca (RF-80, D23)
+
+Sin cambios de reglas, API ni base. Solo pantalla.
+
+- **El texto del buscador sube a `PantallaDocumentos`.** Hoy lo lee `ArchivadorDeDocumentos` con
+  `useParametroDeDireccion('buscar', '')`, que lee la dirección una sola vez, así que la pantalla no se entera de
+  que se está buscando. Pasa a leerse en `PantallaDocumentos` y baja al archivador como dos props: `busqueda` y
+  `buscar`. Así queda una sola fuente: dos lecturas del mismo parámetro se desincronizarían.
+- **El título, la pestaña y la ruta se calculan con `abierta` y `buscando`** (`busqueda.trim().length > 0`), en
+  `PantallaDocumentos`:
+  - el título del marco es el nombre de la carpeta solo si hay carpeta abierta y no se está buscando; si no,
+    «Documentos»;
+  - `registro` y `useTituloDelRegistro` también van sin la carpeta mientras se busca;
+  - `alVolverDelRegistro` queda igual mientras haya carpeta abierta: no estorba, porque sin registro no hay paso
+    de carpeta que lo use.
+- **Lo que no cambia:** la carpeta sigue en la dirección mientras se busca, así que al borrar el texto se vuelve
+  a ella con su nombre (RF-41, RF-16).
+- **Verificación:** es solo pantalla y no entra en `verificar-reglas.ts`. Se comprueba en Chrome con la sesión
+  de Gerencia en desarrollo:
+  - en OCC se abre una carpeta y se escribe en el buscador: título y pestaña dicen «Documentos», y la ruta no
+    muestra la carpeta;
+  - al borrar el texto, vuelve el nombre;
+  - entrando por una dirección con `?carpeta=…&buscar=…`, se ve «Documentos» desde el primer momento;
+  - se toman las fotos de «después» y corren los tres comandos.
+
 ## Pendiente de la spec
 
 Ninguno: los documentos sin tamaño quedaron resueltos como D19 / RF-69 (no se muestra la línea del tamaño).

@@ -45,6 +45,7 @@ import { usePersona } from '@/features/panel/sesion';
 import { useTituloDelRegistro } from '@/features/panel/titulo-del-registro';
 import { POR_PAGINA } from '@/features/panel/paginas';
 import { useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
+import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import {
   carpetasDe,
@@ -118,7 +119,12 @@ export default function PantallaDocumentos() {
   const ruta = usePathname();
   const router = useRouter();
   const navegacion = useNavigation();
-  useTituloDelRegistro(abierta?.nombre);
+  // Segundo cambio del 2026-11-20 (RF-80, D23): mientras se busca, los resultados son de todas las
+  // carpetas, así que el título, la pestaña y la ruta dicen «Documentos» aunque haya una abierta. El
+  // texto se lee aquí y baja al archivador: una sola lectura de la dirección, para que no se desfasen.
+  const [busqueda, buscar] = useParametroDeDireccion('buscar', '');
+  const enLaCarpeta = busqueda.trim().length > 0 ? null : abierta;
+  useTituloDelRegistro(enLaCarpeta?.nombre);
 
   // Cada carpeta abierta es una pantalla aparte del Stack (T4), y la de abajo se queda montada con lo que
   // pidió al entrar. Si en la de arriba se subió o se anuló algo, al volver con «atrás» o con «Todas las
@@ -150,11 +156,11 @@ export default function PantallaDocumentos() {
   return (
     <MarcoPantalla
       acciones={puedeSubir && pedido ? <Boton titulo="Subir documento" onPress={() => setSubiendo(true)} /> : undefined}
-      titulo={abierta?.nombre ?? 'Documentos'}
-      registro={abierta?.nombre}
-      alVolverDelRegistro={abierta ? volver : undefined}
+      titulo={enLaCarpeta?.nombre ?? 'Documentos'}
+      registro={enLaCarpeta?.nombre}
+      alVolverDelRegistro={enLaCarpeta ? volver : undefined}
       descripcion={
-        abierta
+        enLaCarpeta
           ? `Los documentos de ${nombreDelLugar} en esta carpeta, del más reciente al más antiguo.`
           : `Los documentos de ${nombreDelLugar}, en una carpeta por clase. Al subir uno se elige su carpeta o se crea una nueva. Nada se borra: lo que sobra se anula con motivo.`
       }
@@ -169,6 +175,8 @@ export default function PantallaDocumentos() {
           deQuien={deQuien}
           carpetas={carpetas}
           abierta={abierta}
+          busqueda={busqueda}
+          buscar={buscar}
           alAbrir={abrirCarpeta}
           alVolver={volver}
           puedeSubir={puedeSubir}

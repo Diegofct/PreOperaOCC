@@ -20,7 +20,8 @@
  * de comercio» no sabe, o no debería tener que saber, en qué carpeta la guardaron. Mientras hay texto
  * mandan los resultados, cada uno con el nombre de su carpeta; al borrarlo se vuelve a donde se estaba
  * (RF-41), porque la carpeta sigue en la dirección. La búsqueda va con `replace` en la dirección —no
- * llena el historial de letras— y la carpeta con `push`, que es lo que deshace «atrás».
+ * llena el historial de letras— y la carpeta con `push`, que es lo que deshace «atrás». El texto lo
+ * lee la pantalla y llega por props, porque mientras se busca el título dice «Documentos» (RF-80).
  */
 import { useState, type ReactNode } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -46,7 +47,6 @@ import {
 import type { DocumentoDelLugar } from '@/features/panel/contratos';
 import { POR_PAGINA } from '@/features/panel/paginas';
 import { useEsAngosto } from '@/features/panel/usar-ancho';
-import { useParametroDeDireccion } from '@/features/panel/usar-parametro-direccion';
 import { carpetasDe, coincideBusqueda, type CarpetaDelArchivador, type LugarDeDocumentos } from '@/shared/rules/documentos';
 
 export function ArchivadorDeDocumentos({
@@ -55,6 +55,8 @@ export function ArchivadorDeDocumentos({
   deQuien,
   carpetas,
   abierta,
+  busqueda,
+  buscar,
   alAbrir,
   alVolver,
   puedeSubir,
@@ -68,6 +70,9 @@ export function ArchivadorDeDocumentos({
   carpetas: CarpetaDelArchivador[];
   /** La carpeta de la dirección, si existe en este lugar (RF-21, RF-22). */
   abierta: CarpetaDelArchivador | null;
+  /** El texto del buscador, que vive en la dirección (`?buscar=`) y lo lee la pantalla (RF-80). */
+  busqueda: string;
+  buscar: (texto: string) => void;
   alAbrir: (carpeta: string) => void;
   alVolver: () => void;
   puedeSubir: boolean;
@@ -86,7 +91,6 @@ export function ArchivadorDeDocumentos({
   // RF-43, RF-45: las dos casillas de la 034 aplican dentro de una carpeta y en la búsqueda; en las
   // carpetas, la de vencidos esconde las que no tienen nada que atender (RF-44) y la de anulados no
   // cambia los números (RF-67: las carpetas nunca cuentan anulados).
-  const [busqueda, buscar] = useParametroDeDireccion('buscar', '');
   const [soloConAviso, setSoloConAviso] = useState(false);
   const [verAnulados, setVerAnulados] = useState(false);
   const buscando = busqueda.trim().length > 0;

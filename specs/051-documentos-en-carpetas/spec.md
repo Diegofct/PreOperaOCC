@@ -1,6 +1,6 @@
 # Spec 051 — Documentos en carpetas
 
-> Estado: **Cumplida el 2026-11-20, con su cambio** (`validacion.md`: 77/77 RF vigentes en verde; RF-47 y RF-48 retirados) · Cambio del 2026-11-20 (las carpetas nacen al subir: RF-70 a RF-79, D20–D22; RF-4, RF-5, RF-9, RF-22, RF-49, RF-57 y RF-67 modificados), revalidado el mismo día · Primera validación: 69/69 · **Aprobada** por Diego el 2026-11-19 y clarificada el mismo día (D7–D18); D19 al aprobar el plan · Fecha: 2026-11-19 · Tercera de la tanda de UI/UX (049 marca, 050 interfaz, 051 documentos en carpetas) · Entrevista del 18 y el 19-nov: D1 a D6, abajo · **Modifica la 034** (RF-31, RF-32, RF-33 y RF-37: la lista con selector de clase pasa a carpetas con tarjetas) · **Toca la 050** (RF-53 en Documentos: sin documentos se ve el vacío de las listas con «Subir documento»; desde el cambio del 2026-11-20 ya no hay carpetas vacías)
+> Estado: **Cumplida el 2026-11-20, con sus dos cambios** (`validacion.md`: 78/78 RF vigentes en verde; RF-47 y RF-48 retirados) · Segundo cambio del 2026-11-20 (el título mientras se busca dentro de una carpeta: RF-80, D23; RF-16, RF-17 y RF-58 modificados), revalidado el mismo día · Cambio del 2026-11-20 (las carpetas nacen al subir: RF-70 a RF-79, D20–D22; RF-4, RF-5, RF-9, RF-22, RF-49, RF-57 y RF-67 modificados), revalidado el mismo día · Primera validación: 69/69 · **Aprobada** por Diego el 2026-11-19 y clarificada el mismo día (D7–D18); D19 al aprobar el plan · Fecha: 2026-11-19 · Tercera de la tanda de UI/UX (049 marca, 050 interfaz, 051 documentos en carpetas) · Entrevista del 18 y el 19-nov: D1 a D6, abajo · **Modifica la 034** (RF-31, RF-32, RF-33 y RF-37: la lista con selector de clase pasa a carpetas con tarjetas) · **Toca la 050** (RF-53 en Documentos: sin documentos se ve el vacío de las listas con «Subir documento»; desde el cambio del 2026-11-20 ya no hay carpetas vacías)
 
 ## Contexto y objetivo
 
@@ -72,9 +72,9 @@ Los mismos de la spec 034, con los mismos permisos:
 ### Entrar a una carpeta (H2)
 
 - RF-15: CUANDO alguien pulsa una carpeta, EL SISTEMA muestra solo los documentos de esa clase.
-- RF-16: MIENTRAS hay una carpeta abierta, EL SISTEMA muestra su nombre en el título de la pantalla.
-- RF-58: MIENTRAS hay una carpeta abierta, EL SISTEMA muestra su nombre en el título de la pestaña del navegador (049/RF-13; D11).
-- RF-17: MIENTRAS hay una carpeta abierta, EL SISTEMA muestra en la ruta de arriba el paso «Documentos», con enlace para volver a todas las carpetas (050/RF-27, RF-28).
+- RF-16: MIENTRAS hay una carpeta abierta y el buscador está vacío, EL SISTEMA muestra su nombre en el título de la pantalla (D23).
+- RF-58: MIENTRAS hay una carpeta abierta y el buscador está vacío, EL SISTEMA muestra su nombre en el título de la pestaña del navegador (049/RF-13; D11, D23).
+- RF-17: MIENTRAS hay una carpeta abierta y el buscador está vacío, EL SISTEMA muestra en la ruta de arriba el paso «Documentos», con enlace para volver a todas las carpetas (050/RF-27, RF-28).
 - RF-18: MIENTRAS hay una carpeta abierta, EL SISTEMA muestra un botón «Todas las carpetas» que vuelve a ellas.
 - RF-19: CUANDO alguien abre una carpeta, EL SISTEMA guarda la carpeta en la dirección de la página.
 - RF-20: CUANDO alguien usa «atrás» del navegador desde una carpeta, EL SISTEMA vuelve a todas las carpetas.
@@ -114,6 +114,7 @@ Los mismos de la spec 034, con los mismos permisos:
 - RF-40: MIENTRAS hay texto en el buscador, EL SISTEMA muestra en cada tarjeta el nombre de su carpeta.
 - RF-66: MIENTRAS hay texto en el buscador, EL SISTEMA ordena los resultados del más reciente al más antiguo por fecha del documento (D15).
 - RF-41: CUANDO alguien borra el texto del buscador, EL SISTEMA vuelve a donde estaba: a todas las carpetas o a la carpeta abierta.
+- RF-80: MIENTRAS hay texto en el buscador, aunque haya una carpeta abierta, EL SISTEMA muestra «Documentos» en el título de la pantalla y en el de la pestaña, y la ruta de arriba sin el paso de la carpeta, porque los resultados son de todas (RF-38; D23).
 - RF-42: SI la búsqueda no encuentra nada, ENTONCES EL SISTEMA lo dice y ofrece limpiar la búsqueda (050/RF-54).
 - RF-43: EL SISTEMA conserva la casilla «Solo vencidos o por vencer», que aplica dentro de una carpeta y en la búsqueda (034/RF-40).
 - RF-44: MIENTRAS la casilla «Solo vencidos o por vencer» está marcada y no hay carpeta abierta ni búsqueda, EL SISTEMA muestra solo las carpetas que tienen documentos vencidos o por vencer.
@@ -177,7 +178,7 @@ Los mismos de la spec 034, con los mismos permisos:
 - **Clase retirada del catálogo**: sus documentos no se pierden; aparecen en su propia carpeta con el nombre guardado (RF-13).
 - **Una carpeta solo con anulados** (cambio del 2026-11-20): no se ve; con «Ver anulados» aparece en gris con «0», y al abrirla salen sus anulados.
 - **Dirección con una carpeta inventada o de otro lugar**: se ven todas las carpetas (RF-22).
-- **Buscar dentro de una carpeta**: busca en todas (RF-38); al borrar la búsqueda se vuelve a la carpeta (RF-41).
+- **Buscar dentro de una carpeta**: busca en todas (RF-38) y el título dice «Documentos» mientras tanto (RF-80); al borrar la búsqueda se vuelve a la carpeta, con su nombre en el título (RF-41, RF-16).
 - **Dos personas a la vez**: si otra persona sube o anula mientras se mira, los números se ponen al día al volver a cargar, como hoy.
 - **Clase del documento distinta de la carpeta desde la que se subió** (se cambió en la ventana): el documento queda en la carpeta de su clase, y es esa la que se abre (RF-53).
 - **Pruebas en desarrollo**: lo que se suba lleva el prefijo PRUEBA-051 y se borra al final con la limpieza acotada.
@@ -247,6 +248,12 @@ las clases de siempre), y retira RF-47 y RF-48.
 - D21: crea carpetas todo el que puede subir en ese lugar; no cambia ningún permiso (RF-77).
 - D22: una carpeta cuyos documentos están todos anulados deja de verse, y vuelve con «Ver anulados» (RF-9,
   RF-67, RF-76).
+
+## Segundo cambio del 2026-11-20 (Diego, después del commit)
+
+- D23: mientras se busca dentro de una carpeta, el título dice «Documentos» y no el nombre de la carpeta,
+  porque los resultados son de todas; al borrar la búsqueda vuelve el nombre de la carpeta (RF-80; modifica
+  RF-16, RF-17 y RF-58).
 
 ## Dudas abiertas
 

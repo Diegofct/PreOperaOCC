@@ -342,6 +342,20 @@ Si hay que forzar una respuesta, se intercepta la petición; nunca se guardan da
       por código). Export web sin errores (197 rutas de API) y sin secretos en `dist/client`; permisos y esquema
       sin cambios. Spec marcada **Cumplida, con su cambio**. 1111 verificaciones; typecheck y lint en verde.
 
+### Segundo cambio del 2026-11-20: el título mientras se busca
+
+- [x] T22. La búsqueda sube a `PantallaDocumentos` y baja al archivador como props. Mientras hay texto en el
+      buscador, el título, la pestaña y la ruta dicen «Documentos» y no muestran la carpeta. (RF-16, RF-17,
+      RF-58, RF-80)
+      Hecho cuando:
+      - en Chrome, dentro de una carpeta de OCC, al escribir el título y la pestaña dicen «Documentos», y al
+        borrar vuelve el nombre de la carpeta;
+      - con `?carpeta=…&buscar=…` se ve «Documentos»;
+      - los tres comandos están en verde.
+- [x] T23. Revalidación corta: RF-16, RF-17, RF-41, RF-58 y RF-80 en `validacion.md`, con fotos de «después»; la
+      spec vuelve a «Cumplida» (78/78). (RF-16, RF-17, RF-41, RF-58, RF-80)
+      Hecho cuando: cada uno tiene su comprobación y su resultado, y los tres comandos están en verde.
+
 ## Notas de ejecución
 
 **T1 (19-nov).** 10 fotos en `fotos/antes/`, tomadas con un recuadro de 1366×768 y 390×844 dentro de la
@@ -426,3 +440,29 @@ Decisión de Diego (19-nov): A — al cerrar la 051, /sdd:cambio a la 050 para a
   que es la primera que publica un registro.
 - Quedan 1105 verificaciones.
 
+**T22 (20-nov).**
+- **Qué se hizo:** `PantallaDocumentos` lee `?buscar=` con `useParametroDeDireccion` y se lo pasa al archivador
+  en las props `busqueda` y `buscar`; el archivador ya no lo lee por su cuenta. `enLaCarpeta` es la carpeta
+  abierta solo si no hay texto en el buscador, y de ahí salen el título, `registro`, `useTituloDelRegistro` y
+  `alVolverDelRegistro`.
+- **Va un poco más allá de la tarea:** la descripción del encabezado tampoco dice «en esta carpeta» mientras se
+  busca. Es la misma decisión D23, porque la descripción vive junto al título.
+- **En Chrome** (sesión de Gerencia, OCC):
+  - dentro de RUT dice «RUT», la ruta es «OCC › Documentos › RUT» y la pestaña «RUT · Documentos · OCC»;
+  - al escribir «rup», el título dice «Documentos», la ruta es «OCC › Documentos», la pestaña «Documentos · OCC»,
+    y salen resultados de RUT y de RUP OCC;
+  - al borrar el texto vuelve «RUT»;
+  - entrando por `?carpeta=rut&buscar=rup` se ve «Documentos».
+  - Foto: `fotos/despues/t22-buscando-dentro-de-rut.jpg`.
+- **Servidor de desarrollo:** antes de la prueba estaba en 1,4 GB y tardaba 86 s en responder; se reinició.
+- Los tres comandos están en verde (1111 verificaciones).
+
+**T23 (20-nov).**
+- En `validacion.md`:
+  - las filas de RF-16, RF-17 y RF-58 llevan la comprobación de la T22;
+  - RF-41 va junto a RF-38, RF-40 y RF-42;
+  - RF-80 tiene fila propia;
+  - el veredicto quedó en 78/78.
+- La spec vuelve a «Cumplida».
+- Los tres comandos están en verde (1111 verificaciones). El export web no se repitió porque no se tocó nada que
+  lea un secreto.
