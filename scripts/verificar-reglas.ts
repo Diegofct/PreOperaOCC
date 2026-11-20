@@ -706,16 +706,25 @@ import {
   type SolicitudDePagoParaPaso,
 } from '../src/shared/rules/pagos';
 import {
+  carpetasDe,
+  claseAGuardar,
+  claseParaNombre,
   clasesDe,
   coincideBusqueda,
+  esLugarConCarpetas,
+  opcionesDeCarpeta,
+  VALOR_NUEVA_CARPETA,
   esClaseDe,
   estadoDelVencimiento,
   extensionDe,
   faltasDelDocumento,
   llevaPrecio,
   nombreDeClase,
+  MIMES_DE_DOCUMENTOS,
   resumenDeVencimientos,
   revisarDocumento,
+  formatoDeArchivo,
+  tamanoLegible,
   tipoPorFirma,
   TAMANO_MAXIMO_DE_DOCUMENTO,
   type LugarDeDocumentos,
@@ -22542,7 +22551,7 @@ prueba('050/RF-26 a RF-32, RF-69: el encabezado de toda pantalla lleva la ruta, 
   // Los pasos los prueba `migasDelLugar` (T5); esto vigila que el marco de todas las pantallas los
   // pinte con esa regla y con el nombre de obra compartido, y no con uno armado aparte.
   const marco = readFileSync('src/features/panel/marco.tsx', 'utf8');
-  assert.match(marco, /<Migas registro=\{registro\} \/>/);
+  assert.match(marco, /<Migas registro=\{registro\}( alVolverDelRegistro=\{alVolverDelRegistro\})? \/>/);
   assert.match(marco, /acciones \? <View style=\{angosto \? estilos\.accionesAngosto : estilos\.acciones\}>\{acciones\}<\/View> : null/);
   const migas = readFileSync('src/features/panel/migas.tsx', 'utf8');
   assert.match(migas, /migasDelLugar\(lugar, \{ obra: obra\?\.nombre \?\? null \}, registro\)/);
@@ -22882,4 +22891,292 @@ prueba('050/RF-30 (cambio de Diego, 18-nov): Plan semanal y Planificación lleva
   assert.match(leer('planificacion/pantalla-planificacion'), /\{subir\.botones\}\s*\{crear\.botones\}/);
   // Sin permiso, sin botones.
   assert.match(leer('planificacion/pantalla-planificacion'), /if \(!obraId \|\| !puedeSubir\) return pintar\(SIN_ACCION, SIN_ACCION\);/);
+});
+
+/* ── Spec 051: Documentos en carpetas ─────────────────────────────────────── */
+
+prueba('051/RF-4, RF-70 (cambio del 2026-11-20): sin documentos no hay carpetas; solo las clases con documentos', () => {
+  assert.deepEqual(carpetasDe('occ', []), []);
+  assert.deepEqual(carpetasDe('obra', []), []);
+  const doc = (clase: string) => ({ clase, claseNombre: clase, fecha: '2026-11-01', anulado: null, aviso: null });
+  assert.deepEqual(
+    carpetasDe('occ', [doc('rut'), doc('rut'), doc('manuales')]).map((c) => [c.id, c.vigentes]),
+    [
+      ['rut', 2],
+      ['manuales', 1],
+    ],
+  );
+});
+
+prueba('051/RF-9, RF-67, RF-76 (cambio del 2026-11-20, D22): una carpeta solo con anulados sale solo con «Ver anulados»', () => {
+  const doc = (clase: string, anulado: boolean) => ({
+    clase,
+    claseNombre: clase,
+    fecha: '2026-11-01',
+    anulado: anulado ? { motivo: 'repetido' } : null,
+    aviso: null,
+  });
+  const documentos = [doc('rut', true), doc('actas', false), doc('actas', true)];
+  assert.deepEqual(
+    carpetasDe('occ', documentos).map((c) => c.id),
+    ['actas'],
+  );
+  const conAnulados = carpetasDe('occ', documentos, { conAnulados: true });
+  assert.deepEqual(
+    conAnulados.map((c) => [c.id, c.vigentes, c.vacia, c.tieneAnulados]),
+    [
+      ['rut', 0, true, true],
+      ['actas', 1, false, true],
+    ],
+  );
+});
+
+prueba('051/RF-6 a RF-10, RF-68 (D8): vigente es no anulado; vencidos y por vencer sin anulados', () => {
+  const doc = (aviso: 'vencido' | 'por_vencer' | null, anulado = false) => ({
+    clase: 'rut',
+    claseNombre: 'RUT',
+    fecha: '2026-11-01',
+    anulado: anulado ? { motivo: 'repetido' } : null,
+    aviso: aviso ? { estado: aviso } : null,
+  });
+  const rut = carpetasDe('occ', [doc('vencido'), doc('por_vencer'), doc(null), doc('vencido', true)]).find(
+    (c) => c.id === 'rut',
+  );
+  assert.deepEqual(
+    rut && [rut.vigentes, rut.vencidos, rut.porVencer, rut.vacia, rut.tieneAnulados],
+    [3, 1, 1, false, true],
+  );
+  // Una carpeta solo con anulados cuenta 0 y va en gris, pero se puede abrir (RF-68).
+  const soloAnulados = carpetasDe('occ', [doc(null, true)], { conAnulados: true }).find((c) => c.id === 'rut');
+  assert.deepEqual(soloAnulados && [soloAnulados.vigentes, soloAnulados.vacia, soloAnulados.tieneAnulados], [0, true, true]);
+  // Un solo vencido: cuenta, y la carpeta no va en gris (D8).
+  const vencido = carpetasDe('occ', [doc('vencido')]).find((c) => c.id === 'rut');
+  assert.deepEqual(vencido && [vencido.vigentes, vencido.vacia], [1, false]);
+});
+
+prueba('051/RF-13, RF-57: las clases retiradas, antes de «Otro», en orden alfabético y con su nombre guardado', () => {
+  const retirada = (clase: string, claseNombre: string, fecha = '2026-10-01') => ({
+    clase,
+    claseNombre,
+    fecha,
+    anulado: null,
+    aviso: null,
+  });
+  const carpetas = carpetasDe('geolab', [
+    retirada('zeta_vieja', 'Zeta'),
+    retirada('acta_vieja', 'Acta vieja (antes)', '2026-01-01'),
+    retirada('acta_vieja', 'Acta vieja', '2026-09-01'),
+  ]);
+  // Desde el cambio del 2026-11-20 solo salen las clases con documentos.
+  assert.deepEqual(
+    carpetas.map((c) => c.id),
+    ['acta_vieja', 'zeta_vieja'],
+  );
+  const acta = carpetas.find((c) => c.id === 'acta_vieja');
+  // Con dos nombres guardados para la misma clave, el del documento más reciente.
+  assert.deepEqual(acta && [acta.nombre, acta.vigentes, acta.retirada], ['Acta vieja', 2, true]);
+});
+
+prueba('051/RF-5, RF-57 (cambio del 2026-11-20): catálogo en su orden, luego propias y retiradas juntas por alfabeto, «Otro» al final', () => {
+  const doc = (clase: string, claseNombre = clase) => ({ clase, claseNombre, fecha: '2026-11-01', anulado: null, aviso: null });
+  const carpetas = carpetasDe('occ', [
+    doc('otro', 'Otro'),
+    doc('carpeta:zanjas', 'Zanjas'),
+    doc('mantenimiento', 'Soportes de mantenimiento'),
+    doc('clase_vieja', 'Bitácoras viejas'),
+    doc('carpeta:acueducto', 'Acueducto'),
+    doc('rut', 'RUT'),
+    doc('carpeta:especificaciones', 'Especificaciones'),
+  ]);
+  assert.deepEqual(
+    carpetas.map((c) => c.nombre),
+    ['RUT', 'Soportes de mantenimiento', 'Acueducto', 'Bitácoras viejas', 'Especificaciones', 'Zanjas', 'Otro'],
+  );
+  const acueducto = carpetas.find((c) => c.id === 'carpeta:acueducto');
+  assert.deepEqual(acueducto && [acueducto.propia, acueducto.retirada], [true, false]);
+  const vieja = carpetas.find((c) => c.id === 'clase_vieja');
+  assert.deepEqual(vieja && [vieja.propia, vieja.retirada], [false, true]);
+});
+
+prueba('051/RF-73, RF-74, RF-78 (cambio del 2026-11-20): el nombre de una carpeta nueva decide su clave', () => {
+  assert.deepEqual(claseParaNombre('occ', 'Manuales de obra'), {
+    clase: 'carpeta:manuales_de_obra',
+    claseNombre: 'Manuales de obra',
+  });
+  // La misma carpeta con otra escritura: misma clave, el nombre como se escribió (sin espacios de más).
+  assert.deepEqual(claseParaNombre('occ', '  manuales DE   obra '), {
+    clase: 'carpeta:manuales_de_obra',
+    claseNombre: 'manuales DE obra',
+  });
+  // Coincide con una clase de siempre: se usa esa, con su nombre (RF-73).
+  for (const escrito of ['cámara de comercio', 'CAMARA DE COMERCIO', ' Camara  de comercio ']) {
+    assert.deepEqual(claseParaNombre('occ', escrito), { clase: 'camara_de_comercio', claseNombre: 'Cámara de comercio' }, escrito);
+  }
+  assert.deepEqual(claseParaNombre('obra', 'planos'), { clase: 'planos', claseNombre: 'Planos' });
+  // «Otro» también es del catálogo.
+  assert.deepEqual(claseParaNombre('geolab', 'otro'), { clase: 'otro', claseNombre: 'Otro' });
+  // Nada útil: se pide otro nombre.
+  for (const escrito of ['', '   ', '—', '...', '¿?']) assert.equal(claseParaNombre('occ', escrito), null, escrito);
+  // Más de 60 caracteres: no.
+  assert.equal(claseParaNombre('occ', 'a'.repeat(61)), null);
+  assert.ok(claseParaNombre('occ', 'a'.repeat(60)));
+  // La clave nunca pasa de 64 en total.
+  const larga = claseParaNombre('occ', 'Ñandú '.repeat(10).trim().slice(0, 60));
+  assert.ok(larga && larga.clase.length <= 64 && !larga.clase.endsWith('_'), larga?.clase ?? 'sin clase');
+  // La ficha, la requisición y el pago no tienen carpetas propias (RF-78).
+  for (const lugar of ['persona', 'solicitud', 'pago'] as const) {
+    assert.equal(esLugarConCarpetas(lugar), false, lugar);
+    assert.equal(claseParaNombre(lugar, 'Manuales de obra'), null, lugar);
+  }
+  for (const lugar of ['elemental', 'occ', 'geolab', 'obra'] as const) assert.equal(esLugarConCarpetas(lugar), true, lugar);
+});
+
+prueba('051/RF-79 (cambio del 2026-11-20): una carpeta propia se acepta solo en empresas y obras, con nombre', () => {
+  const datos = { clase: 'carpeta:manuales_de_obra', claseNombre: 'Manuales de obra', nombre: 'Manual', fecha: '2026-11-20', vence: null };
+  assert.deepEqual(faltasDelDocumento('occ', datos), []);
+  assert.deepEqual(faltasDelDocumento('obra', datos), []);
+  assert.ok(esClaseDe('geolab', 'carpeta:manuales_de_obra'));
+  for (const lugar of ['persona', 'solicitud', 'pago'] as const) {
+    assert.ok(!esClaseDe(lugar, 'carpeta:manuales_de_obra'), lugar);
+    assert.deepEqual(faltasDelDocumento(lugar, datos), ['Esa clase no es de este lugar.'], lugar);
+  }
+  // Sin nombre, o con una clave mal formada.
+  assert.deepEqual(faltasDelDocumento('occ', { ...datos, claseNombre: '' }), ['Escriba el nombre de la carpeta.']);
+  assert.deepEqual(faltasDelDocumento('occ', { ...datos, claseNombre: '—' }), [
+    'El nombre de la carpeta tiene que llevar letras o números.',
+  ]);
+  assert.deepEqual(faltasDelDocumento('occ', { ...datos, claseNombre: 'x'.repeat(61) }), [
+    'El nombre de la carpeta no puede pasar de 60 caracteres.',
+  ]);
+  for (const clase of ['carpeta:', 'carpeta:Con Mayúsculas', 'carpeta:_borde', `carpeta:${'a'.repeat(60)}`]) {
+    assert.ok(!esClaseDe('occ', clase), clase);
+  }
+  // Una clase del catálogo no necesita el nombre: sale del catálogo, como siempre.
+  assert.deepEqual(faltasDelDocumento('occ', { ...datos, clase: 'rut', claseNombre: '' }), []);
+});
+
+prueba('051/RF-79 (cambio del 2026-11-20, T17): el servidor guarda la clase que da la regla, no la que manda la pantalla', () => {
+  // Una carpeta propia: la clave sale del nombre, aunque la pantalla mande otra.
+  assert.deepEqual(claseAGuardar('occ', { clase: 'carpeta:otra_cosa', claseNombre: '  Manuales  de obra ' }), {
+    clase: 'carpeta:manuales_de_obra',
+    claseNombre: 'Manuales de obra',
+  });
+  // Un nombre que es el de una clase de siempre cae en ella (RF-73).
+  assert.deepEqual(claseAGuardar('obra', { clase: 'carpeta:planos', claseNombre: 'PLANOS' }), {
+    clase: 'planos',
+    claseNombre: 'Planos',
+  });
+  // Una clase de siempre se guarda con su nombre del catálogo, aunque llegue otro.
+  assert.deepEqual(claseAGuardar('occ', { clase: 'rut', claseNombre: 'cualquier cosa' }), { clase: 'rut', claseNombre: 'RUT' });
+  assert.deepEqual(claseAGuardar('persona', { clase: 'hoja_de_vida' }), { clase: 'hoja_de_vida', claseNombre: 'Hoja de vida' });
+});
+
+prueba('051/RF-71 (cambio del 2026-11-20): al subir, las carpetas del lugar, luego las sugerencias, «Otro» y «＋ Nueva carpeta…»', () => {
+  const doc = (clase: string, claseNombre: string) => ({ clase, claseNombre, fecha: '2026-11-01', anulado: null, aviso: null });
+  const carpetas = carpetasDe('geolab', [doc('carpeta:ensayos_viejos', 'Ensayos viejos'), doc('formatos', 'Formatos'), doc('otro', 'Otro')]);
+  const opciones = opcionesDeCarpeta('geolab', carpetas);
+  const valores = opciones.map((o) => o.valor);
+  // Primero las que ya tiene el lugar (sin «Otro»), en su orden.
+  assert.deepEqual(valores.slice(0, 2), ['formatos', 'carpeta:ensayos_viejos']);
+  // Después las sugerencias del catálogo que todavía no tienen carpeta, sin repetir ninguna.
+  const sugeridas = clasesDe('geolab')
+    .map((c) => c.id)
+    .filter((id) => id !== 'otro' && id !== 'formatos');
+  assert.deepEqual(valores.slice(2, 2 + sugeridas.length), sugeridas);
+  assert.deepEqual(valores.slice(-2), ['otro', VALOR_NUEVA_CARPETA]);
+  assert.equal(new Set(valores).size, valores.length);
+  assert.equal(opciones.at(-1)?.etiqueta, '＋ Nueva carpeta…');
+  // Un lugar sin documentos: el catálogo entero, «Otro» y la carpeta nueva.
+  assert.deepEqual(
+    opcionesDeCarpeta('obra', []).map((o) => o.valor),
+    [...clasesDe('obra').map((c) => c.id), VALOR_NUEVA_CARPETA],
+  );
+});
+
+prueba('051/RF-54: las carpetas suman lo mismo que las cifras de arriba', () => {
+  const hoy = '2026-11-19';
+  const crudos = [
+    { clase: 'rut', vence: '2026-11-01', anulado: false },
+    { clase: 'rut', vence: '2026-12-01', anulado: false },
+    { clase: 'polizas', vence: '2026-11-19', anulado: false },
+    { clase: 'polizas', vence: '2027-06-01', anulado: false },
+    { clase: 'soat_tecnomecanica', vence: '2026-10-01', anulado: true },
+    { clase: 'otro', vence: null, anulado: false },
+    { clase: 'clase_retirada', vence: '2026-11-02', anulado: false },
+  ];
+  const documentos = crudos.map((d) => ({
+    clase: d.clase,
+    claseNombre: d.clase,
+    fecha: '2026-10-01',
+    anulado: d.anulado ? { motivo: 'x' } : null,
+    aviso: estadoDelVencimiento(d, hoy),
+  }));
+  const carpetas = carpetasDe('occ', documentos);
+  const suma = carpetas.reduce(
+    (total, c) => ({ vencidos: total.vencidos + c.vencidos, porVencer: total.porVencer + c.porVencer }),
+    { vencidos: 0, porVencer: 0 },
+  );
+  assert.deepEqual(suma, resumenDeVencimientos(crudos, hoy));
+  assert.equal(
+    carpetas.reduce((n, c) => n + c.vigentes, 0),
+    crudos.filter((d) => !d.anulado).length,
+  );
+});
+
+prueba('051/RF-33, RF-69 (D14, D19): el tamaño en KB sin decimales hasta 1.024 KB, y en MB con un decimal', () => {
+  assert.equal(tamanoLegible(850 * 1024), '850 KB');
+  assert.equal(tamanoLegible(300), '1 KB'); // nunca «0 KB»: un archivo vacío no se admite (034/RF-28)
+  assert.equal(tamanoLegible(1_048_575), '1.024 KB');
+  assert.equal(tamanoLegible(1_048_576), '1,0 MB');
+  assert.equal(tamanoLegible(Math.round(4.2 * 1_048_576)), '4,2 MB');
+  assert.equal(tamanoLegible(20 * 1_048_576), '20,0 MB');
+  // Sin tamaño guardado, la tarjeta no muestra la línea (RF-69).
+  assert.equal(tamanoLegible(null), null);
+});
+
+prueba('051/RF-26: el tipo de cada archivo admitido es PDF, imagen, Word o Excel', () => {
+  const esperado: Record<string, string> = {
+    'application/pdf': 'pdf',
+    'image/jpeg': 'imagen',
+    'image/png': 'imagen',
+    'image/webp': 'imagen',
+    'application/msword': 'word',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'word',
+    'application/vnd.ms-excel': 'excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'excel',
+  };
+  // Todos los tipos que se guardan tienen el suyo: un tipo nuevo admitido obliga a decidir cuál.
+  assert.deepEqual([...MIMES_DE_DOCUMENTOS].sort(), Object.keys(esperado).sort());
+  for (const [mime, tipo] of Object.entries(esperado)) assert.equal(formatoDeArchivo(mime), tipo, mime);
+});
+
+prueba('051/RF-17 (T5): con registro, el paso del módulo puede volver con una función en vez de navegar', () => {
+  const migas = readFileSync('src/features/panel/migas.tsx', 'utf8');
+  const marco = readFileSync('src/features/panel/marco.tsx', 'utf8');
+  // El marco la pasa tal cual a la ruta.
+  assert.match(marco, /alVolverDelRegistro\?: \(\) => void;/);
+  assert.match(marco, /<Migas registro=\{registro\} alVolverDelRegistro=\{alVolverDelRegistro\} \/>/);
+  // Solo el penúltimo paso (el módulo), y solo cuando hay registro y función.
+  assert.match(migas, /const vuelve = registro && alVolverDelRegistro && i === pasos\.length - 2 \? alVolverDelRegistro : undefined;/);
+  // Con función, el paso no es un `Link` a la misma dirección: llama a la función.
+  assert.match(migas, /onPress=\{enlace \? alPulsar : undefined\}/);
+  assert.match(migas, /return enlace && !alPulsar \? \(\s*<Link href=\{paso\.ruta as Href\} asChild>/);
+});
+
+prueba('051/RF-58 (T6, D11): con una carpeta abierta, su nombre va delante en la pestaña', () => {
+  assert.equal(tituloDeLaPestana('/panel/occ/documentos', 'Pólizas y seguros'), 'Pólizas y seguros · Documentos · OCC');
+  assert.equal(
+    tituloDeLaPestana('/panel/proyectos/o1/documentos', 'Planos'),
+    'Planos · Documentos · Proyectos',
+  );
+  // Sin registro, nada cambia.
+  assert.equal(tituloDeLaPestana('/panel/occ/documentos'), 'Documentos · OCC');
+  assert.equal(tituloDeLaPestana('/panel/occ/documentos', null), 'Documentos · OCC');
+  assert.equal(tituloDeLaPestana('/panel/obras'), 'Obras · Kontrola');
+  // El layout lo arma con lo que publica la pantalla, y la pantalla lo quita al irse.
+  const layout = readFileSync('src/app/panel/_layout.tsx', 'utf8');
+  assert.match(layout, /document\.title = tituloDeLaPestana\(ruta, registro\);/);
+  assert.match(layout, /<ProveedorTituloDelRegistro>/);
+  const contexto = readFileSync('src/features/panel/titulo-del-registro.tsx', 'utf8');
+  assert.match(contexto, /return \(\) => publicar\(\(actual\) => \(actual === nombre \? null : actual\)\);/);
 });

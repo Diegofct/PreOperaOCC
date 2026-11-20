@@ -14,6 +14,14 @@
  * el nombre completo sale en una etiqueta al pasar el puntero o al mantenerlo pulsado (RF-69), con la
  * misma forma que la etiqueta del menú plegado (T7). Sin recorte no sale nada: repetir lo que ya se
  * lee entero es ruido.
+ *
+ * ── Volver del registro sin salir de la pantalla ──
+ *
+ * En Documentos, la carpeta abierta es el registro (spec 051, RF-17): «OCC › Documentos › RUT». Su
+ * paso «Documentos» lleva a la misma pantalla sin la carpeta, y un enlace normal no basta para eso:
+ * quien decide si se vuelve atrás o se reemplaza la pantalla es Documentos (ver la T4 de la 051). Por
+ * eso el marco puede pasar `alVolverDelRegistro`, y entonces ese paso, y solo ese, la llama en vez de
+ * navegar. Las pantallas que no la pasan (la ficha, una requisición) siguen con su enlace.
  */
 import { Link, usePathname, type Href } from 'expo-router';
 import { Fragment, useState } from 'react';
@@ -25,28 +33,31 @@ import { lugarDeLaRuta, migasDelLugar, type Miga } from '@/shared/rules/empresas
 import { useObraDelLugar } from './obra-del-lugar';
 import { useEsAngosto } from './usar-ancho';
 
-export function Migas({ registro }: { registro?: string }) {
+export function Migas({ registro, alVolverDelRegistro }: { registro?: string; alVolverDelRegistro?: () => void }) {
   const lugar = lugarDeLaRuta(usePathname());
   const obra = useObraDelLugar();
   const pasos = migasDelLugar(lugar, { obra: obra?.nombre ?? null }, registro);
   if (pasos.length === 0) return null;
   return (
     <View role="navigation" aria-label="Ruta de la pantalla" style={estilos.migas}>
-      {pasos.map((paso, i) => (
-        <Fragment key={`${i}:${paso.titulo}`}>
-          {i > 0 ? (
-            <Text style={estilos.separador} aria-hidden>
-              ›
-            </Text>
-          ) : null}
-          <Paso paso={paso} />
-        </Fragment>
-      ))}
+      {pasos.map((paso, i) => {
+        const vuelve = registro && alVolverDelRegistro && i === pasos.length - 2 ? alVolverDelRegistro : undefined;
+        return (
+          <Fragment key={`${i}:${paso.titulo}`}>
+            {i > 0 ? (
+              <Text style={estilos.separador} aria-hidden>
+                ›
+              </Text>
+            ) : null}
+            <Paso paso={paso} alPulsar={vuelve} />
+          </Fragment>
+        );
+      })}
     </View>
   );
 }
 
-function Paso({ paso }: { paso: Miga }) {
+function Paso({ paso, alPulsar }: { paso: Miga; alPulsar?: () => void }) {
   const [encima, setEncima] = useState(false);
   const [pulsado, setPulsado] = useState(false);
   const [entero, setEntero] = useState(0);
@@ -62,6 +73,7 @@ function Paso({ paso }: { paso: Miga }) {
       onHoverIn={() => setEncima(true)}
       onHoverOut={() => setEncima(false)}
       onLongPress={() => setPulsado(true)}
+      onPress={enlace ? alPulsar : undefined}
       onPressOut={() => setPulsado(false)}
       accessibilityRole={enlace ? 'link' : undefined}
       accessibilityLabel={paso.titulo}
@@ -92,7 +104,8 @@ function Paso({ paso }: { paso: Miga }) {
     </Pressable>
   );
 
-  return enlace ? (
+  // Con `alPulsar`, el paso ya lleva su `onPress` y no se envuelve en un `Link` a la misma dirección.
+  return enlace && !alPulsar ? (
     <Link href={paso.ruta as Href} asChild>
       {boton}
     </Link>

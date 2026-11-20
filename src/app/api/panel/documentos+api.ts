@@ -95,6 +95,7 @@ export async function POST(peticion: Request) {
 
     const leidos = documentoDelGrupoNuevo.safeParse({
       clase: texto(formulario, 'clase'),
+      claseNombre: texto(formulario, 'claseNombre'),
       nombre: texto(formulario, 'nombre'),
       proveedor: texto(formulario, 'proveedor'),
       descripcion: texto(formulario, 'descripcion'),

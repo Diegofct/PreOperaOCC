@@ -275,3 +275,17 @@ export const CajaDeLogo = {
   menu: { ancho: 184, alto: 56 },
   menuPlegado: { ancho: 40, alto: 40 },
 } as const;
+
+/**
+ * Lo mínimo que mide de ancho una carpeta del archivador de documentos (spec 051). Cabe un nombre de
+ * clase largo («Declaraciones de impuestos») en un renglón con su número al lado, y en 1600 de
+ * listado entran seis por fila. Por debajo de `AnchoCelular` va una sola columna (RF-14).
+ */
+export const AnchoMinimoCarpeta = 220;
+
+/**
+ * Lo mínimo que mide de ancho la tarjeta de un documento dentro de una carpeta (spec 051, D4). Le
+ * caben en un renglón proveedor, fecha y vence; en 1600 de listado entran cuatro por fila. Por
+ * debajo de `AnchoCelular`, una columna (RF-37).
+ */
+export const AnchoMinimoTarjetaDeDocumento = 320;

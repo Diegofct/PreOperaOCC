@@ -66,7 +66,7 @@ import {
   estadoDelVencimiento,
   faltasDelDocumento,
   llevaPrecio,
-  nombreDeClase,
+  claseAGuardar,
   resumenDeVencimientos,
   revisarDocumento,
   TAMANO_MAXIMO_DE_DOCUMENTO,
@@ -262,6 +262,8 @@ export async function documentosDelLugar(dueno: DuenoDeDocumentos): Promise<Docu
 
 export interface DocumentoPedido {
   clase: string;
+  /** Spec 051, RF-72: el nombre de una carpeta creada al subir. */
+  claseNombre: string;
   nombre: string;
   proveedor: string;
   descripcion: string;
@@ -278,7 +280,7 @@ export async function subirDocumento(
   dueno: DuenoDeDocumentos,
   datos: DocumentoPedido,
   archivo: { nombre: string; contenido: Uint8Array<ArrayBuffer> },
-): Promise<{ id: string } | Response> {
+): Promise<{ id: string; clase: string } | Response> {
   const faltas = faltasDelDocumento(dueno.lugar, datos);
   if (dueno.tipo === 'solicitud' && dueno.sinPrecio && llevaPrecio(datos.clase)) {
     faltas.push('Esa clase lleva precios: la sube quien ve los valores de la compra.');
@@ -291,6 +293,9 @@ export async function subirDocumento(
     archivo.contenido.subarray(0, BYTES_DE_FIRMA),
   );
   if (!revision.ok) return errorDePeticion(revision.mensaje, revision.estado);
+
+  // Spec 051, RF-79: la clase la decide la regla aquí, con lo que llegó; no se guarda la de la pantalla.
+  const { clase, claseNombre } = claseAGuardar(dueno.lugar, datos);
 
   const id = uuidv7();
   const mediaId = uuidv7();
@@ -318,8 +323,8 @@ export async function subirDocumento(
       personaId: dueno.tipo === 'persona' ? dueno.personaId : null,
       solicitudId: dueno.tipo === 'solicitud' ? dueno.solicitudId : null,
       solicitudPagoId: dueno.tipo === 'solicitud_pago' ? dueno.solicitudPagoId : null,
-      clase: datos.clase,
-      claseNombre: nombreDeClase(dueno.lugar, datos.clase) ?? datos.clase,
+      clase,
+      claseNombre,
       nombre: datos.nombre.trim(),
       proveedor: datos.proveedor.trim(),
       descripcion: datos.descripcion.trim(),
@@ -330,7 +335,8 @@ export async function subirDocumento(
       subidoPor: sesion.id,
     }),
   ]);
-  return { id };
+  // La pantalla abre la carpeta donde quedó (RF-53, RF-75), que puede no ser la que mandó.
+  return { id, clase };
 }
 
 /** Lo más que puede pesar el cuerpo de una subida: el archivo y unos pocos datos. */

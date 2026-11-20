@@ -138,7 +138,131 @@ export function llevaPrecio(clase: string): boolean {
 }
 
 export function esClaseDe(lugar: LugarDeDocumentos, id: string): boolean {
+  if (esLugarConCarpetas(lugar) && esCarpetaPropia(id)) return true;
   return clasesDe(lugar).some((c) => c.id === id);
+}
+
+/* ── Carpetas creadas al subir (spec 051, cambio del 2026-11-20) ────────── */
+
+/**
+ * Una carpeta que crea quien sube no tiene tabla propia: es una clase guardada en el documento,
+ * `carpeta:<clave>`, con el nombre que se escribió en `clase_nombre`. La clave sale del nombre
+ * —sin tildes, sin mayúsculas, con `_` en lugar de espacios y signos—, así que dos personas que
+ * escriben «Pólizas de obra» y «polizas DE obra» caen en la misma carpeta sin consultar la base
+ * (RF-74). Y si el nombre es el de una clase de siempre, se usa esa (RF-73): nadie tiene que saber
+ * que «Cámara de comercio» ya existía para no duplicarla.
+ *
+ * Una carpeta existe mientras tiene documentos; no se crean vacías, ni se renombran ni se borran.
+ * La regla la aplican igual la pantalla y el servidor, que la recalcula al guardar (RF-79).
+ */
+export const PREFIJO_DE_CARPETA = 'carpeta:';
+
+/** Lo más largo que puede ser el nombre de una carpeta nueva (RF-72). */
+export const LARGO_MAXIMO_DE_CARPETA = 60;
+
+/** Lo más larga que puede ser una clase guardada (la entrada de la API admite 64). */
+const LARGO_MAXIMO_DE_CLASE = 64;
+
+/** El valor de «＋ Nueva carpeta…» en el selector: no se confunde con ninguna clase. */
+export const VALOR_NUEVA_CARPETA = 'nueva-carpeta';
+
+/**
+ * Dónde se pueden crear carpetas: Documentos de las empresas y de las obras. La ficha, la
+ * requisición y el pago siguen con sus clases de siempre (RF-78).
+ */
+export function esLugarConCarpetas(lugar: LugarDeDocumentos): boolean {
+  return lugar === 'elemental' || lugar === 'occ' || lugar === 'geolab' || lugar === 'obra';
+}
+
+/** El nombre escrito, sin espacios en los bordes ni repetidos. */
+function limpiarNombreDeCarpeta(nombre: string): string {
+  return nombre.trim().replace(/\s+/g, ' ');
+}
+
+/** La clave de un nombre: «  Pólizas  de obra » → `polizas_de_obra`. Vacía si no queda nada. */
+function claveDeNombre(nombre: string): string {
+  return normalizar(nombre)
+    .replace(/[^a-z0-9]+/g, '_')
+    .slice(0, LARGO_MAXIMO_DE_CLASE - PREFIJO_DE_CARPETA.length)
+    .replace(/^_+|_+$/g, '');
+}
+
+const CLAVE_DE_CARPETA = /^carpeta:[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+/** Si la clase es una carpeta creada al subir, con la forma que da `claveDeNombre`. */
+export function esCarpetaPropia(clase: string): boolean {
+  return clase.length <= LARGO_MAXIMO_DE_CLASE && CLAVE_DE_CARPETA.test(clase);
+}
+
+/**
+ * La clase con que se guarda un documento subido a una carpeta nueva con ese nombre: la clase de
+ * siempre si el nombre coincide con una (RF-73), o `carpeta:<clave>` con el nombre como se escribió
+ * (RF-74). `null` si en ese lugar no se crean carpetas o si el nombre no sirve: vacío, de solo
+ * signos o de más de 60 caracteres.
+ */
+export function claseParaNombre(
+  lugar: LugarDeDocumentos,
+  nombre: string,
+): { clase: string; claseNombre: string } | null {
+  if (!esLugarConCarpetas(lugar)) return null;
+  const limpio = limpiarNombreDeCarpeta(nombre);
+  if (!limpio || limpio.length > LARGO_MAXIMO_DE_CARPETA) return null;
+  const clave = claveDeNombre(limpio);
+  if (!clave) return null;
+  const deSiempre = clasesDe(lugar).find((c) => claveDeNombre(c.nombre) === clave);
+  if (deSiempre) return { clase: deSiempre.id, claseNombre: deSiempre.nombre };
+  return { clase: `${PREFIJO_DE_CARPETA}${clave}`, claseNombre: limpio };
+}
+
+/**
+ * La clase y el nombre con que se guarda un documento (RF-79, y 034/RF-23). Lo decide el servidor
+ * con esta misma regla, no la pantalla: una carpeta propia sale de su nombre —y cae en la clase de
+ * siempre si es la misma (RF-73)—, y una clase de siempre se guarda con el nombre del catálogo, que
+ * queda congelado con el documento. Se llama después de `faltasDelDocumento`, que ya rechazó lo
+ * que no sirve.
+ */
+export function claseAGuardar(
+  lugar: LugarDeDocumentos,
+  datos: { clase: string; claseNombre?: string },
+): { clase: string; claseNombre: string } {
+  if (esCarpetaPropia(datos.clase)) {
+    const resuelta = claseParaNombre(lugar, datos.claseNombre ?? '');
+    if (resuelta) return resuelta;
+  }
+  return { clase: datos.clase, claseNombre: nombreDeClase(lugar, datos.clase) ?? datos.clase };
+}
+
+/** Lo que le falta al nombre de una carpeta nueva; `null` si sirve. La ventana de subir lo muestra igual. */
+export function faltaDelNombreDeCarpeta(nombre: string): string | null {
+  const limpio = limpiarNombreDeCarpeta(nombre);
+  if (!limpio) return 'Escriba el nombre de la carpeta.';
+  if (limpio.length > LARGO_MAXIMO_DE_CARPETA) {
+    return `El nombre de la carpeta no puede pasar de ${LARGO_MAXIMO_DE_CARPETA} caracteres.`;
+  }
+  if (!claveDeNombre(limpio)) return 'El nombre de la carpeta tiene que llevar letras o números.';
+  return null;
+}
+
+/**
+ * Lo que ofrece la ventana de subir como carpeta (RF-71, D20): primero las que ya tiene el lugar,
+ * después las clases de siempre que todavía no tienen documentos —como sugerencia—, «Otro» y,
+ * al final, «＋ Nueva carpeta…». Ninguna se repite.
+ */
+export function opcionesDeCarpeta(
+  lugar: LugarDeDocumentos,
+  carpetas: readonly { id: string; nombre: string }[],
+): { valor: string; etiqueta: string }[] {
+  const yaEstan = new Set(carpetas.map((c) => c.id));
+  const existentes = carpetas.filter((c) => c.id !== OTRO.id).map((c) => ({ valor: c.id, etiqueta: c.nombre }));
+  const sugeridas = clasesDe(lugar)
+    .filter((c) => c.id !== OTRO.id && !yaEstan.has(c.id))
+    .map((c) => ({ valor: c.id, etiqueta: c.nombre }));
+  return [
+    ...existentes,
+    ...sugeridas,
+    { valor: OTRO.id, etiqueta: OTRO.nombre },
+    { valor: VALOR_NUEVA_CARPETA, etiqueta: '＋ Nueva carpeta…' },
+  ];
 }
 
 /**
@@ -251,6 +375,8 @@ export function revisarDocumento(nombreDeArchivo: string, bytes: number, cabecer
 
 export interface DatosDelDocumento {
   clase: string;
+  /** El nombre de una carpeta creada al subir (spec 051, RF-72); con una clase de siempre no se usa. */
+  claseNombre?: string;
   nombre: string;
   /** `YYYY-MM-DD`. */
   fecha: string;
@@ -266,6 +392,10 @@ export function faltasDelDocumento(lugar: LugarDeDocumentos, datos: DatosDelDocu
   const faltas: string[] = [];
   if (!datos.clase) faltas.push('Elija la clase del documento.');
   else if (!esClaseDe(lugar, datos.clase)) faltas.push('Esa clase no es de este lugar.');
+  else if (esCarpetaPropia(datos.clase)) {
+    const falta = faltaDelNombreDeCarpeta(datos.claseNombre ?? '');
+    if (falta) faltas.push(falta);
+  }
   if (!datos.nombre.trim()) faltas.push('Escriba el nombre del documento.');
   const conFecha = esFechaReal(datos.fecha);
   if (!conFecha) faltas.push('Escriba la fecha del documento.');
@@ -321,6 +451,145 @@ export function resumenDeVencimientos(
     else if (aviso?.estado === 'por_vencer') porVencer += 1;
   }
   return { vencidos, porVencer };
+}
+
+/* ── Carpetas (spec 051) ────────────────────────────────────────────────── */
+
+/**
+ * Una carpeta de Documentos: una clase del lugar con lo que hay que saber de ella sin
+ * abrirla (spec 051, RF-6 a RF-10). Se llama «del archivador» porque `CarpetaDeDocumentos`
+ * ya es el nombre de la lista que usan la ficha, la requisición y el pago.
+ */
+export interface CarpetaDelArchivador {
+  /** La clave de la clase, que es también la de la carpeta en la dirección. */
+  id: string;
+  nombre: string;
+  /** No anulados, aunque estén vencidos (D8). */
+  vigentes: number;
+  vencidos: number;
+  porVencer: number;
+  /** Sin vigentes: se pinta en gris con «0» (RF-9). */
+  vacia: boolean;
+  /** Tiene anulados: se deja abrir aunque esté vacía (RF-68). */
+  tieneAnulados: boolean;
+  /** Su clase ya no está en el catálogo del lugar (RF-13). */
+  retirada: boolean;
+  /** La creó alguien al subir (cambio del 2026-11-20). */
+  propia: boolean;
+}
+
+/** Lo que `carpetasDe` necesita de cada documento; `DocumentoDelLugar` lo cumple. */
+export interface DocumentoParaCarpeta {
+  clase: string;
+  claseNombre: string;
+  fecha: string;
+  anulado: object | null;
+  aviso: { estado: AvisoDeVencimiento['estado'] } | null;
+}
+
+/**
+ * Las carpetas de un lugar: una por cada clase con documentos vigentes (RF-4), y con
+ * `conAnulados` también las que solo tienen anulados, para «Ver anulados» (RF-9, RF-67, RF-76).
+ * Sin documentos, ninguna: la pantalla muestra el vacío (RF-70). Desde el cambio del 2026-11-20 no
+ * hay carpetas vacías del catálogo; las clases de siempre se ofrecen al subir (RF-71).
+ *
+ * El orden (RF-5, RF-57): las del catálogo en su orden; después las creadas al subir y las de clases
+ * retiradas, juntas por alfabeto sin distinguir tildes ni mayúsculas; «Otro» al final. Una carpeta
+ * que no es del catálogo lleva el nombre de su documento más reciente (RF-13).
+ *
+ * Cuenta con el `aviso` que manda el servidor y no con la fecha de este equipo: así las
+ * carpetas suman exactamente lo que dicen las cifras de arriba (RF-54), aunque el reloj de
+ * la computadora esté mal. `estadoDelVencimiento` nunca avisa de un anulado, y aquí además
+ * los anulados no cuentan como vigentes (RF-10).
+ */
+export function carpetasDe(
+  lugar: LugarDeDocumentos,
+  documentos: readonly DocumentoParaCarpeta[],
+  { conAnulados = false }: { conAnulados?: boolean } = {},
+): CarpetaDelArchivador[] {
+  const catalogo = clasesDe(lugar);
+  const delCatalogo = new Map(catalogo.map((c) => [c.id, c]));
+  const porId = new Map<string, CarpetaDelArchivador>();
+  // De las que no son del catálogo, la fecha del documento que dio el nombre: si una clave llegó
+  // con dos nombres, vale el más reciente.
+  const fechaDelNombre = new Map<string, string>();
+
+  for (const documento of documentos) {
+    let carpeta = porId.get(documento.clase);
+    const deSiempre = delCatalogo.get(documento.clase);
+    if (!carpeta) {
+      const propia = !deSiempre && esCarpetaPropia(documento.clase);
+      carpeta = {
+        id: documento.clase,
+        nombre: deSiempre?.nombre ?? documento.claseNombre,
+        vigentes: 0,
+        vencidos: 0,
+        porVencer: 0,
+        vacia: true,
+        tieneAnulados: false,
+        retirada: !deSiempre && !propia,
+        propia,
+      };
+      porId.set(documento.clase, carpeta);
+      fechaDelNombre.set(documento.clase, documento.fecha);
+    } else if (!deSiempre && documento.fecha > (fechaDelNombre.get(documento.clase) ?? '')) {
+      carpeta.nombre = documento.claseNombre;
+      fechaDelNombre.set(documento.clase, documento.fecha);
+    }
+    if (documento.anulado) {
+      carpeta.tieneAnulados = true;
+      continue;
+    }
+    carpeta.vigentes += 1;
+    carpeta.vacia = false;
+    if (documento.aviso?.estado === 'vencido') carpeta.vencidos += 1;
+    else if (documento.aviso?.estado === 'por_vencer') carpeta.porVencer += 1;
+  }
+
+  const visibles = [...porId.values()].filter((c) => c.vigentes > 0 || (conAnulados && c.tieneAnulados));
+  const orden = new Map(catalogo.map((c, i) => [c.id, i]));
+  const deSiempre = visibles
+    .filter((c) => orden.has(c.id) && c.id !== OTRO.id)
+    .sort((a, b) => orden.get(a.id)! - orden.get(b.id)!);
+  const lasDemas = visibles
+    .filter((c) => !orden.has(c.id))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
+  const otro = visibles.filter((c) => c.id === OTRO.id);
+  return [...deSiempre, ...lasDemas, ...otro];
+}
+
+/**
+ * El tamaño de un archivo para leerlo en la tarjeta (spec 051, RF-33, D14): en KB sin
+ * decimales por debajo de 1.024 KB, y en MB con un decimal desde ahí, con coma. Un archivo
+ * de unos bytes dice «1 KB» y no «0 KB», que se leería como vacío.
+ *
+ * `null` cuando el documento no tiene tamaño guardado: la tarjeta no muestra la línea, en
+ * vez de inventar un «0 KB» (RF-69, D19).
+ */
+export function tamanoLegible(bytes: number | null): string | null {
+  if (bytes === null) return null;
+  const kb = bytes / 1024;
+  if (kb < 1024) {
+    const entero = Math.max(1, Math.round(kb));
+    return `${String(entero).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} KB`;
+  }
+  return `${(kb / 1024).toFixed(1).replace('.', ',')} MB`;
+}
+
+export type FormatoDeArchivo = 'pdf' | 'imagen' | 'word' | 'excel';
+
+/**
+ * Qué clase de archivo es, por el tipo que se guardó al subirlo (spec 051, RF-26): es lo que
+ * dice la tarjeta con su ícono. Sale de `EXTENSIONES`, así que un tipo admitido nuevo sin su
+ * clase aquí lo atrapa la verificación. `null` para un tipo que no es de documentos.
+ */
+export function formatoDeArchivo(mime: string): FormatoDeArchivo | null {
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('image/')) return 'imagen';
+  const extension = Object.entries(EXTENSIONES).find(([, e]) => e.mime === mime)?.[0];
+  if (extension === 'doc' || extension === 'docx') return 'word';
+  if (extension === 'xls' || extension === 'xlsx') return 'excel';
+  return null;
 }
 
 /* ── Buscar (RF-34) ─────────────────────────────────────────────────────── */

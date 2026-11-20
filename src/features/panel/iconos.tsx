@@ -43,7 +43,11 @@ export type NombreDeIcono =
   | 'documentos'
   | 'licitaciones'
   // Proyectos (spec 049, RF-53): una grúa sobre una obra a medio levantar.
-  | 'proyectos';
+  | 'proyectos'
+  // El tipo de un documento en su tarjeta (spec 051, RF-26): una hoja para PDF, Word y Excel —el
+  // texto dice cuál— y un paisaje para las imágenes.
+  | 'archivo'
+  | 'imagen';
 
 const DIBUJOS = {
   inicio: (
@@ -193,6 +197,19 @@ const DIBUJOS = {
     </>
   ),
   listo: <Path d="m5 12.5 4.5 4.5L19 7.5" />,
+  archivo: (
+    <>
+      <Path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <Path d="M14 3v5h5M9 13h6M9 17h4" />
+    </>
+  ),
+  imagen: (
+    <>
+      <Rect x={3} y={5} width={18} height={14} rx={2} />
+      <Path d="m3 16 5-5 4 4 3-3 6 6" />
+      <Path d="M15.5 9.5h.01" />
+    </>
+  ),
   pdf: (
     <>
       <Path d="M7 3h7l4 4v4" />

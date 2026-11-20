@@ -13,30 +13,26 @@
  * pantalla: la ficha de una persona (spec 035, RF-23 a RF-25) la usa con `{ personaId }` y
  * los permisos de Recursos Humanos.
  */
-import { useCallback, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useNavigation, usePathname, useRouter, type Href } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { FuentePanel, Panel, Spacing, TextoPanel } from '@/constants/theme';
-import { useAvisos } from '@/features/panel/avisos';
-import { elegirArchivo } from '@/features/contratos/elegir-archivo';
+import { ArchivadorDeDocumentos } from '@/features/documentos/archivador';
+import { VentanaDeSubir } from '@/features/documentos/ventana-de-subir';
 import { VentanaDeAnular } from '@/features/contratos/polizas-y-documentos';
 import { useLugarDelPanel } from '@/features/empresas/contexto-empresa';
-import { api, mensajeDe, type LugarDeLosDocumentos } from '@/features/panel/cliente-api';
+import { api, type LugarDeLosDocumentos } from '@/features/panel/cliente-api';
 import {
   Acciones,
-  AccionesFormulario,
   Aviso,
   BarraDeListado,
   Boton,
-  Campo,
-  CampoDeFecha,
   Casilla,
   Celda,
   Cifra,
   Cifras,
   Etiqueta,
-  Formulario,
-  Modal,
   Paginacion,
   Seccion,
   Selector,
@@ -46,20 +42,16 @@ import {
 import type { DocumentoDelLugar, DocumentosDelLugar } from '@/features/panel/contratos';
 import { MarcoPantalla, useListado } from '@/features/panel/marco';
 import { usePersona } from '@/features/panel/sesion';
+import { useTituloDelRegistro } from '@/features/panel/titulo-del-registro';
 import { POR_PAGINA } from '@/features/panel/paginas';
 import { useListadoFiltrado } from '@/features/panel/usar-listado-filtrado';
 import { fechaDelCorte } from '@/shared/rules/cortes';
 import {
-  ACEPTA_DOCUMENTOS,
-  BYTES_DE_FIRMA,
+  carpetasDe,
   clasesDe,
-  faltasDelDocumento,
-  llevaPrecio,
-  revisarDocumento,
   type LugarDeDocumentos,
 } from '@/shared/rules/documentos';
 import { nombreDeEmpresa } from '@/shared/rules/empresas';
-import { fechaDeJornada } from '@/shared/rules/jornada';
 import { alcanza } from '@/shared/rules/permisos';
 
 const SIN_DOCUMENTOS: DocumentosDelLugar = { documentos: [], resumen: { vencidos: 0, porVencer: 0 } };
@@ -105,6 +97,7 @@ export default function PantallaDocumentos() {
   const pedido: LugarDeLosDocumentos | null =
     lugar?.tipo === 'empresa' ? { empresa: lugar.empresa } : lugar?.tipo === 'obra' ? { obraId: lugar.obraId } : null;
   const cargados = useDocumentosDelLugar(pedido);
+  const deQuien: LugarDeDocumentos = pedido && 'empresa' in pedido ? pedido.empresa : 'obra';
 
   const nombreDelLugar =
     lugar?.tipo === 'empresa' ? nombreDeEmpresa(lugar.empresa) : lugar?.tipo === 'obra' ? 'la obra' : '';
@@ -113,22 +106,76 @@ export default function PantallaDocumentos() {
   // puede. La ventana sigue siendo de la carpeta; desde aquí solo se abre.
   const [subiendo, setSubiendo] = useState(false);
 
+  // Spec 051, RF-19 a RF-22: la carpeta abierta vive en la dirección como pantalla nueva del Stack
+  // (T4). Una clave que no es carpeta de este lugar se ignora y se ven todas.
+  // Cambio del 2026-11-20: la carpeta de la dirección se busca también entre las que solo tienen
+  // anulados, para poder abrirla por su enlace (RF-22, RF-68); la cuadrícula y la ventana de subir
+  // usan las que tienen vigentes.
+  const todas = carpetasDe(deQuien, cargados.datos[0]?.documentos ?? [], { conAnulados: true });
+  const carpetas = todas.filter((c) => c.vigentes > 0);
+  const { carpeta: carpetaPedida } = useLocalSearchParams<{ carpeta?: string }>();
+  const abierta = todas.find((c) => c.id === carpetaPedida) ?? null;
+  const ruta = usePathname();
+  const router = useRouter();
+  const navegacion = useNavigation();
+  useTituloDelRegistro(abierta?.nombre);
+
+  // Cada carpeta abierta es una pantalla aparte del Stack (T4), y la de abajo se queda montada con lo que
+  // pidió al entrar. Si en la de arriba se subió o se anuló algo, al volver con «atrás» o con «Todas las
+  // carpetas» mostraría los números de antes. Por eso, cada vez que esta pantalla vuelve a quedar delante,
+  // pide la lista otra vez (sin la ruedita de «Cargando»). La primera vez no: ya la está pidiendo.
+  const yaEstuvoDelante = useRef(false);
+  const { recargar } = cargados;
+  useFocusEffect(
+    useCallback(() => {
+      if (yaEstuvoDelante.current) recargar();
+      yaEstuvoDelante.current = true;
+    }, [recargar]),
+  );
+
+  const abrirCarpeta = (id: string) => router.push(`${ruta}?carpeta=${encodeURIComponent(id)}` as Href);
+  // RF-17, RF-18, RF-20: si debajo están las carpetas de esta misma pantalla, se vuelve a ellas —es
+  // lo que haría «atrás», sin pedir la lista otra vez—. Si se llegó por un enlace directo a la
+  // carpeta, debajo no hay nada propio y se reemplaza por las carpetas.
+  const volver = () => {
+    const estado = navegacion.getState();
+    const abajo = estado && estado.index > 0 ? estado.routes[estado.index - 1] : undefined;
+    const actual = estado?.routes[estado.index];
+    const sonLasCarpetas =
+      abajo !== undefined && abajo.name === actual?.name && !(abajo.params as { carpeta?: string } | undefined)?.carpeta;
+    if (sonLasCarpetas) router.back();
+    else router.replace(ruta as Href);
+  };
+
   return (
     <MarcoPantalla
       acciones={puedeSubir && pedido ? <Boton titulo="Subir documento" onPress={() => setSubiendo(true)} /> : undefined}
-      titulo="Documentos"
-      descripcion={`Los documentos de ${nombreDelLugar}: búsquelos por nombre, proveedor o archivo, y vea cuáles están vencidos o por vencer. Nada se borra: lo que sobra se anula con motivo.`}
+      titulo={abierta?.nombre ?? 'Documentos'}
+      registro={abierta?.nombre}
+      alVolverDelRegistro={abierta ? volver : undefined}
+      descripcion={
+        abierta
+          ? `Los documentos de ${nombreDelLugar} en esta carpeta, del más reciente al más antiguo.`
+          : `Los documentos de ${nombreDelLugar}, en una carpeta por clase. Al subir uno se elige su carpeta o se crea una nueva. Nada se borra: lo que sobra se anula con motivo.`
+      }
       error={cargados.error}
       cargando={cargados.cargando}
     >
-      <CarpetaDeDocumentos
-        cargados={cargados}
-        pedido={pedido}
-        deQuien={pedido && 'empresa' in pedido ? pedido.empresa : 'obra'}
-        puedeSubir={puedeSubir}
-        puedeAnular={alcanza(rol, 'documentos', 'anular')}
-        subida={{ abierta: subiendo, alCambiar: setSubiendo }}
-      />
+      {/* Spec 051: las carpetas. La ficha, la requisición y el pago siguen con CarpetaDeDocumentos (RF-2). */}
+      {pedido ? (
+        <ArchivadorDeDocumentos
+          cargados={cargados}
+          pedido={pedido}
+          deQuien={deQuien}
+          carpetas={carpetas}
+          abierta={abierta}
+          alAbrir={abrirCarpeta}
+          alVolver={volver}
+          puedeSubir={puedeSubir}
+          puedeAnular={alcanza(rol, 'documentos', 'anular')}
+          subida={{ abierta: subiendo, alCambiar: setSubiendo }}
+        />
+      ) : null}
     </MarcoPantalla>
   );
 }
@@ -377,117 +424,10 @@ export function CarpetaDeDocumentos({
   );
 }
 
-/**
- * Subir un documento (RF-24 a RF-30). El archivo se revisa al elegirlo con la misma regla
- * del servidor —tipo real y tamaño—, para no esperar una subida de 20 MB que se va a
- * rechazar; el servidor lo vuelve a revisar todo (RF-50).
- */
-function VentanaDeSubir({
-  pedido,
-  lugar,
-  sinPrecio,
-  alCerrar,
-  alGuardar,
-}: {
-  pedido: LugarDeLosDocumentos;
-  lugar: LugarDeDocumentos;
-  sinPrecio: boolean;
-  alCerrar: () => void;
-  alGuardar: () => void;
-}) {
-  const [clase, setClase] = useState<string | null>(null);
-  const [nombre, setNombre] = useState('');
-  const [fecha, setFecha] = useState(fechaDeJornada());
-  const [vence, setVence] = useState('');
-  const [proveedor, setProveedor] = useState('');
-  const [descripcion, setDescripcion] = useState('');
-  const [archivo, setArchivo] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Spec 050, RF-57: un fallo al guardar va al aviso de abajo, que se queda hasta que se cierra.
-  const avisos = useAvisos();
-  const [enviando, setEnviando] = useState(false);
-
-  const falta =
-    faltasDelDocumento(lugar, { clase: clase ?? '', nombre, fecha, vence: vence || null })[0] ??
-    (archivo ? null : 'Elija el archivo.');
-
-  async function elegir() {
-    const elegido = await elegirArchivo(ACEPTA_DOCUMENTOS);
-    if (!elegido) return;
-    const cabecera = new Uint8Array(await elegido.slice(0, BYTES_DE_FIRMA).arrayBuffer());
-    const revision = revisarDocumento(elegido.name, elegido.size, cabecera);
-    setArchivo(revision.ok ? elegido : null);
-    setError(revision.ok ? null : revision.mensaje);
-    // Sin nombre todavía, el del archivo sin la extensión: casi siempre es lo que se iba a escribir.
-    if (revision.ok && !nombre.trim()) setNombre(elegido.name.replace(/\.[^.]+$/, ''));
-  }
-
-  async function guardar() {
-    if (!archivo) return;
-    setEnviando(true);
-    setError(null);
-    try {
-      await api.documentos.subir(
-        pedido,
-        { clase: clase ?? '', nombre, fecha, vence, proveedor, descripcion },
-        archivo,
-        archivo.name,
-      );
-      alGuardar();
-    } catch (fallo) {
-      avisos.error(mensajeDe(fallo));
-    } finally {
-      setEnviando(false);
-    }
-  }
-
-  return (
-    <Modal titulo="Subir documento" onCerrar={alCerrar}>
-      <Selector
-        etiqueta="Clase"
-        valor={clase}
-        opciones={clasesDe(lugar)
-          .filter((c) => !sinPrecio || !llevaPrecio(c.id))
-          .map((c) => ({ valor: c.id, etiqueta: c.nombre }))}
-        onChange={setClase}
-        vacio="Elija la clase"
-      />
-      <View style={estilos.archivo}>
-        <Boton titulo={archivo ? 'Cambiar archivo' : 'Elegir archivo *'} tono="secundario" onPress={elegir} />
-        <Text style={estilos.apoyo}>
-          {archivo ? archivo.name : 'PDF, imagen (JPG, PNG, WEBP), Word o Excel, hasta 20 MB.'}
-        </Text>
-      </View>
-      {/* Spec 050, RF-15 a RF-17: en rejilla, con los anchos de la escala. */}
-      <Formulario desnudo>
-        <Campo etiqueta="Nombre" obligatorio valor={nombre} onChange={setNombre} ayuda="Por ejemplo: Cámara de comercio octubre 2026." />
-        <CampoDeFecha etiqueta="Fecha del documento" valor={fecha} onChange={setFecha} />
-        {lugar === 'solicitud' || lugar === 'pago' ? null : (
-          <CampoDeFecha
-            etiqueta="Vence"
-            valor={vence}
-            onChange={setVence}
-            min={fecha || undefined}
-            ayuda="Déjelo vacío si no vence. Avisa desde 30 días antes."
-          />
-        )}
-        <Campo etiqueta="Proveedor o tercero" valor={proveedor} onChange={setProveedor} ayuda="Opcional. Sirve para buscarlo después." />
-        <Campo etiqueta="Descripción" valor={descripcion} onChange={setDescripcion} multilinea compacto />
-      </Formulario>
-      {error ? <Aviso tono="error">{error}</Aviso> : falta ? <Text style={estilos.apoyo}>{falta}</Text> : null}
-      <AccionesFormulario>
-        <Boton titulo="Cancelar" tono="secundario" onPress={alCerrar} />
-        <Boton titulo={enviando ? 'Subiendo…' : 'Subir'} onPress={guardar} deshabilitado={enviando || falta !== null} />
-      </AccionesFormulario>
-    </Modal>
-  );
-}
-
 const estilos = StyleSheet.create({
   celdaDoble: { gap: Spacing.half, alignItems: 'flex-start' },
   nombre: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, fontWeight: '600', color: Panel.texto },
   anulado: { textDecorationLine: 'line-through', color: Panel.textoApoyo },
   texto: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.cuerpo, color: Panel.texto },
   apoyo: { fontFamily: FuentePanel.texto, fontSize: TextoPanel.apoyo, color: Panel.textoApoyo },
-  archivo: { gap: Spacing.one, alignItems: 'flex-start' },
 });

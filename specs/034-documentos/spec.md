@@ -1,6 +1,6 @@
 # Spec 034 — Documentos del grupo y de las obras
 
-> Estado: **Cumplida en dev** el 2026-10-28 (aprobada el mismo día; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28 · **Modificada por la spec 050** (2026-11-18): «Subir documento» va en el encabezado de la pantalla, y una carpeta vacía ofrece subir el primero — ver `specs/050-interfaz-ordenada-y-responsive/spec.md`
+> Estado: **Cumplida en dev** el 2026-10-28 (aprobada el mismo día; ver `validacion.md`). Sube a producción con la T23 de la 033 · Fecha: 2026-10-28 · **Modificada por la spec 050** (2026-11-18): «Subir documento» va en el encabezado de la pantalla, y una carpeta vacía ofrece subir el primero — ver `specs/050-interfaz-ordenada-y-responsive/spec.md` · **Modificada por la spec 051** (2026-11-20): Documentos de empresas y obras pasa a carpetas, una por clase, con tarjetas dentro; se retira el selector de clase (RF-31, RF-32, RF-33 y RF-37). La ficha, la requisición y el pago siguen con su lista — ver `specs/051-documentos-en-carpetas/spec.md`
 > Respuestas del usuario del 2026-10-28 (D1 a D5, abajo): cada quien ve los documentos de lo suyo y gerencia los de todo; la obra también tiene Documentos; cargo nuevo «Encargado de OCC»; suben todos los que ven, anula solo gerencia; clase de proveedores; aviso a 30 días.
 
 ## Contexto y objetivo

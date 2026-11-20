@@ -916,7 +916,8 @@ export const api = {
       const formulario = new FormData();
       for (const [campo, valor] of Object.entries(datos)) formulario.append(campo, valor);
       formulario.append('archivo', archivo, nombreArchivo);
-      return pedir<{ id: string }>(`/api/panel/documentos${delLugar(lugar)}`, { method: 'POST', body: formulario });
+      // Spec 051, RF-75: responde también la clase con que quedó, para abrir esa carpeta.
+      return pedir<{ id: string; clase: string }>(`/api/panel/documentos${delLugar(lugar)}`, { method: 'POST', body: formulario });
     },
     anular: (id: string, motivo: string) =>
       panelEnviar<{ id: string }>(`/documentos/${encodeURIComponent(id)}/anular`, 'POST', { motivo }),
