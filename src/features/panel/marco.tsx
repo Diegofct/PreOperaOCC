@@ -171,6 +171,7 @@ export function MarcoPantalla({
   exigeObra,
   acciones,
   registro,
+  alVolverDelRegistro,
   ancho = 'listado',
   children,
 }: {
@@ -187,6 +188,11 @@ export function MarcoPantalla({
    * de la ruta de arriba (RF-27). Sin él, la ruta termina en el módulo.
    */
   registro?: string;
+  /**
+   * Spec 051, RF-17: cuando el registro es un estado de la misma pantalla —la carpeta abierta de
+   * Documentos—, qué hace el paso del módulo en la ruta en vez de navegar a la misma dirección.
+   */
+  alVolverDelRegistro?: () => void;
   /**
    * Hasta dónde llega la pantalla en un monitor grande (spec 050, RF-42, RF-43, D1, D2): un listado
    * o un tablero, hasta 1600; un formulario o una ficha que se lee de arriba abajo, hasta 1100, para
@@ -238,7 +244,7 @@ export function MarcoPantalla({
             la derecha; en el celular, debajo y a lo ancho. */}
         <View style={[estilos.encabezado, angosto && estilos.encabezadoAngosto]}>
           <View style={[estilos.textosDelEncabezado, angosto && estilos.textosAngostos]}>
-            <Migas registro={registro} />
+            <Migas registro={registro} alVolverDelRegistro={alVolverDelRegistro} />
             <Titulo>{titulo}</Titulo>
             <Text style={estilos.descripcion}>{descripcion}</Text>
           </View>

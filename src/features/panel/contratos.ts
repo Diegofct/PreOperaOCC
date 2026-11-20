@@ -3305,6 +3305,8 @@ export interface MaquinaDeLasObrasFila {
  */
 export const documentoDelGrupoNuevo = z.object({
   clase: z.string().trim().max(64).default(''),
+  // Spec 051, RF-72: el nombre de una carpeta creada al subir. Con una clase de siempre no se usa.
+  claseNombre: z.string().trim().max(60, 'El nombre de la carpeta no puede pasar de 60 caracteres.').default(''),
   nombre: z.string().trim().max(200, 'El nombre no puede pasar de 200 caracteres.').default(''),
   proveedor: z.string().trim().max(200, 'El proveedor no puede pasar de 200 caracteres.').default(''),
   descripcion: z.string().trim().max(1000, 'La descripción no puede pasar de 1000 caracteres.').default(''),

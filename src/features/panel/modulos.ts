@@ -65,10 +65,12 @@ export function moduloDeLaRuta(ruta: string): Modulo | null {
  * blanco— y era difícil distinguir cinco pestañas abiertas (defecto corregido el
  * 2026-10-06). Sale de la ruta, igual que el módulo resaltado del menú.
  */
-export function tituloDeLaPestana(ruta: string): string {
-  // Dentro de una empresa, «<Módulo> · <Empresa>» (spec 033, RF-48).
+export function tituloDeLaPestana(ruta: string, registro?: string | null): string {
+  // Dentro de una empresa, «<Módulo> · <Empresa>» (spec 033, RF-48). Con un registro abierto
+  // que publica la pantalla —la carpeta de Documentos—, delante: «RUT · Documentos · OCC»
+  // (spec 051, RF-58).
   const enEmpresa = tituloDelLugar(lugarDeLaRuta(ruta));
-  if (enEmpresa) return enEmpresa;
+  if (enEmpresa) return registro ? `${registro} · ${enEmpresa}` : enEmpresa;
   if (/^\/panel\/laboratorio\/[^/]+\/informe\/?$/.test(ruta)) {
     return tituloConSistema('Informe de granulometría');
   }

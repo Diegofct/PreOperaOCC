@@ -1327,6 +1327,32 @@ export interface VacioDeLista {
   accion?: ReactNode;
 }
 
+/**
+ * Lo que enseña una lista sin nada que mostrar (spec 050, RF-53, RF-54): si hay registros que la búsqueda o
+ * los filtros esconden, se dice así y se ofrece quitarlos; si no hay ninguno, el ícono, la frase y el botón
+ * para crear el primero. Aparte de `Tabla` desde la spec 051, porque el archivador de documentos muestra
+ * tarjetas y no una tabla, y su vacío tiene que ser el mismo (RF-42, RF-60).
+ */
+export function ListaVacia({ vacio, sinResultados }: { vacio: string | VacioDeLista; sinResultados?: { alQuitar: () => void } }) {
+  if (sinResultados) {
+    return (
+      <View style={estilos.tablaVacia}>
+        <Text style={estilos.vacioSimbolo}>⌕</Text>
+        <Text style={estilos.vacioTexto}>No hay resultados con estos filtros.</Text>
+        <Boton titulo="Quitar los filtros" tono="secundario" onPress={sinResultados.alQuitar} />
+      </View>
+    );
+  }
+  const { texto, icono = '—', accion } = typeof vacio === 'string' ? { texto: vacio } : vacio;
+  return (
+    <View style={estilos.tablaVacia}>
+      <Text style={estilos.vacioSimbolo}>{icono}</Text>
+      <Text style={estilos.vacioTexto}>{texto}</Text>
+      {accion ?? null}
+    </View>
+  );
+}
+
 export function Tabla<T extends { id: string }>({
   columnas,
   filas,
@@ -1384,25 +1410,7 @@ export function Tabla<T extends { id: string }>({
   const [marco, setMarco] = useState(0);
   const tarjetas = seMuestraEnTarjetas({ tipo, angosto, marco, minimo });
 
-  if (filas.length === 0) {
-    if (sinResultados) {
-      return (
-        <View style={estilos.tablaVacia}>
-          <Text style={estilos.vacioSimbolo}>⌕</Text>
-          <Text style={estilos.vacioTexto}>No hay resultados con estos filtros.</Text>
-          <Boton titulo="Quitar los filtros" tono="secundario" onPress={sinResultados.alQuitar} />
-        </View>
-      );
-    }
-    const { texto, icono = '—', accion } = typeof vacio === 'string' ? { texto: vacio } : vacio;
-    return (
-      <View style={estilos.tablaVacia}>
-        <Text style={estilos.vacioSimbolo}>{icono}</Text>
-        <Text style={estilos.vacioTexto}>{texto}</Text>
-        {accion ?? null}
-      </View>
-    );
-  }
+  if (filas.length === 0) return <ListaVacia vacio={vacio} sinResultados={sinResultados} />;
 
   return (
     <View onLayout={(e) => setMarco(e.nativeEvent.layout.width)}>

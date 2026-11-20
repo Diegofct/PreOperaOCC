@@ -13,6 +13,7 @@ import { MarcoSesion } from '@/features/panel/marco-sesion';
 import { MenuLateral, TelonDelMenu } from '@/features/panel/menu-lateral';
 import { tituloDeLaPestana } from '@/features/panel/modulos';
 import { ProveedorSesionPanel, useSesionPanel } from '@/features/panel/sesion';
+import { ProveedorTituloDelRegistro, useRegistroDeLaPestana } from '@/features/panel/titulo-del-registro';
 
 /**
  * El panel de administración.
@@ -51,22 +52,24 @@ export default function LayoutPanel() {
           {/* La obra de la dirección se pide una vez y la leen el menú, la puerta de las páginas de
               obra y la ruta de arriba de cada pantalla (spec 050). */}
           <ProveedorObraDelLugar>
-            <TituloDeLaPestana />
-            <View style={estilos.panel}>
-              <BarraSuperior />
-              <View style={estilos.cuerpo}>
-                <MenuLateral />
-                <View style={estilos.contenido}>
-                  <Stack
-                    screenOptions={{
-                      headerShown: false,
-                      contentStyle: { backgroundColor: Panel.fondo },
-                    }}
-                  />
-                  <TelonDelMenu />
+            <ProveedorTituloDelRegistro>
+              <TituloDeLaPestana />
+              <View style={estilos.panel}>
+                <BarraSuperior />
+                <View style={estilos.cuerpo}>
+                  <MenuLateral />
+                  <View style={estilos.contenido}>
+                    <Stack
+                      screenOptions={{
+                        headerShown: false,
+                        contentStyle: { backgroundColor: Panel.fondo },
+                      }}
+                    />
+                    <TelonDelMenu />
+                  </View>
                 </View>
               </View>
-            </View>
+            </ProveedorTituloDelRegistro>
           </ProveedorObraDelLugar>
         </ProveedorMenu>
       </MarcoSesion>
@@ -85,11 +88,13 @@ function TituloDeLaPestana() {
   // Spec 050, RF-61: el cambio de contraseña por gusto va encima del panel, que sigue montado; al
   // cancelarlo, el título de la pantalla tiene que volver (lo pone `MarcoSesion` mientras dura).
   const { cambiandoClave } = useSesionPanel();
+  // Spec 051, RF-58: el nombre del registro abierto, si la pantalla publica uno (la carpeta).
+  const registro = useRegistroDeLaPestana();
   useEffect(() => {
     // La guarda es por el paquete nativo, donde estas pantallas entran inertes.
     if (typeof document === 'undefined' || cambiandoClave) return;
-    document.title = tituloDeLaPestana(ruta);
-  }, [ruta, cambiandoClave]);
+    document.title = tituloDeLaPestana(ruta, registro);
+  }, [ruta, cambiandoClave, registro]);
   return null;
 }
 
