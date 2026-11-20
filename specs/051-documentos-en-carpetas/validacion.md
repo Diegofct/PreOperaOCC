@@ -5,6 +5,11 @@
 > `localhost:8081`, a 1536 px y con recuadros de 1366 y 390 px dentro de la página.
 >
 > La primera validación (69/69, mismo día) quedó superada por el cambio; esta la reemplaza.
+>
+> **Segundo cambio, revalidado el 2026-11-20 (T23):** el título mientras se busca dentro de una carpeta (RF-80,
+> D23; RF-16, RF-17 y RF-58 modificados). Se rehicieron esas filas y la de RF-41, con la prueba de la T22 en
+> Chrome. Los tres comandos se corrieron otra vez. No se tocó la API ni nada que lea un secreto, así que el
+> export web no se repitió.
 
 ## Comandos (salida real)
 
@@ -79,9 +84,9 @@ En OCC, como Gerencia y contra la base de desarrollo:
 | RF | Qué lo cubre | Resultado |
 | --- | --- | --- |
 | RF-15 | Navegador T11 y demo T20 | verde |
-| RF-16 | Navegador: «Manuales de obra», «Cámara de comercio» como título | verde |
-| RF-58 | :23166; navegador «Manuales de obra · Documentos · OCC» | verde |
-| RF-17 | :23153; navegador T11 | verde |
+| RF-16 | Navegador: «Manuales de obra», «Cámara de comercio» como título; T22: «RUT» con el buscador vacío y otra vez al borrarlo | verde |
+| RF-58 | :23166; navegador «Manuales de obra · Documentos · OCC»; T22: «RUT · Documentos · OCC» con el buscador vacío | verde |
+| RF-17 | :23153; navegador T11; T22: «OCC › Documentos › RUT» con el buscador vacío | verde |
 | RF-18 | Navegador T11 y T20 | verde |
 | RF-19 | Navegador: `?carpeta=carpeta:manuales_de_obra` | verde |
 | RF-20 | Navegador T11, T12 y demo T15; desde T20 la pantalla de abajo recarga al volver | verde |
@@ -108,7 +113,8 @@ En OCC, como Gerencia y contra la base de desarrollo:
 
 | RF | Qué lo cubre | Resultado |
 | --- | --- | --- |
-| RF-38, RF-40, RF-41, RF-42 | Navegador T12 y demo T15 | verde |
+| RF-38, RF-40, RF-41, RF-42 | Navegador T12 y demo T15; T22: al borrar «rup» se vuelve a RUT con su nombre (RF-41) | verde |
+| RF-80 | T22 en Chrome: dentro de RUT, con «rup», título «Documentos», pestaña «Documentos · OCC», ruta «OCC › Documentos», resultados de RUT y RUP OCC; por `?carpeta=rut&buscar=rup` también «Documentos». Foto `fotos/despues/t22-buscando-dentro-de-rut.jpg` | verde |
 | RF-39 | :12360; demo T15 | verde |
 | RF-66 | `ListaDeDocumentos` ordena igual que la carpeta | verde (código) |
 | RF-43, RF-44 | Navegador T12; sin carpetas por la casilla, «No hay resultados con estos filtros» (T19) | verde |
@@ -179,18 +185,19 @@ de datos para verlos en pantalla; se dice en su fila.
 
 - **Ciclo de imports de Documentos:** resuelto en la T18. Queda otro que **ya existía**, fuera de esta spec:
   `compras/vista-de-la-solicitud.tsx` ↔ `requisiciones/cadena-y-decision.tsx`.
-- **Título mientras se busca dentro de una carpeta:** sigue diciendo la carpeta; está preguntado a Diego.
+- **Título mientras se busca dentro de una carpeta:** resuelto con el segundo cambio (D23, RF-80, T22).
 - **Una carpeta propia con el nombre de una clase que se agregue después a la lista de siempre** quedaría
   partida en dos (riesgo anotado en el plan). Se revisa con una consulta antes de agregar una clase.
 
 ## Veredicto
 
-**Sí, la spec 051 está cumplida, con el cambio del 2026-11-20.** Los 77 RF vigentes están en verde. Pasan los tres
+**Sí, la spec 051 está cumplida, con sus dos cambios del 2026-11-20.** Los 78 RF vigentes están en verde.
+Son 1 a 80, menos RF-47 y RF-48, que se retiraron. Pasan los tres
 comandos (1111 verificaciones, tipos y lint) y el export web sale sin secretos. No cambiaron los permisos ni el
 esquema, y no queda nada PRUEBA-051 en desarrollo.
 
 Queda para después:
-- el commit de la spec;
-- el `/sdd:cambio` a la 050 que Diego decidió el 19-nov (decisión A);
-- la respuesta sobre el título mientras se busca;
+- el commit del segundo cambio;
 - el despliegue.
+
+El `/sdd:cambio` a la 050 lo descartó Diego el 20-nov.
