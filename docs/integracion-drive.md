@@ -101,7 +101,7 @@ Un token distinto para desarrollo y para producción. Para revocarlo, se emite o
      desde un n8n en Docker en el mismo PC, `http://host.docker.internal:8081`.
 3. Haga lo mismo con `kontrola` en **Ajustes del pulso**.
 4. Si al importar algún nodo marca la credencial en rojo, ábralo y escoja la del paso 1.3 o 2. Son
-   los nodos de Google (**Carpeta raíz**, **Todas las carpetas**, **Archivos de cada carpeta**,
+   los nodos de Google (**Carpeta raíz**, **Todas las carpetas**, **Todos los archivos**,
    **Descargar del Drive**) y los de Kontrola (**Entregar inventario**, **Subir a Kontrola**,
    **Leer lo pendiente**).
 

@@ -310,3 +310,14 @@ en verde.
   `MSYS_NO_PATHCONV=1`), y `n8n execute` necesita otro `N8N_RUNNERS_BROKER_PORT` con n8n encendido.
   **Fuera de la tarea:** con la pregunta que nombraba una obra ajena, en la respuesta del asistente se coló una
   frase en inglés («Need to verify obra is within reach.»). Es del asistente (spec 028), no del Drive.
+- Ajuste a la T17 (2026-11-24), **en el despliegue**: con la carpeta real de Magdalena (7.182 archivos en 2.243
+  carpetas, 21 GB) el flujo se quedó sin memoria en el VPS. El nodo «Archivos de cada carpeta» hacía una consulta
+  a Google **por carpeta**, y n8n guarda cada respuesta en memoria; el proceso llegó a unos 600 MB contra el
+  tope de 1 GB del contenedor, que comparte con el WhatsApp, y el sistema lo mató. El n8n principal y el
+  WhatsApp no se cayeron. Se cambió por «Todos los archivos»: **un solo listado paginado** de todo lo que ve la
+  cuenta de servicio (`executeOnce`), y «Armar inventario», sin cambios de lógica, se queda con lo que cuelga
+  del árbol. Pasa de unas 2.245 consultas a 22, y de más de 1 minuto a 20 s; la simulación con los datos reales
+  usó unos 70 MB. Kontrola recibe lo mismo: no cambia ningún RF. Probado en el n8n local con PRUEBA-052 (los
+  tres archivos nuevos se pidieron y subieron; datos de `neondb` y R2 limpios) y después en el VPS: inventario
+  de 7.182 archivos, 15 copias y 51 «demasiado grande»; el n8n principal quedó en unos 360 MB. Los archivos
+  que n8n descarga van a disco (`binaryData` en modo `filesystem`, el de omisión de n8n 2.41), no a memoria.
