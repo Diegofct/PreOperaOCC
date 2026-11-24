@@ -102,6 +102,8 @@ import type {
   DetalleDePropuesta,
   GrupoFila,
   PropuestaFila,
+  CarpetaDelDriveFila,
+  ListaDelDrive,
   AsignacionFila,
   AsignacionNueva,
   BitacoraEditada,
@@ -1321,6 +1323,29 @@ reportes: {
     /** RF-92, RF-93: el mismo informe en Excel o PDF; al Residente, sin plata. */
     descargar: (obraId: string, tipo: 'semana' | 'mes', fecha: string, formato: 'excel' | 'pdf') =>
       descargar(`/api/panel/cumplimiento/exportar?${new URLSearchParams({ obraId, tipo, fecha, formato })}`),
+  },
+
+  /**
+   * El Drive de la obra (spec 052). Las copias se abren por `/api/panel/media/:id`, como los
+   * documentos; lo que pasa de 50 MB no tiene copia y se abre en el Drive (RF-41).
+   */
+  drive: {
+    /** RF-29, RF-31: la carpeta de la obra y sus documentos; sin carpeta, `carpeta: null`. */
+    documentos: (obraId: string, buscar = '') =>
+      panel<ListaDelDrive>(`/drive/documentos?${new URLSearchParams({ obraId, buscar })}`),
+    /** RF-10: una carpeta sin obra, solo la gerencia. */
+    documentosDeLaCarpeta: (carpeta: string, buscar = '') =>
+      panel<ListaDelDrive>(`/drive/documentos?${new URLSearchParams({ carpeta, buscar })}`),
+    carpetas: {
+      /** RF-8 a RF-10: todas, las que no tienen obra primero. Solo la gerencia. */
+      listar: () => panel<{ carpetas: CarpetaDelDriveFila[] }>('/drive/carpetas').then((r) => r.carpetas),
+      /** RF-9: asociar o cambiar la obra. 409 si la obra ya tiene otra carpeta. */
+      asociar: (id: string, obraId: string) =>
+        panelEnviar<CarpetaDelDriveFila>(`/drive/carpetas/${encodeURIComponent(id)}`, 'PATCH', { obraId }),
+    },
+    /** RF-33: vuelve a «pendiente» una versión que no se pudo leer. */
+    releer: (versionId: string) =>
+      panelEnviar<{ id: string; estado: 'pendiente' }>(`/drive/versiones/${encodeURIComponent(versionId)}/releer`, 'POST', {}),
   },
 };
 

@@ -549,6 +549,12 @@ function AdjuntosGuardados({ adjuntos }: { adjuntos: MensajeDelAsistente['adjunt
  * dirección todavía es la del asistente en ese momento; abrían la obra por defecto.
  */
 function abrirFuente(ruta: string) {
+  // Spec 052, RF-24: la copia de un documento del Drive se abre en otra pestaña, como un adjunto,
+  // para no perder la conversación.
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && ruta.startsWith('/api/panel/media/')) {
+    window.open(ruta, '_blank', 'noopener');
+    return;
+  }
   if (Platform.OS === 'web' && typeof window !== 'undefined') window.location.assign(ruta);
   else router.push(ruta as Href);
 }

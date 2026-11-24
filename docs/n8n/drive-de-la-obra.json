@@ -1,0 +1,665 @@
+{
+  "id": "KontrolaDrive052",
+  "name": "Kontrola - Drive de la obra",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        -100
+      ],
+      "id": "disparo-manual",
+      "name": "Ejecutar a mano"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        100
+      ],
+      "id": "disparo-inventario",
+      "name": "Cada 5 minutos"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ajuste-kontrola",
+              "name": "kontrola",
+              "value": "https://occ.licitapp-elementaling.cloud",
+              "type": "string"
+            },
+            {
+              "id": "ajuste-carpeta",
+              "name": "carpetaRaiz",
+              "value": "PEGUE-AQUI-EL-ID-DE-LA-CARPETA",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -960,
+        0
+      ],
+      "id": "ajustes",
+      "name": "Ajustes"
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.carpetaRaiz }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,name"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        0
+      ],
+      "id": "carpeta-raiz",
+      "name": "Carpeta raíz",
+      "credentials": {
+        "googleApi": {
+          "id": "driveDeLaObraGoogle",
+          "name": "Google — Drive de la obra"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            },
+            {
+              "name": "fields",
+              "value": "nextPageToken,incompleteSearch,files(id,name,parents)"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "corpora",
+              "value": "allDrives"
+            },
+            {
+              "name": "pageSize",
+              "value": "1000"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "pageToken",
+                    "value": "={{ $response.body.nextPageToken }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.nextPageToken }}"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -480,
+        0
+      ],
+      "id": "todas-las-carpetas",
+      "name": "Todas las carpetas",
+      "credentials": {
+        "googleApi": {
+          "id": "driveDeLaObraGoogle",
+          "name": "Google — Drive de la obra"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// El árbol de la carpeta raíz, sin llamadas en bucle: con el listado de TODAS las carpetas\n// que la cuenta ve, se recorre desde la raíz y sale una fila por subcarpeta con su ruta.\n// Si Google avisó que el listado vino incompleto, se marca, para que Kontrola no retire nada.\nconst raiz = $('Carpeta raíz').first().json;\nconst paginas = $input.all().map((i) => i.json);\nconst incompleto = paginas.some((p) => p.incompleteSearch === true);\nconst hijas = new Map();\nfor (const carpeta of paginas.flatMap((p) => p.files ?? [])) {\n  for (const padre of carpeta.parents ?? []) {\n    if (!hijas.has(padre)) hijas.set(padre, []);\n    hijas.get(padre).push(carpeta);\n  }\n}\nconst salida = [{ json: { id: raiz.id, ruta: '', incompleto } }];\nconst vistas = new Set([raiz.id]);\nfor (let i = 0; i < salida.length; i++) {\n  const { id, ruta } = salida[i].json;\n  for (const hija of hijas.get(id) ?? []) {\n    if (vistas.has(hija.id)) continue;\n    vistas.add(hija.id);\n    salida.push({ json: { id: hija.id, ruta: ruta ? ruta + '/' + hija.name : hija.name, incompleto } });\n  }\n}\nreturn salida;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "subcarpetas",
+      "name": "Subcarpetas"
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "='{{ $json.id }}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'"
+            },
+            {
+              "name": "fields",
+              "value": "nextPageToken,incompleteSearch,files(id,name,mimeType,parents,modifiedTime,size,webViewLink)"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "corpora",
+              "value": "allDrives"
+            },
+            {
+              "name": "pageSize",
+              "value": "1000"
+            }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "parameters": {
+                "parameters": [
+                  {
+                    "name": "pageToken",
+                    "value": "={{ $response.body.nextPageToken }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.nextPageToken }}"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "archivos-de-cada-carpeta",
+      "name": "Archivos de cada carpeta",
+      "credentials": {
+        "googleApi": {
+          "id": "driveDeLaObraGoogle",
+          "name": "Google — Drive de la obra"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// El inventario COMPLETO de la carpeta, como lo pide Kontrola (spec 052, RF-1, RF-6, RF-7).\n// · Lo propio de Google se manda con el mime de su exportación: documento → Word, hoja → Excel,\n//   presentación → PDF. Lo demás de Google (formularios, accesos directos, mapas) no se manda.\n// · completo = false si alguna carpeta falló o Google avisó de un listado a medias: así\n//   Kontrola recibe lo nuevo pero no retira nada (plan, «inventarioAceptable»).\nconst raiz = $('Carpeta raíz').first().json;\nconst carpetas = $('Subcarpetas').all().map((i) => i.json);\nconst rutaDe = new Map(carpetas.map((c) => [c.id, c.ruta]));\nlet completo = !carpetas.some((c) => c.incompleto);\n\nconst EXPORTAR = {\n  'application/vnd.google-apps.document': {\n    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    extension: '.docx',\n  },\n  'application/vnd.google-apps.spreadsheet': {\n    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n    extension: '.xlsx',\n  },\n  'application/vnd.google-apps.presentation': { mime: 'application/pdf', extension: '.pdf' },\n};\n\nconst archivos = [];\nconst porId = {};\nfor (const { json: pagina } of $input.all()) {\n  if (pagina.error) {\n    completo = false;\n    continue;\n  }\n  if (pagina.incompleteSearch === true) completo = false;\n  for (const f of pagina.files ?? []) {\n    if (porId[f.id]) continue;\n    const padre = (f.parents ?? []).find((p) => rutaDe.has(p));\n    if (padre === undefined) continue;\n    const exportar = EXPORTAR[f.mimeType];\n    if (!exportar && f.mimeType.startsWith('application/vnd.google-apps.')) continue;\n    let nombre = f.name;\n    if (exportar && !nombre.toLowerCase().endsWith(exportar.extension)) nombre += exportar.extension;\n    const mime = exportar ? exportar.mime : f.mimeType;\n    archivos.push({\n      driveId: f.id,\n      nombre,\n      ruta: rutaDe.get(padre),\n      mime,\n      modificadoEn: f.modifiedTime,\n      tamano: Number(f.size ?? 0),\n      enlace: f.webViewLink ?? null,\n    });\n    porId[f.id] = { nombre, mime, exportar: exportar ? exportar.mime : null };\n  }\n}\n\nreturn [{ json: { inventario: { carpeta: { id: raiz.id, nombre: raiz.name }, completo, archivos }, porId } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "armar-inventario",
+      "name": "Armar inventario"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Ajustes').first().json.kontrola }}/api/integraciones/drive/inventario",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.inventario) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "entregar-inventario",
+      "name": "Entregar inventario",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "driveDeLaObraKontrola",
+          "name": "Kontrola — Drive de la obra"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lo que Kontrola pidió, de a un lote por vuelta. Lo que no alcanza a subir en esta vuelta\n// se vuelve a pedir en la siguiente (cinco minutos después): así la primera carga de una\n// carpeta grande no junta cientos de archivos en la memoria de n8n.\nconst LOTE = 15;\nconst { inventario, porId } = $('Armar inventario').first().json;\nconst pedir = $input.first().json.pedir ?? [];\nreturn pedir\n  .filter((p) => porId[p.driveId])\n  .slice(0, LOTE)\n  .map((p) => ({\n    json: { carpeta: inventario.carpeta.id, driveId: p.driveId, modificadoEn: p.modificadoEn, ...porId[p.driveId] },\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "archivos-pedidos",
+      "name": "Archivos pedidos"
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        0
+      ],
+      "id": "de-a-uno",
+      "name": "De a uno"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.exportar ? 'https://www.googleapis.com/drive/v3/files/' + $json.driveId + '/export?mimeType=' + encodeURIComponent($json.exportar) : 'https://www.googleapis.com/drive/v3/files/' + $json.driveId + '?alt=media&supportsAllDrives=true' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        100
+      ],
+      "id": "descargar-del-drive",
+      "name": "Descargar del Drive",
+      "credentials": {
+        "googleApi": {
+          "id": "driveDeLaObraGoogle",
+          "name": "Google — Drive de la obra"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('Ajustes').first().json.kontrola }}/api/integraciones/drive/archivos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "carpeta",
+              "value": "={{ $('De a uno').item.json.carpeta }}"
+            },
+            {
+              "name": "archivo",
+              "value": "={{ $('De a uno').item.json.driveId }}"
+            },
+            {
+              "name": "modificado",
+              "value": "={{ $('De a uno').item.json.modificadoEn }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "={{ $('De a uno').item.json.mime }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        100
+      ],
+      "id": "subir-a-kontrola",
+      "name": "Subir a Kontrola",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "driveDeLaObraKontrola",
+          "name": "Kontrola — Drive de la obra"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "2-59/5 * * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1200,
+        400
+      ],
+      "id": "disparo-pulso",
+      "name": "Pulso cada 5 minutos"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ajuste-kontrola-pulso",
+              "name": "kontrola",
+              "value": "https://occ.licitapp-elementaling.cloud",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -960,
+        400
+      ],
+      "id": "ajustes-del-pulso",
+      "name": "Ajustes del pulso"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.kontrola }}/api/integraciones/drive/pulso",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 330000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        400
+      ],
+      "id": "leer-lo-pendiente",
+      "name": "Leer lo pendiente",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "driveDeLaObraKontrola",
+          "name": "Kontrola — Drive de la obra"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Drive de la obra → Kontrola (spec 052)\n\nAntes de activarlo, lea `docs/integracion-drive.md`.\n\n1. En **Ajustes**: el id de la carpeta raíz (y la dirección de Kontrola, también en **Ajustes del pulso**).\n2. Las dos credenciales: **Google — Drive de la obra** (cuenta de servicio) y **Kontrola — Drive de la obra** (`Authorization: Bearer <token>`).\n\nArriba, cada 5 minutos: inventario completo → Kontrola dice qué pedir → se baja y se sube de a uno (15 por vuelta).\nAbajo, dos minutos después: Kontrola lee lo pendiente (hasta ~4 min).",
+        "height": 300,
+        "width": 520
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1260,
+        -420
+      ],
+      "id": "nota-guia",
+      "name": "Nota"
+    }
+  ],
+  "connections": {
+    "Ejecutar a mano": {
+      "main": [
+        [
+          {
+            "node": "Ajustes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Ajustes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajustes": {
+      "main": [
+        [
+          {
+            "node": "Carpeta raíz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carpeta raíz": {
+      "main": [
+        [
+          {
+            "node": "Todas las carpetas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todas las carpetas": {
+      "main": [
+        [
+          {
+            "node": "Subcarpetas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subcarpetas": {
+      "main": [
+        [
+          {
+            "node": "Archivos de cada carpeta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archivos de cada carpeta": {
+      "main": [
+        [
+          {
+            "node": "Armar inventario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar inventario": {
+      "main": [
+        [
+          {
+            "node": "Entregar inventario",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Entregar inventario": {
+      "main": [
+        [
+          {
+            "node": "Archivos pedidos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archivos pedidos": {
+      "main": [
+        [
+          {
+            "node": "De a uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "De a uno": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Descargar del Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Descargar del Drive": {
+      "main": [
+        [
+          {
+            "node": "Subir a Kontrola",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Subir a Kontrola": {
+      "main": [
+        [
+          {
+            "node": "De a uno",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pulso cada 5 minutos": {
+      "main": [
+        [
+          {
+            "node": "Ajustes del pulso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ajustes del pulso": {
+      "main": [
+        [
+          {
+            "node": "Leer lo pendiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "active": false
+}

@@ -13,7 +13,7 @@ import { pulso } from '@/features/whatsapp/servidor/pulso';
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const rechazo = await requerirIntegracion(peticion);
+    const rechazo = await requerirIntegracion(peticion, 'TOKEN_INTEGRACION_WHATSAPP');
     if (rechazo) return rechazo;
     if (process.env.WHATSAPP_GUARDADO_AUTOMATICO !== '1') return ok({ apagado: true });
     return ok(await pulso());

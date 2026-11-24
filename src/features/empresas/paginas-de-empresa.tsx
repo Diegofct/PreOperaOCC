@@ -14,6 +14,7 @@ import type { ComponentType } from 'react';
 import PantallaAsistente from '@/features/asistente/pantalla-asistente';
 import PantallaContrato from '@/features/contratos/pantalla-contrato';
 import PantallaDocumentos from '@/features/documentos/pantalla-documentos';
+import PantallaDrive from '@/features/drive/pantalla-drive';
 import PantallaLaboratorio from '@/features/laboratorio/pantalla-laboratorio';
 import PantallaAlmacen from '@/features/panel/pantalla-almacen';
 import PantallaAsignaciones from '@/features/panel/pantalla-asignaciones';
@@ -105,6 +106,8 @@ const PANTALLAS_DE_OBRA: Record<string, ComponentType> = {
   cantera: PantallaCantera,
   contrato: PantallaContrato,
   documentos: PantallaDocumentos,
+  // Spec 052, RF-29.
+  drive: PantallaDrive,
   // Spec 043, RF-86, RF-88.
   planificacion: PantallaPlanificacion,
   cumplimiento: PantallaCumplimiento,

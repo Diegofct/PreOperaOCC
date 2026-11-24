@@ -105,6 +105,10 @@ const EXTENSIONES: Record<string, string> = {
   'audio/mpeg': 'mp3',
   'audio/mp4': 'm4a',
   'video/mp4': 'mp4',
+  // Spec 052: lo que llega del Drive de la obra.
+  'image/gif': 'gif',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
 };
 
 function extensionDe(mime: string): string {

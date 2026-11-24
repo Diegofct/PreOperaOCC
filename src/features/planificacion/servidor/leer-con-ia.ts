@@ -23,7 +23,8 @@ import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { BetaContentBlockParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
 import * as z from 'zod/v4';
 
-import { clienteDeIa, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
+import { clienteDeIa, formaDeLaFalla, mensajeDeFalloDeIa, MODELO_DE_IA } from '@/features/servidor/ia';
+import { fallaPasajera } from '@/shared/rules/drive';
 import { CONCEPTOS_INDIRECTOS, FORMAS_DE_INDIRECTO } from '@/shared/rules/planificacion';
 import type { RespuestaDelCalendario } from '@/shared/rules/planificacion-calendario-ia';
 import {
@@ -146,7 +147,10 @@ totalesDelExcel, los que traiga la hoja de planificación, sin sumarlos tú:
 
 supuestos y objetivos: cada renglón como texto, de las hojas de esos usos.`;
 
-export type RespuestaDeIa<T> = { ok: true; datos: T; modelo: string; tokensEntrada: number; tokensSalida: number } | { ok: false; error: string };
+export type RespuestaDeIa<T> =
+  | { ok: true; datos: T; modelo: string; tokensEntrada: number; tokensSalida: number }
+  /** `pasajera`: la red, la IA ocupada o el tiempo agotado; reintentar puede arreglarlo (spec 052, RF-16). */
+  | { ok: false; error: string; pasajera?: boolean };
 
 /** Lo que se le dice a la persona cuando la IA se niega o la respuesta no cabe. */
 export interface TextosDeFalloDeIa {
@@ -202,7 +206,7 @@ export async function llamarConEsquema<T>(
     }
     return { ok: true, datos: leido.data, modelo: mensaje.model, tokensEntrada: mensaje.usage.input_tokens, tokensSalida: mensaje.usage.output_tokens };
   } catch (fallo) {
-    return { ok: false, error: mensajeDeFalloDeIa(fallo) };
+    return { ok: false, error: mensajeDeFalloDeIa(fallo), pasajera: fallaPasajera(formaDeLaFalla(fallo)) };
   }
 }
 

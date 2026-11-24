@@ -83,6 +83,8 @@ const ICONOS: Record<string, NombreDeIcono> = {
   compras: 'compras',
   tesoreria: 'finanzas',
   documentos: 'documentos',
+  // Spec 052: la hoja de las tarjetas de documento.
+  drive: 'archivo',
   licitaciones: 'licitaciones',
   bitacora: 'bitacoras',
   calidad: 'laboratorio',

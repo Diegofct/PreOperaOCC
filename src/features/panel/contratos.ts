@@ -2168,6 +2168,118 @@ export const entregaDeWhatsapp = z.object({
 export type EntregaDeWhatsapp = z.input<typeof entregaDeWhatsapp>;
 
 /*
+ * ── El Drive de la obra (spec 052) ──
+ *
+ * n8n manda cada 5 minutos el listado **completo** de la carpeta, no los cambios (plan,
+ * «Inventario»). Por eso aquí no hay ids de versión ni operaciones: un archivo con su
+ * fecha de modificación, y el servidor decide qué pedir con `cambiosDelInventario`.
+ *
+ * El tope de archivos es holgado a propósito: una carpeta de obra con años de oficios
+ * llega a miles. Pasado el tope, la entrega se rechaza entera antes que tomar una
+ * parte y retirar el resto.
+ */
+const ARCHIVOS_POR_INVENTARIO = 20_000;
+
+const archivoDelInventario = z.object({
+  driveId: textoObligatorio(200, 'el id del archivo en Drive'),
+  nombre: textoObligatorio(500, 'el nombre del archivo'),
+  /** La subcarpeta dentro de la raíz. En la raíz puede faltar. */
+  ruta: z.string().trim().max(1000).default(''),
+  mime: textoObligatorio(200, 'el tipo del archivo'),
+  modificadoEn: z.iso.datetime({ offset: true, error: 'La fecha de modificación va en ISO 8601.' }),
+  tamano: z.number().int('El tamaño va en bytes, sin decimales.').min(0, 'El tamaño no puede ser negativo.'),
+  /** La dirección del archivo en Drive, para abrir lo que no se copia (RF-41). */
+  enlace: z.url({ error: 'El enlace del archivo no es una dirección.' }).max(2000).nullish().transform((v) => v ?? null),
+});
+
+/** `POST /api/integraciones/drive/inventario` (RF-1, RF-6, RF-19 a RF-21, RF-34, RF-40). */
+export const inventarioDelDrive = z.object({
+  carpeta: z.object({
+    id: textoObligatorio(200, 'el id de la carpeta'),
+    nombre: textoObligatorio(500, 'el nombre de la carpeta'),
+  }),
+  /** Solo `true` si n8n listó todas las subcarpetas sin error: sin eso, no se retira nada. */
+  completo: z.boolean({ error: 'Falta decir si el inventario está completo.' }),
+  archivos: z.array(archivoDelInventario).max(ARCHIVOS_POR_INVENTARIO, 'El inventario trae demasiados archivos.'),
+});
+
+export type InventarioDelDriveEntregado = z.input<typeof inventarioDelDrive>;
+
+/**
+ * `PUT /api/integraciones/drive/archivos?carpeta=&archivo=&modificado=` (RF-1, RF-4, RF-17).
+ * La versión va en la dirección y los bytes en el cuerpo: así un archivo de 40 MB no viaja en
+ * base64 dentro de un JSON, y un reintento repite la misma dirección. `modificado` es el que
+ * el inventario devolvió en `pedir`.
+ */
+export const subidaAlDrive = z.object({
+  carpeta: textoObligatorio(200, 'la carpeta'),
+  archivo: textoObligatorio(200, 'el id del archivo en Drive'),
+  modificado: z.iso.datetime({ offset: true, error: 'La fecha de modificación va en ISO 8601.' }),
+});
+
+/** `PATCH /api/panel/drive/carpetas/:id` (RF-8, RF-9): la obra a la que pasa la carpeta. */
+export const carpetaAsociada = z.object({
+  obraId: textoObligatorio(64, 'la obra'),
+});
+
+/** Una versión de un documento en la lista del panel (RF-30, RF-32). */
+export interface VersionDelDriveFila {
+  id: string;
+  modificadoEnDrive: string;
+  estado: 'pendiente' | 'leyendo' | 'leido' | 'no_se_pudo';
+  motivo: string | null;
+  resumen: string | null;
+  /** La copia; `null` si pasa de 50 MB y se abre en el Drive (RF-41). */
+  mediaId: string | null;
+  bytes: number | null;
+  vigente: boolean;
+}
+
+/** Un documento del Drive de la obra (RF-29 a RF-32). */
+export interface DocumentoDelDriveFila {
+  id: string;
+  nombre: string;
+  subcarpeta: string;
+  /** El tipo del archivo, para decidir si se abre en el navegador o se descarga. */
+  mime: string;
+  /** La dirección del archivo en Drive, para lo que no tiene copia (RF-41). */
+  enlace: string | null;
+  retirado: boolean;
+  modificadoEnDrive: string;
+  estado: { clave: 'leido' | 'leyendo' | 'no_se_pudo' | 'retirado'; texto: string };
+  resumen: string | null;
+  versiones: VersionDelDriveFila[];
+}
+
+/** Una carpeta del Drive conectada a Kontrola (RF-8 a RF-10, RF-34). */
+export interface CarpetaDelDriveFila {
+  id: string;
+  nombre: string;
+  obraId: string | null;
+  obraNombre: string | null;
+  ultimaEntregaEn: string | null;
+  archivosEnLaUltimaEntrega: number | null;
+}
+
+/** `GET /api/panel/drive/documentos`: la carpeta de la obra y sus documentos. Sin carpeta, `null`. */
+export interface ListaDelDrive {
+  carpeta: CarpetaDelDriveFila | null;
+  documentos: DocumentoDelDriveFila[];
+}
+
+/** Lo que responde el inventario: qué versiones subir, y cuánto cambió. */
+export interface RespuestaDelInventario {
+  pedir: { driveId: string; modificadoEn: string }[];
+  nuevos: number;
+  renombrados: number;
+  retirados: number;
+  vuelven: number;
+  demasiadoGrandes: number;
+  /** Solo si hubo retiros que no se aplicaron porque el inventario no era aceptable. */
+  sinRetirar?: number;
+}
+
+/*
  * ── Lo que corrige y aprueba el residente ──
  *
  * La propuesta corregida tiene la forma de `ReporteDelDia` (`rules/whatsapp`), la

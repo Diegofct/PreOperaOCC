@@ -270,7 +270,7 @@ import {
 import { decisionPedida, requisicionPedida } from '../src/features/panel/requisiciones';
 import { lineaOccPedida, pasoOccPedido, requisicionOccPedida, respuestasOccPedidas } from '../src/features/panel/requisiciones-occ';
 import { COLUMNAS_OCC, planillaOcc } from '../src/features/requisiciones/exportar-occ';
-import { compraPedida, solicitudCorregida, solicitudDePagoCorregida, solicitudPedida } from '../src/features/panel/contratos';
+import { compraPedida, inventarioDelDrive, solicitudCorregida, solicitudDePagoCorregida, solicitudPedida, subidaAlDrive } from '../src/features/panel/contratos';
 import {
   anulacionDePlanSemanal,
   aprobacionDePlanSemanal,
@@ -729,6 +729,50 @@ import {
   TAMANO_MAXIMO_DE_DOCUMENTO,
   type LugarDeDocumentos,
 } from '../src/shared/rules/documentos';
+import {
+  cambiosDelInventario,
+  claseDeArchivoDelDrive,
+  estadoDelDocumento,
+  fragmentar,
+  inventarioAceptable,
+  TAMANO_DE_FRAGMENTO,
+  versionVigente,
+  type ArchivoDelInventario,
+  type ArchivoRegistrado,
+  INTENTOS_DE_LECTURA,
+  MOTIVO_DEMASIADO_GRANDE,
+  MOTIVO_SIN_TEXTO,
+  MOTIVO_TIPO_NO_ADMITIDO,
+  CARACTERES_PARA_RESUMIR,
+  CARACTERES_POR_BUSQUEDA,
+  consultaDeBusqueda,
+  FRAGMENTOS_POR_BUSQUEDA,
+  recortarResultados,
+  TERMINOS_POR_BUSQUEDA,
+  terminosDeBusqueda,
+  comoSeAbre,
+  despuesDeUnaFalla,
+  ENTREGA_ATRASADA_DESPUES_DE_MS,
+  entregaAtrasada,
+  documentosParaLaLista,
+  motivoParaNoReleer,
+  opcionesDeCarpetasSinObra,
+  type EstadoDeLecturaDelDrive,
+  fallaPasajera,
+  lecturaCortada,
+  lecturaConIaActiva,
+  quedaTiempoEnElPulso,
+  textoParaResumir,
+  TOPE_DEL_PULSO_MS,
+  PAGINAS_POR_PIEZA,
+  paginasDeLaPieza,
+  piezasDelPdf,
+  paginasDelLibro,
+  paginasDelTexto,
+  seLeeSinIa,
+  pasaDelTopeDeLectura,
+  TAMANO_MAXIMO_DE_LECTURA,
+} from '../src/shared/rules/drive';
 import {
   claveDeItem,
   copiarParaNuevaVersion,
@@ -8488,17 +8532,73 @@ async function verificarIntegracion() {
         method: 'POST',
         headers: { cookie: 'sesion=una-sesion-del-panel' },
       });
-      const rechazo = await requerirIntegracion(conCookie);
+      const rechazo = await requerirIntegracion(conCookie, 'TOKEN_INTEGRACION_WHATSAPP');
       assert.equal(rechazo?.status, 401);
 
       const conToken = new Request('http://localhost/api/integraciones/whatsapp/mensajes', {
         method: 'POST',
         headers: { authorization: `Bearer ${token}` },
       });
-      assert.equal(await requerirIntegracion(conToken), null);
+      assert.equal(await requerirIntegracion(conToken, 'TOKEN_INTEGRACION_WHATSAPP'), null);
     } finally {
       if (anterior === undefined) delete process.env.TOKEN_INTEGRACION_WHATSAPP;
       else process.env.TOKEN_INTEGRACION_WHATSAPP = anterior;
+    }
+  });
+  await pruebaAsync('052/RF-2, RF-3 (T6): el token de WhatsApp no abre el Drive, el del Drive no abre WhatsApp, y sin variable no entra nadie', async () => {
+    const tokenDrive = 'd'.repeat(64);
+    const hashDrive = await hashDeTokenDeIntegracion(tokenDrive);
+    const anteriores = {
+      whatsapp: process.env.TOKEN_INTEGRACION_WHATSAPP,
+      drive: process.env.TOKEN_INTEGRACION_DRIVE,
+    };
+    const con = (t: string) =>
+      new Request('http://localhost/api/integraciones/drive/inventario', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${t}` },
+      });
+    try {
+      process.env.TOKEN_INTEGRACION_WHATSAPP = hash;
+      process.env.TOKEN_INTEGRACION_DRIVE = hashDrive;
+      // Cada token abre solo su puerta.
+      assert.equal(await requerirIntegracion(con(tokenDrive), 'TOKEN_INTEGRACION_DRIVE'), null);
+      assert.equal(await requerirIntegracion(con(token), 'TOKEN_INTEGRACION_WHATSAPP'), null);
+      assert.equal((await requerirIntegracion(con(token), 'TOKEN_INTEGRACION_DRIVE'))?.status, 401);
+      assert.equal((await requerirIntegracion(con(tokenDrive), 'TOKEN_INTEGRACION_WHATSAPP'))?.status, 401);
+      // Sin la variable del Drive no entra nadie, ni con el token de WhatsApp que sí está configurado.
+      delete process.env.TOKEN_INTEGRACION_DRIVE;
+      assert.equal((await requerirIntegracion(con(tokenDrive), 'TOKEN_INTEGRACION_DRIVE'))?.status, 401);
+      assert.equal((await requerirIntegracion(con(token), 'TOKEN_INTEGRACION_DRIVE'))?.status, 401);
+      // Y la cookie del panel tampoco.
+      const conCookie = new Request('http://localhost/api/integraciones/drive/inventario', {
+        method: 'POST',
+        headers: { cookie: 'sesion=una-sesion-del-panel' },
+      });
+      process.env.TOKEN_INTEGRACION_DRIVE = hashDrive;
+      assert.equal((await requerirIntegracion(conCookie, 'TOKEN_INTEGRACION_DRIVE'))?.status, 401);
+    } finally {
+      for (const [clave, valor] of [
+        ['TOKEN_INTEGRACION_WHATSAPP', anteriores.whatsapp],
+        ['TOKEN_INTEGRACION_DRIVE', anteriores.drive],
+      ] as const) {
+        if (valor === undefined) delete process.env[clave];
+        else process.env[clave] = valor;
+      }
+    }
+  });
+
+  await pruebaAsync('052/RF-2 (T6): cada ruta de integración pide la variable de su puerta', async () => {
+    const rutas = readdirSync('src/app/api/integraciones', { recursive: true, encoding: 'utf8' })
+      .filter((r) => r.endsWith('+api.ts'))
+      .map((r) => r.replaceAll('\\', '/'));
+    assert.ok(rutas.length >= 3);
+    for (const ruta of rutas) {
+      const codigo = readFileSync(path.join('src/app/api/integraciones', ruta), 'utf8');
+      const puerta = ruta.split('/')[0];
+      const variable = `TOKEN_INTEGRACION_${puerta.toUpperCase()}`;
+      const llamadas = [...codigo.matchAll(/requerirIntegracion\(peticion(?:, '([A-Z_]+)')?\)/g)];
+      assert.ok(llamadas.length > 0, `${ruta}: no abre con la guardia`);
+      for (const llamada of llamadas) assert.equal(llamada[1], variable, `${ruta}: pide ${llamada[1] ?? 'ninguna'}`);
     }
   });
 }
@@ -10904,6 +11004,8 @@ prueba('028/RF-1 a RF-5, RF-65: cada rol alcanza sus módulos, y el residente ta
     obras: ['obra-a'],
     modulos: [
       'bitacoras', 'preoperacionales', 'almacen', 'cantera', 'laboratorio', 'whatsapp', 'reportes', 'contrato', 'cumplimiento',
+      // Spec 052, RF-22: el Drive de su obra.
+      'drive',
       'vehiculos', 'personas', 'solicitudes',
     ],
     empresas: [],
@@ -11670,17 +11772,18 @@ prueba('033/RF-17, RF-18: el menú de una obra, sin los módulos que la obra tie
   // Con Planificación y Cumplimiento después de Documentos desde la spec 043 (RF-86, RF-88), y el
   // Plan semanal detrás desde la 044 (RF-78).
   // Modificado por la spec 050 (RF-4 a RF-8): el Asistente primero y el resto en el orden de sus secciones.
+  // Con el Drive después de Documentos desde la spec 052 (RF-29).
   assert.deepEqual(paginas(menuDeObra('admin')), [
     'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
     'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'cantera', 'calidad', 'recursos-humanos',
-    'documentos', 'reportes',
+    'documentos', 'drive', 'reportes',
   ]);
   assert.equal(menuDeObra('admin').find((m) => m.pagina === 'reportes')?.titulo, 'Reportes e informes');
   // Calidad es el laboratorio de la obra: se apaga con él.
   const sinCanteraNiLaboratorio = { almacen: true, cantera: false, laboratorio: false };
   assert.deepEqual(paginas(menuDeObra('admin', sinCanteraNiLaboratorio)), [
     'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
-    'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'recursos-humanos', 'documentos', 'reportes',
+    'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'recursos-humanos', 'documentos', 'drive', 'reportes',
   ]);
 });
 
@@ -11821,10 +11924,11 @@ prueba('033/RF-21, RF-32, RF-44: el menú reparte con los permisos de hoy; datos
   // Humanos en consulta y las solicitudes de compra y de pago. Y Documentos de su obra
   // (spec 034, RF-5).
   // Modificado por la spec 050 (RF-4 a RF-8): el Asistente primero y el resto en el orden de sus secciones.
+  // Con el Drive desde la spec 052 (RF-29, RF-36).
   assert.deepEqual(paginas(menuDeObra('director_obra')), [
     'asistente', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp', 'contrato', 'planificacion',
     'plan-semanal', 'cumplimiento', 'requisiciones', 'almacen', 'cantera', 'calidad', 'recursos-humanos',
-    'documentos', 'reportes',
+    'documentos', 'drive', 'reportes',
   ]);
   // Todo lo que el residente veía antes sigue en algún menú suyo (RF-21). Personas, que la
   // 041 le abrió para dar accesos de obra, no es una entrada del menú de la obra: es la pestaña
@@ -15253,6 +15357,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     plan_semanal: ['ver', 'listar', 'escribir'],
     // Spec 046: la bandeja de Elemental no es de los cargos de obra.
     aprobaciones: [],
+    // Spec 052, RF-33, RF-36: ve el Drive de su obra y pide que se vuelva a leer.
+    drive: ['ver', 'listar', 'escribir'],
   },
   director_obra: {
     inicio: ['ver'],
@@ -15283,6 +15389,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     plan_semanal: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
     // Spec 046: la bandeja de Elemental no es de los cargos de obra.
     aprobaciones: [],
+    // Spec 052, RF-33, RF-36: ve el Drive de su obra y pide que se vuelva a leer.
+    drive: ['ver', 'listar', 'escribir'],
   },
   director_proyectos: {
     inicio: ['ver'],
@@ -15313,6 +15421,8 @@ const ESPERADO_041: Record<'residente' | 'director_obra' | 'director_proyectos',
     plan_semanal: ['ver', 'listar', 'escribir', 'aprobar', 'anular'],
     // Spec 046: la bandeja de Elemental no es de los cargos de obra.
     aprobaciones: [],
+    // Spec 052, RF-33, RF-36: ve el Drive de su obra y pide que se vuelva a leer.
+    drive: ['ver', 'listar', 'escribir'],
   },
 };
 
@@ -22286,7 +22396,8 @@ prueba('050/RF-1, RF-3 a RF-8: el menú de cada lugar, por secciones y con el As
     ['Día a día', 'bitacoras', 'preoperacionales', 'asignaciones', 'whatsapp'],
     ['Planeación y contrato', 'contrato', 'planificacion', 'plan-semanal', 'cumplimiento'],
     ['Materiales y calidad', 'requisiciones', 'almacen', 'cantera', 'calidad'],
-    ['Personal y archivo', 'recursos-humanos', 'documentos', 'reportes'],
+    // Con el Drive desde la spec 052 (RF-29).
+    ['Personal y archivo', 'recursos-humanos', 'documentos', 'drive', 'reportes'],
   ]);
   const occ = menuPorSecciones({ tipo: 'empresa', empresa: 'occ', pagina: null }, 'admin');
   assert.deepEqual(forma(occ), [
@@ -23179,4 +23290,772 @@ prueba('051/RF-58 (T6, D11): con una carpeta abierta, su nombre va delante en la
   assert.match(layout, /<ProveedorTituloDelRegistro>/);
   const contexto = readFileSync('src/features/panel/titulo-del-registro.tsx', 'utf8');
   assert.match(contexto, /return \(\) => publicar\(\(actual\) => \(actual === nombre \? null : actual\)\);/);
+});
+
+/* ── Spec 052: el Drive de la obra ─────────────────────────────────────────── */
+
+prueba('052/RF-7, RF-15 (T1): la clase de cada archivo del Drive sale de su mime, y del nombre si el mime no dice nada', () => {
+  const clase = claseDeArchivoDelDrive;
+  assert.equal(clase('application/pdf', 'Oficio 12.pdf'), 'pdf');
+  for (const mime of ['image/jpeg', 'image/png', 'image/webp', 'image/gif']) assert.equal(clase(mime, 'foto'), 'imagen');
+  // Word y Excel, nuevos y viejos: los viejos los rechaza el lector con su motivo, no la clase.
+  assert.equal(clase('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'Acta.docx'), 'word');
+  assert.equal(clase('application/msword', 'Acta.doc'), 'word');
+  assert.equal(clase('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Cantidades.xlsx'), 'excel');
+  assert.equal(clase('application/vnd.ms-excel', 'Cantidades.xls'), 'excel');
+  // Lo propio de Google (RF-7): n8n lo manda con el mime de su exportación, y aun con el suyo se lee igual.
+  assert.equal(clase('application/vnd.google-apps.document', 'Informe semanal'), 'word');
+  assert.equal(clase('application/vnd.google-apps.spreadsheet', 'Control de cantidades'), 'excel');
+  // Texto plano y CSV.
+  assert.equal(clase('text/plain', 'notas.txt'), 'texto');
+  assert.equal(clase('text/csv', 'lista.csv'), 'texto');
+  assert.equal(clase('text/plain; charset=utf-8', 'notas.txt'), 'texto');
+  // Mayúsculas en el mime: siguen siendo lo mismo.
+  assert.equal(clase('Application/PDF', 'x.pdf'), 'pdf');
+  // Sin mime útil, decide la extensión.
+  assert.equal(clase('application/octet-stream', 'Plano.PDF'), 'pdf');
+  assert.equal(clase('', 'Acta.docx'), 'word');
+  assert.equal(clase('application/octet-stream', 'foto.JPG'), 'imagen');
+  assert.equal(clase('application/octet-stream', 'sin-extension'), 'no_admitido');
+  // Lo que no se lee (RF-15): video, audio, zip, imágenes que la IA no recibe, presentaciones.
+  assert.equal(clase('video/mp4', 'recorrido.mp4'), 'no_admitido');
+  assert.equal(clase('audio/mpeg', 'nota de voz.mp3'), 'no_admitido');
+  assert.equal(clase('application/zip', 'planos.zip'), 'no_admitido');
+  assert.equal(clase('application/octet-stream', 'planos.zip'), 'no_admitido');
+  assert.equal(clase('image/heic', 'IMG_0001.HEIC'), 'no_admitido');
+  assert.equal(clase('application/vnd.google-apps.folder', 'Oficios'), 'no_admitido');
+  // Un mime que dice video gana sobre un nombre engañoso.
+  assert.equal(clase('video/mp4', 'oficio.pdf'), 'no_admitido');
+});
+
+prueba('052/RF-40, RF-16 (T1, D12): el tope de lectura es 50 MB y los intentos son 3', () => {
+  assert.equal(TAMANO_MAXIMO_DE_LECTURA, 50 * 1024 * 1024);
+  assert.equal(INTENTOS_DE_LECTURA, 3);
+});
+
+prueba('052/RF-30, RF-15, RF-40 (T1): los estados que se muestran de cada documento', () => {
+  assert.deepEqual(estadoDelDocumento({ estado: 'leido', motivo: null, retirado: false }), {
+    clave: 'leido',
+    texto: 'Leído',
+  });
+  // Pendiente y leyendo son lo mismo para quien mira la lista: todavía no está.
+  assert.deepEqual(estadoDelDocumento({ estado: 'pendiente', motivo: null, retirado: false }), {
+    clave: 'leyendo',
+    texto: 'Leyendo',
+  });
+  assert.deepEqual(estadoDelDocumento({ estado: 'leyendo', motivo: null, retirado: false }), {
+    clave: 'leyendo',
+    texto: 'Leyendo',
+  });
+  assert.deepEqual(estadoDelDocumento({ estado: 'no_se_pudo', motivo: 'tiene contraseña', retirado: false }), {
+    clave: 'no_se_pudo',
+    texto: 'No se pudo leer: tiene contraseña',
+  });
+  // Sin motivo escrito, igual se dice.
+  assert.deepEqual(estadoDelDocumento({ estado: 'no_se_pudo', motivo: '  ', retirado: false }), {
+    clave: 'no_se_pudo',
+    texto: 'No se pudo leer',
+  });
+  // D12: lo de más de 50 MB.
+  assert.equal(MOTIVO_DEMASIADO_GRANDE, 'demasiado grande');
+  assert.deepEqual(estadoDelDocumento({ estado: 'no_se_pudo', motivo: MOTIVO_DEMASIADO_GRANDE, retirado: false }), {
+    clave: 'no_se_pudo',
+    texto: 'No se pudo leer: demasiado grande',
+  });
+  // Retirado gana sobre cualquier estado de lectura (RF-19).
+  for (const estado of ['leido', 'pendiente', 'leyendo', 'no_se_pudo'] as const) {
+    assert.deepEqual(estadoDelDocumento({ estado, motivo: null, retirado: true }), {
+      clave: 'retirado',
+      texto: 'Retirado del Drive',
+    });
+  }
+});
+
+prueba('052/RF-1, RF-4, RF-6, RF-17, RF-21, RF-40 (T2): qué se pide de cada entrega del Drive', () => {
+  const MB = 1024 * 1024;
+  const enInventario = (driveId: string, extra: Partial<ArchivoDelInventario> = {}): ArchivoDelInventario => ({
+    driveId,
+    nombre: `${driveId}.pdf`,
+    ruta: 'Oficios',
+    mime: 'application/pdf',
+    modificadoEn: '2026-11-20T10:00:00.000Z',
+    tamano: MB,
+    enlace: `https://drive.google.com/file/d/${driveId}/view`,
+    ...extra,
+  });
+  const registrado = (driveId: string, extra: Partial<ArchivoRegistrado> = {}): ArchivoRegistrado => ({
+    driveId,
+    nombre: `${driveId}.pdf`,
+    subcarpeta: 'Oficios',
+    retirado: false,
+    ultimaModificacion: '2026-11-20T10:00:00.000Z',
+    ...extra,
+  });
+
+  // Primera entrega (RF-6): todo lo que ya estaba es nuevo y se pide.
+  const primera = cambiosDelInventario([], { completo: true, archivos: [enInventario('a'), enInventario('b')] });
+  assert.deepEqual(primera.nuevos.map((a) => a.driveId), ['a', 'b']);
+  assert.deepEqual(primera.pedir, [
+    { driveId: 'a', modificadoEn: '2026-11-20T10:00:00.000Z' },
+    { driveId: 'b', modificadoEn: '2026-11-20T10:00:00.000Z' },
+  ]);
+
+  // Nuevo, cambiado e igual (RF-1, RF-17, RF-4).
+  const c = cambiosDelInventario([registrado('cambia'), registrado('igual')], {
+    completo: true,
+    archivos: [
+      enInventario('nuevo'),
+      enInventario('cambia', { modificadoEn: '2026-11-21T08:30:00.000Z' }),
+      enInventario('igual'),
+    ],
+  });
+  assert.deepEqual(c.nuevos.map((a) => a.driveId), ['nuevo']);
+  assert.deepEqual(c.pedir, [
+    { driveId: 'nuevo', modificadoEn: '2026-11-20T10:00:00.000Z' },
+    { driveId: 'cambia', modificadoEn: '2026-11-21T08:30:00.000Z' },
+  ]);
+  assert.deepEqual([c.renombrados, c.retirar, c.vuelven, c.demasiadoGrandes], [[], [], [], []]);
+
+  // La misma fecha escrita de otra forma es la misma versión (RF-4).
+  const mismaFecha = cambiosDelInventario([registrado('a')], {
+    completo: true,
+    archivos: [enInventario('a', { modificadoEn: '2026-11-20T05:00:00-05:00' })],
+  });
+  assert.deepEqual(mismaFecha.pedir, []);
+
+  // Una fecha más vieja que la registrada no pide nada (caso límite).
+  const vieja = cambiosDelInventario([registrado('a')], {
+    completo: true,
+    archivos: [enInventario('a', { modificadoEn: '2026-11-01T10:00:00.000Z' })],
+  });
+  assert.deepEqual(vieja.pedir, []);
+
+  // Un registrado sin ninguna versión todavía se pide.
+  const sinVersion = cambiosDelInventario([registrado('a', { ultimaModificacion: null })], {
+    completo: true,
+    archivos: [enInventario('a')],
+  });
+  assert.deepEqual(sinVersion.pedir, [{ driveId: 'a', modificadoEn: '2026-11-20T10:00:00.000Z' }]);
+
+  // Renombrado y movido: se actualizan, sin versión nueva (RF-21). Las barras de los bordes no cuentan.
+  const r = cambiosDelInventario([registrado('ren'), registrado('mov'), registrado('quieto')], {
+    completo: true,
+    archivos: [
+      enInventario('ren', { nombre: 'Oficio 12 firmado.pdf' }),
+      enInventario('mov', { ruta: 'Oficios/2026' }),
+      enInventario('quieto', { ruta: '/Oficios/' }),
+    ],
+  });
+  assert.deepEqual(r.pedir, []);
+  assert.deepEqual(r.renombrados, [
+    { driveId: 'ren', nombre: 'Oficio 12 firmado.pdf', subcarpeta: 'Oficios' },
+    { driveId: 'mov', nombre: 'mov.pdf', subcarpeta: 'Oficios/2026' },
+  ]);
+  // En la raíz, la subcarpeta es vacía.
+  assert.equal(cambiosDelInventario([], { completo: true, archivos: [enInventario('raiz', { ruta: '/' })] }).nuevos[0].ruta, '');
+
+  // Más de 50 MB (RF-40, D12): no se pide; se registra sin copia. Justo 50 MB sí se pide.
+  const g = cambiosDelInventario([registrado('crece')], {
+    completo: true,
+    archivos: [
+      enInventario('grande', { tamano: 50 * MB + 1 }),
+      enInventario('justo', { tamano: 50 * MB }),
+      enInventario('crece', { tamano: 80 * MB, modificadoEn: '2026-11-22T00:00:00.000Z' }),
+    ],
+  });
+  assert.deepEqual(g.nuevos.map((a) => a.driveId), ['grande', 'justo']);
+  assert.deepEqual(g.pedir, [{ driveId: 'justo', modificadoEn: '2026-11-20T10:00:00.000Z' }]);
+  assert.deepEqual(g.demasiadoGrandes, [
+    { driveId: 'grande', modificadoEn: '2026-11-20T10:00:00.000Z' },
+    { driveId: 'crece', modificadoEn: '2026-11-22T00:00:00.000Z' },
+  ]);
+
+  // El mismo archivo dos veces en el listado (Drive deja tenerlo en dos carpetas): cuenta una sola.
+  const doble = cambiosDelInventario([], {
+    completo: true,
+    archivos: [enInventario('a'), enInventario('a', { ruta: 'Actas' })],
+  });
+  assert.deepEqual(doble.nuevos.map((a) => [a.driveId, a.ruta]), [['a', 'Oficios']]);
+  assert.equal(doble.pedir.length, 1);
+});
+
+/** Un archivo mínimo, para los casos de retiro. */
+const archivoDelDrive052 = (driveId: string): ArchivoDelInventario => ({
+  driveId,
+  nombre: `${driveId}.pdf`,
+  ruta: '',
+  mime: 'application/pdf',
+  modificadoEn: '2026-11-20T10:00:00.000Z',
+  tamano: 1000,
+  enlace: '',
+});
+const registradoDelDrive052 = (driveId: string, retirado = false): ArchivoRegistrado => ({
+  driveId,
+  nombre: `${driveId}.pdf`,
+  subcarpeta: '',
+  retirado,
+  ultimaModificacion: '2026-11-20T10:00:00.000Z',
+});
+
+prueba('052/RF-19, RF-20 (T2): el que falta se retira y el retirado que vuelve queda vigente', () => {
+  const r = registradoDelDrive052;
+  const c = cambiosDelInventario([r('sigue'), r('falta'), r('vuelve', true), r('ausente', true)], {
+    completo: true,
+    archivos: [archivoDelDrive052('sigue'), archivoDelDrive052('vuelve')],
+  });
+  assert.deepEqual(c.retirar, ['falta']);
+  assert.deepEqual(c.vuelven, ['vuelve']);
+  // Un retirado que sigue sin estar no se vuelve a retirar, y el que vuelve igual no pide versión.
+  assert.deepEqual(c.pedir, []);
+  assert.equal(c.retirosRetenidos, 0);
+});
+
+prueba('052/RF-19 (T2, riesgo 1): un inventario incompleto o una caída de más de la mitad no retiran', () => {
+  assert.equal(inventarioAceptable({ completo: true, vigentes: 100, aRetirar: 3 }), true);
+  assert.equal(inventarioAceptable({ completo: false, vigentes: 100, aRetirar: 1 }), false);
+  // Incompleto sin nada que retirar: no hay qué proteger.
+  assert.equal(inventarioAceptable({ completo: false, vigentes: 100, aRetirar: 0 }), true);
+  // Más de la mitad, pero 10 o menos: una carpeta chica que se limpió, y se acepta.
+  assert.equal(inventarioAceptable({ completo: true, vigentes: 12, aRetirar: 10 }), true);
+  // Más de la mitad y más de 10: se sospecha un listado a medias.
+  assert.equal(inventarioAceptable({ completo: true, vigentes: 30, aRetirar: 16 }), false);
+  // Justo la mitad todavía se acepta.
+  assert.equal(inventarioAceptable({ completo: true, vigentes: 30, aRetirar: 15 }), true);
+
+  const registrados = Array.from({ length: 30 }, (_, i) => registradoDelDrive052(`f${i}`));
+  // Llegan solo 5 de 30, y uno nuevo: el nuevo se pide igual, pero no se retira nada.
+  const caida = cambiosDelInventario(registrados, {
+    completo: true,
+    archivos: [...registrados.slice(0, 5).map((r) => archivoDelDrive052(r.driveId)), archivoDelDrive052('nuevo')],
+  });
+  assert.deepEqual(caida.retirar, []);
+  assert.equal(caida.retirosRetenidos, 25);
+  assert.deepEqual(caida.pedir.map((p) => p.driveId), ['nuevo']);
+  // Incompleto: tampoco se retira, aunque falte uno solo.
+  const incompleto = cambiosDelInventario(registrados, {
+    completo: false,
+    archivos: registrados.slice(1).map((r) => archivoDelDrive052(r.driveId)),
+  });
+  assert.deepEqual(incompleto.retirar, []);
+  assert.equal(incompleto.retirosRetenidos, 1);
+});
+
+prueba('052/RF-17, RF-25 (T3): la versión vigente es la de fecha de Drive más reciente, no la que llegó de última', () => {
+  // En el orden en que llegaron: la del 21 llegó antes que una del 18 que se demoró.
+  const versiones = [
+    { id: 'v1', modificadoEnDrive: '2026-11-10T09:00:00.000Z' },
+    { id: 'v3', modificadoEnDrive: '2026-11-21T09:00:00.000Z' },
+    { id: 'v2', modificadoEnDrive: '2026-11-18T09:00:00.000Z' },
+  ];
+  assert.equal(versionVigente(versiones)?.id, 'v3');
+  // Se comparan instantes, no texto: 2026-11-21T05:00-05:00 es igual a 10:00Z, posterior a 09:00Z.
+  assert.equal(
+    versionVigente([...versiones, { id: 'v4', modificadoEnDrive: '2026-11-21T05:00:00-05:00' }])?.id,
+    'v4',
+  );
+  assert.equal(versionVigente([{ id: 'sola', modificadoEnDrive: '2026-11-01T00:00:00.000Z' }])?.id, 'sola');
+  assert.equal(versionVigente([]), null);
+});
+
+prueba('052/RF-12, RF-25 (T3): los fragmentos no pasan del tope, no cortan renglones y conservan su página', () => {
+  assert.equal(TAMANO_DE_FRAGMENTO, 1500);
+  const renglon = (n: number) => `Renglón ${n}: ${'texto del oficio '.repeat(5).trim()}.`;
+  const larga = Array.from({ length: 60 }, (_, i) => renglon(i + 1)).join('\n');
+  const paginas = [
+    { pagina: 1, texto: 'OFICIO 012\r\nAsunto: plazo de la obra' },
+    { pagina: 2, texto: larga },
+    { pagina: 3, texto: '   \n\n ' },
+    { pagina: 4, texto: 'Firma: residente' },
+  ];
+  const trozos = fragmentar(paginas);
+
+  // Ninguno pasa del tope, y ninguno va vacío.
+  for (const t of trozos) {
+    assert.ok(t.texto.length <= TAMANO_DE_FRAGMENTO, `un fragmento de ${t.texto.length}`);
+    assert.ok(t.texto.trim().length > 0);
+  }
+  // Un orden seguido, de cero en adelante.
+  assert.deepEqual(trozos.map((t) => t.orden), trozos.map((_, i) => i));
+  // Ninguno mezcla páginas, y la página en blanco no deja fragmento.
+  assert.deepEqual([...new Set(trozos.map((t) => t.pagina))], [1, 2, 4]);
+  assert.deepEqual(trozos[0], { orden: 0, pagina: 1, texto: 'OFICIO 012\nAsunto: plazo de la obra' });
+  assert.equal(trozos.at(-1)?.texto, 'Firma: residente');
+  // La página larga se parte en varios, y cada renglón queda entero en uno solo.
+  const deLaDos = trozos.filter((t) => t.pagina === 2);
+  assert.ok(deLaDos.length > 1);
+  const renglones = deLaDos.flatMap((t) => t.texto.split('\n'));
+  assert.deepEqual(renglones, larga.split('\n'));
+  // Se llenan: un fragmento no se corta mientras el siguiente renglón todavía cabe.
+  for (let i = 0; i < deLaDos.length - 1; i++) {
+    const siguiente = deLaDos[i + 1].texto.split('\n')[0];
+    assert.ok(deLaDos[i].texto.length + 1 + siguiente.length > TAMANO_DE_FRAGMENTO);
+  }
+
+  // Un renglón solo que pasa del tope (una tabla aplanada) se parte entre palabras.
+  const enorme = 'palabra '.repeat(500).trim();
+  const partido = fragmentar([{ pagina: 7, texto: enorme }]);
+  assert.ok(partido.length > 1);
+  for (const t of partido) {
+    assert.ok(t.texto.length <= TAMANO_DE_FRAGMENTO);
+    assert.equal(t.pagina, 7);
+    assert.match(t.texto, /^palabra( palabra)*$/);
+  }
+  assert.equal(partido.map((t) => t.texto).join(' '), enorme);
+  // Y una «palabra» sin espacios más larga que el tope se corta en seco: no hay otra.
+  const sinEspacios = fragmentar([{ pagina: 1, texto: 'x'.repeat(3200) }]);
+  assert.deepEqual(sinEspacios.map((t) => t.texto.length), [1500, 1500, 200]);
+
+  // Sin texto, ningún fragmento.
+  assert.deepEqual(fragmentar([]), []);
+  assert.deepEqual(fragmentar([{ pagina: 1, texto: '' }]), []);
+});
+
+prueba('052/RF-9, RF-33, RF-36, RF-37 (T4): el Drive de la obra, rol por rol', () => {
+  const OBRA = ['ver', 'listar', 'escribir'];
+  const esperado: Partial<Record<Rol, readonly string[]>> = {
+    // RF-9: solo la gerencia asocia la carpeta a una obra (`activar`).
+    admin: ['ver', 'listar', 'escribir', 'activar'],
+    director_proyectos: OBRA,
+    director_obra: OBRA,
+    residente: OBRA,
+  };
+  const acciones = ['ver', 'listar', 'escribir', 'anular', 'activar', 'aprobar', 'importar'] as const;
+  for (const rol of ROLES) {
+    assert.deepEqual(
+      acciones.filter((a) => alcanza(rol, 'drive', a)),
+      esperado[rol] ?? [],
+      `drive · ${rol}`,
+    );
+  }
+  // Los que no lo ven, con nombre (RF-36).
+  for (const rol of ['almacenista', 'laboratorista', 'auxiliar_administrativa', 'encargado_occ', 'operador'] as const) {
+    assert.equal(alcanza(rol, 'drive', 'ver'), false, rol);
+  }
+  // Es de empresa, no del menú de siempre: solo existe dentro del menú de la obra.
+  assert.ok((MODULOS_DE_EMPRESA as readonly string[]).includes('drive'));
+  assert.equal((MODULOS as readonly string[]).includes('drive'), false);
+  for (const rol of ROLES) assert.equal((modulosVisibles(rol) as string[]).includes('drive'), false, rol);
+  // El rechazo dice qué no se puede y quién sí (RF-37).
+  assert.equal(
+    motivoDeRechazo('drive', 'activar'),
+    'No puede asociar una carpeta del Drive a una obra: lo hace la gerencia.',
+  );
+  assert.match(motivoDeRechazo('drive', 'ver'), /^No puede ver el Drive de la obra: lo hacen la gerencia, /);
+  assert.match(motivoDeRechazo('drive', 'escribir'), /^No puede pedir que se vuelva a leer un documento del Drive:/);
+});
+
+prueba('052/RF-22, RF-28 (T4, T13): el asistente alcanza el Drive con la tabla, y desde la T13 lo anuncia', () => {
+  const de = (rol: Rol, obraId: string | null = 'obra-a') =>
+    alcanceDelAsistente({ rol, obraId, modulosDeObra: TODOS_LOS_MODULOS });
+  assert.ok((MODULOS_CONSULTABLES as readonly string[]).includes('drive'));
+  for (const rol of ['admin', 'director_proyectos', 'director_obra', 'residente'] as const) {
+    assert.ok(de(rol).modulos.includes('drive'), rol);
+  }
+  // Sin obra, el residente no alcanza el Drive de ninguna (RF-28).
+  assert.equal(de('residente', null).modulos.includes('drive'), false);
+  for (const rol of ['almacenista', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa', 'encargado_planta'] as const) {
+    assert.equal(de(rol).modulos.includes('drive'), false, rol);
+  }
+  // T13: con la consulta `drive_de_la_obra`, el saludo lo nombra a quien lo alcanza, y solo a él.
+  assert.ok(loQueConsulta(de('residente')).includes('Lo que dicen los documentos del Drive de la obra: oficios, actas e informes.'));
+  assert.equal(loQueConsulta(de('almacenista')).some((f) => /drive/i.test(f)), false);
+});
+
+prueba('052/RF-1, RF-6, RF-40 (T7): el contrato del inventario, forma válida e inválida', () => {
+  const archivo = {
+    driveId: '1AbC-dEf_123',
+    nombre: 'Oficio 012.pdf',
+    ruta: 'Oficios/2026',
+    mime: 'application/pdf',
+    modificadoEn: '2026-11-20T10:00:00.000Z',
+    tamano: 120_000,
+    enlace: 'https://drive.google.com/file/d/1AbC-dEf_123/view',
+  };
+  const valido = { carpeta: { id: '0BxRaiz', nombre: 'Consorcio Magdalena' }, completo: true, archivos: [archivo] };
+  const leido = inventarioDelDrive.parse(valido);
+  assert.equal(leido.archivos[0].ruta, 'Oficios/2026');
+  // Una carpeta vacía es un inventario válido: es lo que manda n8n antes del primer archivo.
+  assert.equal(inventarioDelDrive.safeParse({ ...valido, archivos: [] }).success, true);
+  // En la raíz, la ruta puede faltar; y el enlace también (RF-41 lo usa solo si está).
+  const sinRuta = inventarioDelDrive.parse({ ...valido, archivos: [{ ...archivo, ruta: undefined, enlace: undefined }] });
+  assert.equal(sinRuta.archivos[0].ruta, '');
+  assert.equal(sinRuta.archivos[0].enlace, null);
+  // La fecha con zona horaria también vale.
+  assert.equal(
+    inventarioDelDrive.safeParse({ ...valido, archivos: [{ ...archivo, modificadoEn: '2026-11-20T05:00:00-05:00' }] }).success,
+    true,
+  );
+  // Lo que no vale: sin carpeta, sin «completo», una fecha que no es ISO, un tamaño negativo o con decimales,
+  // un archivo sin id o sin nombre, un enlace que no es una dirección.
+  const invalidos: unknown[] = [
+    { ...valido, carpeta: undefined },
+    { ...valido, carpeta: { id: '', nombre: 'x' } },
+    { ...valido, completo: undefined },
+    { ...valido, completo: 'si' },
+    { ...valido, archivos: undefined },
+    { ...valido, archivos: [{ ...archivo, modificadoEn: '20/11/2026' }] },
+    { ...valido, archivos: [{ ...archivo, tamano: -1 }] },
+    { ...valido, archivos: [{ ...archivo, tamano: 1.5 }] },
+    { ...valido, archivos: [{ ...archivo, driveId: ' ' }] },
+    { ...valido, archivos: [{ ...archivo, nombre: '' }] },
+    { ...valido, archivos: [{ ...archivo, enlace: 'no es una dirección' }] },
+  ];
+  for (const [i, cuerpo] of invalidos.entries()) {
+    assert.equal(inventarioDelDrive.safeParse(cuerpo).success, false, `inválido ${i}`);
+  }
+});
+
+prueba('052/RF-1, RF-4, RF-17 (T8): la subida dice de qué carpeta, archivo y versión es', () => {
+  const de = (consulta: string) => subidaAlDrive.safeParse(Object.fromEntries(new URLSearchParams(consulta)));
+  const bien = de('carpeta=0BxRaiz&archivo=1AbC-dEf_123&modificado=2026-11-20T10:00:00.000Z');
+  assert.equal(bien.success, true);
+  assert.deepEqual(bien.data, { carpeta: '0BxRaiz', archivo: '1AbC-dEf_123', modificado: '2026-11-20T10:00:00.000Z' });
+  // La fecha con zona horaria también: es la misma versión que su forma en UTC.
+  assert.equal(de('carpeta=c&archivo=a&modificado=2026-11-20T05:00:00-05:00').success, true);
+  // Falta algo, o la fecha no es ISO: 400, sin guardar nada.
+  for (const consulta of [
+    'archivo=a&modificado=2026-11-20T10:00:00.000Z',
+    'carpeta=c&modificado=2026-11-20T10:00:00.000Z',
+    'carpeta=c&archivo=a',
+    'carpeta=c&archivo=a&modificado=20/11/2026',
+    'carpeta=%20&archivo=a&modificado=2026-11-20T10:00:00.000Z',
+  ]) {
+    assert.equal(de(consulta).success, false, consulta);
+  }
+});
+
+prueba('052/RF-5, RF-40 (T8, D12): lo que sube pasa del tope solo por encima de 50 MB', () => {
+  assert.equal(pasaDelTopeDeLectura(TAMANO_MAXIMO_DE_LECTURA), false);
+  assert.equal(pasaDelTopeDeLectura(TAMANO_MAXIMO_DE_LECTURA + 1), true);
+  assert.equal(pasaDelTopeDeLectura(0), false);
+  // La cabecera `content-length` puede faltar o venir mal: entonces decide el cuerpo leído.
+  assert.equal(pasaDelTopeDeLectura(null), false);
+  assert.equal(pasaDelTopeDeLectura(Number.NaN), false);
+});
+
+prueba('052/RF-12 (T9): un Excel se lee como una página por hoja, con su nombre, y sin filas vacías', () => {
+  const paginas = paginasDelLibro([
+    {
+      nombre: 'Cantidades',
+      filas: [
+        ['Ítem', 'Descripción', 'Cantidad'],
+        [null, null, null],
+        ['1.1', 'Excavación mecánica', 1250.5],
+        ['1.2', null, 30],
+        [],
+      ],
+    },
+    { nombre: 'Vacía', filas: [[null], []] },
+    { nombre: 'Notas', filas: [['  Revisar con interventoría  ']] },
+  ]);
+  assert.deepEqual(paginas, [
+    {
+      pagina: 1,
+      texto: 'Hoja «Cantidades»\nÍtem | Descripción | Cantidad\n1.1 | Excavación mecánica | 1250.5\n1.2 |  | 30',
+    },
+    // La hoja vacía no deja página, pero no corre el número de las demás: es la hoja 3 del libro.
+    { pagina: 3, texto: 'Hoja «Notas»\nRevisar con interventoría' },
+  ]);
+  assert.deepEqual(paginasDelLibro([]), []);
+});
+
+prueba('052/RF-12 (T9): un texto o un Word se leen como una sola página, sin la marca BOM', () => {
+  assert.deepEqual(paginasDelTexto('﻿OFICIO 012\r\nAsunto: plazo'), [{ pagina: 1, texto: 'OFICIO 012\r\nAsunto: plazo' }]);
+  assert.deepEqual(paginasDelTexto('   \n  '), []);
+  assert.deepEqual(paginasDelTexto(''), []);
+});
+
+prueba('052/RF-15 (T9): los motivos de «No se pudo leer» son siempre los mismos textos', () => {
+  assert.equal(MOTIVO_TIPO_NO_ADMITIDO, 'tipo no admitido');
+  assert.equal(MOTIVO_SIN_TEXTO, 'sin texto');
+  assert.equal(
+    estadoDelDocumento({ estado: 'no_se_pudo', motivo: MOTIVO_TIPO_NO_ADMITIDO, retirado: false }).texto,
+    'No se pudo leer: tipo no admitido',
+  );
+  // Lo que se lee sin IA, y lo que espera a la IA (T10).
+  assert.deepEqual(
+    (['pdf', 'imagen', 'word', 'excel', 'texto', 'no_admitido'] as const).filter(seLeeSinIa),
+    ['word', 'excel', 'texto', 'no_admitido'],
+  );
+});
+
+prueba('052/RF-12, RF-14 (T10): un PDF se parte en piezas de hasta 20 páginas, sin huecos ni repetidas', () => {
+  assert.equal(PAGINAS_POR_PIEZA, 20);
+  assert.deepEqual(piezasDelPdf(30), [
+    { desde: 1, hasta: 20 },
+    { desde: 21, hasta: 30 },
+  ]);
+  assert.deepEqual(piezasDelPdf(20), [{ desde: 1, hasta: 20 }]);
+  assert.deepEqual(piezasDelPdf(1), [{ desde: 1, hasta: 1 }]);
+  assert.deepEqual(piezasDelPdf(41).map((p) => [p.desde, p.hasta]), [[1, 20], [21, 40], [41, 41]]);
+  assert.deepEqual(piezasDelPdf(0), []);
+});
+
+prueba('052/RF-12, RF-23 (T10): las páginas que transcribe la IA de una pieza vuelven al número del documento', () => {
+  const pieza = { desde: 21, hasta: 30 };
+  assert.deepEqual(
+    paginasDeLaPieza(pieza, [
+      { pagina: 2, texto: 'segunda de la pieza' },
+      { pagina: 1, texto: 'primera de la pieza' },
+      // Fuera de la pieza: la IA no puede inventar páginas.
+      { pagina: 11, texto: 'no existe' },
+      { pagina: 0, texto: 'tampoco' },
+      // Repetida: se juntan en el orden en que llegaron.
+      { pagina: 2, texto: 'más de la segunda' },
+      // Una página en blanco no deja nada.
+      { pagina: 3, texto: '   ' },
+    ]),
+    [
+      { pagina: 21, texto: 'primera de la pieza' },
+      { pagina: 22, texto: 'segunda de la pieza\nmás de la segunda' },
+    ],
+  );
+  assert.deepEqual(paginasDeLaPieza(pieza, []), []);
+});
+
+prueba('052/RF-12 (T10, riesgo 2): sin DRIVE_LECTURA_ACTIVA=1 no se gasta IA', () => {
+  assert.equal(lecturaConIaActiva('1'), true);
+  assert.equal(lecturaConIaActiva(' 1 '), true);
+  for (const valor of [undefined, '', '0', 'true', 'si']) assert.equal(lecturaConIaActiva(valor), false, String(valor));
+});
+
+prueba('052/RF-16 (T11): una falla pasajera vuelve a la cola hasta el tercer intento; una definitiva, no', () => {
+  assert.equal(INTENTOS_DE_LECTURA, 3);
+  assert.deepEqual(despuesDeUnaFalla(0, true), { estado: 'pendiente', intentos: 1 });
+  assert.deepEqual(despuesDeUnaFalla(1, true), { estado: 'pendiente', intentos: 2 });
+  // A la tercera, queda «No se pudo leer».
+  assert.deepEqual(despuesDeUnaFalla(2, true), { estado: 'no_se_pudo', intentos: 3 });
+  assert.deepEqual(despuesDeUnaFalla(5, true), { estado: 'no_se_pudo', intentos: 6 });
+  // Una definitiva (archivo dañado, la IA se negó) no se reintenta, pero cuenta el intento.
+  assert.deepEqual(despuesDeUnaFalla(0, false), { estado: 'no_se_pudo', intentos: 1 });
+});
+
+prueba('052/RF-16 (T11): qué falla es pasajera, por cómo falló', () => {
+  // Sin conexión o tiempo agotado: pasajera.
+  assert.equal(fallaPasajera({ sinConexion: true }), true);
+  // La IA ocupada, sobrecargada o con un error suyo: pasajera.
+  for (const estado of [408, 409, 429, 500, 502, 503, 529]) assert.equal(fallaPasajera({ estado, sinConexion: false }), true, String(estado));
+  // Una petición rechazada, una llave inválida, sin saldo: definitiva; reintentar no la arregla.
+  for (const estado of [400, 401, 403, 404, 413, 422]) assert.equal(fallaPasajera({ estado, sinConexion: false }), false, String(estado));
+  // Sin estado ni conexión caída (la IA se negó, la respuesta no cabía): definitiva.
+  assert.equal(fallaPasajera({ sinConexion: false }), false);
+});
+
+prueba('052/RF-16 (T11): una lectura de más de 10 minutos se da por cortada', () => {
+  const ahora = Date.parse('2026-11-23T12:00:00.000Z');
+  assert.equal(lecturaCortada(new Date(ahora - 11 * 60_000), ahora), true);
+  assert.equal(lecturaCortada(new Date(ahora - 10 * 60_000 - 1), ahora), true);
+  assert.equal(lecturaCortada(new Date(ahora - 9 * 60_000), ahora), false);
+  // Sin fecha de inicio no hay cómo saber: se retoma, antes que dejarla «Leyendo» para siempre.
+  assert.equal(lecturaCortada(null, ahora), true);
+});
+
+prueba('052/RF-12, RF-13 (T11): un pulso no toma otra versión después de unos 4 minutos', () => {
+  assert.equal(TOPE_DEL_PULSO_MS, 4 * 60_000);
+  const inicio = Date.parse('2026-11-23T12:00:00.000Z');
+  assert.equal(quedaTiempoEnElPulso(inicio, inicio), true);
+  assert.equal(quedaTiempoEnElPulso(inicio, inicio + 3 * 60_000 + 59_000), true);
+  assert.equal(quedaTiempoEnElPulso(inicio, inicio + 4 * 60_000), false);
+});
+
+prueba('052/RF-13 (T11): al resumen va el texto en su orden, hasta 60 000 caracteres y sin cortar renglones', () => {
+  assert.equal(CARACTERES_PARA_RESUMIR, 60_000);
+  assert.equal(
+    textoParaResumir([
+      { pagina: 1, texto: 'OFICIO 012' },
+      { pagina: 1, texto: 'Asunto: plazo' },
+      { pagina: 2, texto: 'Firma: residente' },
+    ]),
+    'OFICIO 012\nAsunto: plazo\nFirma: residente',
+  );
+  const renglon = 'x'.repeat(999);
+  const largo = textoParaResumir(Array.from({ length: 100 }, () => ({ pagina: 1, texto: renglon })));
+  assert.ok(largo.length <= CARACTERES_PARA_RESUMIR);
+  assert.ok(largo.split('\n').every((r) => r === renglon));
+  assert.equal(largo.split('\n').length, 60);
+  assert.equal(textoParaResumir([]), '');
+});
+
+prueba('052/RF-22, RF-27 (T12): las palabras de una pregunta, sin tildes ni mayúsculas, para buscar cualquiera', () => {
+  assert.deepEqual(terminosDeBusqueda('¿Cuántos días de PRÓRROGA aprobó la Interventoría?'), [
+    'cuantos',
+    'dias',
+    'de',
+    'prorroga',
+    'aprobo',
+    'la',
+    'interventoria',
+  ]);
+  // Lo que no es letra ni número no llega a la consulta: ni comillas, ni operadores, ni símbolos.
+  assert.deepEqual(terminosDeBusqueda(`PR 12+300 & "acta" | !vecindad :* (ñandú)`), ['pr', '12', '300', 'acta', 'vecindad', 'nandu']);
+  // Sin repetidas, y con tope: una pregunta larguísima no arma una consulta larguísima.
+  assert.deepEqual(terminosDeBusqueda('obra obra Obra'), ['obra']);
+  assert.equal(terminosDeBusqueda(Array.from({ length: 40 }, (_, i) => `palabra${i}`).join(' ')).length, TERMINOS_POR_BUSQUEDA);
+  assert.deepEqual(terminosDeBusqueda('  ¿? '), []);
+  // La consulta para Postgres: cualquiera de las palabras.
+  assert.equal(consultaDeBusqueda('Prórroga interventoría'), 'prorroga | interventoria');
+  assert.equal(consultaDeBusqueda('¿?'), null);
+});
+
+prueba('052/RF-23, RF-27 (T12): lo que vuelve al asistente: hasta 8 fragmentos y unos 12 000 caracteres, en su orden', () => {
+  assert.equal(FRAGMENTOS_POR_BUSQUEDA, 8);
+  assert.equal(CARACTERES_POR_BUSQUEDA, 12_000);
+  const f = (id: string, largo: number) => ({ id, texto: 'x'.repeat(largo) });
+  assert.deepEqual(recortarResultados(Array.from({ length: 12 }, (_, i) => f(`f${i}`, 100))).map((r) => r.id), [
+    'f0', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7',
+  ]);
+  // Uno que ya no cabe se salta, pero los siguientes más cortos todavía entran.
+  assert.deepEqual(
+    recortarResultados([f('a', 1500), f('b', 1500), f('c', 1500), f('d', 1500), f('e', 1500), f('f', 1500), f('g', 1500), f('h', 1500)]).map(
+      (r) => r.id,
+    ),
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+  );
+  assert.deepEqual(recortarResultados([f('a', 11_000), f('b', 1500), f('c', 900)]).map((r) => r.id), ['a', 'c']);
+  assert.deepEqual(recortarResultados([]), []);
+});
+
+prueba('052/RF-22 a RF-28, RF-39 (T13): la consulta del Drive, a quién se ofrece y cómo cita', () => {
+  const codigo = readFileSync('src/features/asistente/servidor/herramientas.ts', 'utf8');
+  const bloque = codigo.slice(codigo.indexOf("nombre: 'drive_de_la_obra'"), codigo.indexOf('const generarArchivoConsulta'));
+  // Se ofrece por el módulo `drive` del alcance (RF-28), no por una lista de roles.
+  assert.match(bloque, /modulo: 'drive',/);
+  // No estricta: la gerencia ya está en el tope de la gramática.
+  assert.match(bloque, /estricta: false,/);
+  // La obra se autoriza antes de buscar, y la búsqueda es de esa obra (RF-28, RF-39).
+  assert.match(bloque, /const obra = await obraConsultada\(alcance, obraId\);\s+if \('error' in obra\) return obra;\s+const encontrados = await buscarEnElDrive\(obra\.id,/);
+  // Cada fuente abre la copia de su versión (RF-24); sin copia, la lista del Drive.
+  assert.match(bloque, /ruta: f\.mediaId \? `\/api\/panel\/media\/\$\{f\.mediaId\}` : rutaDeObra\(obra\.id, 'drive'\)/);
+  // Sin resultados, se dice sin inventar (RF-27).
+  assert.match(bloque, /El Drive de la obra no tiene nada sobre eso: dígalo, sin inventar\./);
+  assert.match(codigo, /\n {2}driveDeLaObra,\n/);
+  // Las instrucciones: citar documento, subcarpeta y página; marcar viejas y retiradas (RF-23, RF-26).
+  const conversacion = readFileSync('src/features/asistente/servidor/conversacion.ts', 'utf8');
+  assert.match(conversacion, /cítelo con el nombre del documento, su subcarpeta y la página/);
+  assert.match(conversacion, /versión anterior o de un documento retirado del Drive, dígalo/);
+});
+
+prueba('052/RF-10, RF-24, RF-37 (T13): la copia del Drive sale solo a quien ve el Drive de su obra', () => {
+  const ruta = readFileSync('src/app/api/panel/media/[id]+api.ts', 'utf8');
+  const funcion = ruta.slice(ruta.indexOf('async function versionDelDriveAlAlcance'));
+  // El permiso del módulo primero: `alcanzaLaImagen` no lo mira para quien tiene una sola obra.
+  assert.match(funcion, /if \(!alcanza\(sesion\.rol, 'drive', 'ver'\)\) return null;/);
+  // Una carpeta sin obra, solo la gerencia (RF-10).
+  assert.match(funcion, /if \(!fila\.obraId\) return sesion\.rol === 'admin' \?/);
+  assert.match(funcion, /alcanzaLaImagen\(sesion, \{ existe: true, obraId: fila\.obraId \}, 'drive'\)/);
+  // Y la pantalla la abre en otra pestaña, sin perder la conversación.
+  const pantalla = readFileSync('src/features/asistente/pantalla-asistente.tsx', 'utf8');
+  assert.match(pantalla, /ruta\.startsWith\('\/api\/panel\/media\/'\)\) \{\s+window\.open\(ruta, '_blank', 'noopener'\);/);
+});
+
+prueba('052/RF-29 a RF-31, RF-35 (T14): la lista del Drive, con su estado, su búsqueda y su orden', () => {
+  const version = (id: string, modificadoEnDrive: string, estado: EstadoDeLecturaDelDrive = 'leido', motivo: string | null = null) => ({
+    id,
+    modificadoEnDrive,
+    estado,
+    motivo,
+    resumen: null,
+    mediaId: `m-${id}`,
+  });
+  const archivos = [
+    { id: 'a', nombre: 'Oficio 012 Prórroga.pdf', subcarpeta: 'Oficios/2026', retirado: false, versiones: [version('a1', '2026-11-10T10:00:00Z'), version('a2', '2026-11-20T10:00:00Z')] },
+    { id: 'b', nombre: 'Acta de vecindad.pdf', subcarpeta: 'Actas', retirado: true, versiones: [version('b1', '2026-11-22T10:00:00Z')] },
+    { id: 'c', nombre: 'Planos.zip', subcarpeta: '', retirado: false, versiones: [version('c1', '2026-11-15T10:00:00Z', 'no_se_pudo', 'tipo no admitido')] },
+    { id: 'd', nombre: 'Cronograma.xlsx', subcarpeta: 'Planeación', retirado: false, versiones: [version('d1', '2026-11-01T10:00:00Z'), version('d2', '2026-11-21T10:00:00Z', 'pendiente')] },
+  ];
+  const lista = documentosParaLaLista(archivos, '', new Set());
+  // RF-35: de la modificación más reciente a la más antigua, por la versión vigente.
+  assert.deepEqual(lista.map((d) => d.id), ['b', 'd', 'a', 'c']);
+  // RF-30: el estado sale de la versión vigente y del retiro.
+  assert.deepEqual(lista.map((d) => d.estado.texto), ['Retirado del Drive', 'Leyendo', 'Leído', 'No se pudo leer: tipo no admitido']);
+  // La vigente va primero, y las viejas detrás, de la más nueva a la más vieja (RF-32).
+  assert.deepEqual(lista.find((d) => d.id === 'a')?.versiones.map((v) => [v.id, v.vigente]), [['a2', true], ['a1', false]]);
+  assert.equal(lista.find((d) => d.id === 'd')?.modificadoEnDrive, '2026-11-21T10:00:00Z');
+
+  // RF-31: por el nombre y la subcarpeta, sin tildes ni mayúsculas…
+  assert.deepEqual(documentosParaLaLista(archivos, 'PRORROGA', new Set()).map((d) => d.id), ['a']);
+  assert.deepEqual(documentosParaLaLista(archivos, 'planeacion', new Set()).map((d) => d.id), ['d']);
+  // …y por el contenido, con los que la base encontró por su texto.
+  assert.deepEqual(documentosParaLaLista(archivos, 'interventoría', new Set(['c', 'a'])).map((d) => d.id), ['a', 'c']);
+  assert.deepEqual(documentosParaLaLista(archivos, 'helicóptero', new Set()), []);
+  // Un archivo sin ninguna versión todavía no se muestra: no hay qué abrir ni qué decir de él.
+  assert.deepEqual(documentosParaLaLista([{ id: 'x', nombre: 'x', subcarpeta: '', retirado: false, versiones: [] }], '', new Set()), []);
+});
+
+prueba('052/RF-33 (T14): solo se vuelve a leer lo que no se pudo leer y tiene copia', () => {
+  assert.equal(motivoParaNoReleer({ estado: 'no_se_pudo', mediaId: 'm1' }), null);
+  assert.match(motivoParaNoReleer({ estado: 'leido', mediaId: 'm1' }) ?? '', /ya se leyó/);
+  assert.match(motivoParaNoReleer({ estado: 'pendiente', mediaId: 'm1' }) ?? '', /se está leyendo/);
+  assert.match(motivoParaNoReleer({ estado: 'leyendo', mediaId: 'm1' }) ?? '', /se está leyendo/);
+  // Lo de más de 50 MB no tiene copia: volver a leerlo no lo arreglaría (D12).
+  assert.match(motivoParaNoReleer({ estado: 'no_se_pudo', mediaId: null }) ?? '', /se abre en el Drive/);
+});
+
+prueba('052/RF-32, RF-41 (T15): cómo se abre cada copia, y lo que no tiene copia abre el Drive', () => {
+  const enlace = 'https://drive.google.com/file/d/X/view';
+  // El navegador muestra PDF, imágenes y texto; Word, Excel y lo demás se descargan.
+  assert.equal(comoSeAbre({ mediaId: 'm', mime: 'application/pdf', nombre: 'a.pdf', enlace }), 'abrir');
+  assert.equal(comoSeAbre({ mediaId: 'm', mime: 'image/png', nombre: 'a.png', enlace }), 'abrir');
+  assert.equal(comoSeAbre({ mediaId: 'm', mime: 'text/plain', nombre: 'a.txt', enlace }), 'abrir');
+  assert.equal(
+    comoSeAbre({ mediaId: 'm', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', nombre: 'a.docx', enlace }),
+    'descargar',
+  );
+  assert.equal(comoSeAbre({ mediaId: 'm', mime: 'application/zip', nombre: 'a.zip', enlace }), 'descargar');
+  // Sin copia (más de 50 MB, D12): el Drive, si n8n mandó el enlace; si no, nada que abrir.
+  assert.equal(comoSeAbre({ mediaId: null, mime: 'video/mp4', nombre: 'a.mp4', enlace }), 'drive');
+  assert.equal(comoSeAbre({ mediaId: null, mime: 'video/mp4', nombre: 'a.mp4', enlace: null }), null);
+});
+
+prueba('052/RF-34 (T15): la última entrega está atrasada si pasa media hora sin otra', () => {
+  assert.equal(ENTREGA_ATRASADA_DESPUES_DE_MS, 30 * 60_000);
+  const ahora = Date.parse('2026-11-23T12:00:00Z');
+  assert.equal(entregaAtrasada('2026-11-23T11:55:00Z', ahora), false);
+  assert.equal(entregaAtrasada('2026-11-23T11:30:00Z', ahora), false);
+  assert.equal(entregaAtrasada('2026-11-23T11:29:59Z', ahora), true);
+  // Una carpeta que nunca recibió entrega no se conectó del todo: también es para avisar.
+  assert.equal(entregaAtrasada(null, ahora), true);
+});
+
+prueba('052/RF-29 (T15): «Drive» va en el menú de la obra, en Personal y archivo, solo para quien lo ve', () => {
+  const tiene = (rol: Rol) => menuDeObra(rol).some((e) => e.pagina === 'drive' && e.permiso === 'drive' && e.seccion === 'Personal y archivo');
+  for (const rol of ['admin', 'director_proyectos', 'director_obra', 'residente'] as const) assert.ok(tiene(rol), rol);
+  for (const rol of ['almacenista', 'laboratorista', 'encargado_occ', 'auxiliar_administrativa'] as const) {
+    assert.equal(menuDeObra(rol).some((e) => e.pagina === 'drive'), false, rol);
+  }
+  // Y en ningún menú de empresa: es de la obra.
+  for (const empresa of ['elemental', 'occ', 'geolab'] as const) {
+    assert.equal(menuDeEmpresa(empresa, 'admin').some((e) => e.pagina === 'drive'), false, empresa);
+  }
+  // La pantalla existe para esa página.
+  assert.match(readFileSync('src/features/empresas/paginas-de-empresa.tsx', 'utf8'), /\n {2}drive: PantallaDrive,\n/);
+});
+
+prueba('052/RF-8 a RF-10 (T16): para conectar se ofrecen solo las carpetas sin obra, con lo que traen', () => {
+  const carpeta = (id: string, obraId: string | null, archivos: number | null, ultimaEntregaEn: string | null = '2026-11-23T12:00:00Z') => ({
+    id,
+    nombre: `Carpeta ${id}`,
+    obraId,
+    archivosEnLaUltimaEntrega: archivos,
+    ultimaEntregaEn,
+  });
+  assert.deepEqual(
+    opcionesDeCarpetasSinObra([carpeta('a', 'obra-1', 10), carpeta('b', null, 1), carpeta('c', null, 25), carpeta('d', null, null, null)]),
+    [
+      { valor: 'b', etiqueta: 'Carpeta b', detalle: '1 archivo en la última entrega' },
+      { valor: 'c', etiqueta: 'Carpeta c', detalle: '25 archivos en la última entrega' },
+      { valor: 'd', etiqueta: 'Carpeta d', detalle: 'Todavía sin entregas de n8n' },
+    ],
+  );
+  assert.deepEqual(opcionesDeCarpetasSinObra([carpeta('a', 'obra-1', 10)]), []);
+});
+
+prueba('052/RF-9 (T16): «Conectar carpeta» solo para quien asocia, y la lista vacía para los demás', () => {
+  const pantalla = readFileSync('src/features/drive/pantalla-drive.tsx', 'utf8');
+  assert.match(pantalla, /const puedeConectar = alcanza\(persona\.rol, 'drive', 'activar'\);/);
+  // El botón sale solo con ese permiso; sin él, la frase de siempre.
+  assert.match(pantalla, /accion: puedeConectar \? <Boton titulo="Conectar carpeta"/);
+  assert.match(pantalla, /La conecta la gerencia\./);
+  // Solo la gerencia tiene `activar` en `drive`.
+  assert.deepEqual(ROLES.filter((rol) => alcanza(rol, 'drive', 'activar')), ['admin']);
 });

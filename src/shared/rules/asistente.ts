@@ -58,6 +58,9 @@ export const MODULOS_CONSULTABLES = [
   // Spec 043, RF-94: el cumplimiento de la planificación. Vive en el menú de la obra y no en
   // `MODULOS`, así que `modulosVisibles` no lo trae: lo suma `deObraFuera`, con la tabla.
   'cumplimiento',
+  // Spec 052, RF-22, RF-28: los documentos del Drive de la obra. Como el cumplimiento, vive en el
+  // menú de la obra y no en `MODULOS`: lo suma `deObraFuera`, con la tabla.
+  'drive',
   'vehiculos',
   'personas',
   // Spec 040, RF-13 a RF-15: lo de las empresas. No son de una obra: los alcanza quien entra a
@@ -175,7 +178,8 @@ function deEmpresa(rol: Rol): {
  * del Excel, y al asistente solo le toca el informe de cumplimiento (RF-94).
  */
 function deObraFuera(rol: Rol): ModuloConPermiso[] {
-  return alcanza(rol, 'cumplimiento', 'listar') ? ['cumplimiento'] : [];
+  const fuera: ModuloConPermiso[] = ['cumplimiento', 'drive'];
+  return fuera.filter((modulo) => alcanza(rol, modulo, 'listar'));
 }
 
 /** Lo que alcanza el asistente para quien pregunta. */
@@ -703,7 +707,8 @@ export function ejemplosDePregunta(alcance: AlcanceDelAsistente): string[] {
  * cumplimiento (spec 043) va en una frase aparte: en la lista, la del Director de Obra pasaba de
  * los 160 caracteres que RF-25 deja a una frase corta.
  */
-type ModuloDeObraEnLaLista = Exclude<ModuloDeObraConsultable, 'cumplimiento'>;
+// El Drive (spec 052), por lo mismo: en la lista, la del Director de Obra volvía a pasar de 160.
+type ModuloDeObraEnLaLista = Exclude<ModuloDeObraConsultable, 'cumplimiento' | 'drive'>;
 const MODULO_DE_OBRA_EN_CORTO: Record<ModuloDeObraEnLaLista, string> = {
   bitacoras: 'bitácoras',
   preoperacionales: 'preoperacionales',
@@ -744,6 +749,8 @@ export function loQueConsulta(alcance: AlcanceDelAsistente): string[] {
     frases.push(`${alcance.obras === 'todas' ? 'De las obras' : 'De su obra'}: ${cuales}.`);
   }
   if (m('cumplimiento')) frases.push('Cómo va la obra frente a su planificación: metas, lo ejecutado y lo pendiente.');
+  // Spec 052: con la consulta `drive_de_la_obra`.
+  if (m('drive')) frases.push('Lo que dicen los documentos del Drive de la obra: oficios, actas e informes.');
   if (m('compras')) frases.push('Las compras del grupo: qué falta aprobar, comprar o recibir.');
   else if (m('solicitudes')) frases.push('Sus solicitudes de compra y de pago, y en qué van.');
   if (m('tesoreria')) frases.push('Las solicitudes de pago y los pagos del grupo.');
@@ -841,6 +848,8 @@ const LO_QUE_LEE: Record<string, string> = {
   contrato_y_presupuesto: 'Leyendo el contrato y el presupuesto',
   anulados: 'Buscando lo anulado',
   mensajes_de_whatsapp: 'Leyendo los mensajes de WhatsApp',
+  // Spec 052.
+  drive_de_la_obra: 'Buscando en el Drive de la obra',
   pedir_aclaracion: 'Preparando una pregunta',
 };
 

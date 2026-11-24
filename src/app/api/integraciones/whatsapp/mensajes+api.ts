@@ -25,7 +25,7 @@ import { recibirMensaje } from '@/features/whatsapp/servidor/recepcion';
  */
 export async function POST(peticion: Request) {
   return responder(async () => {
-    const rechazo = await requerirIntegracion(peticion);
+    const rechazo = await requerirIntegracion(peticion, 'TOKEN_INTEGRACION_WHATSAPP');
     if (rechazo) return rechazo;
 
     const entrega = await cuerpoJson(peticion, entregaDeWhatsapp);

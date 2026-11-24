@@ -6,6 +6,9 @@ import {
   asistenteConversaciones,
   bitacoras,
   contratos,
+  driveArchivos,
+  driveCarpetas,
+  driveVersiones,
   media,
   partesDeObra,
   preoperacionales,
@@ -96,6 +99,12 @@ export async function GET(peticion: Request, { id }: { id: string }) {
       // Spec 043, RF-50: el Excel original lleva costos y nómina, y aquí la guardia es genérica.
       // Sale solo por su propia ruta, con su permiso.
       return noEncontrado('ese archivo');
+    } else if (fila.duenoTipo === 'drive') {
+      // Spec 052, RF-10, RF-24, RF-32, RF-37: la copia de una versión del Drive de la obra, a quien
+      // ve el Drive de esa obra. Sale con el nombre del archivo, para abrirla o descargarla.
+      const documento = await versionDelDriveAlAlcance(sesion, fila.duenoId);
+      if (!documento) return noEncontrado('ese archivo');
+      nombreArchivo = documento.nombre;
     } else if (fila.duenoTipo === 'almacen') {
       // Spec 042, RF-47, RF-92 a RF-95: el documento original de una importación, solo confirmada
       // y a quien puede ver el Almacén de esa obra. Una descartada o a medio revisar no sale.
@@ -266,4 +275,24 @@ async function alcanzaLaRequisicionOcc(sesion: PersonaEnSesion, duenoId: string)
     .limit(1);
   if (!importacion) return false;
   return importacion.estado === 'confirmada' || importacion.creadoPor === sesion.id;
+}
+
+/**
+ * Spec 052, RF-10, RF-37: la versión del Drive de la que cuelga una copia, si quien la pide ve el
+ * Drive de su obra; si no, `null`. Además de la obra hace falta el permiso `drive`, que
+ * `alcanzaLaImagen` no mira para quien no ve todas las obras: sin él, el almacenista de la obra
+ * abriría el Drive. Una carpeta sin obra solo la ve la gerencia, que es quien la asocia.
+ */
+async function versionDelDriveAlAlcance(sesion: PersonaEnSesion, versionId: string): Promise<{ nombre: string } | null> {
+  if (!alcanza(sesion.rol, 'drive', 'ver')) return null;
+  const [fila] = await baseServidor()
+    .select({ nombre: driveArchivos.nombre, obraId: driveCarpetas.obraId })
+    .from(driveVersiones)
+    .innerJoin(driveArchivos, eq(driveArchivos.id, driveVersiones.archivoId))
+    .innerJoin(driveCarpetas, eq(driveCarpetas.id, driveArchivos.carpetaId))
+    .where(eq(driveVersiones.id, versionId))
+    .limit(1);
+  if (!fila) return null;
+  if (!fila.obraId) return sesion.rol === 'admin' ? { nombre: fila.nombre } : null;
+  return alcanzaLaImagen(sesion, { existe: true, obraId: fila.obraId }, 'drive') ? { nombre: fila.nombre } : null;
 }

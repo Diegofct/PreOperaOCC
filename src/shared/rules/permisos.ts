@@ -148,6 +148,8 @@ export const MODULOS_DE_EMPRESA = [
   // Spec 046, RF-47: la bandeja de Elemental donde se aprueban las requisiciones del grupo. Aparte
   // de `compras` y `tesoreria` porque la Auxiliar entra a esos dos para pagar y no aprueba (RF-84).
   'aprobaciones',
+  // Spec 052, RF-29, RF-36: los documentos del Drive de la obra. Solo en el menú de una obra.
+  'drive',
 ] as const;
 export type ModuloDeEmpresa = (typeof MODULOS_DE_EMPRESA)[number];
 
@@ -672,6 +674,24 @@ const TABLA: Record<ModuloConPermiso, Record<Rol, readonly Accion[]>> = {
     director_obra: NADA,
     administradora_elemental: ['ver', 'listar', 'aprobar'],
   },
+  // Spec 052, RF-9, RF-33, RF-36. El Drive de la obra lo ven la gerencia, el director de
+  // proyectos, y el director de obra y el residente de esa obra (la obra la decide el alcance,
+  // no esta fila). `escribir` es pedir que se vuelva a leer un documento; `activar`, asociar una
+  // carpeta a una obra, que es solo de la gerencia. Nadie anula: el Drive es del consorcio, y lo
+  // que se retira allá se marca aquí solo.
+  drive: {
+    admin: ['ver', 'listar', 'escribir', 'activar'],
+    residente: ['ver', 'listar', 'escribir'],
+    operador: NADA,
+    almacenista: NADA,
+    encargado_planta: NADA,
+    laboratorista: NADA,
+    encargado_occ: NADA,
+    auxiliar_administrativa: NADA,
+    director_proyectos: ['ver', 'listar', 'escribir'],
+    director_obra: ['ver', 'listar', 'escribir'],
+    administradora_elemental: NADA,
+  },
 };
 
 /** ¿Este rol puede hacer esta acción sobre este módulo? */
@@ -875,6 +895,13 @@ const QUE_SE_INTENTABA_EN: Partial<Record<ModuloConPermiso, Partial<Record<Accio
     listar: 'ver las requisiciones por aprobar',
     aprobar: 'aprobar requisiciones en el último paso',
   },
+  // Spec 052.
+  drive: {
+    ver: 'ver el Drive de la obra',
+    listar: 'ver el Drive de la obra',
+    escribir: 'pedir que se vuelva a leer un documento del Drive',
+    activar: 'asociar una carpeta del Drive a una obra',
+  },
   // Spec 044.
   plan_semanal: {
     ver: 'ver el plan semanal de la obra',
@@ -1001,6 +1028,7 @@ const NOMBRE_DE_MODULO: Record<ModuloConPermiso, string> = {
   cumplimiento: 'Cumplimiento de obra',
   plan_semanal: 'Plan semanal',
   aprobaciones: 'Requisiciones por aprobar',
+  drive: 'Drive de la obra',
 };
 
 /**
