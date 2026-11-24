@@ -51,6 +51,11 @@ services:
       # Spec 031 (cambio del 2026-10-21) y, después, el asistente (028). Opcional: sin
       # ella el panel funciona igual y lo que necesita la IA dice que no está disponible.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Spec 052. Opcional, como la de WhatsApp: sin ella la integración del Drive no entra.
+      TOKEN_INTEGRACION_DRIVE: ${TOKEN_INTEGRACION_DRIVE:-}
+      # Spec 052. El freno del gasto: solo con `1` se leen con IA los PDF y las imágenes del
+      # Drive. Apagado, los Word y los Excel se leen igual y lo demás espera en «pendiente».
+      DRIVE_LECTURA_ACTIVA: ${DRIVE_LECTURA_ACTIVA:-0}
 
     # Informativo: `docker ps` dice si está sano. No reinicia nada por sí solo,
     # pero es la forma rápida de contestar «¿volvió bien?» después de un

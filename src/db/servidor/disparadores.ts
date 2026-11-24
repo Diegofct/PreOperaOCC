@@ -53,6 +53,10 @@ const TABLAS_CON_RELOJ = [
   'fichas_laborales',
   // Spec 038: la bitácora de una empresa, como la de una obra.
   'bitacoras_empresa',
+  // Spec 052: cuándo se asoció o se entregó la carpeta, se retiró el archivo o se leyó la versión.
+  'drive_carpetas',
+  'drive_archivos',
+  'drive_versiones',
 ];
 
 const FUNCION = `

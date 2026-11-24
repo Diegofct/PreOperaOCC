@@ -182,6 +182,8 @@ R2_BUCKET=...
 R2_LLAVE_ID=...
 R2_LLAVE_SECRETA=...
 TOKEN_INTEGRACION_WHATSAPP=...el hash de un token nuevo, no el de desarrollo (puede ir vacío)...
+TOKEN_INTEGRACION_DRIVE=...el hash del token del Drive, también nuevo (puede ir vacío)...
+DRIVE_LECTURA_ACTIVA=0
 PUERTO_PANEL=3000
 FIN
 
@@ -224,8 +226,9 @@ server {
 
     # Las firmas y las fotos de los preoperacionales suben por aquí. El valor por
     # defecto de nginx es 1 MB y las cortaría: el operador vería "subido" y la
-    # evidencia no llegaría.
-    client_max_body_size 25m;
+    # evidencia no llegaría. 55 MB y no 25 desde la spec 052: n8n sube copias del
+    # Drive de hasta 50 MB. (Hoy el proxy es Caddy, sin tope: ver «La integración del Drive».)
+    client_max_body_size 55m;
 
     location / {
         proxy_pass http://127.0.0.1:$PANEL_PUERTO;
@@ -236,7 +239,8 @@ server {
         proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
 
-        proxy_read_timeout 120s;
+        # 330 s y no 120 desde la spec 052: el pulso del Drive lee hasta unos 4 minutos y medio.
+        proxy_read_timeout 330s;
     }
 }
 FIN
@@ -524,6 +528,46 @@ docker tag preoperaocc:anterior preoperaocc:ultima && cd /opt/preoperaocc && doc
   toca el panel y el servidor no obliga a repartir la app otra vez.
 - **Tocar el proxy.** Caddy ya tiene su ruta al panel; una actualización no la altera. Ese era
   el único paso con riesgo para el vecino, y actualizar se lo salta entero.
+
+---
+
+## La integración del Drive *(spec 052, revisado el 2026-11-23)*
+
+n8n le entrega a Kontrola el inventario y las copias de una carpeta de Google Drive, y cada 5 minutos
+le pide que lea lo pendiente. Cómo se conecta la cuenta de Google y la carpeta está en
+**`docs/integracion-drive.md`**; aquí va solo lo del servidor.
+
+**Las dos variables**, en el `.env` de `/opt/preoperaocc`:
+
+- `TOKEN_INTEGRACION_DRIVE`: el **hash** que imprime `npx tsx scripts/token-integracion.ts drive`. El
+  token va en n8n. Uno nuevo para producción, distinto del de desarrollo y del de WhatsApp. Vacía, la
+  integración no entra (401), y el panel arranca igual.
+- `DRIVE_LECTURA_ACTIVA`: el freno del gasto. Solo con `1` se leen con IA los PDF y las imágenes, a
+  unos **0,0085 USD por página** (medido en la T10). Con `0`, los Word, los Excel y el texto se leen
+  igual y lo demás espera en «pendiente» hasta que se abra. **Se abre después de que Diego vea el
+  estimado de la primera carga**, no antes. Necesita también `ANTHROPIC_API_KEY`.
+
+Las dos llegan al contenedor por `compose.yaml`, que las declara desde la spec 052. **El `compose.yaml`
+del VPS hay que actualizarlo**, pero no a ciegas (ver la advertencia de arriba): primero
+`diff` contra el del repositorio, y si la única diferencia son estas dos líneas, se copia. Después,
+`docker compose up -d` (**nunca `down`**).
+
+**El proxy no necesita cambios.** El bloque del panel en el `Caddyfile` del vecino es solo
+`encode` + `reverse_proxy` (comprobado el 2026-11-23, solo lectura), y Caddy no pone por defecto ni tope
+al tamaño del cuerpo ni límite de tiempo a la respuesta. Así que pasan las copias de hasta 50 MB y el
+pulso que dura unos 4 minutos y medio. Los 120 s y los 25 MB que se temían en la T11 eran del bloque de
+nginx de este documento, que en esta máquina no existe. **Si algún día el proxy pasa a nginx**, el
+bloque del paso 4.1 ya trae 55 MB y 330 s.
+
+**Comprobar sin credenciales:**
+
+```sh
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://occ.licitapp-elementaling.cloud/api/integraciones/drive/pulso \
+  -H 'Authorization: Bearer inventado'      # debe dar 401, nunca 500 ni 404
+```
+
+Un 404 es una imagen vieja, sin las rutas del Drive. Un 500, casi siempre la migración `0051` sin
+aplicar en `preoperaocc`.
 
 ---
 

@@ -195,6 +195,8 @@ const MENU_DE_OBRA: readonly EntradaDelMenu[] = [
   // Spec 034, RF-2: los documentos de la obra. Desde la 050 van en «Personal y archivo» y no
   // detrás de Contrato y Presupuesto.
   e('documentos', 'Documentos', 'documentos', 'Personal y archivo'),
+  // Spec 052, RF-29: los documentos del Drive de la obra, junto a los que se suben a Kontrola.
+  e('drive', 'Drive', 'drive', 'Personal y archivo'),
   e('reportes', 'Reportes e informes', 'reportes', 'Personal y archivo'),
 ];
 

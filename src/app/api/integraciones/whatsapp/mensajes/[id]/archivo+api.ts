@@ -38,7 +38,7 @@ import { rechazoDeArchivo, tipoDeArchivo } from '@/shared/rules/whatsapp';
 export async function PUT(peticion: Request, { id: crudo }: { id: string }) {
   return responder(async () => {
     const id = idDeLaRuta(crudo);
-    const rechazo = await requerirIntegracion(peticion);
+    const rechazo = await requerirIntegracion(peticion, 'TOKEN_INTEGRACION_WHATSAPP');
     if (rechazo) return rechazo;
 
     const tipo = tipoDeArchivo(peticion.headers.get('content-type'));

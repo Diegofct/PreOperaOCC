@@ -56,6 +56,7 @@ import {
   type LugarDeLaSolicitud,
 } from '@/features/compras/servidor/solicitudes';
 import { leerContrato } from '@/features/contratos/servidor/contrato';
+import { buscarEnElDrive } from '@/features/drive/servidor/buscar';
 import { duenoDelPedido, documentosDelLugar } from '@/features/documentos/servidor/documentos';
 import { consolidadoDelGrupo, cortesDe } from '@/features/empresas/servidor/cortes';
 import { laboratorioDeLasObras } from '@/features/empresas/servidor/laboratorio';
@@ -1147,6 +1148,7 @@ const NOMBRE_DEL_MODULO: Record<ModuloDeObraConsultable, string> = {
   reportes: 'Reportes',
   contrato: 'Contrato y Presupuesto',
   cumplimiento: 'Cumplimiento',
+  drive: 'Drive de la obra',
   vehiculos: 'Vehículos',
   personas: 'Personas',
 };
@@ -1163,6 +1165,8 @@ const RUTA_DEL_MODULO: Record<ModuloDeObraConsultable, (obraId: string, fecha: s
   reportes: (obraId, fecha) => `${rutaDeObra(obraId, 'reportes')}?${new URLSearchParams({ fecha })}`,
   contrato: (obraId) => rutaDeObra(obraId, 'contrato'),
   cumplimiento: (obraId, fecha) => `${rutaDeObra(obraId, 'cumplimiento')}?${new URLSearchParams({ fecha })}`,
+  // Spec 052: la pantalla llega con la T15, en el menú de la obra.
+  drive: (obraId) => rutaDeObra(obraId, 'drive'),
   vehiculos: () => rutaDeEmpresa('occ', 'vehiculos'),
   personas: (obraId) => rutaDeObra(obraId, 'recursos-humanos'),
 };
@@ -1701,6 +1705,64 @@ const documentosDelGrupoConsulta = herramienta({
 });
 
 /**
+ * Spec 052, RF-22 a RF-28, RF-39: lo que dicen los documentos del Drive de la obra. Busca con
+ * `buscarEnElDrive`, que solo mira la obra ya autorizada aquí (`obraConsultada`) y nunca una
+ * carpeta sin obra. Cada documento citado es una fuente que abre su copia (RF-24).
+ *
+ * No estricta: la gerencia ya está en el tope de la gramática de las estrictas (ver `estricta`),
+ * y la entrada la valida zod entera.
+ */
+const driveDeLaObra = herramienta({
+  nombre: 'drive_de_la_obra',
+  descripcion:
+    'Busca en los documentos del Drive de una obra (oficios, actas, informes, planos, cuadros de cantidades) y trae los fragmentos que mejor responden, con el documento, su subcarpeta, la página y la fecha de esa versión. Úsela cuando pregunten qué dice un documento de la obra, o algo que estaría en su correspondencia o sus actas (plazos, prórrogas, aprobaciones, requerimientos). En «pregunta» van las palabras que deberían aparecer en el documento. Por defecto trae solo la versión vigente de cada documento y ninguno retirado del Drive; «versiones» y «retirados» en true solo si preguntan por versiones anteriores o por documentos que ya no están. Cite con el nombre del documento, su subcarpeta y la página; si un fragmento es de una versión vieja o de un documento retirado, dígalo. Si no trae nada, diga que el Drive de la obra no tiene eso, sin inventar.',
+  modulo: 'drive',
+  estricta: false,
+  entrada: z.strictObject({
+    obraId: OBRA,
+    pregunta: z.string().min(1).max(500).describe('Las palabras que deberían aparecer en el documento, en español.'),
+    versiones: z.boolean().describe('true solo si preguntan por versiones anteriores de un documento.'),
+    retirados: z.boolean().describe('true solo si preguntan por documentos que ya no están en el Drive.'),
+  }),
+  async ejecutar({ obraId, pregunta, versiones, retirados }, alcance) {
+    const obra = await obraConsultada(alcance, obraId);
+    if ('error' in obra) return obra;
+    const encontrados = await buscarEnElDrive(obra.id, pregunta, { conVersiones: versiones, conRetirados: retirados });
+
+    // Una fuente por versión citada, que abre su copia; sin copia (más de 50 MB), la lista del Drive.
+    const fuentes = new Map<string, FuenteDeRespuesta>();
+    for (const f of encontrados) {
+      if (fuentes.has(f.versionId)) continue;
+      const marca = f.retirado ? ', retirado del Drive' : f.vigente ? '' : ', versión anterior';
+      fuentes.set(f.versionId, {
+        modulo: 'drive',
+        etiqueta: `${f.documento}${f.subcarpeta ? ` (${f.subcarpeta})` : ''}${marca}`,
+        fecha: f.modificadoEnDrive.slice(0, 10),
+        ruta: f.mediaId ? `/api/panel/media/${f.mediaId}` : rutaDeObra(obra.id, 'drive'),
+      });
+    }
+    return {
+      datos: {
+        obra: obra.codigo,
+        encontrados: encontrados.length,
+        fragmentos: encontrados.map((f) => ({
+          documento: f.documento,
+          subcarpeta: f.subcarpeta || '(raíz)',
+          pagina: f.pagina,
+          fechaDeLaVersion: f.modificadoEnDrive.slice(0, 10),
+          vigente: f.vigente,
+          retirado: f.retirado,
+          texto: f.texto,
+        })),
+        ...(encontrados.length === 0 ? { nota: 'El Drive de la obra no tiene nada sobre eso: dígalo, sin inventar.' } : {}),
+      },
+      fuentes: [...fuentes.values()],
+      consulto: consulta(obra.id, 'drive'),
+    };
+  },
+});
+
+/**
  * Spec 040, RF-18 a RF-23: un PDF, un Excel o un Word con lo que se consultó en esta respuesta.
  * Se ofrece a todos los que usan el asistente. Las tablas salen de las consultas guardadas en el
  * turno (`archivos/generar.ts`), nunca de lo que escriba la IA. Sin campos opcionales: lo que no
@@ -1796,6 +1858,8 @@ const TODAS: Herramienta<never>[] = [
   personasDeLaObra,
   contratoYPresupuesto,
   cumplimientoDeObra,
+  // Spec 052.
+  driveDeLaObra,
   anulados,
   mensajesDeWhatsapp,
 ] as unknown as Herramienta<never>[];

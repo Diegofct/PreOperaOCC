@@ -10,6 +10,8 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 
+import type { FormaDeLaFalla } from '@/shared/rules/drive';
+
 /** El mismo modelo que lee los mensajes de WhatsApp en n8n. */
 export const MODELO_DE_IA = 'claude-opus-5-5';
 
@@ -22,6 +24,17 @@ export function clienteDeIa(): Anthropic | null {
     cliente = llave ? new Anthropic({ apiKey: llave }) : null;
   }
   return cliente;
+}
+
+/**
+ * Cómo falló la llamada, para decidir si reintentarla (spec 052, RF-16) sin que la regla dependa
+ * de la librería: sin conexión o tiempo agotado, o el estado HTTP que respondió la API.
+ */
+export function formaDeLaFalla(fallo: unknown): FormaDeLaFalla {
+  // `APIConnectionTimeoutError` es un `APIConnectionError`.
+  if (fallo instanceof Anthropic.APIConnectionError) return { sinConexion: true };
+  if (fallo instanceof Anthropic.APIError) return { estado: fallo.status, sinConexion: false };
+  return { sinConexion: false };
 }
 
 /**

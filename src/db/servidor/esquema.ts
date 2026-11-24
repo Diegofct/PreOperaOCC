@@ -34,6 +34,7 @@ import {
   doublePrecision,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -75,6 +76,7 @@ import type { FranjaGranulometrica } from '../../shared/catalogos/franjas-granul
 import { HORARIO_PROPUESTO, type HorarioDeObra } from '../../shared/rules/horas';
 import type { SeccionesSinRegistro } from '../../shared/rules/parte';
 import { CLASES_CON_INTERVALO, CLASES_DE_MANTENIMIENTO } from '../../shared/rules/mantenimiento';
+import { ESTADOS_DE_LECTURA_DEL_DRIVE } from '../../shared/rules/drive';
 import type { ImpuestoDelContrato, IntegranteDelConsorcio } from '../../shared/rules/contrato';
 import { ESTADOS_DE_REGISTRO_DE_POLIZA } from '../../shared/rules/polizas';
 import { IDS_DE_ESTADOS_DE_SOLICITUD } from '../../shared/rules/compras';
@@ -187,6 +189,8 @@ export const duenoMedia = pgEnum('dueno_media', [
   'almacen',
   // Spec 047: la planilla importada de una requisición de pagos de OCC y el RUT y la cuenta de cada línea.
   'requisicion_occ',
+  // Spec 052: la copia de una versión de un archivo del Drive de la obra, con `dueno_id` = la versión.
+  'drive',
 ]);
 export const propositoMedia = pgEnum('proposito_media', [
   'hallazgo',
@@ -3370,6 +3374,134 @@ export const pagos = pgTable(
     index('ix_pagos_compra').on(t.compraId),
     index('ix_pagos_requisicion_occ_linea').on(t.requisicionOccLineaId),
     index('ix_pagos_fecha').on(t.fecha),
+  ],
+);
+
+/* ------------------------------------------------------------------------ */
+/* El Drive de la obra (solo del servidor, spec 052)                          */
+/* ------------------------------------------------------------------------ */
+
+export const estadoLecturaDrive = pgEnum('estado_lectura_drive', ESTADOS_DE_LECTURA_DEL_DRIVE);
+
+/**
+ * El índice de búsqueda de Postgres. Drizzle no trae el tipo: se declara aquí y se llena al
+ * insertar con `to_tsvector('spanish', …)` sobre el texto ya normalizado (sin tildes ni
+ * mayúsculas), para no depender de la extensión `unaccent` (plan, «Decisiones técnicas»).
+ */
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
+
+/**
+ * Una carpeta raíz del Drive y la obra a la que pertenece (RF-8 a RF-11), como
+ * `whatsapp_grupos`: el id es el de Drive, y la carpeta se crea sola en la primera entrega,
+ * sin obra, para que la gerencia la asocie. **Una carpeta, una obra**: el índice único
+ * parcial lo hace cumplir aunque dos asociaciones lleguen a la vez.
+ */
+export const driveCarpetas = pgTable(
+  'drive_carpetas',
+  {
+    id: text('id').primaryKey(),
+    nombre: text('nombre').notNull(),
+    obraId: text('obra_id').references(() => obras.id),
+    asociadoPor: text('asociado_por').references(() => usuarios.id),
+    asociadoEn: timestamp('asociado_en', { withTimezone: true, mode: 'date' }),
+    /** La última entrega recibida, para notar si la integración dejó de mandar (RF-34). */
+    ultimaEntregaEn: timestamp('ultima_entrega_en', { withTimezone: true, mode: 'date' }),
+    archivosEnLaUltimaEntrega: integer('archivos_en_la_ultima_entrega'),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [uniqueIndex('ux_drive_carpeta_obra').on(t.obraId).where(sql`obra_id is not null`)],
+);
+
+/**
+ * Un archivo de la carpeta, el mismo aunque cambie de nombre o de subcarpeta (RF-21): lo
+ * identifica su id de Drive dentro de la carpeta. Retirarlo es escribir `retirado_en`, y
+ * volver a aparecer es dejarlo en nulo (RF-19, RF-20). La fila nunca se borra.
+ */
+export const driveArchivos = pgTable(
+  'drive_archivos',
+  {
+    id: text('id').primaryKey(),
+    carpetaId: text('carpeta_id')
+      .notNull()
+      .references(() => driveCarpetas.id),
+    driveId: text('drive_id').notNull(),
+    /** La dirección del archivo en Drive, para abrir lo que no tiene copia (RF-41). */
+    enlace: text('enlace'),
+    nombre: text('nombre').notNull(),
+    /** La ruta dentro de la raíz, «Oficios/2026»; vacía en la raíz. */
+    subcarpeta: text('subcarpeta').notNull().default(''),
+    mime: text('mime').notNull(),
+    retiradoEn: timestamp('retirado_en', { withTimezone: true, mode: 'date' }),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [uniqueIndex('ux_drive_archivo').on(t.carpetaId, t.driveId)],
+);
+
+/**
+ * Una versión de un archivo: una fecha de modificación en Drive (RF-4, RF-17). El índice
+ * único es la idempotencia de la subida: la misma versión dos veces cae sobre la misma fila.
+ * Sin copia (`media_id` nulo) cuando pasa de 50 MB (RF-40). Una versión leída no se borra ni
+ * se sobrescribe (RF-18, principio 4); lo que se rehace al reintentar son sus fragmentos.
+ */
+export const driveVersiones = pgTable(
+  'drive_versiones',
+  {
+    id: text('id').primaryKey(),
+    archivoId: text('archivo_id')
+      .notNull()
+      .references(() => driveArchivos.id),
+    modificadoEnDrive: timestamp('modificado_en_drive', { withTimezone: true, mode: 'date' }).notNull(),
+    mediaId: text('media_id').references(() => media.id),
+    /** `bigint`: lo que no se copia puede pasar de lo que cabe en un `integer` (un video). */
+    bytes: bigint('bytes', { mode: 'number' }),
+    estado: estadoLecturaDrive('estado').notNull().default('pendiente'),
+    /** Por qué no se pudo leer (RF-15): «tipo no admitido», «sin texto», «demasiado grande»… */
+    motivo: text('motivo'),
+    intentos: integer('intentos').notNull().default(0),
+    /** Cuándo empezó la lectura en curso: una de más de 10 minutos se da por cortada. */
+    leyendoDesde: timestamp('leyendo_desde', { withTimezone: true, mode: 'date' }),
+    resumen: text('resumen'),
+    paginas: integer('paginas'),
+    tokensEntrada: integer('tokens_entrada').notNull().default(0),
+    tokensSalida: integer('tokens_salida').notNull().default(0),
+    leidoEn: timestamp('leido_en', { withTimezone: true, mode: 'date' }),
+    creadoEn: creadoEn(),
+    actualizadoEn: actualizadoEn(),
+  },
+  (t) => [
+    uniqueIndex('ux_drive_version').on(t.archivoId, t.modificadoEnDrive),
+    index('ix_drive_version_estado').on(t.estado),
+    check('ck_drive_version_intentos', sql`${t.intentos} >= 0`),
+    check('ck_drive_version_tokens', sql`${t.tokensEntrada} >= 0 and ${t.tokensSalida} >= 0`),
+  ],
+);
+
+/**
+ * Un trozo del texto leído, con su página (RF-12, RF-23). Es lo que busca el asistente: los
+ * pedazos que responden, y no el documento entero. Son datos derivados de la versión, no
+ * evidencia: los de un intento fallido se borran antes de reintentar.
+ */
+export const driveFragmentos = pgTable(
+  'drive_fragmentos',
+  {
+    id: text('id').primaryKey(),
+    versionId: text('version_id')
+      .notNull()
+      .references(() => driveVersiones.id),
+    orden: integer('orden').notNull(),
+    pagina: integer('pagina').notNull(),
+    texto: text('texto').notNull(),
+    buscable: tsvector('buscable').notNull(),
+  },
+  (t) => [
+    uniqueIndex('ux_drive_fragmento').on(t.versionId, t.orden),
+    index('ix_drive_fragmento_buscable').using('gin', t.buscable),
   ],
 );
 
