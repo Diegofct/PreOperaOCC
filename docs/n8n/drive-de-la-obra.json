@@ -189,7 +189,7 @@
           "parameters": [
             {
               "name": "q",
-              "value": "='{{ $json.id }}' in parents and trashed = false and mimeType != 'application/vnd.google-apps.folder'"
+              "value": "mimeType != 'application/vnd.google-apps.folder' and trashed = false"
             },
             {
               "name": "fields",
@@ -237,19 +237,20 @@
         0,
         0
       ],
-      "id": "archivos-de-cada-carpeta",
-      "name": "Archivos de cada carpeta",
+      "id": "todos-los-archivos",
+      "name": "Todos los archivos",
       "credentials": {
         "googleApi": {
           "id": "driveDeLaObraGoogle",
           "name": "Google — Drive de la obra"
         }
       },
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
-        "jsCode": "// El inventario COMPLETO de la carpeta, como lo pide Kontrola (spec 052, RF-1, RF-6, RF-7).\n// · Lo propio de Google se manda con el mime de su exportación: documento → Word, hoja → Excel,\n//   presentación → PDF. Lo demás de Google (formularios, accesos directos, mapas) no se manda.\n// · completo = false si alguna carpeta falló o Google avisó de un listado a medias: así\n//   Kontrola recibe lo nuevo pero no retira nada (plan, «inventarioAceptable»).\nconst raiz = $('Carpeta raíz').first().json;\nconst carpetas = $('Subcarpetas').all().map((i) => i.json);\nconst rutaDe = new Map(carpetas.map((c) => [c.id, c.ruta]));\nlet completo = !carpetas.some((c) => c.incompleto);\n\nconst EXPORTAR = {\n  'application/vnd.google-apps.document': {\n    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    extension: '.docx',\n  },\n  'application/vnd.google-apps.spreadsheet': {\n    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n    extension: '.xlsx',\n  },\n  'application/vnd.google-apps.presentation': { mime: 'application/pdf', extension: '.pdf' },\n};\n\nconst archivos = [];\nconst porId = {};\nfor (const { json: pagina } of $input.all()) {\n  if (pagina.error) {\n    completo = false;\n    continue;\n  }\n  if (pagina.incompleteSearch === true) completo = false;\n  for (const f of pagina.files ?? []) {\n    if (porId[f.id]) continue;\n    const padre = (f.parents ?? []).find((p) => rutaDe.has(p));\n    if (padre === undefined) continue;\n    const exportar = EXPORTAR[f.mimeType];\n    if (!exportar && f.mimeType.startsWith('application/vnd.google-apps.')) continue;\n    let nombre = f.name;\n    if (exportar && !nombre.toLowerCase().endsWith(exportar.extension)) nombre += exportar.extension;\n    const mime = exportar ? exportar.mime : f.mimeType;\n    archivos.push({\n      driveId: f.id,\n      nombre,\n      ruta: rutaDe.get(padre),\n      mime,\n      modificadoEn: f.modifiedTime,\n      tamano: Number(f.size ?? 0),\n      enlace: f.webViewLink ?? null,\n    });\n    porId[f.id] = { nombre, mime, exportar: exportar ? exportar.mime : null };\n  }\n}\n\nreturn [{ json: { inventario: { carpeta: { id: raiz.id, nombre: raiz.name }, completo, archivos }, porId } }];"
+        "jsCode": "// El inventario COMPLETO de la carpeta, como lo pide Kontrola (spec 052, RF-1, RF-6, RF-7).\n// · Lo propio de Google se manda con el mime de su exportación: documento → Word, hoja → Excel,\n//   presentación → PDF. Lo demás de Google (formularios, accesos directos, mapas) no se manda.\n// · completo = false si el listado falló o Google avisó de un listado a medias: así\n//   Kontrola recibe lo nuevo pero no retira nada (plan, «inventarioAceptable»).\n// · Los archivos llegan en un solo listado de TODO lo que ve la cuenta (unas pocas páginas de\n//   1000), no en una consulta por carpeta: con 2.243 carpetas eso eran 2.243 respuestas en memoria\n//   y n8n se quedaba sin ella. Aquí se queda solo lo que cuelga de una carpeta del árbol.\nconst raiz = $('Carpeta raíz').first().json;\nconst carpetas = $('Subcarpetas').all().map((i) => i.json);\nconst rutaDe = new Map(carpetas.map((c) => [c.id, c.ruta]));\nlet completo = !carpetas.some((c) => c.incompleto);\n\nconst EXPORTAR = {\n  'application/vnd.google-apps.document': {\n    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n    extension: '.docx',\n  },\n  'application/vnd.google-apps.spreadsheet': {\n    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n    extension: '.xlsx',\n  },\n  'application/vnd.google-apps.presentation': { mime: 'application/pdf', extension: '.pdf' },\n};\n\nconst archivos = [];\nconst porId = {};\nfor (const { json: pagina } of $input.all()) {\n  if (pagina.error) {\n    completo = false;\n    continue;\n  }\n  if (pagina.incompleteSearch === true) completo = false;\n  for (const f of pagina.files ?? []) {\n    if (porId[f.id]) continue;\n    const padre = (f.parents ?? []).find((p) => rutaDe.has(p));\n    if (padre === undefined) continue;\n    const exportar = EXPORTAR[f.mimeType];\n    if (!exportar && f.mimeType.startsWith('application/vnd.google-apps.')) continue;\n    let nombre = f.name;\n    if (exportar && !nombre.toLowerCase().endsWith(exportar.extension)) nombre += exportar.extension;\n    const mime = exportar ? exportar.mime : f.mimeType;\n    archivos.push({\n      driveId: f.id,\n      nombre,\n      ruta: rutaDe.get(padre),\n      mime,\n      modificadoEn: f.modifiedTime,\n      tamano: Number(f.size ?? 0),\n      enlace: f.webViewLink ?? null,\n    });\n    porId[f.id] = { nombre, mime, exportar: exportar ? exportar.mime : null };\n  }\n}\n\nreturn [{ json: { inventario: { carpeta: { id: raiz.id, nombre: raiz.name }, completo, archivos }, porId } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -548,18 +549,7 @@
       "main": [
         [
           {
-            "node": "Archivos de cada carpeta",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Archivos de cada carpeta": {
-      "main": [
-        [
-          {
-            "node": "Armar inventario",
+            "node": "Todos los archivos",
             "type": "main",
             "index": 0
           }
@@ -649,6 +639,17 @@
         [
           {
             "node": "Leer lo pendiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Todos los archivos": {
+      "main": [
+        [
+          {
+            "node": "Armar inventario",
             "type": "main",
             "index": 0
           }
